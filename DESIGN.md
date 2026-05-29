@@ -50,6 +50,17 @@
 - Backend: public API inputs must validate allowed enum values and numeric ranges before reaching domain logic, return safe JSON errors, and avoid stack traces.
 - Production metadata: share URLs should point at the stable Bubble Wash domain, not old tunnel URLs.
 
+## Outside-the-box visual direction
+
+- User goal and attention model: make Bubble Wash feel like a command center for clean laundry, not a generic SaaS landing page. Above the fold should answer three questions fast: Can they pick up here? What will it cost? Can I track the job?
+- Gestalt/Fitts/cognitive load: use a strong dark operations shell, bright high-contrast CTAs, grouped ticket/card modules, and large touch targets. Repeat the same action pattern: check, estimate, book, track.
+- Typography tokens: use a sharper display face for headings and a calmer UI face for forms/body. Headings should feel engineered and local-operator serious; body copy must stay readable on phones.
+- Spacing/radii/shadows: keep compact command-card spacing, slightly squared radii, stronger borders, and fewer soft template bubbles. Cards should feel like dispatch tickets rather than generic marketing cards.
+- Color roles: navy command background, cyan action, lime/mint live-status accents, cream page warmth, blue-gray text. Avoid default purple/gradient AI slop.
+- Interaction/motion: small transform/opacity only, no large paint-heavy mobile animations; reduced-motion keeps everything static.
+- Component map/data shape: hero coverage checker, route preview, quote calculator, booking forms, tracking panel, staff login, and role dashboards stay intact while the skin becomes more distinctive.
+- Critique risk: visual experiments cannot break forms, role auth, or mobile nav. If a redesign makes actions less obvious, it failed.
+
 ## Critique checklist
 
 - Buttons must not be decorative; every visible action navigates, submits, calculates, tracks, or opens contact.

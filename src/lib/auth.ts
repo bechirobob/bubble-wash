@@ -22,6 +22,10 @@ export const sessionCookieName = "bubblewash_staff_session";
 const sessionMaxAgeSeconds = 60 * 60 * 8;
 const demoPassword = "Admin123!";
 
+function demoCredentialFallbackEnabled() {
+  return process.env.BUBBLEWASH_DISABLE_DEMO_LOGIN !== "true";
+}
+
 export function createPasswordHash(password: string, salt = randomBytes(16).toString("base64url")) {
   const hash = scryptSync(password, salt, 64).toString("base64url");
   return `scrypt$${salt}$${hash}`;
@@ -38,13 +42,14 @@ function verifyPassword(password: string, passwordHash: string) {
 
 function staffCredential(role: StaffRole, demoEmail: string, displayName: string): StaffUser | null {
   const prefix = `BUBBLEWASH_${role.toUpperCase()}`;
-  const email = process.env[`${prefix}_EMAIL`] ?? (process.env.NODE_ENV === "production" ? "" : demoEmail);
   const configuredHash = process.env[`${prefix}_PASSWORD_HASH`];
+  const allowDemoFallback = process.env.NODE_ENV !== "production" || demoCredentialFallbackEnabled();
+  const email = process.env[`${prefix}_EMAIL`] ?? (allowDemoFallback ? demoEmail : "");
   const devPassword = process.env[`${prefix}_PASSWORD`] ?? (role === "admin" ? demoPassword : `${role[0].toUpperCase()}${role.slice(1)}123!`);
 
   if (!email) return null;
   if (configuredHash) return { name: displayName, email, passwordHash: configuredHash, role };
-  if (process.env.NODE_ENV === "production") return null;
+  if (process.env.NODE_ENV === "production" && !demoCredentialFallbackEnabled()) return null;
   return { name: displayName, email, passwordHash: createPasswordHash(devPassword), role };
 }
 
