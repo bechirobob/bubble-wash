@@ -64,7 +64,7 @@ function LoginForm() {
           </form>
           <aside className="credentialPanel">
             <h2>Staff access</h2>
-            <p>Demo users are listed for pilot review, but passwords are no longer printed on the page. Use the issued staff password or environment-backed credentials.</p>
+            <p>Authorized staff roles are listed so teams can pick the right workspace quickly. Use the issued staff password or environment-backed credentials.</p>
             <div className="credentialList">
               {credentialCards.map(([role, emailValue, copy]) => (
                 <button className="credentialCard" type="button" key={role} onClick={() => fillCredential(emailValue)}>

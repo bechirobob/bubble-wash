@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: new URL("https://bubblewash.co"),
   title: "Bubble Wash — Laundry pickup for busy teams",
-  description: "Book laundry pickups, compare plans, estimate delivery fees, track orders, and manage Bubble Wash pilot operations in Accra.",
+  description: "Book laundry pickups, compare plans, estimate delivery fees, track orders, and manage Bubble Wash operations in Accra.",
   applicationName: "Bubble Wash",
   manifest: "/site.webmanifest",
   icons: {

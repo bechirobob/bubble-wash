@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
     const record = {
       id: `BW-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`,
       createdAt: new Date().toISOString(),
-      source: "bubblewash-next-pilot",
+      source: "bubblewash-operations-web",
       data: body,
     };
 

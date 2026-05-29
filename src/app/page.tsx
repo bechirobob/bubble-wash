@@ -280,7 +280,12 @@ export default function Home() {
         <span className="foamOrb orbTwo" />
         <span className="foamOrb orbThree" />
         <span className="foamOrb orbFour" />
+        <span className="foamOrb orbFive" />
+        <span className="foamOrb orbSix" />
+        <span className="foamTrail trailOne" />
+        <span className="foamTrail trailTwo" />
       </div>
+      <a className="backToTop" href="#top" aria-label="Back to top"><span aria-hidden="true">↑</span><b>Top</b></a>
       <header className="nav">
         <a className="brand" href="#top" aria-label="Bubble Wash home">
           <Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} priority />
@@ -356,6 +361,8 @@ export default function Home() {
       <section className="proofStrip" aria-label="service proof points">
         {proof.map(([number, label]) => <div key={label}><strong>{number}</strong><span>{label}</span></div>)}
       </section>
+
+      <div className="foamDivider" aria-hidden="true"><span /><span /><span /></div>
 
       <section id="plans" className="section soft">
         <div className="sectionHead">

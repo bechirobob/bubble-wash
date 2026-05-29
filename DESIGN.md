@@ -15,7 +15,7 @@
 
 ## Visual system tokens
 
-- Type: Inter/system sans; compact tracking for display headings; 16px minimum form text on mobile.
+- Type: Space Grotesk for display/ops labels and Manrope for UI/body; 16px minimum form text on mobile.
 - Spacing: section padding scales from 54px mobile to 86px desktop; card gaps 14–18px; touch targets at least 44px.
 - Radius: 12px buttons, 18px cards, 22px mobile nav shell.
 - Shadow: soft single-layer shadows for cards; remove heavy effects on mobile.
@@ -59,7 +59,8 @@
 - Color roles: navy command background, cyan action, lime/mint live-status accents, cream page warmth, blue-gray text. Avoid default purple/gradient AI slop.
 - Interaction/motion: small transform/opacity only, no large paint-heavy mobile animations; reduced-motion keeps everything static.
 - Component map/data shape: hero coverage checker, route preview, quote calculator, booking forms, tracking panel, staff login, and role dashboards stay intact while the skin becomes more distinctive.
-- Memorable homepage layer: Bubble Wash should carry its icon and bubble motif everywhere — browser tab, install metadata, nav, hero, footer, and share previews. Bubbles are used as spatial memory: floating foam, lens-like route orbs, and handwritten operational notes; never as generic AI confetti.
+- Memorable homepage layer: Bubble Wash should carry its icon and bubble motif everywhere — browser tab, install metadata, nav, hero, footer, and share previews. Bubbles are used as spatial memory: floating foam, lens-like route orbs, soap trails, section foam seams, and handwritten operational notes; never as generic AI confetti.
+- Long-page navigation: a persistent back-to-top control must be available after scrolling distance so visitors can recover quickly from the long homepage without hunting for the nav.
 - Interaction/motion: bubble effects drift with opacity/transform only, pause on hover where useful, and shut off under `prefers-reduced-motion`. The hero should feel alive, but not slow the booking form.
 - Critique risk: visual experiments cannot break forms, role auth, or mobile nav. If a redesign makes actions less obvious, it failed.
 
@@ -70,7 +71,7 @@
 - Ticket state model: Open → In Review/Assigned/Waiting on Customer/Waiting on Vendor/Waiting on Driver → Escalated or Resolved → Closed/Reopened.
 - Order workflow: use one shared Order ID. Events from customer booking, admin assignment, vendor job updates, driver route logs, and support tickets attach to the same timeline.
 - Timers: show elapsed time in the current stage plus SLA state. Internal staff see due/overdue labels; customer tracking keeps it simpler with delivery windows and next step.
-- Maps: current MVP uses privacy-safe Google Maps URL search/directions. Live GPS is a later level that needs driver consent, retention policy, HTTPS geolocation, location pings, and restricted Maps keys.
+- Maps: current production stage uses privacy-safe Google Maps URL search/directions. Live GPS is a later level that needs driver consent, retention policy, HTTPS geolocation, location pings, and restricted Maps keys.
 
 ## Critique checklist
 
