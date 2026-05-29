@@ -110,6 +110,7 @@ function recordStatus(record: SubmissionRecord) {
   if (type.includes("vendor-job")) return "Vendor update received";
   if (type.includes("qr-bag")) return "Vendor intake checked";
   if (type.includes("driver-route")) return "Driver route update received";
+  if (type.includes("driver-onboarding")) return text(record.data.driverStatus) || "Driver onboarded";
   if (type.includes("linen-inventory")) return "Inventory count logged";
   if (type.includes("support")) return "Support ticket open";
   if (type.includes("admin")) return "Admin action logged";

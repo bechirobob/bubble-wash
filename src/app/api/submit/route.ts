@@ -41,6 +41,7 @@ const publicAllowedFields = new Set([
 const staffSubmissionRoles = new Map<string, StaffRole>([
   ["admin-operation", "admin"],
   ["driver-route-log", "driver"],
+  ["driver-onboarding", "admin"],
   ["linen-inventory-log", "admin"],
   ["vendor-application", "vendor"],
   ["vendor-job-update", "vendor"],

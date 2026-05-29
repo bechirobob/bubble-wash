@@ -8,7 +8,7 @@ import { automationActionsForOrder } from "@/lib/order-workflow";
 
 const adminQueues = [
   ["Intake", "New pickup requests, payment checks, and customer confirmation."],
-  ["Dispatch", "Assign vendor, route, driver window, and promised delivery time."],
+  ["Dispatch", "Auto-assign vendor from capacity, attach admin-onboarded drivers, and review every handoff."],
   ["Quality", "Log washing issues, missing items, stain escalations, and rework."],
 ];
 
@@ -59,7 +59,7 @@ type AutomationAction = ReturnType<typeof automationActionsForOrder>[number];
 
 const workflowStages = [
   ["01", "Received → Pickup Scheduled", "Admin validates the original booking once, then schedules pickup from inherited customer data."],
-  ["02", "Vendor Assigned → Accepted", "Dispatch creates the handoff; the vendor accepts without retyping contact, route, or payment context."],
+  ["02", "Auto-assign → Vendor accepts/declines", "Admin can auto-assign from vendor capacity and the driver roster; vendors accept or decline without retyping order context."],
   ["03", "Driver Route → At Vendor", "Driver route, pickup, and vendor drop-off actions append checkpoints to the same Order ID."],
   ["04", "Washing → Ready → Delivered", "Vendor and driver move the order through production and return delivery; support handles only exceptions."],
 ];
@@ -348,15 +348,16 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
             <button className="button primary full" type="submit">Save Admin Action</button>
             {formStatus["admin-operation"] && <p className="status success">{formStatus["admin-operation"]}</p>}
           </form>
-          <form className="panel opsForm routeLogForm" onSubmit={(event) => submitLead(event, "driver-route-log")}> 
-            <h3>Driver route log</h3>
-            <div className="two"><input name="name" placeholder="Driver / dispatcher" defaultValue={userName} required /><input name="email" type="email" placeholder="Dispatcher email" defaultValue="admin@bubblewash.local" required /></div>
-            <div className="two"><input name="phone" placeholder="Driver phone" required /><input name="company" placeholder="Bubble Wash route team" defaultValue="Bubble Wash Route Team" required /></div>
-            <div className="two"><input name="orderId" placeholder="Order ID" required /><select name="orderStatus"><option>Pickup scheduled</option><option>Driver en route</option><option>Picked up</option><option>Dropped at vendor</option><option>Collected from vendor</option><option>Delivered</option><option>Delayed</option></select></div>
-            <div className="two"><input name="area" placeholder="Route area" /><input name="bagCount" placeholder="Bag count / kg" /></div>
-            <textarea name="message" placeholder="ETA, location note, customer handoff, photo reference, or delay reason..." required />
-            <button className="button secondary full" type="submit">Save Route Update</button>
-            {formStatus["driver-route-log"] && <p className="status success">{formStatus["driver-route-log"]}</p>}
+          <form className="panel opsForm routeLogForm" onSubmit={(event) => submitLead(event, "driver-onboarding")}>
+            <h3>Onboard driver</h3>
+            <p className="formHint">Drivers do not self-onboard. Admin adds the route roster, then automated dispatch can attach active drivers to orders.</p>
+            <div className="two"><input name="name" placeholder="Driver full name" required /><input name="email" type="email" placeholder="Driver email" required /></div>
+            <div className="two"><input name="phone" placeholder="Driver phone / WhatsApp" required /><input name="company" placeholder="Route team / contractor" defaultValue="Bubble Wash Route Team" required /></div>
+            <div className="two"><input name="area" placeholder="Primary route area e.g. Osu, Labone" /><input name="vehicle" placeholder="Vehicle / bike ID" /></div>
+            <div className="two"><select name="driverStatus"><option>Active</option><option>Training</option><option>Inactive</option><option>Suspended</option></select><select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited route capacity</option><option>Paused today</option></select></div>
+            <textarea name="message" placeholder="License check, ID check, route restrictions, emergency contact, or onboarding notes..." required />
+            <button className="button secondary full" type="submit">Save Driver Onboarding</button>
+            {formStatus["driver-onboarding"] && <p className="status success">{formStatus["driver-onboarding"]}</p>}
           </form>
           <form className="panel opsForm inventoryLogForm" onSubmit={(event) => submitLead(event, "linen-inventory-log")}> 
             <h3>Commercial linen inventory</h3>

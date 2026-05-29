@@ -70,6 +70,7 @@ const stageByKey = new Map(workflowStages.map((stage) => [stage.key, stage]));
 export function workflowStageFromStatus(status: string, lastEventType = "") {
   const normalized = `${status} ${lastEventType}`.toLowerCase();
   if (/closed|resolved/.test(normalized)) return stageByKey.get("closed")!;
+  if (/declined|delayed|issue|missing|quality|escalated|needs attention|waiting/.test(normalized)) return stageByKey.get("exception")!;
   if (/delivered|completed/.test(normalized)) return stageByKey.get("delivered")!;
   if (/out for delivery|return route/.test(normalized)) return stageByKey.get("out-for-delivery")!;
   if (/ready|ready for driver|ready for delivery/.test(normalized)) return stageByKey.get("ready")!;
@@ -158,8 +159,8 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
         message: `Pickup scheduled from inherited order data. Customer: ${customer}. Area: ${order.area}. Window: ${order.routeWindow}.`,
       }));
     }
-    if (["received", "pickup-scheduled"].includes(stage.key)) {
-      actions.push(action("admin-assign-vendor", "Assign vendor + driver", "Creates the dispatch handoff so vendor and driver dashboards inherit the same Order ID.", "admin-operation", "Vendor assigned", {
+    if (["received", "pickup-scheduled", "exception"].includes(stage.key)) {
+      actions.push(action("admin-assign-vendor", "Auto-assign vendor + driver", "Selects the best available vendor and an admin-onboarded driver, then creates the dispatch handoff.", "admin-operation", "Vendor assigned", {
         ...base,
         actionType: "Assign vendor",
         orderStatus: "Vendor assigned",
@@ -197,6 +198,13 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
         vendorName: order.vendor === "Unassigned" ? "Vendor Partner" : order.vendor,
         jobStatus: "Accepted",
         message: `Vendor accepted via automation. Customer: ${customer}. Area: ${order.area}. Window: ${order.routeWindow}.`,
+      }));
+      actions.push(action("vendor-decline-job", "Decline job", "Declines the task and sends it back to admin review without losing the original order timeline.", "vendor-job-update", "Needs attention", {
+        ...base,
+        vendorName: order.vendor === "Unassigned" ? "Vendor Partner" : order.vendor,
+        jobStatus: "Declined",
+        priority: "High",
+        message: `Vendor declined ${order.orderId}. Admin should reassign from current vendor availability. Customer/order context remains attached: ${customer}.`,
       }));
     }
     if (["vendor-accepted", "picked-up"].includes(stage.key)) {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { appendSubmissionRecord } from "@/lib/data-store";
+import { selectAssignmentPair } from "@/lib/assignment";
 import { getCurrentStaffUser } from "@/lib/auth";
 import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
 import { automationActionsForOrder } from "@/lib/order-workflow";
@@ -35,11 +36,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "That automation is not allowed for the current order stage." }, { status: 400 });
     }
 
+    const assignment = actionKey === "admin-assign-vendor" ? selectAssignmentPair(allRecords, order) : null;
+    const payload = assignment ? {
+      ...selected.payload,
+      vendorName: assignment.vendorName,
+      driverName: assignment.driverName,
+      message: `${selected.payload.message} ${assignment.assignmentNote}`,
+    } : selected.payload;
+
     const record = {
       id: `BW-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`,
       createdAt: new Date().toISOString(),
       source: "bubblewash-workflow-automation",
-      data: selected.payload,
+      data: payload,
     };
 
     appendSubmissionRecord(record);

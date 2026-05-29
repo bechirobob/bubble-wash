@@ -33,5 +33,7 @@ Payment and notification integrations:
 - `/api/payments/verify?reference=...` verifies Paystack payment status and appends a payment event to the order timeline.
 - `/api/submit` stores bookings/onboarding/support events and attempts email/WhatsApp notifications when provider credentials are configured.
 - `/api/orders/advance` appends role-scoped workflow events and attempts timeline notifications.
+- Admin auto-assignment uses vendor capacity records and admin-only driver onboarding records.
+- Vendors can accept or decline assigned jobs from the shared order board; declines move the order into review instead of losing context.
 
 Missing provider credentials are reported safely in JSON responses; the app does not fake live sends.
