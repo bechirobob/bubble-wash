@@ -61,6 +61,15 @@
 - Component map/data shape: hero coverage checker, route preview, quote calculator, booking forms, tracking panel, staff login, and role dashboards stay intact while the skin becomes more distinctive.
 - Critique risk: visual experiments cannot break forms, role auth, or mobile nav. If a redesign makes actions less obvious, it failed.
 
+## Staff workflow target
+
+- Access control: admin can open every staff section for oversight. Vendor, driver, and support stay in their own sections unless a specific API action lets them participate.
+- Support tickets: admin, vendor, and driver can raise tickets tied to an order. Support owns the desk and can attend, assign, escalate, de-escalate, wait on a party, resolve, close, and reopen.
+- Ticket state model: Open → In Review/Assigned/Waiting on Customer/Waiting on Vendor/Waiting on Driver → Escalated or Resolved → Closed/Reopened.
+- Order workflow: use one shared Order ID. Events from customer booking, admin assignment, vendor job updates, driver route logs, and support tickets attach to the same timeline.
+- Timers: show elapsed time in the current stage plus SLA state. Internal staff see due/overdue labels; customer tracking keeps it simpler with delivery windows and next step.
+- Maps: current MVP uses privacy-safe Google Maps URL search/directions. Live GPS is a later level that needs driver consent, retention policy, HTTPS geolocation, location pings, and restricted Maps keys.
+
 ## Critique checklist
 
 - Buttons must not be decorative; every visible action navigates, submits, calculates, tracks, or opens contact.

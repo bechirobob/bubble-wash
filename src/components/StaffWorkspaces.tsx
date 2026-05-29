@@ -43,8 +43,12 @@ type OrderSummary = {
   nextStep: string;
   eventCount: number;
   lastEventType: string;
+  route: { googleMapsUrl: string; directionsUrl: string; zoneLabel: string; zoneNote: string };
+  stageTimer: { label: string; tone: "ok" | "due" | "breached" | "paused"; elapsedMinutes: number; targetMinutes: number };
   timeline: Array<{ id: string; createdAt: string; type: string; status: string; actor: string; note: string }>;
 };
+
+type SubmitHandler = (event: FormEvent<HTMLFormElement>, type: string) => Promise<void>;
 
 const workflowStages = [
   ["01", "Admin receives", "Validate booking, route, payment preference, and customer notes."],
@@ -141,7 +145,8 @@ function SharedOrderBoard({ role }: { role: StaffRole }) {
         {orders.map((order) => <article className="orderBoardCard" key={order.orderId}>
           <div className="orderBoardTop"><strong>{order.orderId}</strong><span>{order.status}</span></div>
           <h3>{order.customer}</h3>
-          <div className="orderMeta"><span>Vendor: {order.vendor}</span><span>Driver: {order.driver}</span><span>ETA/window: {order.routeWindow}</span><span>Driver note: {order.locationNote}</span><span>Area: {order.area}</span><span>Payment: {order.payment}</span><span>Priority: {order.priority}</span><span>Events: {order.eventCount}</span><span>Updated: {new Date(order.updatedAt).toLocaleString()}</span></div>
+          <div className="orderMeta"><span>Vendor: {order.vendor}</span><span>Driver: {order.driver}</span><span>ETA/window: {order.routeWindow}</span><span>Timer: {order.stageTimer.label}</span><span>Driver note: {order.locationNote}</span><span>Area: {order.area}</span><span>Payment: {order.payment}</span><span>Priority: {order.priority}</span><span>Events: {order.eventCount}</span><span>Updated: {new Date(order.updatedAt).toLocaleString()}</span></div>
+          <div className="mapActions"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noreferrer">Open Route</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noreferrer">View Area</a></div>
           <p>{order.nextStep}</p>
           <details><summary>Timeline</summary><div className="timelineList">{order.timeline.slice(0, 5).map((event) => <div key={`${order.orderId}-${event.id}-${event.createdAt}`}><b>{event.status}</b><span>{event.type} · {event.actor} · {new Date(event.createdAt).toLocaleString()}</span><p>{event.note}</p></div>)}</div></details>
         </article>)}
@@ -159,15 +164,13 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
 }
 
 function PortalShell({ title, eyebrow, description, role, userName, children }: PortalShellProps) {
+  const portalLinks = role === "admin" ? [["/admin", "Admin"], ["/vendors", "Vendors"], ["/drivers", "Drivers"], ["/support", "Support"]] : role === "vendor" ? [["/vendors", "Vendor workspace"]] : role === "driver" ? [["/drivers", "Driver workspace"]] : [["/support", "Support desk"]];
   return (
     <main className="portalPage">
       <header className="portalNav">
         <Link className="brand" href="/"><span className="brandMark textMark">BW</span><span>Bubble Wash</span></Link>
         <nav className="portalLinks">
-          <Link href="/admin">Admin</Link>
-          <Link href="/vendors">Vendors</Link>
-          <Link href="/drivers">Drivers</Link>
-          <Link href="/support">Support</Link>
+          {portalLinks.map(([href, label]) => <Link key={href} href={href}>{label}</Link>)}
           <a className="button secondary" href="/api/logout">Logout</a>
         </nav>
       </header>
@@ -185,6 +188,86 @@ function PortalShell({ title, eyebrow, description, role, userName, children }: 
       </section>
       {children}
     </main>
+  );
+}
+
+
+function SupportTicketForm({ userName, role, onSubmit, status }: { userName: string; role: StaffRole; onSubmit: SubmitHandler; status?: string }) {
+  return (
+    <form className="panel supportForm" onSubmit={(event) => onSubmit(event, "support-ticket")}>
+      <h3>Create support ticket</h3>
+      <p className="formHint">Use this when an order needs help from support. Support can attend, assign, escalate, de-escalate, or resolve it from the ticket desk.</p>
+      <div className="two"><input name="name" placeholder="Your name" defaultValue={userName} required /><input name="email" type="email" placeholder="Email" defaultValue={`${role}@bubblewash.local`} required /></div>
+      <div className="two"><input name="phone" placeholder="Phone / WhatsApp" required /><input name="company" placeholder="Team, vendor, or customer" defaultValue={role === "admin" ? "Bubble Wash Operations" : role === "driver" ? "Bubble Wash Route Team" : role === "vendor" ? "Vendor Partner" : "Bubble Wash Support"} required /></div>
+      <div className="two"><input name="orderId" placeholder="Related Order ID" /><select name="issueType">{supportTypes.map((item) => <option key={item}>{item}</option>)}</select></div>
+      <div className="two"><select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select><select name="ticketStatus"><option>Open</option><option>Waiting on Customer</option><option>Waiting on Vendor</option><option>Waiting on Driver</option></select></div>
+      <textarea name="message" placeholder="What happened? Include the timeline, customer impact, delay reason, payment reference, or item issue." required />
+      <button className="button primary full" type="submit">Raise Support Ticket</button>
+      {status && <p className="status success">{status}</p>}
+    </form>
+  );
+}
+
+function SupportTicketDesk({ userName }: { userName: string }) {
+  const [records, setRecords] = useState<SubmissionRecord[]>([]);
+  const [status, setStatus] = useState("Loading support tickets…");
+  const [formStatus, setFormStatus] = useState<Record<string, string>>({});
+
+  async function loadTickets(showLoading = true) {
+    if (showLoading) setStatus("Loading support tickets…");
+    const response = await fetch("/api/submissions");
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      setStatus(data.error ?? "Unable to load support tickets.");
+      return;
+    }
+    const tickets = data.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes("support-ticket"));
+    setRecords(tickets.slice(0, 16));
+    setStatus(tickets.length ? "Support ticket desk loaded." : "No support tickets yet.");
+  }
+
+  async function action(event: FormEvent<HTMLFormElement>, record: SubmissionRecord) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = Object.fromEntries(new FormData(form).entries());
+    payload.submissionType = "support-ticket-action";
+    payload.orderId = String(record.data.orderId || record.id);
+    payload.company = String(record.data.company || "Bubble Wash Support");
+    payload.email = "support@bubblewash.local";
+    payload.phone = String(record.data.phone || "support-desk");
+    payload.name = userName;
+    try {
+      const data = await postJSON<{ ok: boolean; message: string; id: string }>("/api/submit", payload);
+      setFormStatus((current) => ({ ...current, [record.id]: `${data.message} Action: ${data.id}` }));
+      form.reset();
+      await loadTickets(false);
+    } catch (error) {
+      setFormStatus((current) => ({ ...current, [record.id]: error instanceof Error ? error.message : "Unable to save ticket action." }));
+    }
+  }
+
+  useEffect(() => { loadTickets(); }, []);
+
+  return (
+    <section className="section supportDeskSection">
+      <div className="activityHeader"><div><p className="eyebrow">Ticket command desk</p><h2>Attend, assign, escalate, de-escalate, and resolve support tickets.</h2><p>Tickets raised by admin, vendors, drivers, and support land here with the related Order ID.</p></div><button className="button secondary" type="button" onClick={() => loadTickets()}>Refresh Tickets</button></div>
+      <div className="supportTicketList">
+        {records.map((record) => <article className="orderBoardCard supportTicketCard" key={record.id}>
+          <div className="orderBoardTop"><strong>{record.data.orderId || record.id}</strong><span>{record.data.ticketStatus || record.data.issueType || "Open"}</span></div>
+          <h3>{record.data.issueType || "Support ticket"}</h3>
+          <div className="orderMeta"><span>Raised by: {record.data.name || "Team member"}</span><span>Team/customer: {record.data.company || "Bubble Wash"}</span><span>Priority: {record.data.priority || "Normal"}</span><span>Created: {new Date(record.createdAt).toLocaleString()}</span></div>
+          <p>{record.data.message || "No ticket note supplied."}</p>
+          <form className="ticketActionForm" onSubmit={(event) => action(event, record)}>
+            <div className="two"><select name="ticketStatus"><option>In Review</option><option>Assigned</option><option>Waiting on Customer</option><option>Waiting on Vendor</option><option>Waiting on Driver</option><option>Escalated</option><option>Resolved</option><option>Closed</option><option>Reopened</option></select><select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select></div>
+            <div className="two"><select name="assignedRole"><option>Support</option><option>Admin</option><option>Vendor</option><option>Driver</option></select><select name="escalationLevel"><option>Level 0</option><option>Level 1</option><option>Level 2</option><option>Level 3</option></select></div>
+            <textarea name="message" placeholder="Action note, escalation reason, de-escalation reason, or resolution summary..." required />
+            <button className="button primary full" type="submit">Save Ticket Action</button>
+            {formStatus[record.id] && <p className="status success">{formStatus[record.id]}</p>}
+          </form>
+        </article>)}
+      </div>
+      <p className="status">{status}</p>
+    </section>
   );
 }
 
@@ -246,6 +329,9 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
           </form>
         </div>
       </section>
+      <section className="section portalSection supportCreateSection">
+        <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
+      </section>
       <SharedOrderBoard role={role} />
       <RecentActivity />
     </PortalShell>
@@ -304,6 +390,9 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
           </form>
         </div>
       </section>
+      <section className="section portalSection supportCreateSection">
+        <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
+      </section>
       <SharedOrderBoard role={role} />
       <RecentActivity filter="vendor" />
     </PortalShell>
@@ -351,6 +440,9 @@ export function DriverWorkspace({ userName, role }: { userName: string; role: St
           </form>
         </div>
       </section>
+      <section className="section portalSection supportCreateSection">
+        <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
+      </section>
       <SharedOrderBoard role={role} />
       <RecentActivity filter="driver-route-log" />
     </PortalShell>
@@ -396,6 +488,7 @@ export function SupportWorkspace({ userName, role }: { userName: string; role: S
           </div>
         </div>
       </section>
+      <SupportTicketDesk userName={userName} />
       <SharedOrderBoard role={role} />
       <RecentActivity filter="support" />
     </PortalShell>

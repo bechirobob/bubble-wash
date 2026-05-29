@@ -45,7 +45,9 @@ const staffSubmissionRoles = new Map<string, StaffRole>([
   ["vendor-job-update", "vendor"],
   ["qr-bag-intake", "vendor"],
   ["support-ticket", "support"],
+  ["support-ticket-action", "support"],
 ]);
+const crossRoleStaffSubmissionTypes = new Set(["support-ticket"]);
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -66,6 +68,9 @@ async function authorizeSubmission(submissionType: string) {
   const requiredRole = staffSubmissionRoles.get(submissionType);
   if (!requiredRole) return NextResponse.json({ ok: false, error: "Unsupported submission type." }, { status: 400 });
   const user = await getCurrentStaffUser();
+  if (crossRoleStaffSubmissionTypes.has(submissionType)) {
+    return user ? null : NextResponse.json({ ok: false, error: "Staff authorization required for this action." }, { status: 403 });
+  }
   if (!user || !canAccess(user.role, requiredRole)) {
     return NextResponse.json({ ok: false, error: "Staff authorization required for this action." }, { status: 403 });
   }

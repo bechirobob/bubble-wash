@@ -29,6 +29,12 @@ export type OrderSummary = {
   eventCount: number;
   lastEventType: string;
   route: RoutePreview;
+  stageTimer: {
+    label: string;
+    tone: "ok" | "due" | "breached" | "paused";
+    elapsedMinutes: number;
+    targetMinutes: number;
+  };
   timeline: Array<{
     id: string;
     createdAt: string;
@@ -43,7 +49,7 @@ const roleVisibleTypes: Record<StaffRole, Set<string> | null> = {
   admin: null,
   vendor: new Set(["vendor-application", "vendor-job-update", "qr-bag-intake"]),
   driver: new Set(["driver-route-log"]),
-  support: new Set(["support-ticket"]),
+  support: new Set(["support-ticket", "support-ticket-action"]),
 };
 
 export function visibleSubmissionRecords(records: SubmissionRecord[], role: StaffRole) {
@@ -82,7 +88,7 @@ function zoneKeyFrom(value: string): ZoneKey {
 }
 
 function recordStatus(record: SubmissionRecord) {
-  const explicit = text(record.data.orderStatus) || text(record.data.jobStatus) || text(record.data.availability) || text(record.data.issueType);
+  const explicit = text(record.data.ticketStatus) || text(record.data.orderStatus) || text(record.data.jobStatus) || text(record.data.availability) || text(record.data.issueType);
   if (explicit) return explicit;
   const type = text(record.data.submissionType);
   if (type.includes("booking")) return "Received — dispatch confirmation pending";
@@ -95,6 +101,37 @@ function recordStatus(record: SubmissionRecord) {
   if (type.includes("support")) return "Support ticket open";
   if (type.includes("admin")) return "Admin action logged";
   return "Request received";
+}
+
+const stageTargets = [
+  { match: ["received", "booking", "intake"], minutes: 20 },
+  { match: ["pickup scheduled", "vendor assigned", "assigned"], minutes: 60 },
+  { match: ["driver en route", "out for delivery"], minutes: 75 },
+  { match: ["picked up", "dropped at vendor", "vendor received"], minutes: 45 },
+  { match: ["washing", "ironing", "finishing"], minutes: 360 },
+  { match: ["ready"], minutes: 120 },
+  { match: ["delayed", "waiting"], minutes: 0, paused: true },
+  { match: ["delivered", "completed", "resolved", "closed"], minutes: 0, paused: true },
+];
+
+function minutesSince(value: string) {
+  const started = new Date(value).getTime();
+  if (!Number.isFinite(started)) return 0;
+  return Math.max(0, Math.round((Date.now() - started) / 60_000));
+}
+
+function stageTimerFor(status: string, updatedAt: string) {
+  const normalized = status.toLowerCase();
+  const rule = stageTargets.find((item) => item.match.some((word) => normalized.includes(word))) ?? { minutes: 180 };
+  const elapsedMinutes = minutesSince(updatedAt);
+  if ("paused" in rule && rule.paused) {
+    return { label: normalized.includes("delivered") || normalized.includes("completed") || normalized.includes("resolved") || normalized.includes("closed") ? "Timer complete" : "Timer paused", tone: "paused" as const, elapsedMinutes, targetMinutes: 0 };
+  }
+  const targetMinutes = rule.minutes;
+  const remaining = targetMinutes - elapsedMinutes;
+  if (remaining < 0) return { label: `Overdue by ${Math.abs(remaining)} min`, tone: "breached" as const, elapsedMinutes, targetMinutes };
+  if (remaining <= 20) return { label: `Due in ${remaining} min`, tone: "due" as const, elapsedMinutes, targetMinutes };
+  return { label: `Elapsed ${elapsedMinutes} min · SLA ${targetMinutes} min`, tone: "ok" as const, elapsedMinutes, targetMinutes };
 }
 
 function nextStepFor(summary: Pick<OrderSummary, "status" | "lastEventType" | "vendor">) {
@@ -180,6 +217,7 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
       eventCount: chronological.length,
       lastEventType,
       route,
+      stageTimer: stageTimerFor(status, latest.createdAt),
       timeline: chronological.map((record) => ({
         id: record.id,
         createdAt: record.createdAt,
