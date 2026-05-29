@@ -70,6 +70,8 @@
 - Support tickets: admin, vendor, and driver can raise tickets tied to an order. Support owns the desk and can attend, assign, escalate, de-escalate, wait on a party, resolve, close, and reopen.
 - Ticket state model: Open → In Review/Assigned/Waiting on Customer/Waiting on Vendor/Waiting on Driver → Escalated or Resolved → Closed/Reopened.
 - Order workflow: use one shared Order ID. Events from customer booking, admin assignment, vendor job updates, driver route logs, and support tickets attach to the same timeline.
+- Automation workflow: customer booking is the source of truth. Staff should not re-enter customer, area, contact, payment, pickup window, or Order ID fields when those were already captured; role dashboards should offer one-click actions that append the next event with inherited order context.
+- Operational exceptions: manual inputs are only for new facts that were not in the initial order, such as vendor exceptions, bag-count mismatch, delay reason, payment reference, stain/damage notes, or customer escalation outcome.
 - Timers: show elapsed time in the current stage plus SLA state. Internal staff see due/overdue labels; customer tracking keeps it simpler with delivery windows and next step.
 - Maps: current production stage uses privacy-safe Google Maps URL search/directions. Live GPS is a later level that needs driver consent, retention policy, HTTPS geolocation, location pings, and restricted Maps keys.
 

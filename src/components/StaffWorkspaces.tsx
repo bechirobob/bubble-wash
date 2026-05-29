@@ -33,6 +33,8 @@ type OrderSummary = {
   orderId: string;
   updatedAt: string;
   customer: string;
+  email: string;
+  phone: string;
   area: string;
   vendor: string;
   driver: string;
@@ -50,6 +52,13 @@ type OrderSummary = {
 };
 
 type SubmitHandler = (event: FormEvent<HTMLFormElement>, type: string) => Promise<void>;
+
+type AutomationAction = {
+  label: string;
+  description: string;
+  submissionType: string;
+  payload: Record<string, string>;
+};
 
 const workflowStages = [
   ["01", "Admin receives", "Validate booking, route, payment preference, and customer notes."],
@@ -101,7 +110,177 @@ function RecentActivity({ filter }: { filter?: string }) {
   );
 }
 
-function SharedOrderBoard({ role }: { role: StaffRole }) {
+function roleEmail(role: StaffRole) {
+  return `${role}@bubblewash.local`;
+}
+
+function orderPhone(order: OrderSummary) {
+  return order.phone || "operations-line";
+}
+
+function automationActionsFor(order: OrderSummary, role: StaffRole, userName: string): AutomationAction[] {
+  const staffBase = {
+    name: userName,
+    email: roleEmail(role),
+    phone: orderPhone(order),
+    orderId: order.orderId,
+  };
+  const customerLine = `${order.customer}${order.email ? ` · ${order.email}` : ""}${order.phone ? ` · ${order.phone}` : ""}`;
+
+  if (role === "admin") {
+    const actions: AutomationAction[] = [
+      {
+        label: order.vendor === "Unassigned" ? "Auto-assign next vendor" : "Confirm pickup window",
+        description: "Uses the booking details already attached to this Order ID.",
+        submissionType: "admin-operation",
+        payload: {
+          ...staffBase,
+          company: "Bubble Wash Operations",
+          actionType: order.vendor === "Unassigned" ? "Auto-assign vendor" : "Confirm pickup",
+          orderStatus: order.vendor === "Unassigned" ? "Vendor assigned" : "Pickup scheduled",
+          vendorName: order.vendor === "Unassigned" ? "Next available vendor" : order.vendor,
+          driverName: order.driver === "Unassigned" ? "Next available driver" : order.driver,
+          routeWindow: order.routeWindow,
+          area: order.area,
+          paymentPreference: order.payment,
+          priority: order.priority,
+          message: `Automated from existing order data. Customer: ${customerLine}. Area: ${order.area}. Window: ${order.routeWindow}.`,
+        },
+      },
+    ];
+    if (order.stageTimer.tone === "breached" || order.priority === "Urgent") {
+      actions.push({
+        label: "Create support escalation",
+        description: "Turns overdue or urgent orders into a support ticket without copying the order fields.",
+        submissionType: "support-ticket",
+        payload: {
+          ...staffBase,
+          company: order.customer,
+          issueType: "Workflow follow-up",
+          ticketStatus: "Escalated",
+          priority: order.priority === "Urgent" ? "Urgent" : "High",
+          message: `Automated escalation for ${order.orderId}. Status: ${order.status}. Timer: ${order.stageTimer.label}. Next step: ${order.nextStep}`,
+        },
+      });
+    }
+    return actions;
+  }
+
+  if (role === "vendor") {
+    return [
+      {
+        label: "Accept job from order",
+        description: "Creates the vendor event with the Order ID, customer, area, and notes already carried over.",
+        submissionType: "vendor-job-update",
+        payload: {
+          ...staffBase,
+          company: order.vendor === "Unassigned" ? "Vendor Partner" : order.vendor,
+          vendorName: order.vendor === "Unassigned" ? "Vendor Partner" : order.vendor,
+          jobStatus: "Accepted",
+          area: order.area,
+          message: `Accepted via automation. Customer: ${customerLine}. Area: ${order.area}. Window: ${order.routeWindow}.`,
+        },
+      },
+      {
+        label: "Log bag intake",
+        description: "Starts intake on the same timeline; only item exceptions need manual notes afterward.",
+        submissionType: "qr-bag-intake",
+        payload: {
+          ...staffBase,
+          company: order.vendor === "Unassigned" ? "Vendor Partner" : order.vendor,
+          vendorName: order.vendor === "Unassigned" ? "Vendor Partner" : order.vendor,
+          qrTag: `${order.orderId}-BAG`,
+          itemCondition: "All items accepted",
+          message: `Automated intake shell for ${order.orderId}. Staff should only add exceptions or count mismatch if needed.`,
+        },
+      },
+    ];
+  }
+
+  if (role === "driver") {
+    return [
+      {
+        label: "Start route update",
+        description: "Reuses the order area and route window so drivers only add live checkpoint details when needed.",
+        submissionType: "driver-route-log",
+        payload: {
+          ...staffBase,
+          company: "Bubble Wash Route Team",
+          orderStatus: "Driver en route",
+          area: order.area,
+          driverEta: order.routeWindow,
+          locationNote: order.locationNote === "No driver checkpoint yet" ? "Route started" : order.locationNote,
+          message: `Driver route started from existing order data. Customer: ${customerLine}. Area: ${order.area}.`,
+        },
+      },
+      {
+        label: "Mark picked up",
+        description: "Adds the pickup checkpoint to the same Order ID with no second record needed.",
+        submissionType: "driver-route-log",
+        payload: {
+          ...staffBase,
+          company: "Bubble Wash Route Team",
+          orderStatus: "Picked up",
+          area: order.area,
+          driverEta: order.routeWindow,
+          locationNote: "Pickup confirmed",
+          message: `Pickup confirmed via automation for ${order.orderId}. Add exceptions only if bag count or customer handoff changed.`,
+        },
+      },
+    ];
+  }
+
+  return [
+    {
+      label: "Open order follow-up",
+      description: "Creates a support ticket from the order context instead of retyping customer and route details.",
+      submissionType: "support-ticket",
+      payload: {
+        ...staffBase,
+        company: order.customer,
+        issueType: "General question",
+        ticketStatus: "In Review",
+        priority: order.stageTimer.tone === "breached" ? "High" : order.priority,
+        message: `Support follow-up created from ${order.orderId}. Customer: ${customerLine}. Status: ${order.status}. Next step: ${order.nextStep}`,
+      },
+    },
+  ];
+}
+
+function AutomatedOrderActions({ order, role, userName, onSaved }: { order: OrderSummary; role: StaffRole; userName: string; onSaved: () => Promise<void> }) {
+  const [status, setStatus] = useState("");
+  const [pendingLabel, setPendingLabel] = useState("");
+  const actions = automationActionsFor(order, role, userName);
+
+  async function run(action: AutomationAction) {
+    setPendingLabel(action.label);
+    setStatus(`Running ${action.label.toLowerCase()}…`);
+    try {
+      const data = await postJSON<{ ok: boolean; message: string; id: string }>("/api/submit", { ...action.payload, submissionType: action.submissionType });
+      setStatus(`${data.message} Automation event: ${data.id}`);
+      await onSaved();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to run automation.");
+    } finally {
+      setPendingLabel("");
+    }
+  }
+
+  return (
+    <div className="automationPanel">
+      <div>
+        <b>Automation shortcuts</b>
+        <span>No retyping: these actions reuse the original order data and append the next event to this timeline.</span>
+      </div>
+      <div className="automationActions">
+        {actions.map((action) => <button className="button secondary" disabled={Boolean(pendingLabel)} key={action.label} onClick={() => run(action)} title={action.description} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>)}
+      </div>
+      {status && <p className="status success" role="status" aria-live="polite">{status}</p>}
+    </div>
+  );
+}
+
+function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: string }) {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [status, setStatus] = useState("Loading shared order board…");
 
@@ -140,7 +319,7 @@ function SharedOrderBoard({ role }: { role: StaffRole }) {
 
   return (
     <section className="section sharedBoardSection">
-      <div className="activityHeader"><div><p className="eyebrow">Shared workflow board</p><h2>One Order ID across admin, vendor, support, and tracking.</h2><p>Research-backed fix: every team writes events to the same order timeline instead of creating disconnected records.</p></div><button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh Board</button></div>
+      <div className="activityHeader"><div><p className="eyebrow">Automation workflow board</p><h2>One order entry feeds admin, vendor, driver, support, and tracking.</h2><p>Customer booking data now follows the order. Staff use one-click workflow actions instead of retyping details that already exist.</p></div><button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh Board</button></div>
       <div className="workflowStages">{workflowStages.map(([step, title, copy]) => <article key={step}><b>{step}</b><h3>{title}</h3><p>{copy}</p></article>)}</div>
       <div className="orderBoardList">
         {orders.map((order) => <article className="orderBoardCard" key={order.orderId}>
@@ -148,6 +327,7 @@ function SharedOrderBoard({ role }: { role: StaffRole }) {
           <h3>{order.customer}</h3>
           <div className="orderMeta"><span>Vendor: {order.vendor}</span><span>Driver: {order.driver}</span><span>ETA/window: {order.routeWindow}</span><span>Timer: {order.stageTimer.label}</span><span>Driver note: {order.locationNote}</span><span>Area: {order.area}</span><span>Payment: {order.payment}</span><span>Priority: {order.priority}</span><span>Events: {order.eventCount}</span><span>Updated: {new Date(order.updatedAt).toLocaleString()}</span></div>
           <div className="mapActions"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noreferrer">Open Route</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noreferrer">View Area</a></div>
+          <AutomatedOrderActions order={order} role={role} userName={userName} onSaved={() => loadOrders(false)} />
           <p>{order.nextStep}</p>
           <details><summary>Timeline</summary><div className="timelineList">{order.timeline.slice(0, 5).map((event) => <div key={`${order.orderId}-${event.id}-${event.createdAt}`}><b>{event.status}</b><span>{event.type} · {event.actor} · {new Date(event.createdAt).toLocaleString()}</span><p>{event.note}</p></div>)}</div></details>
         </article>)}
@@ -333,7 +513,7 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
       <section className="section portalSection supportCreateSection">
         <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
       </section>
-      <SharedOrderBoard role={role} />
+      <SharedOrderBoard role={role} userName={userName} />
       <RecentActivity />
     </PortalShell>
   );
@@ -394,7 +574,7 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
       <section className="section portalSection supportCreateSection">
         <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
       </section>
-      <SharedOrderBoard role={role} />
+      <SharedOrderBoard role={role} userName={userName} />
       <RecentActivity filter="vendor" />
     </PortalShell>
   );
@@ -444,7 +624,7 @@ export function DriverWorkspace({ userName, role }: { userName: string; role: St
       <section className="section portalSection supportCreateSection">
         <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
       </section>
-      <SharedOrderBoard role={role} />
+      <SharedOrderBoard role={role} userName={userName} />
       <RecentActivity filter="driver-route-log" />
     </PortalShell>
   );
@@ -490,7 +670,7 @@ export function SupportWorkspace({ userName, role }: { userName: string; role: S
         </div>
       </section>
       <SupportTicketDesk userName={userName} />
-      <SharedOrderBoard role={role} />
+      <SharedOrderBoard role={role} userName={userName} />
       <RecentActivity filter="support" />
     </PortalShell>
   );

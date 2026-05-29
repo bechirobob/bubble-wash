@@ -430,6 +430,12 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .orderMeta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
 .orderMeta span { border: 1px solid var(--line); border-radius: 14px; padding: 9px 10px; color: var(--soft-ink); background: #fbfeff; font-size: 13px; font-weight: 800; }
 .orderBoardCard p { color: var(--soft-ink); line-height: 1.55; }
+.automationPanel { margin: 16px 0; border: 1px solid rgba(17,134,212,.18); border-radius: 22px; padding: 16px; background: linear-gradient(135deg, rgba(232,248,255,.9), rgba(255,255,255,.92)); display: grid; gap: 12px; }
+.automationPanel b, .automationPanel span { display: block; }
+.automationPanel b { color: var(--ink); margin-bottom: 4px; }
+.automationPanel span { color: var(--soft-ink); line-height: 1.45; font-size: 13px; }
+.automationActions { display: flex; flex-wrap: wrap; gap: 10px; }
+.automationActions .button { padding: 10px 14px; }
 details summary { cursor: pointer; font-weight: 950; color: var(--blue-dark); }
 .timelineList { display: grid; gap: 10px; margin-top: 12px; }
 .timelineList div { border-left: 3px solid var(--blue); background: #f7fcff; border-radius: 0 16px 16px 0; padding: 12px 14px; }

@@ -17,6 +17,8 @@ export type OrderSummary = {
   createdAt: string;
   updatedAt: string;
   customer: string;
+  email: string;
+  phone: string;
   area: string;
   vendor: string;
   driver: string;
@@ -196,7 +198,7 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
     };
     const vendor = findLatest("vendorName", "vendor");
     const driver = findLatest("driverName") || findLatestFromTypes(["driver-route-log"], "name") || "Unassigned";
-    const routeWindow = findLatest("routeWindow", "driverEta", "eta") || "ETA pending";
+    const routeWindow = findLatest("routeWindow", "pickupWindow", "driverEta", "eta") || "ETA pending";
     const locationNote = findLatest("locationNote", "routeCheckpoint") || findLatestFromTypes(["driver-route-log"], "message") || "No driver checkpoint yet";
     const area = findLatest("area", "zone", "routeArea") || "Route pending";
     const route = buildRoutePreview(zoneKeyFrom(findLatest("zone", "routeArea", "area")), area);
@@ -205,6 +207,8 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
       createdAt: first.createdAt,
       updatedAt: latest.createdAt,
       customer: findCustomer(),
+      email: findLatest("email") || "",
+      phone: findLatest("phone") || "",
       area,
       vendor: vendor || "Unassigned",
       driver,
