@@ -35,6 +35,13 @@
 - Quote uses `/api/quote` with plan, kg, zone, add-ons, and discount.
 - Tracking uses `/api/track?id=` and displays only customer-safe fields.
 
+## Compact refinement pass
+
+- Mobile menu: treat the menu as a stateful overlay, not a hidden desktop nav. Use explicit open/closed visual state, `aria-expanded`, `aria-hidden`, Escape close, and close after link selection.
+- Bulky sections: operations, service handling, and assurance should read as compact proof modules. Shorten copy, reduce card padding, and let cards scan like operational receipts instead of essays.
+- Vendor trust: use image-backed cards with opaque overlays so partner cards feel more like real laundry operations while keeping text legible.
+- Payment lanes: use recognizable payment badges/icons for card, mobile money, bank, and invoice lanes. Keep accessible labels for screen readers, but avoid spelling every lane as plain text chips.
+
 ## Critique checklist
 
 - Buttons must not be decorative; every visible action navigates, submits, calculates, tracks, or opens contact.

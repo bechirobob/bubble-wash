@@ -57,6 +57,7 @@ button:disabled, .button:disabled {
 label { color: var(--ink); }
 label > input, label > select, label > textarea { margin-top: 7px; }
 input::placeholder, textarea::placeholder { color: #8295a8; opacity: 1; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .nav {
   position: sticky;
@@ -135,6 +136,8 @@ h3 { letter-spacing: -.035em; }
 .soft { background: #f6fbff; }
 .sectionHead { max-width: 920px; margin-bottom: 34px; }
 .sectionHead.narrow { max-width: 700px; }
+.compactHead { max-width: 760px; margin-bottom: 24px; }
+.compactHead h2 { max-width: 720px; }
 .plansGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
 .planCard, .serviceCard, .panel, .faqItem, .contactCard, .quoteResult {
   background: rgba(255,255,255,.92);
@@ -150,6 +153,7 @@ h3 { letter-spacing: -.035em; }
 .pickup { color: var(--ink); font-weight: 900; }
 ul { padding-left: 0; list-style: none; display: grid; gap: 10px; color: var(--soft-ink); line-height: 1.4; }
 .serviceGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.compactServiceGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .serviceIcon { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 15px; color: white; background: linear-gradient(135deg, var(--blue), #9edfff); margin-bottom: 16px; font-size: 32px; line-height: 0; }
 .serviceCard p { color: var(--soft-ink); line-height: 1.58; }
 .locationSection { background: #fff; }
@@ -210,8 +214,23 @@ textarea { min-height: 118px; resize: vertical; }
 .contactCard img { border-radius: 34px; object-fit: cover; margin-bottom: 18px; }
 .contactCard p { color: var(--soft-ink); line-height: 1.55; }
 .paymentStrip { padding: 42px min(5vw, 72px); text-align: center; background: #f6fbff; }
-.paymentStrip div { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 18px; }
-.paymentStrip span { padding: 12px 16px; border-radius: 999px; background: white; color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow); font-weight: 900; }
+.paymentLogoGrid { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 18px; }
+.paymentLogo { width: 112px; height: 56px; position: relative; display: inline-grid; place-items: center; border-radius: 18px; background: white; color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow); overflow: hidden; }
+.paymentLogo::before, .paymentLogo::after { content: ""; display: block; }
+.paymentLogo.visa::before { content: "VISA"; color: #1434cb; font-size: 24px; font-weight: 950; letter-spacing: -.05em; transform: skew(-8deg); }
+.paymentLogo.mastercard::before, .paymentLogo.mastercard::after { position: absolute; width: 34px; height: 34px; border-radius: 50%; top: 11px; }
+.paymentLogo.mastercard::before { background: #eb001b; left: 34px; }
+.paymentLogo.mastercard::after { background: rgba(247,158,27,.86); left: 54px; mix-blend-mode: multiply; }
+.paymentLogo.momo { background: #ffcc00; }
+.paymentLogo.momo::before { content: "MoMo"; color: #111; font-size: 22px; font-weight: 950; }
+.paymentLogo.telecel { background: #e60000; }
+.paymentLogo.telecel::before { content: "T"; color: white; width: 34px; height: 34px; display: grid; place-items: center; border: 3px solid white; border-radius: 50%; font-size: 22px; font-weight: 950; }
+.paymentLogo.airteltigo { background: linear-gradient(135deg, #e30613 0 50%, #0054a6 50%); }
+.paymentLogo.airteltigo::before { content: "AT"; color: white; font-size: 23px; font-weight: 950; letter-spacing: -.04em; }
+.paymentLogo.bank::before { content: "▰"; color: var(--blue-dark); font-size: 32px; line-height: 1; }
+.paymentLogo.bank::after { content: ""; position: absolute; width: 54px; height: 7px; left: 29px; bottom: 13px; background: var(--blue-dark); box-shadow: 0 -11px 0 -1px var(--blue-dark), 0 -22px 0 -2px var(--blue-dark); }
+.paymentLogo.invoice::before { content: "GH₵"; color: var(--blue-dark); font-size: 21px; font-weight: 950; }
+.paymentLogo.invoice::after { content: ""; position: absolute; inset: 10px 28px; border: 2px solid rgba(7,95,159,.3); border-radius: 10px; }
 .footer { display: grid; grid-template-columns: 1.35fr repeat(3, 1fr); gap: 30px; padding: 58px min(5vw, 72px); background: #071f34; color: white; }
 .footer p, .footer a { display: block; color: rgba(255,255,255,.7); margin: 8px 0; line-height: 1.45; }
 .footerBrand { margin-bottom: 14px; }
@@ -332,7 +351,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 @keyframes testimonialSlide { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .portalNav { background: rgba(255,255,255,.94); }
 .portalHero { background: radial-gradient(circle at 80% 20%, rgba(20,168,236,.16), transparent 28%), linear-gradient(180deg, #fff, #f7fcff); }
-@media (max-width: 1120px) { .vendorShowcaseGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1120px) { .vendorShowcaseGrid, .compactServiceGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 780px) { .coverageForm { border-radius: 24px; flex-direction: column; } .vendorShowcaseGrid { grid-template-columns: 1fr; } .orderCard, .ratingCard { right: 18px; } .orderCard { top: 24px; } .ratingCard { bottom: 24px; } }
 .activitySection { background: #f7fcff; padding-top: 38px; }
 .activityHeader { display: flex; justify-content: space-between; gap: 18px; align-items: center; margin-bottom: 18px; }
@@ -426,20 +445,23 @@ h2 { color: var(--navy); }
 .opsCommand .eyebrow { color: #8ee5ff; }
 .opsCommand h2, .opsCommand p { color: white; }
 .opsCommand .sectionHead p { color: rgba(255,255,255,.72); }
-.commandGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
-.commandGrid article { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); padding: 24px; }
-.commandGrid span { display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: #8ee5ff; color: #061b31; font-weight: 950; margin-bottom: 18px; }
+.commandGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.commandGrid article { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); padding: 18px; }
+.commandGrid span { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: #8ee5ff; color: #061b31; font-weight: 950; margin-bottom: 12px; }
+.commandGrid h3 { margin-bottom: 8px; }
 .commandGrid p { color: rgba(255,255,255,.72); line-height: 1.58; }
-.vendorPhoto { height: 190px; border-radius: 16px; position: relative; overflow: hidden; display: flex; align-items: flex-end; padding: 16px; background: linear-gradient(135deg, #e9f8ff, #fff); }
-.vendorPhoto::before { content: ""; position: absolute; inset: 18px; border-radius: 18px; background: repeating-linear-gradient(90deg, rgba(255,255,255,.55) 0 16px, rgba(6,27,49,.08) 16px 18px), linear-gradient(135deg, rgba(91,220,255,.35), rgba(255,255,255,.1)); }
-.vendorPhoto::after { content: ""; position: absolute; width: 110px; height: 110px; border-radius: 50%; right: -22px; top: -20px; background: rgba(17,134,212,.18); }
+.vendorPhoto { height: 190px; border-radius: 16px; position: relative; overflow: hidden; display: flex; align-items: flex-end; padding: 16px; background: linear-gradient(135deg, #e9f8ff, #fff); background-size: cover; background-position: center; isolation: isolate; }
+.vendorPhoto::before { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(6,27,49,.08), rgba(6,27,49,.62)); z-index: -1; }
+.vendorPhoto::after { content: ""; position: absolute; inset: 12px; border: 1px solid rgba(255,255,255,.32); border-radius: 14px; }
 .vendorPhoto span { position: relative; z-index: 1; border-radius: 999px; background: rgba(6,27,49,.88); color: white; padding: 8px 10px; font-size: 12px; font-weight: 950; }
-.vendorPhoto.machines { background: linear-gradient(135deg, #e9f8ff, #d7f4ff); }
-.vendorPhoto.fold { background: linear-gradient(135deg, #fff, #edf9f2); }
-.vendorPhoto.steam { background: linear-gradient(135deg, #fff7e7, #e8f8ff); }
-.assuranceSection { background: linear-gradient(180deg, #fff, #f7fcff); }
-.assuranceGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
-.assuranceGrid article { padding: 26px; background: white; border: 1px solid var(--line); }
+.vendorPhoto.linen { background-image: url('https://images.unsplash.com/photo-1517677208171-0bc6725a3e60?auto=format&fit=crop&w=900&q=72'); }
+.vendorPhoto.machines { background-image: url('https://images.unsplash.com/photo-1582735689369-4fe89db7114c?auto=format&fit=crop&w=900&q=72'); }
+.vendorPhoto.fold { background-image: url('https://images.unsplash.com/photo-1521656693074-0ef32e80a5d5?auto=format&fit=crop&w=900&q=72'); }
+.vendorPhoto.steam { background-image: url('https://images.unsplash.com/photo-1545173168-9f1947eebb7f?auto=format&fit=crop&w=900&q=72'); }
+.assuranceSection { background: linear-gradient(180deg, #fff, #f7fcff); padding-top: 58px; padding-bottom: 58px; }
+.assuranceGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.assuranceGrid article { padding: 18px; background: white; border: 1px solid var(--line); }
+.assuranceGrid h3 { margin-bottom: 8px; }
 .assuranceGrid p { color: var(--soft-ink); line-height: 1.58; }
 .trackingResult .miniRows span { color: rgba(255,255,255,.82); }
 .paymentPanel { background: linear-gradient(145deg, #fff, #f7fcff); }
@@ -505,6 +527,7 @@ main { overflow-x: clip; }
   }
   .menuButton { min-height: 44px; }
   .navLinks {
+    display: flex;
     top: calc(100% + 8px);
     left: 12px;
     right: 12px;
@@ -514,6 +537,17 @@ main { overflow-x: clip; }
     -webkit-overflow-scrolling: touch;
     border-radius: 20px;
     contain: layout paint;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-8px) scale(.98);
+    transition: opacity .16s ease, transform .16s ease, visibility .16s ease;
+  }
+  .navLinks.open, .navLinks[data-open="true"] {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
   }
   .navLinks a { min-height: 44px; display: flex; align-items: center; }
   .section { padding: 54px 16px; }
@@ -568,7 +602,7 @@ main { overflow-x: clip; }
     gap: 10px;
   }
   .proofStrip div { border-radius: 16px; padding: 16px; box-shadow: none; }
-  .plansGrid, .serviceGrid, .vendorShowcaseGrid, .staffCards, .commandGrid, .assuranceGrid, .trackingGrid, .quoteGrid, .scheduleGrid, .scheduleGrid.twoCols, .two, .addonGrid, .footer {
+  .plansGrid, .serviceGrid, .compactServiceGrid, .vendorShowcaseGrid, .staffCards, .commandGrid, .assuranceGrid, .trackingGrid, .quoteGrid, .scheduleGrid, .scheduleGrid.twoCols, .two, .addonGrid, .footer {
     grid-template-columns: 1fr;
   }
   .planCard, .serviceCard, .panel, .faqItem, .contactCard, .quoteResult, .vendorShowcaseCard, .staffCard, .assuranceGrid article, .commandGrid article {
@@ -580,4 +614,11 @@ main { overflow-x: clip; }
   .testimonialTrack { animation: none; width: auto; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 8px; }
   .testimonialCard { min-width: 82vw; scroll-snap-align: start; }
   .miniRows span { gap: 10px; align-items: flex-start; }
+  .opsCommand, .assuranceSection { padding-top: 42px; padding-bottom: 42px; }
+  .compactHead { margin-bottom: 18px; }
+  .commandGrid article, .assuranceGrid article, .serviceCard { padding: 16px; }
+  .serviceIcon { width: 38px; height: 38px; border-radius: 12px; font-size: 14px; margin-bottom: 10px; }
+  .vendorPhoto { height: 170px; }
+  .paymentLogoGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .paymentLogo { width: 100%; height: 52px; border-radius: 16px; box-shadow: rgba(8,35,61,.08) 0 14px 30px -24px; }
 }

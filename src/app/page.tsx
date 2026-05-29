@@ -38,12 +38,10 @@ type TrackingResult = {
 };
 
 const services = [
-  ["Wash, dry & fold", "Everyday laundry handled by a vetted partner, packed cleanly, and returned on a schedule."],
-  ["Ironing & finishing", "Uniforms, napkins, linens, shirts, and guest-facing pieces finished with a cleaner presentation."],
-  ["QR bag notes", "Orders can carry bag counts, garment notes, and care flags so pickup, vendor intake, and delivery match."],
-  ["Express runs", "Under-24h turnaround can be added when a hotel, restaurant, or clinic has an urgent pile-up."],
-  ["Commercial linen cycles", "Track towels, sheets, uniforms, gowns, and table linen with pickup rhythm and inventory notes."],
-  ["Driver handoffs", "Route, photo, timestamp, and pickup/delivery status updates can be logged from staff workspaces."],
+  ["Wash + fold", "Everyday laundry returned clean, packed, and tied to one order reference.", "01"],
+  ["Ironing", "Uniforms, shirts, napkins, and guest-facing linen finished before delivery.", "02"],
+  ["Commercial linen", "Hotels, clinics, restaurants, and teams can schedule repeat pickup cycles.", "03"],
+  ["Express routing", "Urgent loads can be flagged for faster vendor assignment and dispatch follow-up.", "04"],
 ];
 
 const locations = ["Osu", "Labone", "Cantonments", "Airport", "East Legon", "Dzorwulu", "Spintex", "Madina", "Tema by confirmation"];
@@ -87,9 +85,19 @@ const operationsPillars = [
 const trackingStages = ["Received", "Pickup scheduled", "Vendor assigned", "In washing", "Ready for delivery", "Delivered"];
 
 const assuranceItems = [
-  ["Clear intake", "Pickup notes, textile type, preferred window, route zone, and payment preference are captured before dispatch."],
-  ["Vendor accountability", "Partner updates attach to the order timeline so acceptance, washing, finishing, and ready-for-driver are visible."],
-  ["Commercial controls", "Linen counts, QR/bag tags, shortages, and invoice notes stay tied to the customer account."],
+  ["Clear intake", "Route, textile notes, alert preference, and payment lane are captured before dispatch."],
+  ["Vendor accountability", "Acceptance, washing, finishing, and ready-for-driver updates attach to the timeline."],
+  ["Commercial controls", "Bag counts, shortages, and invoice notes stay tied to the customer account."],
+];
+
+const paymentMethods = [
+  ["Visa", "visa"],
+  ["Mastercard", "mastercard"],
+  ["MTN Mobile Money", "momo"],
+  ["Telecel Cash", "telecel"],
+  ["AirtelTigo Money", "airteltigo"],
+  ["Bank transfer", "bank"],
+  ["Invoice billing", "invoice"],
 ];
 
 function formatMoney(value: number) {
@@ -210,12 +218,15 @@ export default function Home() {
           aria-controls="site-navigation"
           aria-expanded={mobileOpen}
           aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setMobileOpen(false);
+          }}
           onClick={() => setMobileOpen(!mobileOpen)}
         >
           <span>{mobileOpen ? "Close" : "Menu"}</span>
           <span className="menuIcon" aria-hidden="true">{mobileOpen ? "×" : "☰"}</span>
         </button>
-        <nav id="site-navigation" className={mobileOpen ? "navLinks open" : "navLinks"}>
+        <nav id="site-navigation" className={mobileOpen ? "navLinks open" : "navLinks"} data-open={mobileOpen}>
           <a href="#services" onClick={() => setMobileOpen(false)}>Services</a>
           <a href="#plans" onClick={() => setMobileOpen(false)}>Plans</a>
           <a href="#booking" onClick={() => setMobileOpen(false)}>Book</a>
@@ -279,20 +290,20 @@ export default function Home() {
       </section>
 
       <section className="section opsCommand">
-        <div className="sectionHead">
+        <div className="sectionHead compactHead">
           <p className="eyebrow">Operations engine</p>
           <h2>One customer promise, one order timeline behind it.</h2>
-          <p>Research from Laundryheap-style delivery flows, CleanCloud-style notifications, and Cents-style route control points to the same answer: booking, route, QR/bag intake, vendor updates, and support must not live in separate islands.</p>
+          <p>Booking, routing, vendor updates, and support stay connected so customers are not chasing four different people.</p>
         </div>
         <div className="commandGrid">{operationsPillars.map(([title, copy], index) => <article key={title}><span>{String(index + 1).padStart(2, "0")}</span><h3>{title}</h3><p>{copy}</p></article>)}</div>
       </section>
 
       <section id="services" className="section">
-        <div className="sectionHead narrow">
+        <div className="sectionHead narrow compactHead">
           <p className="eyebrow">What Bubble Wash handles</p>
-          <h2>Simple for the customer. Structured behind the scenes.</h2>
+          <h2>Core laundry jobs, without the clutter.</h2>
         </div>
-        <div className="serviceGrid">{services.map(([title, copy]) => <article className="serviceCard" key={title}><div className="serviceIcon">•</div><h3>{title}</h3><p>{copy}</p></article>)}</div>
+        <div className="serviceGrid compactServiceGrid">{services.map(([title, copy, number]) => <article className="serviceCard" key={title}><div className="serviceIcon">{number}</div><h3>{title}</h3><p>{copy}</p></article>)}</div>
       </section>
 
       <section id="vendors-public" className="section vendorShowcase">
@@ -343,10 +354,10 @@ export default function Home() {
       </section>
 
       <section className="section assuranceSection">
-        <div className="sectionHead">
+        <div className="sectionHead compactHead">
           <p className="eyebrow">Service assurance</p>
-          <h2>The parts customers usually worry about are handled directly in the workflow.</h2>
-          <p>Pickup delays, lost items, unclear invoices, and vendor handoff mistakes are operational problems. Bubble Wash is shaped around preventing those gaps before they become support issues.</p>
+          <h2>Trust signals built into the workflow.</h2>
+          <p>Less promise-stacking, more practical controls for pickup, vendor handoff, and billing clarity.</p>
         </div>
         <div className="assuranceGrid">{assuranceItems.map(([title, copy]) => <article key={title}><h3>{title}</h3><p>{copy}</p></article>)}</div>
       </section>
@@ -460,7 +471,7 @@ export default function Home() {
         <div className="contactCard"><Image src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={180} height={180} /><h2>Need a faster answer?</h2><p>Use the WhatsApp button for quick customer support, vendor questions, or account setup.</p><a className="button primary full" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20need%20help" target="_blank" rel="noreferrer">Chat on WhatsApp</a></div>
       </section>
 
-      <section className="paymentStrip"><h3>Accepted payment lanes</h3><div><span>Visa</span><span>Mastercard</span><span>MTN MoMo</span><span>Telecel Cash</span><span>AirtelTigo</span><span>Bank Transfer</span><span>Invoice</span></div></section>
+      <section className="paymentStrip" aria-labelledby="payment-heading"><p className="eyebrow">Payment references</p><h3 id="payment-heading">Accepted payment lanes</h3><div className="paymentLogoGrid">{paymentMethods.map(([label, className]) => <span className={`paymentLogo ${className}`} key={label} role="img" aria-label={label} title={label}><span className="srOnly">{label}</span></span>)}</div></section>
 
       <footer id="contact" className="footer">
         <div><div className="brand footerBrand"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} /><span>Bubble Wash</span></div><p>Laundry pickup and vendor fulfilment for Accra teams that need clean work without the back-and-forth.</p></div>
