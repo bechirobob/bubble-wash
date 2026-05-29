@@ -51,6 +51,8 @@ const services = [
 
 const locations = ["Osu", "Labone", "Cantonments", "Airport", "East Legon", "Dzorwulu", "Spintex", "Madina", "Tema by confirmation"];
 
+const popularAreas = ["Osu", "Labone", "East Legon", "Airport", "Cantonments"];
+
 const vendors = [
   ["CleanPro Laundry Services", "East Legon", "Certified", "Express", "72% on-time return", "linen"],
   ["SparkleWash Ghana", "Airport Residential", "Certified", "24/7", "night dispatch", "machines"],
@@ -74,10 +76,10 @@ const faqs = [
 ];
 
 const proof = [
-  ["24h", "standard return target"],
-  ["7", "days scheduling"],
+  ["24h", "standard turnaround target"],
+  ["7", "days of pickup scheduling"],
   ["8", "Accra route zones"],
-  ["1", "shared order timeline"],
+  ["1", "order timeline from pickup to delivery"],
 ];
 
 const operationsPillars = [
@@ -90,9 +92,9 @@ const operationsPillars = [
 const trackingStages = ["Received", "Pickup scheduled", "Vendor assigned", "In washing", "Ready for delivery", "Delivered"];
 
 const liveTrackingPlan = [
-  ["MVP now", "Customers see status, vendor, route zone, and Google Maps directions from the saved order timeline."],
-  ["Driver workflow now", "Drivers sign in to update route status, ETA, pickup/delivery notes, and handoffs against the shared Order ID."],
-  ["Production later", "Use Maps JavaScript API for live markers, Routes API for ETA/traffic, and server-side retention rules for privacy."],
+  ["Order updates", "Customers see pickup status, vendor handoff, route zone, and the next step from the saved order timeline."],
+  ["Driver ETAs", "Drivers update ETA, pickup, delivery, and handoff notes against the same Bubble Wash reference ID."],
+  ["Privacy-safe maps", "Google Maps links help plan routes without collecting live GPS unless a future driver tracking feature is explicitly enabled."],
 ];
 
 const assuranceItems = [
@@ -133,6 +135,7 @@ export default function Home() {
   const [activeFaq, setActiveFaq] = useState(0);
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [coverageArea, setCoverageArea] = useState("");
   const [coverageStatus, setCoverageStatus] = useState("Enter your area to check pickup coverage.");
   const [routePreview, setRoutePreview] = useState<RoutePreview>(() => buildRoutePreview("core", "Core Accra route"));
   const [trackingStatus, setTrackingStatus] = useState("Enter a booking/reference ID after submitting a request.");
@@ -190,7 +193,7 @@ export default function Home() {
 
   async function checkCoverage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const area = String(new FormData(event.currentTarget).get("coverageArea") ?? "").trim();
+    const area = String(new FormData(event.currentTarget).get("coverageArea") ?? coverageArea).trim();
     const matched = locations.find((location) => area.toLowerCase().includes(location.split(" ")[0].toLowerCase()));
     const selectedZone = routeZoneForArea(area || matched || "core");
     setCoverageStatus("Checking coverage and route map...");
@@ -259,41 +262,44 @@ export default function Home() {
         </button>
         <nav id="site-navigation" className={mobileOpen ? "navLinks open" : "navLinks"} data-open={mobileOpen}>
           <a href="#services" onClick={() => setMobileOpen(false)}>Services</a>
-          <a href="#plans" onClick={() => setMobileOpen(false)}>Plans</a>
-          <a href="#booking" onClick={() => setMobileOpen(false)}>Book</a>
-          <a href="#track" onClick={() => setMobileOpen(false)}>Track</a>
-          <a href="#locations" onClick={() => setMobileOpen(false)}>Map</a>
-          <a href="#vendors-public" onClick={() => setMobileOpen(false)}>Vendors</a>
-          <a href="#onboarding" onClick={() => setMobileOpen(false)}>Create account</a>
+          <a href="#plans" onClick={() => setMobileOpen(false)}>Pricing</a>
+          <a href="#locations" onClick={() => setMobileOpen(false)}>Coverage</a>
+          <a href="#track" onClick={() => setMobileOpen(false)}>Track Order</a>
           <a href="#faq" onClick={() => setMobileOpen(false)}>FAQ</a>
-          <a href="/login?next=/drivers" onClick={() => setMobileOpen(false)}>Driver Login</a>
-          <a href="/login" onClick={() => setMobileOpen(false)}>Staff Login</a>
+          <a href="#booking" onClick={() => setMobileOpen(false)}>Book</a>
           <a className="navCta" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20want%20to%20schedule%20a%20laundry%20pickup" target="_blank" rel="noreferrer" onClick={() => setMobileOpen(false)}>WhatsApp</a>
         </nav>
       </header>
 
       <section id="top" className="hero section">
         <div className="heroCopy">
-          <p className="eyebrow">Accra laundry pickup · subscriptions · vendor fulfilment</p>
-          <h1>Accra laundry pickup with real order visibility.</h1>
-          <p className="lead">Bubble Wash coordinates pickup, vendor fulfilment, route updates, payments, and support for households and commercial teams that need clean laundry back on schedule.</p>
+          <p className="eyebrow">Laundry pickup in Accra</p>
+          <h1>Book laundry pickup with clear tracking from pickup to delivery.</h1>
+          <p className="lead">Bubble Wash collects, routes to vetted laundry partners, and keeps households and businesses updated by WhatsApp, email, and one order reference.</p>
           <form className="coverageForm" onSubmit={checkCoverage}>
-            <input name="coverageArea" placeholder="Enter your area or business location" aria-label="Coverage area" />
-            <button className="button primary" type="submit">Check Coverage</button>
+            <label className="coverageLabel" htmlFor="coverageArea">Check if we serve your area</label>
+            <div className="coverageRow">
+              <input id="coverageArea" name="coverageArea" value={coverageArea} onChange={(event) => setCoverageArea(event.target.value)} placeholder="e.g. Osu, Labone, East Legon" autoComplete="address-level2" />
+              <button className="button primary" type="submit">Check Coverage</button>
+            </div>
+            <div className="coverageQuickChips" aria-label="Popular coverage areas">
+              {popularAreas.map((area) => <button key={area} type="button" onClick={() => setCoverageArea(area)}>{area}</button>)}
+            </div>
           </form>
           <p className="status" role="status" aria-live="polite">{coverageStatus}</p>
           <div className="heroActions">
             <a className="button primary" href="#booking">Book a Pickup</a>
-            <a className="button secondary" href="#quote">Estimate Price</a>
+            <a className="button secondary" href="#locations">Check Coverage</a>
+            <a className="textLink" href="#quote">Estimate price →</a>
           </div>
-          <div className="humanNote"><b>Built for Accra operations:</b> traffic-aware routes, repeat pickups, vendor capacity, MoMo and invoice preferences, and status updates before customers have to chase.</div>
+          <div className="humanNote"><b>Simple promise:</b> schedule pickup, pay by MoMo/card/invoice, and see updates before you have to chase anyone.</div>
         </div>
         <div className="heroVisual heroSlider" aria-label="Bubble Wash live operations summary">
           <div className="slideOverlay" />
-          <div className="visualCard orderCard"><span>Live order</span><strong>BW-2081</strong><small>Pickup scheduled · Vendor assigned · Customer notified</small></div>
-          <div className="visualCard mainBasket"><span>Today’s route</span><strong>82kg</strong><small>Growth plan · Core Accra · ironing added · return window set</small></div>
+          <div className="visualCard orderCard"><span>Your order</span><strong>BW-2081</strong><small>Pickup scheduled · Washing started · Delivery window set</small></div>
+          <div className="visualCard mainBasket"><span>Today’s pickup</span><strong>82kg</strong><small>Growth plan · Core Accra · ironing added · WhatsApp updates on</small></div>
           <div className="routeCard"><b>Route fee</b><span>{zones[zone].label}</span><strong>{formatMoney(zones[zone].fee)}</strong></div>
-          <div className="ratingCard"><b>4.8★</b><span>service confidence</span></div>
+          <div className="ratingCard"><b>4.8★</b><span>customer confidence</span></div>
         </div>
       </section>
 

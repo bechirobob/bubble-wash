@@ -349,9 +349,15 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .nav { background: rgba(255,255,255,.9); box-shadow: rgba(15, 66, 112, .08) 0 14px 40px -28px; }
 .navLinks a:not(.navCta) { padding: 10px 4px; }
 .hero { background: radial-gradient(circle at 20% 20%, rgba(20,168,236,.13), transparent 25%), linear-gradient(180deg, #fff, #f3fbff 72%, #fff); }
-.coverageForm { display: flex; gap: 10px; max-width: 680px; padding: 8px; border: 1px solid var(--line); background: rgba(255,255,255,.86); border-radius: 999px; box-shadow: var(--shadow); }
-.coverageForm input { border: 0; background: transparent; padding-left: 18px; }
-.coverageForm input:focus { box-shadow: none; }
+.coverageForm { display: grid; gap: 10px; max-width: 700px; padding: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.9); border-radius: 24px; box-shadow: var(--shadow); }
+.coverageLabel { color: var(--ink); font-size: 14px; font-weight: 950; padding: 0 4px; }
+.coverageRow { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+.coverageForm input { border: 0; background: #f8fcff; padding-left: 18px; }
+.coverageForm input:focus { box-shadow: 0 0 0 4px rgba(20,168,236,.13); }
+.coverageQuickChips { display: flex; flex-wrap: wrap; gap: 8px; }
+.coverageQuickChips button { border: 1px solid var(--line); border-radius: 999px; background: white; color: var(--blue-dark); cursor: pointer; font-size: 13px; font-weight: 900; padding: 8px 11px; }
+.coverageQuickChips button:hover { border-color: var(--blue); }
+.textLink { align-self: center; color: var(--blue-dark); font-weight: 950; padding: 10px 4px; }
 .heroSlider { background-image: linear-gradient(135deg, rgba(7,31,52,.1), rgba(20,168,236,.08)), url('https://images.unsplash.com/photo-1545173168-9f1947eebb7f?auto=format&fit=crop&w=1100&q=80'); background-size: cover; background-position: center; animation: laundrySlides 18s infinite ease-in-out; }
 .slideOverlay { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5,20,36,.08), rgba(255,255,255,.15)); }
 .orderCard { right: 34px; top: 38px; width: 245px; }
@@ -381,7 +387,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .portalNav { background: rgba(255,255,255,.94); }
 .portalHero { background: radial-gradient(circle at 80% 20%, rgba(20,168,236,.16), transparent 28%), linear-gradient(180deg, #fff, #f7fcff); }
 @media (max-width: 1120px) { .vendorShowcaseGrid, .compactServiceGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 780px) { .coverageForm { border-radius: 24px; flex-direction: column; } .vendorShowcaseGrid { grid-template-columns: 1fr; } .orderCard, .ratingCard { right: 18px; } .orderCard { top: 24px; } .ratingCard { bottom: 24px; } }
+@media (max-width: 780px) { .coverageForm { border-radius: 24px; } .coverageRow { grid-template-columns: 1fr; } .coverageRow .button { width: 100%; } .vendorShowcaseGrid { grid-template-columns: 1fr; } .orderCard, .ratingCard { right: 18px; } .orderCard { top: 24px; } .ratingCard { bottom: 24px; } }
 .activitySection { background: #f7fcff; padding-top: 38px; }
 .activityHeader { display: flex; justify-content: space-between; gap: 18px; align-items: center; margin-bottom: 18px; }
 .activityHeader h2 { margin-bottom: 0; }
@@ -444,13 +450,13 @@ details summary { cursor: pointer; font-weight: 950; color: var(--blue-dark); }
   --shadow: rgba(50,50,93,.18) 0 30px 45px -30px, rgba(0,0,0,.08) 0 18px 36px -18px;
 }
 body { background: #ffffff; }
-.nav { max-width: 1180px; left: 50%; transform: translateX(-50%); top: 12px; border: 1px solid rgba(223,234,243,.82); border-radius: 22px; padding: 10px 14px; margin-bottom: -72px; }
+.nav { max-width: 1180px; left: 50%; transform: translateX(-50%); top: 12px; border: 1px solid rgba(223,234,243,.82); border-radius: 22px; padding: 10px 14px; margin-bottom: 0; }
 .brandMark { width: 46px; height: 46px; border-radius: 14px; }
 .navLinks { gap: 14px; font-size: 13px; }
 .navCta, .button { border-radius: 12px; padding: 12px 16px; }
 .button.secondary { background: #f8fcff; }
 .section { padding-left: max(min(5vw, 72px), calc((100vw - 1180px) / 2)); padding-right: max(min(5vw, 72px), calc((100vw - 1180px) / 2)); }
-.hero { padding-top: 144px; grid-template-columns: .95fr 1.05fr; min-height: 760px; background: radial-gradient(circle at 80% 10%, rgba(91,220,255,.22), transparent 30%), radial-gradient(circle at 8% 30%, rgba(17,134,212,.12), transparent 32%), linear-gradient(180deg, #fff 0%, #f7fcff 70%, #fff 100%); }
+.hero { padding-top: 104px; grid-template-columns: .95fr 1.05fr; min-height: 760px; background: radial-gradient(circle at 80% 10%, rgba(91,220,255,.22), transparent 30%), radial-gradient(circle at 8% 30%, rgba(17,134,212,.12), transparent 32%), linear-gradient(180deg, #fff 0%, #f7fcff 70%, #fff 100%); }
 h1 { font-size: clamp(48px, 6vw, 86px); letter-spacing: -.075em; color: var(--navy); }
 h2 { color: var(--navy); }
 .lead, .sectionHead p { font-size: 19px; }
@@ -460,7 +466,7 @@ h2 { color: var(--navy); }
 .heroSlider { background-image: radial-gradient(circle at 72% 18%, rgba(91,220,255,.34), transparent 24%), linear-gradient(140deg, #071f34 0%, #0c4f83 45%, #e9fbff 100%) !important; animation: none; }
 .slideOverlay { background: linear-gradient(135deg, rgba(255,255,255,.08), rgba(255,255,255,.22)); }
 .heroSlider::before { content: ""; position: absolute; inset: 70px 52px 110px 120px; border-radius: 32px; background: linear-gradient(160deg, rgba(255,255,255,.92), rgba(232,248,255,.76)); box-shadow: rgba(3,31,52,.22) 0 38px 80px -46px; }
-.heroSlider::after { content: "Dispatch board\A Pickup → Vendor → Washing → Ready → Delivered"; white-space: pre-line; position: absolute; left: 150px; right: 78px; top: 120px; color: #08233d; font-weight: 950; font-size: 28px; line-height: 1.2; letter-spacing: -.05em; }
+.heroSlider::after { content: "Your order timeline\A Scheduled → Washing → Ready → Delivered"; white-space: pre-line; position: absolute; left: 150px; right: 78px; top: 120px; color: #08233d; font-weight: 950; font-size: 28px; line-height: 1.2; letter-spacing: -.05em; }
 .visualCard, .routeCard, .ratingCard { border-radius: 18px; box-shadow: var(--shadow); }
 .orderCard { z-index: 2; right: 28px; top: 46px; }
 .routeCard { z-index: 2; top: 68px; left: 34px; }
@@ -496,7 +502,7 @@ h2 { color: var(--navy); }
 .paymentPanel { background: linear-gradient(145deg, #fff, #f7fcff); }
 .footer { background: #061b31; }
 @media (max-width: 1120px) { .commandGrid, .assuranceGrid, .staffCards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .nav { max-width: calc(100vw - 24px); } }
-@media (max-width: 780px) { .nav { top: 8px; transform: none; left: auto; margin: 8px 12px -60px; } .hero { padding-top: 116px; } .commandGrid, .assuranceGrid { grid-template-columns: 1fr; } .heroSlider::before { inset: 92px 22px 116px 42px; } .heroSlider::after { left: 60px; right: 42px; top: 132px; font-size: 22px; } .proofStrip { padding: 0 18px 28px; } }
+@media (max-width: 780px) { .nav { top: 8px; transform: none; left: auto; margin: 0; } .hero { padding-top: 116px; } .commandGrid, .assuranceGrid { grid-template-columns: 1fr; } .heroSlider::before { inset: 92px 22px 116px 42px; } .heroSlider::after { left: 60px; right: 42px; top: 132px; font-size: 22px; } .proofStrip { padding: 0 18px 28px; } }
 
 /* Final visual fixes for release review */
 .nav { width: calc(100% - 32px); }
