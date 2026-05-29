@@ -19,6 +19,9 @@ export type OrderSummary = {
   customer: string;
   area: string;
   vendor: string;
+  driver: string;
+  routeWindow: string;
+  locationNote: string;
   status: string;
   payment: string;
   priority: string;
@@ -39,6 +42,7 @@ export type OrderSummary = {
 const roleVisibleTypes: Record<StaffRole, Set<string> | null> = {
   admin: null,
   vendor: new Set(["vendor-application", "vendor-job-update", "qr-bag-intake"]),
+  driver: new Set(["driver-route-log"]),
   support: new Set(["support-ticket"]),
 };
 
@@ -50,7 +54,14 @@ export function visibleSubmissionRecords(records: SubmissionRecord[], role: Staf
 
 export function orderBoardRecords(records: SubmissionRecord[], role: StaffRole) {
   if (role === "admin") return records;
-  return visibleSubmissionRecords(records, role);
+  if (role !== "driver") return visibleSubmissionRecords(records, role);
+
+  const driverOrderIds = new Set(
+    records
+      .filter((record) => text(record.data.submissionType) === "driver-route-log" || text(record.data.driverName) || text(record.data.driverPhone) || text(record.data.routeWindow))
+      .map((record) => canonicalOrderId(record)),
+  );
+  return records.filter((record) => driverOrderIds.has(canonicalOrderId(record)));
 }
 
 export function text(value: unknown) {
@@ -79,7 +90,7 @@ function recordStatus(record: SubmissionRecord) {
   if (type.includes("vendor-application")) return "Vendor capacity updated";
   if (type.includes("vendor-job")) return "Vendor update received";
   if (type.includes("qr-bag")) return "Vendor intake checked";
-  if (type.includes("driver-route")) return "Route update received";
+  if (type.includes("driver-route")) return "Driver route update received";
   if (type.includes("linen-inventory")) return "Inventory count logged";
   if (type.includes("support")) return "Support ticket open";
   if (type.includes("admin")) return "Admin action logged";
@@ -93,6 +104,9 @@ function nextStepFor(summary: Pick<OrderSummary, "status" | "lastEventType" | "v
   if (status.includes("vendor assigned")) return "Vendor accepts the job, confirms capacity, and logs QR/bag intake when received.";
   if (status.includes("accepted")) return "Driver/vendor updates pickup handoff, bag count, and ETA before washing starts.";
   if (status.includes("washing") || status.includes("ironing")) return "Vendor keeps status current and flags missing/stain/quality issues before ready-for-driver.";
+  if (status.includes("driver en route")) return "Driver shares ETA, pickup/delivery checkpoint, and customer handoff note.";
+  if (status.includes("picked up")) return "Driver drops the bags at the assigned vendor and logs bag count / handoff note.";
+  if (status.includes("delayed")) return "Support contacts the customer with the latest route note and revised ETA.";
   if (status.includes("ready")) return "Dispatch schedules return delivery and support watches for customer alerts.";
   if (status.includes("delivered")) return "Admin closes the order, confirms payment/invoice, and records any quality follow-up.";
   if (type.includes("support")) return "Support checks the shared timeline before contacting customer, vendor, or driver.";
@@ -133,7 +147,20 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
     };
     const lastEventType = text(latest.data.submissionType) || "request";
     const status = recordStatus(latest);
+    const findLatestFromTypes = (types: string[], ...fields: string[]) => {
+      for (const record of [...chronological].reverse()) {
+        if (!types.includes(text(record.data.submissionType))) continue;
+        for (const field of fields) {
+          const value = text(record.data[field]);
+          if (value) return value;
+        }
+      }
+      return "";
+    };
     const vendor = findLatest("vendorName", "vendor");
+    const driver = findLatest("driverName") || findLatestFromTypes(["driver-route-log"], "name") || "Unassigned";
+    const routeWindow = findLatest("routeWindow", "driverEta", "eta") || "ETA pending";
+    const locationNote = findLatest("locationNote", "routeCheckpoint") || findLatestFromTypes(["driver-route-log"], "message") || "No driver checkpoint yet";
     const area = findLatest("area", "zone", "routeArea") || "Route pending";
     const route = buildRoutePreview(zoneKeyFrom(findLatest("zone", "routeArea", "area")), area);
     const summary: OrderSummary = {
@@ -143,6 +170,9 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
       customer: findCustomer(),
       area,
       vendor: vendor || "Unassigned",
+      driver,
+      routeWindow,
+      locationNote,
       status,
       payment: findLatest("paymentPreference", "paymentMethod") || "Payment not confirmed",
       priority: findLatest("priority") || "Normal",

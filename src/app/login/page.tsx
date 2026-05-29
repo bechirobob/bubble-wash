@@ -6,8 +6,9 @@ import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 const credentialCards = [
-  ["Admin", "admin@bubblewash.local", "Full access to admin, vendor, and support workspaces."],
+  ["Admin", "admin@bubblewash.local", "Full access to admin, vendor, driver, and support workspaces."],
   ["Vendor", "vendor@bubblewash.local", "Vendor capacity and job update workspace."],
+  ["Driver", "driver@bubblewash.local", "Route pickup, handoff, ETA, and delivery workspace."],
   ["Support", "support@bubblewash.local", "Support ticket workspace."],
 ];
 
@@ -15,7 +16,7 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const nextPath = useMemo(() => {
     const value = searchParams.get("next");
-    return value && ["/admin", "/vendors", "/support"].includes(value) ? value : "/admin";
+    return value && ["/admin", "/vendors", "/drivers", "/support"].includes(value) ? value : "/admin";
   }, [searchParams]);
   const [email, setEmail] = useState("admin@bubblewash.local");
   const [password, setPassword] = useState("");
@@ -54,7 +55,7 @@ function LoginForm() {
           <form className="panel loginPanel" onSubmit={login}>
             <p className="eyebrow">Staff login</p>
             <h1>Separate dashboards, cleaner public page.</h1>
-            <p className="lead">Sign in to open the admin, vendor, or support workspace. Customers stay on the booking page; operations move behind credentials.</p>
+            <p className="lead">Sign in to open the admin, vendor, driver, or support workspace. Customers stay on the booking page; operations move behind credentials.</p>
             <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Staff email" required />
             <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" required />
             <button className="button primary full" type="submit">Sign in</button>

@@ -34,6 +34,9 @@ type TrackingResult = {
   area: string;
   payment: string;
   vendor?: string;
+  driver?: string;
+  routeWindow?: string;
+  locationNote?: string;
   eventCount?: number;
   updatedAt?: string;
   route?: RoutePreview;
@@ -80,7 +83,7 @@ const proof = [
 const operationsPillars = [
   ["Book", "Schedule pickup, service type, area, alerts, and payment preference from one flow."],
   ["Route", "Dispatch sees route zone, bag count, pickup notes, vendor assignment, and ETA."],
-  ["Track", "Customer, admin, vendor, and support read from the same Order ID timeline."],
+  ["Track", "Customer, admin, vendor, driver, and support read from the same Order ID timeline."],
   ["Resolve", "Support can connect delays, missing items, QR intake notes, and payment status."],
 ];
 
@@ -88,7 +91,7 @@ const trackingStages = ["Received", "Pickup scheduled", "Vendor assigned", "In w
 
 const liveTrackingPlan = [
   ["MVP now", "Customers see status, vendor, route zone, and Google Maps directions from the saved order timeline."],
-  ["Driver app next", "Drivers opt into browser Geolocation on HTTPS and send timed location pings while active on a delivery."],
+  ["Driver workflow now", "Drivers sign in to update route status, ETA, pickup/delivery notes, and handoffs against the shared Order ID."],
   ["Production later", "Use Maps JavaScript API for live markers, Routes API for ETA/traffic, and server-side retention rules for privacy."],
 ];
 
@@ -263,6 +266,7 @@ export default function Home() {
           <a href="#vendors-public" onClick={() => setMobileOpen(false)}>Vendors</a>
           <a href="#onboarding" onClick={() => setMobileOpen(false)}>Create account</a>
           <a href="#faq" onClick={() => setMobileOpen(false)}>FAQ</a>
+          <a href="/login?next=/drivers" onClick={() => setMobileOpen(false)}>Driver Login</a>
           <a href="/login" onClick={() => setMobileOpen(false)}>Staff Login</a>
           <a className="navCta" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20want%20to%20schedule%20a%20laundry%20pickup" target="_blank" rel="noreferrer" onClick={() => setMobileOpen(false)}>WhatsApp</a>
         </nav>
@@ -435,7 +439,7 @@ export default function Home() {
               <h3>{trackingResult.id}</h3>
               <strong>{trackingResult.status}</strong>
               <p>{trackingResult.customer}</p>
-              <div className="miniRows"><span>Vendor: {trackingResult.vendor || "Pending assignment"}</span><span>Area: {trackingResult.area}</span><span>Payment: {trackingResult.payment}</span><span>Events: {trackingResult.eventCount ?? 1}</span><span>Updated: {new Date(trackingResult.updatedAt || trackingResult.createdAt).toLocaleString()}</span></div>
+              <div className="miniRows"><span>Vendor: {trackingResult.vendor || "Pending assignment"}</span><span>Driver: {trackingResult.driver || "Pending dispatch"}</span><span>Route window: {trackingResult.routeWindow || "ETA pending"}</span><span>Driver note: {trackingResult.locationNote || "No checkpoint yet"}</span><span>Area: {trackingResult.area}</span><span>Payment: {trackingResult.payment}</span><span>Events: {trackingResult.eventCount ?? 1}</span><span>Updated: {new Date(trackingResult.updatedAt || trackingResult.createdAt).toLocaleString()}</span></div>
               <p>{trackingResult.nextStep}</p>
               {trackingResult.route && <div className="trackingMapActions"><a className="button primary" href={trackingResult.route.directionsUrl} target="_blank" rel="noreferrer">Open Google Maps Route</a><a className="button secondary" href={trackingResult.route.googleMapsUrl} target="_blank" rel="noreferrer">View Pickup Area</a></div>}
             </> : <>
@@ -514,13 +518,14 @@ export default function Home() {
       <section id="staff" className="section staffTeaser">
         <div className="sectionHead">
           <p className="eyebrow">Staff workspace</p>
-          <h2>Admin, vendor, and support work now lives after login.</h2>
-          <p>Customers get a focused booking experience. Operators get separate pages for intake, vendor capacity, job updates, and support tickets once they sign in.</p>
+          <h2>Admin, vendor, driver, and support work now lives after login.</h2>
+          <p>Customers get a focused booking experience. Operators get separate pages for intake, vendor capacity, driver route updates, and support tickets once they sign in.</p>
         </div>
         <div className="staffCards">
           <a className="staffCard" href="/login?next=/admin"><span>01</span><h3>Admin dashboard</h3><p>Order intake, dispatch, payments, priority, and quality actions.</p></a>
           <a className="staffCard" href="/login?next=/vendors"><span>02</span><h3>Vendor dashboard</h3><p>Capacity reporting, vendor registration, and job status updates.</p></a>
-          <a className="staffCard" href="/login?next=/support"><span>03</span><h3>Support desk</h3><p>Customer, vendor, and payment issues handled away from the landing page.</p></a>
+          <a className="staffCard" href="/login?next=/drivers"><span>03</span><h3>Driver route board</h3><p>Pickup, ETA, handoff, route checkpoint, and delivery updates.</p></a>
+          <a className="staffCard" href="/login?next=/support"><span>04</span><h3>Support desk</h3><p>Customer, vendor, and payment issues handled away from the landing page.</p></a>
         </div>
       </section>
 
@@ -533,8 +538,8 @@ export default function Home() {
 
       <footer id="contact" className="footer">
         <div><div className="brand footerBrand"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} /><span>Bubble Wash</span></div><p>Laundry pickup and vendor fulfilment for Accra teams that need clean work without the back-and-forth.</p></div>
-        <div><h3>Use Bubble Wash</h3><a href="#booking">Book pickup</a><a href="#quote">Estimate pricing</a><a href="/login?next=/admin">Admin login</a><a href="/login?next=/support">Support login</a></div>
-        <div><h3>For operators</h3><a href="/login?next=/vendors">Vendor login</a><a href="#plans">Subscriptions</a><a href="#services">Services</a></div>
+        <div><h3>Use Bubble Wash</h3><a href="#booking">Book pickup</a><a href="#quote">Estimate pricing</a><a href="/login?next=/admin">Admin login</a><a href="/login?next=/drivers">Driver login</a><a href="/login?next=/support">Support login</a></div>
+        <div><h3>For operators</h3><a href="/login?next=/vendors">Vendor login</a><a href="/login?next=/drivers">Driver login</a><a href="#plans">Subscriptions</a><a href="#services">Services</a></div>
         <div><h3>Get in touch</h3><p>Accra, Ghana</p><p>hello@bubblewashgh.com</p><p>WhatsApp: +233 55 000 0000</p></div>
       </footer>
     </main>

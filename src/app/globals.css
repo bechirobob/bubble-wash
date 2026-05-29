@@ -211,6 +211,14 @@ textarea { min-height: 118px; resize: vertical; }
 .opsBoard article, .supportRules article { border: 1px solid var(--line); border-radius: 26px; padding: 22px; background: linear-gradient(145deg, #f7fcff, white); box-shadow: var(--shadow); }
 .opsBoard p, .supportRules span { color: var(--soft-ink); line-height: 1.55; }
 .opsForm { background: linear-gradient(145deg, white, var(--mint)); border-color: #ccefdc; }
+
+.driverSection { background: linear-gradient(180deg, #fff, #f7fcff); }
+.driverGrid { display: grid; grid-template-columns: .85fr 1.15fr; gap: 18px; align-items: start; }
+.driverChecklist { display: grid; gap: 14px; }
+.driverChecklist article { border: 1px solid var(--line); border-radius: 24px; padding: 20px; background: white; box-shadow: var(--shadow); }
+.driverChecklist strong { display: block; margin-bottom: 6px; }
+.driverChecklist span { display: block; color: var(--soft-ink); line-height: 1.5; }
+.driverForm { background: linear-gradient(145deg, white, #eaf6ff); }
 .supportSection { background: linear-gradient(180deg, white, #f7fcff); }
 .supportRules { display: grid; gap: 14px; }
 .supportRules strong { display: block; margin-bottom: 6px; }
@@ -258,7 +266,7 @@ textarea { min-height: 118px; resize: vertical; }
 
 @media (max-width: 1120px) {
   .plansGrid, .scheduleGrid { grid-template-columns: repeat(2, 1fr); }
-  .hero, .quoteGrid, .opsGrid, .supportGrid, .vendorGrid, .faqTestimonials { grid-template-columns: 1fr; }
+  .hero, .quoteGrid, .opsGrid, .supportGrid, .vendorGrid, .driverGrid, .faqTestimonials { grid-template-columns: 1fr; }
   .hero { padding-top: 150px; }
   .heroVisual { min-height: 520px; }
   .testimonialTrack:hover { animation-play-state: paused; }
@@ -299,7 +307,7 @@ textarea { min-height: 118px; resize: vertical; }
 }
 
 .staffTeaser { background: linear-gradient(180deg, #fff, #f5fbff); }
-.staffCards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.staffCards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
 .staffCard { display: block; background: white; border: 1px solid var(--line); border-radius: 30px; padding: 26px; box-shadow: var(--shadow); transition: transform .16s ease, border-color .16s ease; }
 .staffCard:hover { transform: translateY(-3px); border-color: var(--blue); }
 .staffCard span { display: inline-grid; place-items: center; width: 42px; height: 42px; border-radius: 16px; color: white; background: linear-gradient(135deg, var(--blue), var(--blue-dark)); font-weight: 950; margin-bottom: 18px; }
@@ -487,7 +495,7 @@ h2 { color: var(--navy); }
 .trackingResult .miniRows span { color: rgba(255,255,255,.82); }
 .paymentPanel { background: linear-gradient(145deg, #fff, #f7fcff); }
 .footer { background: #061b31; }
-@media (max-width: 1120px) { .commandGrid, .assuranceGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .nav { max-width: calc(100vw - 24px); } }
+@media (max-width: 1120px) { .commandGrid, .assuranceGrid, .staffCards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .nav { max-width: calc(100vw - 24px); } }
 @media (max-width: 780px) { .nav { top: 8px; transform: none; left: auto; margin: 8px 12px -60px; } .hero { padding-top: 116px; } .commandGrid, .assuranceGrid { grid-template-columns: 1fr; } .heroSlider::before { inset: 92px 22px 116px 42px; } .heroSlider::after { left: 60px; right: 42px; top: 132px; font-size: 22px; } .proofStrip { padding: 0 18px 28px; } }
 
 /* Final visual fixes for release review */

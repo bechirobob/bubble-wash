@@ -3,7 +3,7 @@ import "server-only";
 import { createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 
-export type StaffRole = "admin" | "vendor" | "support";
+export type StaffRole = "admin" | "vendor" | "driver" | "support";
 
 export type StaffUser = {
   name: string;
@@ -51,10 +51,11 @@ function staffCredential(role: StaffRole, demoEmail: string, displayName: string
 export const staffUsers: StaffUser[] = [
   staffCredential("admin", "admin@bubblewash.local", "Admin Operator"),
   staffCredential("vendor", "vendor@bubblewash.local", "Vendor Partner"),
+  staffCredential("driver", "driver@bubblewash.local", "Route Driver"),
   staffCredential("support", "support@bubblewash.local", "Support Agent"),
 ].filter((user): user is StaffUser => Boolean(user));
 
-const allowedNextPaths = new Set(["/admin", "/vendors", "/support"]);
+const allowedNextPaths = new Set(["/admin", "/vendors", "/drivers", "/support"]);
 
 function sessionSecret() {
   const secret = process.env.BUBBLEWASH_SESSION_SECRET;

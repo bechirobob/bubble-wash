@@ -34,6 +34,9 @@ type OrderSummary = {
   customer: string;
   area: string;
   vendor: string;
+  driver: string;
+  routeWindow: string;
+  locationNote: string;
   status: string;
   payment: string;
   priority: string;
@@ -47,7 +50,7 @@ const workflowStages = [
   ["01", "Admin receives", "Validate booking, route, payment preference, and customer notes."],
   ["02", "Admin assigns vendor", "Use one shared Order ID and assign the vendor before handoff."],
   ["03", "Vendor accepts", "Vendor updates capacity, QR/bag intake, item condition, and completion ETA."],
-  ["04", "Driver + support sync", "Route updates, delivery status, and support issues attach to the same Order ID."],
+  ["04", "Driver + support sync", "Driver ETA, pickup, vendor handoff, delivery, and support issues attach to the same Order ID."],
 ];
 
 function RecentActivity({ filter }: { filter?: string }) {
@@ -138,7 +141,7 @@ function SharedOrderBoard({ role }: { role: StaffRole }) {
         {orders.map((order) => <article className="orderBoardCard" key={order.orderId}>
           <div className="orderBoardTop"><strong>{order.orderId}</strong><span>{order.status}</span></div>
           <h3>{order.customer}</h3>
-          <div className="orderMeta"><span>Vendor: {order.vendor}</span><span>Area: {order.area}</span><span>Payment: {order.payment}</span><span>Priority: {order.priority}</span><span>Events: {order.eventCount}</span><span>Updated: {new Date(order.updatedAt).toLocaleString()}</span></div>
+          <div className="orderMeta"><span>Vendor: {order.vendor}</span><span>Driver: {order.driver}</span><span>ETA/window: {order.routeWindow}</span><span>Driver note: {order.locationNote}</span><span>Area: {order.area}</span><span>Payment: {order.payment}</span><span>Priority: {order.priority}</span><span>Events: {order.eventCount}</span><span>Updated: {new Date(order.updatedAt).toLocaleString()}</span></div>
           <p>{order.nextStep}</p>
           <details><summary>Timeline</summary><div className="timelineList">{order.timeline.slice(0, 5).map((event) => <div key={`${order.orderId}-${event.id}-${event.createdAt}`}><b>{event.status}</b><span>{event.type} · {event.actor} · {new Date(event.createdAt).toLocaleString()}</span><p>{event.note}</p></div>)}</div></details>
         </article>)}
@@ -163,6 +166,7 @@ function PortalShell({ title, eyebrow, description, role, userName, children }: 
         <nav className="portalLinks">
           <Link href="/admin">Admin</Link>
           <Link href="/vendors">Vendors</Link>
+          <Link href="/drivers">Drivers</Link>
           <Link href="/support">Support</Link>
           <a className="button secondary" href="/api/logout">Logout</a>
         </nav>
@@ -213,6 +217,7 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
             <div className="two"><input name="name" placeholder="Operator name" defaultValue={userName} required /><input name="email" type="email" placeholder="Operator email" defaultValue="admin@bubblewash.local" required /></div>
             <div className="two"><input name="phone" placeholder="Operator phone" required /><input name="company" placeholder="Bubble Wash operations" defaultValue="Bubble Wash Operations" required /></div>
             <div className="two"><input name="orderId" placeholder="Shared Order ID e.g. BW-1779979663969" required /><input name="vendorName" placeholder="Assigned vendor e.g. CleanPro Laundry" /></div>
+            <div className="two"><input name="driverName" placeholder="Assigned driver e.g. Kofi Route 1" /><input name="routeWindow" placeholder="ETA/window e.g. 2:30–3:00 PM" /></div>
             <div className="two"><select name="actionType"><option>New order intake</option><option>Assign vendor</option><option>Update order status</option><option>Payment follow-up</option><option>Quality issue</option><option>Customer escalation</option></select><select name="orderStatus"><option>Received</option><option>Pickup scheduled</option><option>Vendor assigned</option><option>In washing</option><option>Ready for delivery</option><option>Delivered</option><option>Needs attention</option></select></div>
             <div className="two"><select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select><select name="paymentPreference"><option>Payment not confirmed</option><option>MTN MoMo</option><option>Telecel Cash</option><option>Card</option><option>Bank transfer</option><option>Invoice</option></select></div>
             <textarea name="message" placeholder="Action notes: customer, vendor, route, promised time, payment status, or quality issue..." required />
@@ -301,6 +306,53 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
       </section>
       <SharedOrderBoard role={role} />
       <RecentActivity filter="vendor" />
+    </PortalShell>
+  );
+}
+
+export function DriverWorkspace({ userName, role }: { userName: string; role: StaffRole }) {
+  const [formStatus, setFormStatus] = useState<Record<string, string>>({});
+
+  async function submitLead(event: FormEvent<HTMLFormElement>, type: string) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = Object.fromEntries(new FormData(form).entries());
+    payload.submissionType = type;
+    try {
+      const data = await postJSON<{ ok: boolean; message: string; id: string }>("/api/submit", payload);
+      setFormStatus((current) => ({ ...current, [type]: `${data.message} Reference: ${data.id}` }));
+      form.reset();
+    } catch (error) {
+      setFormStatus((current) => ({ ...current, [type]: error instanceof Error ? error.message : "Unable to save route update." }));
+    }
+  }
+
+  return (
+    <PortalShell role={role} userName={userName} eyebrow="Driver operations" title="Driver route board" description="A focused route workflow for pickup, vendor handoff, customer ETA, and delivery updates without exposing live GPS before consent is ready.">
+      <section className="section driverSection portalSection">
+        <div className="driverGrid">
+          <div className="driverChecklist">
+            <article><strong>1. Confirm assignment</strong><span>Use the shared Order ID from dispatch. Do not create a second order.</span></article>
+            <article><strong>2. Share ETA</strong><span>Update pickup/delivery window before moving, especially when traffic changes.</span></article>
+            <article><strong>3. Log handoff</strong><span>Record bag count, vendor/customer handoff, and any photo or QR reference.</span></article>
+            <article><strong>4. Escalate delays</strong><span>Mark delayed early so support can notify the customer before they chase.</span></article>
+          </div>
+          <form className="panel driverForm" onSubmit={(event) => submitLead(event, "driver-route-log")}>
+            <h3>Update route status</h3>
+            <p className="formHint">Pilot-safe driver workflow: manual ETA/checkpoint updates now; browser GPS only after explicit driver opt-in and production privacy rules.</p>
+            <div className="two"><input name="name" placeholder="Driver name" defaultValue={userName} required /><input name="email" type="email" placeholder="Driver email" defaultValue="driver@bubblewash.local" required /></div>
+            <div className="two"><input name="phone" placeholder="Driver phone" required /><input name="company" placeholder="Bubble Wash route team" defaultValue="Bubble Wash Route Team" required /></div>
+            <div className="two"><input name="orderId" placeholder="Shared Order ID e.g. BW-1234" required /><select name="orderStatus"><option>Driver en route</option><option>Pickup scheduled</option><option>Picked up</option><option>Dropped at vendor</option><option>Collected from vendor</option><option>Out for delivery</option><option>Delivered</option><option>Delayed</option></select></div>
+            <div className="two"><input name="area" placeholder="Route area / customer area" /><input name="driverEta" placeholder="ETA e.g. 25 min / 3:20 PM" /></div>
+            <div className="two"><input name="locationNote" placeholder="Checkpoint e.g. Spintex Road near Palace" /><input name="bagCount" placeholder="Bag count / kg" /></div>
+            <textarea name="message" placeholder="Pickup note, vendor/customer handoff, delay reason, QR/photo reference, or delivery confirmation..." required />
+            <button className="button primary full" type="submit">Save Driver Route Update</button>
+            {formStatus["driver-route-log"] && <p className="status success">{formStatus["driver-route-log"]}</p>}
+          </form>
+        </div>
+      </section>
+      <SharedOrderBoard role={role} />
+      <RecentActivity filter="driver-route-log" />
     </PortalShell>
   );
 }
