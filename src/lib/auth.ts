@@ -65,6 +65,7 @@ const allowedNextPaths = new Set(["/admin", "/vendors", "/drivers", "/support"])
 function sessionSecret() {
   const secret = process.env.BUBBLEWASH_SESSION_SECRET;
   if (secret) return secret;
+  if (process.env.NODE_ENV === "production" && demoCredentialFallbackEnabled()) return "bubblewash-pilot-review-session-secret-change-before-live-ops";
   if (process.env.NODE_ENV === "production") throw new Error("BUBBLEWASH_SESSION_SECRET is required in production.");
   return "bubblewash-local-dev-session-secret-change-before-production";
 }
