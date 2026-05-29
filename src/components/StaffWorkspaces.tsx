@@ -55,7 +55,65 @@ type OrderSummary = {
 
 type SubmitHandler = (event: FormEvent<HTMLFormElement>, type: string) => Promise<void>;
 
+type VendorAvailabilityRow = { vendorId: string; vendorName: string; serviceZones: string[]; serviceTypes: string[]; capacityRemaining: number; availabilityStatus: string; updatedAt: string; notes?: string };
+type DriverAvailabilityRow = { driverId: string; driverName: string; serviceZones: string[]; vehicle?: string; capacityRemaining: number; availabilityStatus: string; updatedAt: string; notes?: string };
+type VendorDeclineRow = { id: string; orderId: string; vendorName: string; reason: string; declinedBy: string; createdAt: string };
+
 type AutomationAction = ReturnType<typeof automationActionsForOrder>[number];
+
+function AvailabilityBoard({ role }: { role: StaffRole }) {
+  const [vendors, setVendors] = useState<VendorAvailabilityRow[]>([]);
+  const [drivers, setDrivers] = useState<DriverAvailabilityRow[]>([]);
+  const [declines, setDeclines] = useState<VendorDeclineRow[]>([]);
+  const [status, setStatus] = useState("Loading availability table…");
+
+  async function loadAvailability(showLoading = true) {
+    if (showLoading) setStatus("Loading availability table…");
+    const response = await fetch("/api/availability");
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      setStatus(data.error ?? "Unable to load availability table.");
+      return;
+    }
+    setVendors(data.vendors ?? []);
+    setDrivers(data.drivers ?? []);
+    setDeclines(data.declines ?? []);
+    setStatus("Availability table loaded.");
+  }
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/availability")
+      .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+      .then(({ ok, data }) => {
+        if (!active) return;
+        if (!ok || !data.ok) {
+          setStatus(data.error ?? "Unable to load availability table.");
+          return;
+        }
+        setVendors(data.vendors ?? []);
+        setDrivers(data.drivers ?? []);
+        setDeclines(data.declines ?? []);
+        setStatus("Availability table loaded.");
+      })
+      .catch(() => {
+        if (active) setStatus("Unable to load availability table.");
+      });
+    return () => { active = false; };
+  }, []);
+
+  return (
+    <section className="section portalSection availabilitySection">
+      <div className="activityHeader"><div><p className="eyebrow">Availability table</p><h2>Real roster capacity for assignment automation.</h2><p>Admin auto-assignment now reads these SQLite-backed vendor and driver rows instead of guessing from activity logs.</p></div><button className="button secondary" type="button" onClick={() => loadAvailability()}>Refresh Availability</button></div>
+      <div className="orderBoardGrid">
+        {vendors.slice(0, 6).map((vendor) => <article className="orderBoardCard" key={vendor.vendorId}><div className="orderBoardTop"><strong>{vendor.vendorName}</strong><span>{vendor.availabilityStatus}</span></div><div className="orderMeta"><span>Capacity: {vendor.capacityRemaining}</span><span>Zones: {vendor.serviceZones.join(", ") || "Any"}</span><span>Services: {vendor.serviceTypes.join(", ") || "Any"}</span></div><p>{vendor.notes || "No vendor note."}</p></article>)}
+        {(role === "admin" || role === "driver") && drivers.slice(0, 6).map((driver) => <article className="orderBoardCard" key={driver.driverId}><div className="orderBoardTop"><strong>{driver.driverName}</strong><span>{driver.availabilityStatus}</span></div><div className="orderMeta"><span>Route slots: {driver.capacityRemaining}</span><span>Zones: {driver.serviceZones.join(", ") || "Any"}</span><span>Vehicle: {driver.vehicle || "Not set"}</span></div><p>{driver.notes || "No driver note."}</p></article>)}
+      </div>
+      {role === "admin" && declines.length > 0 && <div className="supportTicketList">{declines.slice(0, 4).map((decline) => <article className="orderBoardCard supportTicketCard" key={decline.id}><div className="orderBoardTop"><strong>{decline.orderId}</strong><span>Declined</span></div><p>{decline.vendorName}: {decline.reason}</p><div className="orderMeta"><span>By: {decline.declinedBy}</span><span>{new Date(decline.createdAt).toLocaleString()}</span></div></article>)}</div>}
+      <p className="status">{status}</p>
+    </section>
+  );
+}
 
 const workflowStages = [
   ["01", "Received → Pickup Scheduled", "Admin validates the original booking once, then schedules pickup from inherited customer data."],
@@ -353,8 +411,9 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
             <p className="formHint">Drivers do not self-onboard. Admin adds the route roster, then automated dispatch can attach active drivers to orders.</p>
             <div className="two"><input name="name" placeholder="Driver full name" required /><input name="email" type="email" placeholder="Driver email" required /></div>
             <div className="two"><input name="phone" placeholder="Driver phone / WhatsApp" required /><input name="company" placeholder="Route team / contractor" defaultValue="Bubble Wash Route Team" required /></div>
-            <div className="two"><input name="area" placeholder="Primary route area e.g. Osu, Labone" /><input name="vehicle" placeholder="Vehicle / bike ID" /></div>
-            <div className="two"><select name="driverStatus"><option>Active</option><option>Training</option><option>Inactive</option><option>Suspended</option></select><select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited route capacity</option><option>Paused today</option></select></div>
+            <div className="two"><input name="area" placeholder="Primary route zones e.g. Osu, Labone" /><input name="vehicle" placeholder="Vehicle / bike ID" /></div>
+            <div className="two"><input name="routeCapacity" inputMode="numeric" placeholder="Route slots today e.g. 4" defaultValue="4" /><select name="driverStatus"><option>Active</option><option>Training</option><option>Inactive</option><option>Suspended</option></select></div>
+            <div className="two"><select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited route capacity</option><option>Paused today</option></select><input name="serviceZones" placeholder="Backup zones e.g. Airport, Cantonments" /></div>
             <textarea name="message" placeholder="License check, ID check, route restrictions, emergency contact, or onboarding notes..." required />
             <button className="button secondary full" type="submit">Save Driver Onboarding</button>
             {formStatus["driver-onboarding"] && <p className="status success">{formStatus["driver-onboarding"]}</p>}
@@ -375,6 +434,7 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
         <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
       </section>
       <SharedOrderBoard role={role} userName={userName} />
+      <AvailabilityBoard role={role} />
       <RecentActivity />
     </PortalShell>
   );
@@ -405,7 +465,7 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
             <h3>Register / update vendor capacity</h3>
             <div className="two"><input name="name" placeholder="Contact name" defaultValue={userName} required /><input name="email" type="email" placeholder="Email" defaultValue="vendor@bubblewash.local" required /></div>
             <div className="two"><input name="phone" placeholder="Phone / WhatsApp" required /><input name="company" placeholder="Laundromat name" required /></div>
-            <div className="two"><input name="area" placeholder="Operating area" /><input name="capacity" placeholder="Today capacity e.g. 200kg" /></div>
+            <div className="two"><input name="area" placeholder="Service zones e.g. Osu, Labone" /><input name="capacity" inputMode="numeric" placeholder="Order slots today e.g. 8" /></div>
             <div className="two"><select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited capacity</option><option>Paused today</option></select><select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></div>
             <textarea name="message" placeholder="Machines available, turnaround time, pickup limits, delivery support, service notes..." />
             <button className="button primary full" type="submit">Save Vendor Capacity</button>
@@ -436,6 +496,7 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
         <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
       </section>
       <SharedOrderBoard role={role} userName={userName} />
+      <AvailabilityBoard role={role} />
       <RecentActivity filter="vendor" />
     </PortalShell>
   );
@@ -486,6 +547,7 @@ export function DriverWorkspace({ userName, role }: { userName: string; role: St
         <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
       </section>
       <SharedOrderBoard role={role} userName={userName} />
+      <AvailabilityBoard role={role} />
       <RecentActivity filter="driver-route-log" />
     </PortalShell>
   );

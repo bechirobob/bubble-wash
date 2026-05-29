@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { appendSubmissionRecord } from "@/lib/data-store";
-import { selectAssignmentPair } from "@/lib/assignment";
+import { assignOrderFromAvailability } from "@/lib/assignment";
+import { recordVendorDecline } from "@/lib/availability-store";
 import { getCurrentStaffUser } from "@/lib/auth";
 import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
 import { automationActionsForOrder } from "@/lib/order-workflow";
@@ -36,11 +37,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "That automation is not allowed for the current order stage." }, { status: 400 });
     }
 
-    const assignment = actionKey === "admin-assign-vendor" ? selectAssignmentPair(allRecords, order) : null;
+    const assignment = actionKey === "admin-assign-vendor" ? assignOrderFromAvailability({
+      orderId: order.orderId,
+      area: order.area,
+      serviceType: order.lastEventType,
+      vendor: order.vendor,
+      driver: order.driver,
+    }) : null;
+    if (actionKey === "vendor-decline-job") {
+      recordVendorDecline({
+        orderId: order.orderId,
+        vendorName: order.vendor,
+        reason: text(body.reason) || "Vendor declined assignment from shared order board.",
+        declinedBy: user.name,
+      });
+    }
     const payload = assignment ? {
       ...selected.payload,
       vendorName: assignment.vendorName,
       driverName: assignment.driverName,
+      vendorId: assignment.vendorId,
+      driverId: assignment.driverId,
       message: `${selected.payload.message} ${assignment.assignmentNote}`,
     } : selected.payload;
 

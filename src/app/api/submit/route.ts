@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { canAccess, getCurrentStaffUser, type StaffRole } from "@/lib/auth";
+import { upsertDriverAvailability, upsertVendorAvailability } from "@/lib/availability-store";
 import { appendSubmissionRecord } from "@/lib/data-store";
 import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
@@ -53,6 +54,52 @@ const crossRoleStaffSubmissionTypes = new Set(["support-ticket"]);
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function numberFrom(value: unknown, fallback = 0) {
+  const matched = text(value).match(/\d+/);
+  return matched ? Number(matched[0]) : fallback;
+}
+
+function listFrom(value: unknown) {
+  return text(value).split(/[,+/]|\band\b/i).map((item) => item.trim()).filter(Boolean);
+}
+
+function availabilityStatusFrom(value: unknown, activeWord = "available") {
+  const normalized = text(value).toLowerCase();
+  if (normalized.includes("pause")) return "paused";
+  if (normalized.includes("inactive")) return "inactive";
+  if (normalized.includes("suspend")) return "suspended";
+  if (normalized.includes("limited")) return "limited";
+  if (normalized.includes("training")) return "training";
+  if (normalized.includes("active")) return "active";
+  return activeWord;
+}
+
+function syncAvailabilityTables(body: Record<string, unknown>, submissionType: string, actorName: string) {
+  if (submissionType === "vendor-application") {
+    upsertVendorAvailability({
+      vendorName: text(body.company) || text(body.vendorName) || text(body.name) || "Vendor partner",
+      serviceZones: listFrom(body.area || body.zone || body.routeArea || body.serviceZones),
+      serviceTypes: listFrom(body.services || body.service),
+      capacityRemaining: numberFrom(body.capacity, 1),
+      availabilityStatus: availabilityStatusFrom(body.availability),
+      updatedBy: actorName,
+      notes: text(body.message),
+    });
+  }
+
+  if (submissionType === "driver-onboarding") {
+    upsertDriverAvailability({
+      driverName: text(body.name) || text(body.driverName) || "Route driver",
+      serviceZones: listFrom(body.area || body.routeArea || body.zone || body.serviceZones),
+      vehicle: text(body.vehicle),
+      capacityRemaining: numberFrom(body.capacity || body.routeCapacity, 4),
+      availabilityStatus: availabilityStatusFrom(body.driverStatus || body.availability, "active"),
+      updatedBy: actorName,
+      notes: text(body.message),
+    });
+  }
 }
 
 function cleanPayload(body: Record<string, unknown>, submissionType: string) {
@@ -108,6 +155,7 @@ export async function POST(request: NextRequest) {
     };
 
     appendSubmissionRecord(record);
+    syncAvailabilityTables(body, submissionType, text(body.name) || text(body.company) || "Bubble Wash team");
     const notifications = await dispatchSubmissionNotifications(record);
     return NextResponse.json({ ok: true, message: `Thanks — your request was received. ${notificationSummary(notifications)}`, id: record.id, notifications });
   } catch {

@@ -1,3 +1,5 @@
+import { listDriverAvailability, listVendorAvailability, reserveDriverCapacity, reserveVendorCapacity, type DriverAvailability, type VendorAvailability } from "./availability-store.ts";
+
 export type AssignmentRecord = {
   id: string;
   createdAt: string;
@@ -14,6 +16,15 @@ export type AssignmentPair = {
   vendorName: string;
   driverName: string;
   assignmentNote: string;
+  vendorId?: string;
+  driverId?: string;
+  vendorCapacityRemaining?: number;
+  driverCapacityRemaining?: number;
+};
+
+export type AvailabilityAssignmentOrder = AssignmentOrder & {
+  orderId: string;
+  serviceType?: string;
 };
 
 function text(value: unknown) {
@@ -58,6 +69,37 @@ function areaMatches(record: AssignmentRecord, area: string) {
   return wanted.split(/[\s,/-]+/).filter(Boolean).some((token) => token.length > 2 && served.includes(token));
 }
 
+function listMatches(values: string[], wanted: string) {
+  const wantedText = wanted.toLowerCase();
+  if (!wantedText) return true;
+  if (values.length === 0) return true;
+  return wantedText.split(/[\s,/-]+/).filter(Boolean).some((token) => token.length > 2 && values.some((value) => value.toLowerCase().includes(token)));
+}
+
+function statusAllowsVendor(vendor: VendorAvailability) {
+  return vendor.capacityRemaining > 0 && !/(paused|closed|unavailable|inactive|suspended)/.test(vendor.availabilityStatus.toLowerCase());
+}
+
+function statusAllowsDriver(driver: DriverAvailability) {
+  return driver.capacityRemaining > 0 && !/(inactive|suspended|offboarded|paused)/.test(driver.availabilityStatus.toLowerCase());
+}
+
+function serviceMatches(vendor: VendorAvailability, serviceType?: string) {
+  if (!serviceType || vendor.serviceTypes.length === 0) return true;
+  const wanted = serviceType.toLowerCase();
+  return vendor.serviceTypes.some((service) => service.toLowerCase().includes(wanted) || wanted.includes(service.toLowerCase()));
+}
+
+function selectAvailabilityVendor(area: string, serviceType?: string) {
+  const available = listVendorAvailability().filter((vendor) => statusAllowsVendor(vendor) && serviceMatches(vendor, serviceType));
+  return available.find((vendor) => listMatches(vendor.serviceZones, area)) ?? available[0];
+}
+
+function selectAvailabilityDriver(area: string) {
+  const active = listDriverAvailability().filter(statusAllowsDriver);
+  return active.find((driver) => listMatches(driver.serviceZones, area)) ?? active[0];
+}
+
 function selectVendor(records: AssignmentRecord[], area: string) {
   const available = latestFirst(records).filter(isVendorAvailable);
   return available.find((record) => areaMatches(record, area)) ?? available[0];
@@ -80,4 +122,28 @@ export function selectAssignmentPair(records: AssignmentRecord[], order: Assignm
   ];
 
   return { vendorName: vendor, driverName: driver, assignmentNote: notes.join(" ") };
+}
+
+export function assignOrderFromAvailability(order: AvailabilityAssignmentOrder): AssignmentPair {
+  const vendorRow = isUnassigned(order.vendor) ? selectAvailabilityVendor(order.area, order.serviceType) : undefined;
+  const driverRow = isUnassigned(order.driver) ? selectAvailabilityDriver(order.area) : undefined;
+  const reservedVendor = vendorRow ? reserveVendorCapacity(vendorRow.vendorId, order.orderId) : undefined;
+  const reservedDriver = driverRow ? reserveDriverCapacity(driverRow.driverId, order.orderId) : undefined;
+  const vendorNameValue = isUnassigned(order.vendor) ? (reservedVendor?.vendorName ?? "Needs admin review") : order.vendor;
+  const driverNameValue = isUnassigned(order.driver) ? (reservedDriver?.driverName ?? "Needs admin onboarding") : order.driver;
+
+  const notes = [
+    reservedVendor ? `Vendor table: ${reservedVendor.vendorName} · ${reservedVendor.availabilityStatus} · ${reservedVendor.capacityRemaining} capacity left.` : isUnassigned(order.vendor) ? "No available vendor table match." : `Vendor preserved: ${order.vendor}.`,
+    reservedDriver ? `Driver table: ${reservedDriver.driverName} · ${reservedDriver.availabilityStatus} · ${reservedDriver.capacityRemaining} route slots left.` : isUnassigned(order.driver) ? "No active admin-onboarded driver table match." : `Driver preserved: ${order.driver}.`,
+  ];
+
+  return {
+    vendorName: vendorNameValue,
+    driverName: driverNameValue,
+    assignmentNote: notes.join(" "),
+    vendorId: reservedVendor?.vendorId,
+    driverId: reservedDriver?.driverId,
+    vendorCapacityRemaining: reservedVendor?.capacityRemaining,
+    driverCapacityRemaining: reservedDriver?.capacityRemaining,
+  };
 }
