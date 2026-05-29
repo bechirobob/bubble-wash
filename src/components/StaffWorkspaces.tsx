@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 import type { StaffRole } from "@/lib/auth";
+import { automationActionsForOrder } from "@/lib/order-workflow";
 
 const adminQueues = [
   ["Intake", "New pickup requests, payment checks, and customer confirmation."],
@@ -41,6 +42,7 @@ type OrderSummary = {
   routeWindow: string;
   locationNote: string;
   status: string;
+  workflowStage: { key: string; label: string; targetMinutes: number; customerNext: string; staffNext: string };
   payment: string;
   priority: string;
   nextStep: string;
@@ -53,18 +55,13 @@ type OrderSummary = {
 
 type SubmitHandler = (event: FormEvent<HTMLFormElement>, type: string) => Promise<void>;
 
-type AutomationAction = {
-  label: string;
-  description: string;
-  submissionType: string;
-  payload: Record<string, string>;
-};
+type AutomationAction = ReturnType<typeof automationActionsForOrder>[number];
 
 const workflowStages = [
-  ["01", "Admin receives", "Validate booking, route, payment preference, and customer notes."],
-  ["02", "Admin assigns vendor", "Use one shared Order ID and assign the vendor before handoff."],
-  ["03", "Vendor accepts", "Vendor updates capacity, QR/bag intake, item condition, and completion ETA."],
-  ["04", "Driver + support sync", "Driver ETA, pickup, vendor handoff, delivery, and support issues attach to the same Order ID."],
+  ["01", "Received → Pickup Scheduled", "Admin validates the original booking once, then schedules pickup from inherited customer data."],
+  ["02", "Vendor Assigned → Accepted", "Dispatch creates the handoff; the vendor accepts without retyping contact, route, or payment context."],
+  ["03", "Driver Route → At Vendor", "Driver route, pickup, and vendor drop-off actions append checkpoints to the same Order ID."],
+  ["04", "Washing → Ready → Delivered", "Vendor and driver move the order through production and return delivery; support handles only exceptions."],
 ];
 
 function RecentActivity({ filter }: { filter?: string }) {
@@ -110,154 +107,17 @@ function RecentActivity({ filter }: { filter?: string }) {
   );
 }
 
-function roleEmail(role: StaffRole) {
-  return `${role}@bubblewash.local`;
-}
-
-function orderPhone(order: OrderSummary) {
-  return order.phone || "operations-line";
-}
-
-function automationActionsFor(order: OrderSummary, role: StaffRole, userName: string): AutomationAction[] {
-  const staffBase = {
-    name: userName,
-    email: roleEmail(role),
-    phone: orderPhone(order),
-    orderId: order.orderId,
-  };
-  const customerLine = `${order.customer}${order.email ? ` · ${order.email}` : ""}${order.phone ? ` · ${order.phone}` : ""}`;
-
-  if (role === "admin") {
-    const actions: AutomationAction[] = [
-      {
-        label: order.vendor === "Unassigned" ? "Auto-assign next vendor" : "Confirm pickup window",
-        description: "Uses the booking details already attached to this Order ID.",
-        submissionType: "admin-operation",
-        payload: {
-          ...staffBase,
-          company: "Bubble Wash Operations",
-          actionType: order.vendor === "Unassigned" ? "Auto-assign vendor" : "Confirm pickup",
-          orderStatus: order.vendor === "Unassigned" ? "Vendor assigned" : "Pickup scheduled",
-          vendorName: order.vendor === "Unassigned" ? "Next available vendor" : order.vendor,
-          driverName: order.driver === "Unassigned" ? "Next available driver" : order.driver,
-          routeWindow: order.routeWindow,
-          area: order.area,
-          paymentPreference: order.payment,
-          priority: order.priority,
-          message: `Automated from existing order data. Customer: ${customerLine}. Area: ${order.area}. Window: ${order.routeWindow}.`,
-        },
-      },
-    ];
-    if (order.stageTimer.tone === "breached" || order.priority === "Urgent") {
-      actions.push({
-        label: "Create support escalation",
-        description: "Turns overdue or urgent orders into a support ticket without copying the order fields.",
-        submissionType: "support-ticket",
-        payload: {
-          ...staffBase,
-          company: order.customer,
-          issueType: "Workflow follow-up",
-          ticketStatus: "Escalated",
-          priority: order.priority === "Urgent" ? "Urgent" : "High",
-          message: `Automated escalation for ${order.orderId}. Status: ${order.status}. Timer: ${order.stageTimer.label}. Next step: ${order.nextStep}`,
-        },
-      });
-    }
-    return actions;
-  }
-
-  if (role === "vendor") {
-    return [
-      {
-        label: "Accept job from order",
-        description: "Creates the vendor event with the Order ID, customer, area, and notes already carried over.",
-        submissionType: "vendor-job-update",
-        payload: {
-          ...staffBase,
-          company: order.vendor === "Unassigned" ? "Vendor Partner" : order.vendor,
-          vendorName: order.vendor === "Unassigned" ? "Vendor Partner" : order.vendor,
-          jobStatus: "Accepted",
-          area: order.area,
-          message: `Accepted via automation. Customer: ${customerLine}. Area: ${order.area}. Window: ${order.routeWindow}.`,
-        },
-      },
-      {
-        label: "Log bag intake",
-        description: "Starts intake on the same timeline; only item exceptions need manual notes afterward.",
-        submissionType: "qr-bag-intake",
-        payload: {
-          ...staffBase,
-          company: order.vendor === "Unassigned" ? "Vendor Partner" : order.vendor,
-          vendorName: order.vendor === "Unassigned" ? "Vendor Partner" : order.vendor,
-          qrTag: `${order.orderId}-BAG`,
-          itemCondition: "All items accepted",
-          message: `Automated intake shell for ${order.orderId}. Staff should only add exceptions or count mismatch if needed.`,
-        },
-      },
-    ];
-  }
-
-  if (role === "driver") {
-    return [
-      {
-        label: "Start route update",
-        description: "Reuses the order area and route window so drivers only add live checkpoint details when needed.",
-        submissionType: "driver-route-log",
-        payload: {
-          ...staffBase,
-          company: "Bubble Wash Route Team",
-          orderStatus: "Driver en route",
-          area: order.area,
-          driverEta: order.routeWindow,
-          locationNote: order.locationNote === "No driver checkpoint yet" ? "Route started" : order.locationNote,
-          message: `Driver route started from existing order data. Customer: ${customerLine}. Area: ${order.area}.`,
-        },
-      },
-      {
-        label: "Mark picked up",
-        description: "Adds the pickup checkpoint to the same Order ID with no second record needed.",
-        submissionType: "driver-route-log",
-        payload: {
-          ...staffBase,
-          company: "Bubble Wash Route Team",
-          orderStatus: "Picked up",
-          area: order.area,
-          driverEta: order.routeWindow,
-          locationNote: "Pickup confirmed",
-          message: `Pickup confirmed via automation for ${order.orderId}. Add exceptions only if bag count or customer handoff changed.`,
-        },
-      },
-    ];
-  }
-
-  return [
-    {
-      label: "Open order follow-up",
-      description: "Creates a support ticket from the order context instead of retyping customer and route details.",
-      submissionType: "support-ticket",
-      payload: {
-        ...staffBase,
-        company: order.customer,
-        issueType: "General question",
-        ticketStatus: "In Review",
-        priority: order.stageTimer.tone === "breached" ? "High" : order.priority,
-        message: `Support follow-up created from ${order.orderId}. Customer: ${customerLine}. Status: ${order.status}. Next step: ${order.nextStep}`,
-      },
-    },
-  ];
-}
-
 function AutomatedOrderActions({ order, role, userName, onSaved }: { order: OrderSummary; role: StaffRole; userName: string; onSaved: () => Promise<void> }) {
   const [status, setStatus] = useState("");
   const [pendingLabel, setPendingLabel] = useState("");
-  const actions = automationActionsFor(order, role, userName);
+  const actions = automationActionsForOrder(order, role, userName);
 
   async function run(action: AutomationAction) {
     setPendingLabel(action.label);
     setStatus(`Running ${action.label.toLowerCase()}…`);
     try {
-      const data = await postJSON<{ ok: boolean; message: string; id: string }>("/api/submit", { ...action.payload, submissionType: action.submissionType });
-      setStatus(`${data.message} Automation event: ${data.id}`);
+      const data = await postJSON<{ ok: boolean; message: string; id: string; nextStatus: string }>("/api/orders/advance", { orderId: order.orderId, actionKey: action.key });
+      setStatus(`${data.message} Automation event: ${data.id}. Next: ${data.nextStatus}`);
       await onSaved();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to run automation.");
@@ -273,7 +133,7 @@ function AutomatedOrderActions({ order, role, userName, onSaved }: { order: Orde
         <span>No retyping: these actions reuse the original order data and append the next event to this timeline.</span>
       </div>
       <div className="automationActions">
-        {actions.map((action) => <button className="button secondary" disabled={Boolean(pendingLabel)} key={action.label} onClick={() => run(action)} title={action.description} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>)}
+        {actions.length ? actions.map((action) => <button className="button secondary" disabled={Boolean(pendingLabel)} key={action.label} onClick={() => run(action)} title={action.description} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>) : <span className="status">No safe automated action for this role at the current stage.</span>}
       </div>
       {status && <p className="status success" role="status" aria-live="polite">{status}</p>}
     </div>
@@ -323,9 +183,9 @@ function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: strin
       <div className="workflowStages">{workflowStages.map(([step, title, copy]) => <article key={step}><b>{step}</b><h3>{title}</h3><p>{copy}</p></article>)}</div>
       <div className="orderBoardList">
         {orders.map((order) => <article className="orderBoardCard" key={order.orderId}>
-          <div className="orderBoardTop"><strong>{order.orderId}</strong><span>{order.status}</span></div>
+          <div className="orderBoardTop"><strong>{order.orderId}</strong><span>{order.workflowStage.label}</span></div>
           <h3>{order.customer}</h3>
-          <div className="orderMeta"><span>Vendor: {order.vendor}</span><span>Driver: {order.driver}</span><span>ETA/window: {order.routeWindow}</span><span>Timer: {order.stageTimer.label}</span><span>Driver note: {order.locationNote}</span><span>Area: {order.area}</span><span>Payment: {order.payment}</span><span>Priority: {order.priority}</span><span>Events: {order.eventCount}</span><span>Updated: {new Date(order.updatedAt).toLocaleString()}</span></div>
+          <div className="orderMeta"><span>Status detail: {order.status}</span><span>Vendor: {order.vendor}</span><span>Driver: {order.driver}</span><span>ETA/window: {order.routeWindow}</span><span>Timer: {order.stageTimer.label}</span><span>Driver note: {order.locationNote}</span><span>Area: {order.area}</span><span>Payment: {order.payment}</span><span>Priority: {order.priority}</span><span>Events: {order.eventCount}</span><span>Updated: {new Date(order.updatedAt).toLocaleString()}</span></div>
           <div className="mapActions"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noreferrer">Open Route</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noreferrer">View Area</a></div>
           <AutomatedOrderActions order={order} role={role} userName={userName} onSaved={() => loadOrders(false)} />
           <p>{order.nextStep}</p>
