@@ -117,6 +117,7 @@ export default function Home() {
   const [coverageStatus, setCoverageStatus] = useState("Enter your area to check pickup coverage.");
   const [trackingStatus, setTrackingStatus] = useState("Enter a booking/reference ID after submitting a request.");
   const [trackingResult, setTrackingResult] = useState<TrackingResult | null>(null);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   const addonEntries = useMemo(() => Object.entries(addons) as Array<[AddonKey, (typeof addons)[AddonKey]]>, []);
   const zoneEntries = useMemo(() => Object.entries(zones) as Array<[ZoneKey, (typeof zones)[ZoneKey]]>, []);
@@ -124,12 +125,16 @@ export default function Home() {
 
   async function calculate(event?: FormEvent) {
     event?.preventDefault();
+    setPendingAction("quote");
+    setQuoteStatus("Calculating estimate...");
     try {
       const result = await postJSON<{ ok: boolean; quote: Quote }>("/api/quote", { plan: quotePlan, kg, addons: selectedAddons, zone, discount });
       setQuote(result.quote);
       setQuoteStatus("Estimate calculated. Use this as the starting point before checkout or booking.");
     } catch (error) {
       setQuoteStatus(error instanceof Error ? error.message : "Unable to calculate estimate.");
+    } finally {
+      setPendingAction(null);
     }
   }
 
@@ -138,12 +143,16 @@ export default function Home() {
     const form = event.currentTarget;
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.submissionType = type;
+    setPendingAction(type);
+    setFormStatus((current) => ({ ...current, [type]: "Saving request..." }));
     try {
       const data = await postJSON<{ ok: boolean; message: string; id: string }>("/api/submit", payload);
       setFormStatus((current) => ({ ...current, [type]: `${data.message} Reference: ${data.id}` }));
       form.reset();
     } catch (error) {
       setFormStatus((current) => ({ ...current, [type]: error instanceof Error ? error.message : "Unable to save request." }));
+    } finally {
+      setPendingAction(null);
     }
   }
 
@@ -172,6 +181,8 @@ export default function Home() {
       return;
     }
     try {
+      setPendingAction("track");
+      setTrackingStatus("Checking saved order timeline...");
       const response = await fetch(`/api/track?id=${encodeURIComponent(reference)}`);
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error ?? "Tracking lookup failed.");
@@ -180,11 +191,14 @@ export default function Home() {
     } catch (error) {
       setTrackingResult(null);
       setTrackingStatus(error instanceof Error ? error.message : "Unable to load tracking details.");
+    } finally {
+      setPendingAction(null);
     }
   }
 
   return (
     <main>
+      <a className="skipLink" href="#booking">Skip to booking</a>
       <header className="nav">
         <a className="brand" href="#top" aria-label="Bubble Wash home">
           <Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} priority />
@@ -210,7 +224,7 @@ export default function Home() {
           <a href="#onboarding" onClick={() => setMobileOpen(false)}>Create account</a>
           <a href="#faq" onClick={() => setMobileOpen(false)}>FAQ</a>
           <a href="/login" onClick={() => setMobileOpen(false)}>Staff Login</a>
-          <a className="navCta" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20want%20to%20schedule%20a%20laundry%20pickup" target="_blank" onClick={() => setMobileOpen(false)}>WhatsApp</a>
+          <a className="navCta" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20want%20to%20schedule%20a%20laundry%20pickup" target="_blank" rel="noreferrer" onClick={() => setMobileOpen(false)}>WhatsApp</a>
         </nav>
       </header>
 
@@ -223,7 +237,7 @@ export default function Home() {
             <input name="coverageArea" placeholder="Enter your area or business location" aria-label="Coverage area" />
             <button className="button primary" type="submit">Check Coverage</button>
           </form>
-          <p className="status">{coverageStatus}</p>
+          <p className="status" role="status" aria-live="polite">{coverageStatus}</p>
           <div className="heroActions">
             <a className="button primary" href="#booking">Book a Pickup</a>
             <a className="button secondary" href="#quote">Estimate Price</a>
@@ -318,8 +332,8 @@ export default function Home() {
             <div className="two"><label>Plan<select value={quotePlan} onChange={(e) => setQuotePlan(e.target.value as PlanName)}>{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label><label>Estimated kg per pickup<input type="number" min={1} value={kg} onChange={(e) => setKg(Number(e.target.value))} /></label></div>
             <div className="two"><label>Pickup zone<select value={zone} onChange={(e) => setZone(e.target.value as ZoneKey)}>{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label} · {formatMoney(item.fee)}</option>)}</select></label><label>Discount<select value={discount} onChange={(e) => setDiscount(e.target.value as DiscountKey)}>{discountEntries.map(([key, item]) => <option key={key} value={key}>{item.label} · {Math.round(item.percent * 100)}%</option>)}</select></label></div>
             <div className="addonGrid">{addonEntries.map(([key, addon]) => <label key={key} className="check"><input type="checkbox" checked={selectedAddons.includes(key)} onChange={() => toggleAddon(key)} /> {addon.label}</label>)}</div>
-            <button className="button primary full" type="submit">Calculate estimate</button>
-            <p className="status">{quoteStatus}</p>
+            <button className="button primary full" type="submit" disabled={pendingAction === "quote"}>{pendingAction === "quote" ? "Calculating..." : "Calculate estimate"}</button>
+            <p className="status" role="status" aria-live="polite">{quoteStatus}</p>
           </form>
           <aside className="quoteResult">
             <h3>Estimated monthly total</h3>
@@ -347,8 +361,8 @@ export default function Home() {
           <form className="panel trackingPanel" onSubmit={trackOrder}>
             <h3>Track a Bubble Wash request</h3>
             <input name="trackingId" placeholder="Reference e.g. BW-1760000000000" aria-label="Tracking reference" />
-            <button className="button primary full" type="submit">Check Status</button>
-            <p className="status">{trackingStatus}</p>
+            <button className="button primary full" type="submit" disabled={pendingAction === "track"}>{pendingAction === "track" ? "Checking..." : "Check Status"}</button>
+            <p className="status" role="status" aria-live="polite">{trackingStatus}</p>
           </form>
           <aside className="trackingResult">
             {trackingResult ? <>
@@ -377,26 +391,28 @@ export default function Home() {
         <div className="scheduleGrid twoCols">
           <form className="panel" onSubmit={(event) => submitLead(event, "pickup-booking")}>
             <h3>Book laundry pickup</h3>
-            <div className="two"><input name="name" placeholder="Name" required /><input name="email" type="email" placeholder="Email" required /></div>
-            <div className="two"><input name="phone" placeholder="Phone / WhatsApp" required /><input name="company" placeholder="Company or household" required /></div>
-            <div className="two"><select name="preferredPlan">{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select><select name="zone">{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></div>
-            <div className="two"><input name="area" placeholder="Pickup area" /><input name="pickupDate" type="date" /></div>
-            <div className="two"><select name="paymentPreference"><option>MTN MoMo</option><option>Telecel Cash</option><option>Card</option><option>Bank transfer</option><option>Invoice me</option></select><select name="alertPreference"><option>Email + WhatsApp alerts</option><option>WhatsApp only</option><option>Email only</option><option>Call me</option></select></div>
-            <textarea name="message" placeholder="Pickup notes, textile type, special instructions, preferred time window..." />
-            <button className="button primary full" type="submit">Request Pickup</button>
-            {formStatus["pickup-booking"] && <p className="status success">{formStatus["pickup-booking"]}</p>}
+            <p className="formHint">Dispatch needs these details to confirm route, vendor capacity, and customer alerts.</p>
+            <div className="two"><label>Contact name<input name="name" placeholder="Name" autoComplete="name" required /></label><label>Email<input name="email" type="email" placeholder="Email" autoComplete="email" required /></label></div>
+            <div className="two"><label>Phone / WhatsApp<input name="phone" placeholder="Phone / WhatsApp" autoComplete="tel" required /></label><label>Company or household<input name="company" placeholder="Company or household" autoComplete="organization" required /></label></div>
+            <div className="two"><label>Preferred plan<select name="preferredPlan">{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label><label>Pickup zone<select name="zone">{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label></div>
+            <div className="two"><label>Pickup area<input name="area" placeholder="Osu, Labone, East Legon..." autoComplete="address-level2" /></label><label>Preferred pickup date<input name="pickupDate" type="date" /></label></div>
+            <div className="two"><label>Payment preference<select name="paymentPreference"><option>MTN MoMo</option><option>Telecel Cash</option><option>Card</option><option>Bank transfer</option><option>Invoice me</option></select></label><label>Alert preference<select name="alertPreference"><option>Email + WhatsApp alerts</option><option>WhatsApp only</option><option>Email only</option><option>Call me</option></select></label></div>
+            <label>Pickup notes<textarea name="message" placeholder="Textile type, special instructions, preferred time window..." /></label>
+            <button className="button primary full" type="submit" disabled={pendingAction === "pickup-booking"}>{pendingAction === "pickup-booking" ? "Saving pickup request..." : "Request Pickup"}</button>
+            {formStatus["pickup-booking"] && <p className="status success" role="status" aria-live="polite">{formStatus["pickup-booking"]}</p>}
           </form>
 
           <form className="panel paymentPanel" onSubmit={(event) => submitLead(event, "checkout-request")}>
             <h3>Payment checkout request</h3>
-            <input name="name" placeholder="Billing name" required />
-            <input name="email" type="email" placeholder="Billing email" required />
-            <input name="phone" placeholder="Phone / MoMo number" required />
-            <input name="company" placeholder="Business / account name" required />
-            <div className="two"><input name="amount" placeholder="Amount e.g. GHS 2250" /><select name="paymentMethod"><option>MTN MoMo</option><option>Telecel Cash</option><option>Visa / Mastercard</option><option>Bank transfer</option></select></div>
-            <textarea name="message" placeholder="Invoice notes or payment reference..." />
-            <button className="button secondary full" type="submit">Create Checkout Request</button>
-            {formStatus["checkout-request"] && <p className="status success">{formStatus["checkout-request"]}</p>}
+            <p className="formHint">This records a checkout request only. Live charging still needs payment-provider credentials.</p>
+            <label>Billing name<input name="name" placeholder="Billing name" autoComplete="name" required /></label>
+            <label>Billing email<input name="email" type="email" placeholder="Billing email" autoComplete="email" required /></label>
+            <label>Phone / MoMo number<input name="phone" placeholder="Phone / MoMo number" autoComplete="tel" required /></label>
+            <label>Business / account name<input name="company" placeholder="Business / account name" autoComplete="organization" required /></label>
+            <div className="two"><label>Amount<input name="amount" placeholder="GHS 2250" inputMode="decimal" /></label><label>Payment method<select name="paymentMethod"><option>MTN MoMo</option><option>Telecel Cash</option><option>Visa / Mastercard</option><option>Bank transfer</option></select></label></div>
+            <label>Invoice notes<textarea name="message" placeholder="Payment reference, invoice notes, or account instructions..." /></label>
+            <button className="button secondary full" type="submit" disabled={pendingAction === "checkout-request"}>{pendingAction === "checkout-request" ? "Saving checkout request..." : "Create Checkout Request"}</button>
+            {formStatus["checkout-request"] && <p className="status success" role="status" aria-live="polite">{formStatus["checkout-request"]}</p>}
           </form>
         </div>
       </section>
@@ -408,22 +424,22 @@ export default function Home() {
           <p>For hotels, restaurants, clinics, and serviced apartments that need repeat pickup schedules, invoice trails, and location-level notes.</p>
         </div>
         <form className="panel onboardingPanel" onSubmit={(event) => submitLead(event, "client-onboarding")}> 
-          <div className="two"><input name="name" placeholder="Authorized contact" required /><input name="email" type="email" placeholder="Work email" required /></div>
-          <div className="two"><input name="phone" placeholder="Phone / WhatsApp" required /><input name="company" placeholder="Business name" required /></div>
-          <textarea name="locations" placeholder="Branches / locations e.g. Airport View Hotel, Osu Suites, East Legon Residence" required />
-          <div className="two"><input name="legalBusinessName" placeholder="Legal business name" /><input name="registrationNumber" placeholder="Registration number" /></div>
-          <div className="two"><input name="taxId" placeholder="Tax ID" /><input name="authorizedSigner" placeholder="Authorized signer" /></div>
-          <div className="two"><select name="multiAdmin"><option>Invite team leads</option><option>Single admin only</option></select><select name="billingCycle"><option>Monthly</option><option>Yearly</option></select></div>
-          <div className="two"><select name="preferredPlan">{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select><select name="accountGoal"><option>Start ordering this week</option><option>Request guided demo</option><option>Need vendor coverage check</option></select></div>
-          <textarea name="message" placeholder="KYC notes, signer email, proof-of-address reference, government ID reference, or rollout notes..." />
-          <button className="button primary full" type="submit">Create Bubble Wash Account Request</button>
-          {formStatus["client-onboarding"] && <p className="status success">{formStatus["client-onboarding"]}</p>}
+          <div className="two"><label>Authorized contact<input name="name" placeholder="Authorized contact" autoComplete="name" required /></label><label>Work email<input name="email" type="email" placeholder="Work email" autoComplete="email" required /></label></div>
+          <div className="two"><label>Phone / WhatsApp<input name="phone" placeholder="Phone / WhatsApp" autoComplete="tel" required /></label><label>Business name<input name="company" placeholder="Business name" autoComplete="organization" required /></label></div>
+          <label>Branches / locations<textarea name="locations" placeholder="Airport View Hotel, Osu Suites, East Legon Residence..." required /></label>
+          <div className="two"><label>Legal business name<input name="legalBusinessName" placeholder="Legal business name" /></label><label>Registration number<input name="registrationNumber" placeholder="Registration number" /></label></div>
+          <div className="two"><label>Tax ID<input name="taxId" placeholder="Tax ID" /></label><label>Authorized signer<input name="authorizedSigner" placeholder="Authorized signer" /></label></div>
+          <div className="two"><label>Team access<select name="multiAdmin"><option>Invite team leads</option><option>Single admin only</option></select></label><label>Billing cycle<select name="billingCycle"><option>Monthly</option><option>Yearly</option></select></label></div>
+          <div className="two"><label>Preferred plan<select name="preferredPlan">{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label><label>Account goal<select name="accountGoal"><option>Start ordering this week</option><option>Request guided demo</option><option>Need vendor coverage check</option></select></label></div>
+          <label>KYC / rollout notes<textarea name="message" placeholder="Signer email, proof-of-address reference, government ID reference, or rollout notes..." /></label>
+          <button className="button primary full" type="submit" disabled={pendingAction === "client-onboarding"}>{pendingAction === "client-onboarding" ? "Saving account request..." : "Create Bubble Wash Account Request"}</button>
+          {formStatus["client-onboarding"] && <p className="status success" role="status" aria-live="polite">{formStatus["client-onboarding"]}</p>}
         </form>
       </section>
 
       <section className="section testimonialsSection">
-        <div className="sectionHead"><p className="eyebrow">Customer confidence</p><h2>Built for teams that care about predictable returns.</h2></div>
-        <div className="testimonialTrack">{testimonials.concat(testimonials).map(([quoteText, name, role], index) => <article className="testimonialCard" key={`${name}-${index}`}><p>“{quoteText}”</p><strong>{name}</strong><span>{role}</span></article>)}</div>
+        <div className="sectionHead"><p className="eyebrow">Customer confidence</p><h2>Built for teams that care about predictable returns.</h2><p className="scrollHint">Customer notes move automatically on desktop and become a swipe row on mobile.</p></div>
+        <div className="testimonialTrack" aria-label="Customer testimonials">{testimonials.concat(testimonials).map(([quoteText, name, role], index) => <article className="testimonialCard" key={`${name}-${index}`}><p>“{quoteText}”</p><strong>{name}</strong><span>{role}</span></article>)}</div>
       </section>
 
       <section id="staff" className="section staffTeaser">
@@ -440,8 +456,8 @@ export default function Home() {
       </section>
 
       <section id="faq" className="section faqTestimonials">
-        <div><p className="eyebrow">Questions people actually ask</p><h2>Clear answers before pickup.</h2>{faqs.map(([question, answer], index) => <button className="faqItem" key={question} onClick={() => setActiveFaq(activeFaq === index ? -1 : index)}><span>{question}</span><b>{activeFaq === index ? "−" : "+"}</b>{activeFaq === index && <p>{answer}</p>}</button>)}</div>
-        <div className="contactCard"><Image src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={180} height={180} /><h2>Need a faster answer?</h2><p>Use the WhatsApp button for quick customer support, vendor questions, or account setup.</p><a className="button primary full" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20need%20help" target="_blank">Chat on WhatsApp</a></div>
+        <div><p className="eyebrow">Questions people actually ask</p><h2>Clear answers before pickup.</h2>{faqs.map(([question, answer], index) => <button className="faqItem" key={question} type="button" aria-expanded={activeFaq === index} onClick={() => setActiveFaq(activeFaq === index ? -1 : index)}><span>{question}</span><b>{activeFaq === index ? "−" : "+"}</b>{activeFaq === index && <p>{answer}</p>}</button>)}</div>
+        <div className="contactCard"><Image src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={180} height={180} /><h2>Need a faster answer?</h2><p>Use the WhatsApp button for quick customer support, vendor questions, or account setup.</p><a className="button primary full" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20need%20help" target="_blank" rel="noreferrer">Chat on WhatsApp</a></div>
       </section>
 
       <section className="paymentStrip"><h3>Accepted payment lanes</h3><div><span>Visa</span><span>Mastercard</span><span>MTN MoMo</span><span>Telecel Cash</span><span>AirtelTigo</span><span>Bank Transfer</span><span>Invoice</span></div></section>
