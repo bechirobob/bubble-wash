@@ -1,66 +1,457 @@
+"use client";
+
 import Image from "next/image";
-import styles from "./page.module.css";
+import { FormEvent, useMemo, useState } from "react";
+import { addons, discounts, plans, zones, type AddonKey, type DiscountKey, type PlanName, type ZoneKey } from "@/lib/pricing";
+
+type Quote = {
+  plan: string;
+  pickupRhythm: string;
+  kg: number;
+  zone: string;
+  zoneFee: number;
+  discount: string;
+  discountAmount: number;
+  ratePerKg: number;
+  subscription: number;
+  monthlyPickups: number;
+  processingPerPickup: number;
+  addonsPerPickup: number;
+  perPickupTotal: number;
+  grossMonthlyTotal: number;
+  estimatedMonthlyTotal: number;
+  minimumApplied: boolean;
+};
+
+type TrackingResult = {
+  id: string;
+  createdAt: string;
+  type: string;
+  customer: string;
+  status: string;
+  nextStep: string;
+  area: string;
+  payment: string;
+  vendor?: string;
+  eventCount?: number;
+  updatedAt?: string;
+};
+
+const services = [
+  ["Wash, dry & fold", "Everyday laundry handled by a vetted partner, packed cleanly, and returned on a schedule."],
+  ["Ironing & finishing", "Uniforms, napkins, linens, shirts, and guest-facing pieces finished with a cleaner presentation."],
+  ["QR bag notes", "Orders can carry bag counts, garment notes, and care flags so pickup, vendor intake, and delivery match."],
+  ["Express runs", "Under-24h turnaround can be added when a hotel, restaurant, or clinic has an urgent pile-up."],
+  ["Commercial linen cycles", "Track towels, sheets, uniforms, gowns, and table linen with pickup rhythm and inventory notes."],
+  ["Driver handoffs", "Route, photo, timestamp, and pickup/delivery status updates can be logged from staff workspaces."],
+];
+
+const locations = ["Osu", "Labone", "Cantonments", "Airport", "East Legon", "Dzorwulu", "Spintex", "Madina", "Tema by confirmation"];
+
+const vendors = [
+  ["CleanPro Laundry Services", "East Legon", "Certified", "Express", "72% on-time return", "linen"],
+  ["SparkleWash Ghana", "Airport Residential", "Certified", "24/7", "night dispatch", "machines"],
+  ["FreshLinens Co.", "Tema Community 25", "Express", "Bulk", "hotel linen", "fold"],
+  ["Pristine Care Laundry", "Cantonments", "Certified", "Same day", "garment care", "steam"],
+];
+
+const testimonials = [
+  ["Pickup windows are finally predictable. We stopped chasing three vendors every weekend.", "Ama Mensah", "Housekeeping Director"],
+  ["The booking flow gives my team enough detail to plan linen movement before the driver arrives.", "Kwame Asante", "Restaurant Operations"],
+  ["Vendor matching and support follow-up are what make this useful for hospitality work.", "Yaw Boateng", "Catering Manager"],
+];
+
+const faqs = [
+  ["Can I book a one-time pickup?", "Yes. The service supports subscriptions, but the booking form can also capture one-time requests and custom pickup notes."],
+  ["Do payments work on the site yet?", "The payment screen is ready as a checkout request flow. Real card or MoMo charging needs Paystack, Flutterwave, or mobile money credentials before we turn on live payments."],
+  ["Will I receive email alerts?", "The site now captures alert preferences with every booking. Real email sending needs SMTP, Resend, SendGrid, or another email provider key."],
+  ["What areas are covered?", "Core Accra routes have no extra route fee. Near-route and outer-route pickups add delivery fees so pricing stays honest."],
+  ["Can vendors manage their availability?", "Yes. Vendors use the staff login to update daily capacity, route area, services, and job status without crowding the customer page."],
+  ["What does the admin section do?", "Admin work now lives behind login on separate pages for operations, vendor coordination, and support tickets."],
+];
+
+const proof = [
+  ["24h", "standard return target"],
+  ["7", "days scheduling"],
+  ["8", "Accra route zones"],
+  ["1", "shared order timeline"],
+];
+
+const operationsPillars = [
+  ["Book", "Schedule pickup, service type, area, alerts, and payment preference from one flow."],
+  ["Route", "Dispatch sees route zone, bag count, pickup notes, vendor assignment, and ETA."],
+  ["Track", "Customer, admin, vendor, and support read from the same Order ID timeline."],
+  ["Resolve", "Support can connect delays, missing items, QR intake notes, and payment status."],
+];
+
+const trackingStages = ["Received", "Pickup scheduled", "Vendor assigned", "In washing", "Ready for delivery", "Delivered"];
+
+const assuranceItems = [
+  ["Clear intake", "Pickup notes, textile type, preferred window, route zone, and payment preference are captured before dispatch."],
+  ["Vendor accountability", "Partner updates attach to the order timeline so acceptance, washing, finishing, and ready-for-driver are visible."],
+  ["Commercial controls", "Linen counts, QR/bag tags, shortages, and invoice notes stay tied to the customer account."],
+];
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("en-GH", { style: "currency", currency: "GHS", maximumFractionDigits: 0 }).format(value);
+}
+
+async function postJSON<T>(url: string, payload: unknown): Promise<T> {
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const data = await response.json();
+  if (!response.ok || !data.ok) throw new Error(data.error ?? "Request failed");
+  return data;
+}
 
 export default function Home() {
+  const [quotePlan, setQuotePlan] = useState<PlanName>("Growth");
+  const [zone, setZone] = useState<ZoneKey>("core");
+  const [discount, setDiscount] = useState<DiscountKey>("newPilot");
+  const [kg, setKg] = useState(82);
+  const [selectedAddons, setSelectedAddons] = useState<AddonKey[]>(["ironing"]);
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [quoteStatus, setQuoteStatus] = useState("Choose your plan, route, and add-ons to see a realistic monthly estimate.");
+  const [activeFaq, setActiveFaq] = useState(0);
+  const [formStatus, setFormStatus] = useState<Record<string, string>>({});
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [coverageStatus, setCoverageStatus] = useState("Enter your area to check pickup coverage.");
+  const [trackingStatus, setTrackingStatus] = useState("Enter a booking/reference ID after submitting a request.");
+  const [trackingResult, setTrackingResult] = useState<TrackingResult | null>(null);
+
+  const addonEntries = useMemo(() => Object.entries(addons) as Array<[AddonKey, (typeof addons)[AddonKey]]>, []);
+  const zoneEntries = useMemo(() => Object.entries(zones) as Array<[ZoneKey, (typeof zones)[ZoneKey]]>, []);
+  const discountEntries = useMemo(() => Object.entries(discounts) as Array<[DiscountKey, (typeof discounts)[DiscountKey]]>, []);
+
+  async function calculate(event?: FormEvent) {
+    event?.preventDefault();
+    try {
+      const result = await postJSON<{ ok: boolean; quote: Quote }>("/api/quote", { plan: quotePlan, kg, addons: selectedAddons, zone, discount });
+      setQuote(result.quote);
+      setQuoteStatus("Estimate calculated. Use this as the starting point before checkout or booking.");
+    } catch (error) {
+      setQuoteStatus(error instanceof Error ? error.message : "Unable to calculate estimate.");
+    }
+  }
+
+  async function submitLead(event: FormEvent<HTMLFormElement>, type: string) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = Object.fromEntries(new FormData(form).entries());
+    payload.submissionType = type;
+    try {
+      const data = await postJSON<{ ok: boolean; message: string; id: string }>("/api/submit", payload);
+      setFormStatus((current) => ({ ...current, [type]: `${data.message} Reference: ${data.id}` }));
+      form.reset();
+    } catch (error) {
+      setFormStatus((current) => ({ ...current, [type]: error instanceof Error ? error.message : "Unable to save request." }));
+    }
+  }
+
+  function toggleAddon(key: AddonKey) {
+    setSelectedAddons((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
+  }
+
+  function checkCoverage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const area = String(new FormData(event.currentTarget).get("coverageArea") ?? "").trim();
+    const matched = locations.find((location) => area.toLowerCase().includes(location.split(" ")[0].toLowerCase()));
+    setCoverageStatus(matched ? `${matched} is covered. Book a pickup and we will confirm the route window.` : `${area || "That area"} may still be serviceable. Submit a booking so dispatch can confirm route pricing.`);
+  }
+
+  function chooseVendor(name: string) {
+    setFormStatus((current) => ({ ...current, ["vendor-choice"]: `${name} selected. Complete the booking form below so dispatch can confirm capacity.` }));
+    document.getElementById("booking")?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  async function trackOrder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const reference = String(new FormData(event.currentTarget).get("trackingId") ?? "").trim();
+    if (!reference) {
+      setTrackingResult(null);
+      setTrackingStatus("Enter a Bubble Wash reference ID first.");
+      return;
+    }
+    try {
+      const response = await fetch(`/api/track?id=${encodeURIComponent(reference)}`);
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error ?? "Tracking lookup failed.");
+      setTrackingResult(data.tracking);
+      setTrackingStatus("Tracking record loaded from saved order requests.");
+    } catch (error) {
+      setTrackingResult(null);
+      setTrackingStatus(error instanceof Error ? error.message : "Unable to load tracking details.");
+    }
+  }
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main>
+      <header className="nav">
+        <a className="brand" href="#top" aria-label="Bubble Wash home">
+          <Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} priority />
+          <span>Bubble Wash</span>
+        </a>
+        <button
+          className="menuButton"
+          type="button"
+          aria-controls="site-navigation"
+          aria-expanded={mobileOpen}
+          aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
+          onClick={() => setMobileOpen(!mobileOpen)}
+        >
+          <span>{mobileOpen ? "Close" : "Menu"}</span>
+          <span className="menuIcon" aria-hidden="true">{mobileOpen ? "×" : "☰"}</span>
+        </button>
+        <nav id="site-navigation" className={mobileOpen ? "navLinks open" : "navLinks"}>
+          <a href="#services" onClick={() => setMobileOpen(false)}>Services</a>
+          <a href="#plans" onClick={() => setMobileOpen(false)}>Plans</a>
+          <a href="#booking" onClick={() => setMobileOpen(false)}>Book</a>
+          <a href="#track" onClick={() => setMobileOpen(false)}>Track</a>
+          <a href="#vendors-public" onClick={() => setMobileOpen(false)}>Vendors</a>
+          <a href="#onboarding" onClick={() => setMobileOpen(false)}>Create account</a>
+          <a href="#faq" onClick={() => setMobileOpen(false)}>FAQ</a>
+          <a href="/login" onClick={() => setMobileOpen(false)}>Staff Login</a>
+          <a className="navCta" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20want%20to%20schedule%20a%20laundry%20pickup" target="_blank" onClick={() => setMobileOpen(false)}>WhatsApp</a>
+        </nav>
+      </header>
+
+      <section id="top" className="hero section">
+        <div className="heroCopy">
+          <p className="eyebrow">Accra laundry pickup · subscriptions · vendor fulfilment</p>
+          <h1>Accra laundry pickup with real order visibility.</h1>
+          <p className="lead">Bubble Wash coordinates pickup, vendor fulfilment, route updates, payments, and support for households and commercial teams that need clean laundry back on schedule.</p>
+          <form className="coverageForm" onSubmit={checkCoverage}>
+            <input name="coverageArea" placeholder="Enter your area or business location" aria-label="Coverage area" />
+            <button className="button primary" type="submit">Check Coverage</button>
+          </form>
+          <p className="status">{coverageStatus}</p>
+          <div className="heroActions">
+            <a className="button primary" href="#booking">Book a Pickup</a>
+            <a className="button secondary" href="#quote">Estimate Price</a>
+          </div>
+          <div className="humanNote"><b>Built for Accra operations:</b> traffic-aware routes, repeat pickups, vendor capacity, MoMo and invoice preferences, and status updates before customers have to chase.</div>
         </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <div className="heroVisual heroSlider" aria-label="Bubble Wash live operations summary">
+          <div className="slideOverlay" />
+          <div className="visualCard orderCard"><span>Live order</span><strong>BW-2081</strong><small>Pickup scheduled · Vendor assigned · Customer notified</small></div>
+          <div className="visualCard mainBasket"><span>Today’s route</span><strong>82kg</strong><small>Growth plan · Core Accra · ironing added · return window set</small></div>
+          <div className="routeCard"><b>Route fee</b><span>{zones[zone].label}</span><strong>{formatMoney(zones[zone].fee)}</strong></div>
+          <div className="ratingCard"><b>4.8★</b><span>service confidence</span></div>
         </div>
-      </main>
-    </div>
+      </section>
+
+      <section className="proofStrip" aria-label="service proof points">
+        {proof.map(([number, label]) => <div key={label}><strong>{number}</strong><span>{label}</span></div>)}
+      </section>
+
+      <section id="plans" className="section soft">
+        <div className="sectionHead">
+          <p className="eyebrow">Plans that do not pretend every customer is the same</p>
+          <h2>Pick a subscription rhythm, then adjust by weight, route, and add-ons.</h2>
+          <p>Each plan connects to weight, pickup rhythm, route fees, finishing add-ons, and payment preference — the same inputs dispatch needs to fulfil the order.</p>
+        </div>
+        <div className="plansGrid">
+          {plans.map((plan) => (
+            <article className={plan.badge ? "planCard featured" : "planCard"} key={plan.name}>
+              {plan.badge && <span className="badge">{plan.badge}</span>}
+              <h3>{plan.name}</h3>
+              <p>{plan.description}</p>
+              <div className="price">{plan.name === "Enterprise" ? "From " : ""}{formatMoney(plan.subscription)}<small>/ month coordination fee</small></div>
+              <p className="pickup">{plan.pickups}</p>
+              <ul>{plan.features.map((feature) => <li key={feature}>✓ {feature}</li>)}</ul>
+              <a className="button primary full" href="#booking">{plan.name === "Enterprise" ? "Request Quote" : "Start with this plan"}</a>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="section opsCommand">
+        <div className="sectionHead">
+          <p className="eyebrow">Operations engine</p>
+          <h2>One customer promise, one order timeline behind it.</h2>
+          <p>Research from Laundryheap-style delivery flows, CleanCloud-style notifications, and Cents-style route control points to the same answer: booking, route, QR/bag intake, vendor updates, and support must not live in separate islands.</p>
+        </div>
+        <div className="commandGrid">{operationsPillars.map(([title, copy], index) => <article key={title}><span>{String(index + 1).padStart(2, "0")}</span><h3>{title}</h3><p>{copy}</p></article>)}</div>
+      </section>
+
+      <section id="services" className="section">
+        <div className="sectionHead narrow">
+          <p className="eyebrow">What Bubble Wash handles</p>
+          <h2>Simple for the customer. Structured behind the scenes.</h2>
+        </div>
+        <div className="serviceGrid">{services.map(([title, copy]) => <article className="serviceCard" key={title}><div className="serviceIcon">•</div><h3>{title}</h3><p>{copy}</p></article>)}</div>
+      </section>
+
+      <section id="vendors-public" className="section vendorShowcase">
+        <div className="sectionHead">
+          <p className="eyebrow">Trusted laundry partners</p>
+          <h2>Vetted vendors with real capacity, route areas, and service tags.</h2>
+          <p>Partner cards show service coverage and operational strengths. Choosing a vendor moves straight to booking so dispatch can confirm capacity against the route.</p>
+        </div>
+        <div className="vendorShowcaseGrid">
+          {vendors.map(([name, area, tagOne, tagTwo, metric, tone]) => (
+            <article className="vendorShowcaseCard" key={name}>
+              <div className={`vendorPhoto ${tone}`}><span>{metric}</span></div>
+              <div><h3>{name}</h3><p>{area}</p><div className="tagRow"><span>{tagOne}</span><span>{tagTwo}</span></div></div>
+              <button className="button primary full" type="button" onClick={() => chooseVendor(name)}>Request Service</button>
+            </article>
+          ))}
+        </div>
+        {formStatus["vendor-choice"] && <p className="status success">{formStatus["vendor-choice"]}</p>}
+      </section>
+
+      <section id="locations" className="section locationSection">
+        <div className="sectionHead">
+          <p className="eyebrow">Route coverage</p>
+          <h2>Start with clear Accra zones instead of promising the whole city overnight.</h2>
+          <p>These areas feed the zone pricing in the calculator, so delivery fees stay connected to actual route distance.</p>
+        </div>
+        <div className="locationGrid">{locations.map((item) => <span key={item}>{item}</span>)}</div>
+      </section>
+
+      <section id="quote" className="section quoteSection">
+        <div className="sectionHead">
+          <p className="eyebrow">Live quote calculator</p>
+          <h2>Get a quote that dispatch can actually work with.</h2>
+        </div>
+        <div className="quoteGrid">
+          <form className="panel largePanel" onSubmit={calculate}>
+            <div className="two"><label>Plan<select value={quotePlan} onChange={(e) => setQuotePlan(e.target.value as PlanName)}>{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label><label>Estimated kg per pickup<input type="number" min={1} value={kg} onChange={(e) => setKg(Number(e.target.value))} /></label></div>
+            <div className="two"><label>Pickup zone<select value={zone} onChange={(e) => setZone(e.target.value as ZoneKey)}>{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label} · {formatMoney(item.fee)}</option>)}</select></label><label>Discount<select value={discount} onChange={(e) => setDiscount(e.target.value as DiscountKey)}>{discountEntries.map(([key, item]) => <option key={key} value={key}>{item.label} · {Math.round(item.percent * 100)}%</option>)}</select></label></div>
+            <div className="addonGrid">{addonEntries.map(([key, addon]) => <label key={key} className="check"><input type="checkbox" checked={selectedAddons.includes(key)} onChange={() => toggleAddon(key)} /> {addon.label}</label>)}</div>
+            <button className="button primary full" type="submit">Calculate estimate</button>
+            <p className="status">{quoteStatus}</p>
+          </form>
+          <aside className="quoteResult">
+            <h3>Estimated monthly total</h3>
+            {quote ? <><strong>{formatMoney(quote.estimatedMonthlyTotal)}</strong><p>{quote.plan} · {quote.pickupRhythm}</p><div className="miniRows"><span>Per pickup: {formatMoney(quote.perPickupTotal)}</span><span>Route fee: {formatMoney(quote.zoneFee)}</span><span>Add-ons: {formatMoney(quote.addonsPerPickup)}</span><span>Discount: −{formatMoney(quote.discountAmount)}</span></div></> : <><strong>Run estimate</strong><p>Choose the plan, zone, discount, and add-ons first.</p></>}
+          </aside>
+        </div>
+      </section>
+
+      <section className="section assuranceSection">
+        <div className="sectionHead">
+          <p className="eyebrow">Service assurance</p>
+          <h2>The parts customers usually worry about are handled directly in the workflow.</h2>
+          <p>Pickup delays, lost items, unclear invoices, and vendor handoff mistakes are operational problems. Bubble Wash is shaped around preventing those gaps before they become support issues.</p>
+        </div>
+        <div className="assuranceGrid">{assuranceItems.map(([title, copy]) => <article key={title}><h3>{title}</h3><p>{copy}</p></article>)}</div>
+      </section>
+
+      <section id="track" className="section trackingSection soft">
+        <div className="sectionHead">
+          <p className="eyebrow">Order tracking</p>
+          <h2>Customers can track a real order reference without calling support.</h2>
+          <p>Tracking reads the shared order timeline and returns a clean customer view: status, vendor, area, payment lane, event count, and next step.</p>
+        </div>
+        <div className="trackingGrid">
+          <form className="panel trackingPanel" onSubmit={trackOrder}>
+            <h3>Track a Bubble Wash request</h3>
+            <input name="trackingId" placeholder="Reference e.g. BW-1760000000000" aria-label="Tracking reference" />
+            <button className="button primary full" type="submit">Check Status</button>
+            <p className="status">{trackingStatus}</p>
+          </form>
+          <aside className="trackingResult">
+            {trackingResult ? <>
+              <span>{trackingResult.type}</span>
+              <h3>{trackingResult.id}</h3>
+              <strong>{trackingResult.status}</strong>
+              <p>{trackingResult.customer}</p>
+              <div className="miniRows"><span>Vendor: {trackingResult.vendor || "Pending assignment"}</span><span>Area: {trackingResult.area}</span><span>Payment: {trackingResult.payment}</span><span>Events: {trackingResult.eventCount ?? 1}</span><span>Updated: {new Date(trackingResult.updatedAt || trackingResult.createdAt).toLocaleString()}</span></div>
+              <p>{trackingResult.nextStep}</p>
+            </> : <>
+              <span>Tracking stages</span>
+              <div className="stageList">{trackingStages.map((stage, index) => <div key={stage}><b>{index + 1}</b><span>{stage}</span></div>)}</div>
+            </>}
+          </aside>
+        </div>
+      </section>
+
+
+
+      <section id="booking" className="section schedule soft">
+        <div className="sectionHead">
+          <p className="eyebrow">Booking + alerts + payment preference</p>
+          <h2>Customers can request pickup, choose payment preference, and opt into alerts.</h2>
+          <p>Use this to request a pickup, record the service details dispatch needs, and receive a Bubble Wash reference ID for tracking.</p>
+        </div>
+        <div className="scheduleGrid twoCols">
+          <form className="panel" onSubmit={(event) => submitLead(event, "pickup-booking")}>
+            <h3>Book laundry pickup</h3>
+            <div className="two"><input name="name" placeholder="Name" required /><input name="email" type="email" placeholder="Email" required /></div>
+            <div className="two"><input name="phone" placeholder="Phone / WhatsApp" required /><input name="company" placeholder="Company or household" required /></div>
+            <div className="two"><select name="preferredPlan">{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select><select name="zone">{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></div>
+            <div className="two"><input name="area" placeholder="Pickup area" /><input name="pickupDate" type="date" /></div>
+            <div className="two"><select name="paymentPreference"><option>MTN MoMo</option><option>Telecel Cash</option><option>Card</option><option>Bank transfer</option><option>Invoice me</option></select><select name="alertPreference"><option>Email + WhatsApp alerts</option><option>WhatsApp only</option><option>Email only</option><option>Call me</option></select></div>
+            <textarea name="message" placeholder="Pickup notes, textile type, special instructions, preferred time window..." />
+            <button className="button primary full" type="submit">Request Pickup</button>
+            {formStatus["pickup-booking"] && <p className="status success">{formStatus["pickup-booking"]}</p>}
+          </form>
+
+          <form className="panel paymentPanel" onSubmit={(event) => submitLead(event, "checkout-request")}>
+            <h3>Payment checkout request</h3>
+            <input name="name" placeholder="Billing name" required />
+            <input name="email" type="email" placeholder="Billing email" required />
+            <input name="phone" placeholder="Phone / MoMo number" required />
+            <input name="company" placeholder="Business / account name" required />
+            <div className="two"><input name="amount" placeholder="Amount e.g. GHS 2250" /><select name="paymentMethod"><option>MTN MoMo</option><option>Telecel Cash</option><option>Visa / Mastercard</option><option>Bank transfer</option></select></div>
+            <textarea name="message" placeholder="Invoice notes or payment reference..." />
+            <button className="button secondary full" type="submit">Create Checkout Request</button>
+            {formStatus["checkout-request"] && <p className="status success">{formStatus["checkout-request"]}</p>}
+          </form>
+        </div>
+      </section>
+
+      <section id="onboarding" className="section onboardingSection">
+        <div className="sectionHead">
+          <p className="eyebrow">Client onboarding</p>
+          <h2>Create a hospitality account with branches, billing contacts, and plan choice.</h2>
+          <p>For hotels, restaurants, clinics, and serviced apartments that need repeat pickup schedules, invoice trails, and location-level notes.</p>
+        </div>
+        <form className="panel onboardingPanel" onSubmit={(event) => submitLead(event, "client-onboarding")}> 
+          <div className="two"><input name="name" placeholder="Authorized contact" required /><input name="email" type="email" placeholder="Work email" required /></div>
+          <div className="two"><input name="phone" placeholder="Phone / WhatsApp" required /><input name="company" placeholder="Business name" required /></div>
+          <textarea name="locations" placeholder="Branches / locations e.g. Airport View Hotel, Osu Suites, East Legon Residence" required />
+          <div className="two"><input name="legalBusinessName" placeholder="Legal business name" /><input name="registrationNumber" placeholder="Registration number" /></div>
+          <div className="two"><input name="taxId" placeholder="Tax ID" /><input name="authorizedSigner" placeholder="Authorized signer" /></div>
+          <div className="two"><select name="multiAdmin"><option>Invite team leads</option><option>Single admin only</option></select><select name="billingCycle"><option>Monthly</option><option>Yearly</option></select></div>
+          <div className="two"><select name="preferredPlan">{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select><select name="accountGoal"><option>Start ordering this week</option><option>Request guided demo</option><option>Need vendor coverage check</option></select></div>
+          <textarea name="message" placeholder="KYC notes, signer email, proof-of-address reference, government ID reference, or rollout notes..." />
+          <button className="button primary full" type="submit">Create Bubble Wash Account Request</button>
+          {formStatus["client-onboarding"] && <p className="status success">{formStatus["client-onboarding"]}</p>}
+        </form>
+      </section>
+
+      <section className="section testimonialsSection">
+        <div className="sectionHead"><p className="eyebrow">Customer confidence</p><h2>Built for teams that care about predictable returns.</h2></div>
+        <div className="testimonialTrack">{testimonials.concat(testimonials).map(([quoteText, name, role], index) => <article className="testimonialCard" key={`${name}-${index}`}><p>“{quoteText}”</p><strong>{name}</strong><span>{role}</span></article>)}</div>
+      </section>
+
+      <section id="staff" className="section staffTeaser">
+        <div className="sectionHead">
+          <p className="eyebrow">Staff workspace</p>
+          <h2>Admin, vendor, and support work now lives after login.</h2>
+          <p>Customers get a focused booking experience. Operators get separate pages for intake, vendor capacity, job updates, and support tickets once they sign in.</p>
+        </div>
+        <div className="staffCards">
+          <a className="staffCard" href="/login?next=/admin"><span>01</span><h3>Admin dashboard</h3><p>Order intake, dispatch, payments, priority, and quality actions.</p></a>
+          <a className="staffCard" href="/login?next=/vendors"><span>02</span><h3>Vendor dashboard</h3><p>Capacity reporting, vendor registration, and job status updates.</p></a>
+          <a className="staffCard" href="/login?next=/support"><span>03</span><h3>Support desk</h3><p>Customer, vendor, and payment issues handled away from the landing page.</p></a>
+        </div>
+      </section>
+
+      <section id="faq" className="section faqTestimonials">
+        <div><p className="eyebrow">Questions people actually ask</p><h2>Clear answers before pickup.</h2>{faqs.map(([question, answer], index) => <button className="faqItem" key={question} onClick={() => setActiveFaq(activeFaq === index ? -1 : index)}><span>{question}</span><b>{activeFaq === index ? "−" : "+"}</b>{activeFaq === index && <p>{answer}</p>}</button>)}</div>
+        <div className="contactCard"><Image src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={180} height={180} /><h2>Need a faster answer?</h2><p>Use the WhatsApp button for quick customer support, vendor questions, or account setup.</p><a className="button primary full" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20need%20help" target="_blank">Chat on WhatsApp</a></div>
+      </section>
+
+      <section className="paymentStrip"><h3>Accepted payment lanes</h3><div><span>Visa</span><span>Mastercard</span><span>MTN MoMo</span><span>Telecel Cash</span><span>AirtelTigo</span><span>Bank Transfer</span><span>Invoice</span></div></section>
+
+      <footer id="contact" className="footer">
+        <div><div className="brand footerBrand"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} /><span>Bubble Wash</span></div><p>Laundry pickup and vendor fulfilment for Accra teams that need clean work without the back-and-forth.</p></div>
+        <div><h3>Use Bubble Wash</h3><a href="#booking">Book pickup</a><a href="#quote">Estimate pricing</a><a href="/login?next=/admin">Admin login</a><a href="/login?next=/support">Support login</a></div>
+        <div><h3>For operators</h3><a href="/login?next=/vendors">Vendor login</a><a href="#plans">Subscriptions</a><a href="#services">Services</a></div>
+        <div><h3>Get in touch</h3><p>Accra, Ghana</p><p>hello@bubblewashgh.com</p><p>WhatsApp: +233 55 000 0000</p></div>
+      </footer>
+    </main>
   );
 }
