@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { buildRoutePreview, type RoutePreview } from "@/lib/maps";
 import { addons, discounts, plans, zones, type AddonKey, type DiscountKey, type PlanName, type ZoneKey } from "@/lib/pricing";
 
@@ -135,6 +135,7 @@ export default function Home() {
   const [activeFaq, setActiveFaq] = useState(0);
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobileNav, setIsMobileNav] = useState(false);
   const [coverageArea, setCoverageArea] = useState("");
   const [coverageStatus, setCoverageStatus] = useState("Enter your area to check pickup coverage.");
   const [routePreview, setRoutePreview] = useState<RoutePreview>(() => buildRoutePreview("core", "Core Accra route"));
@@ -145,6 +146,27 @@ export default function Home() {
   const addonEntries = useMemo(() => Object.entries(addons) as Array<[AddonKey, (typeof addons)[AddonKey]]>, []);
   const zoneEntries = useMemo(() => Object.entries(zones) as Array<[ZoneKey, (typeof zones)[ZoneKey]]>, []);
   const discountEntries = useMemo(() => Object.entries(discounts) as Array<[DiscountKey, (typeof discounts)[DiscountKey]]>, []);
+
+  useEffect(() => {
+    const mobileQuery = window.matchMedia("(max-width: 780px)");
+    setIsMobileNav(mobileQuery.matches);
+
+    function updateMobileNav(event: MediaQueryListEvent) {
+      setIsMobileNav(event.matches);
+      if (!event.matches) setMobileOpen(false);
+    }
+
+    function closeMenu(event: KeyboardEvent) {
+      if (event.key === "Escape") setMobileOpen(false);
+    }
+
+    mobileQuery.addEventListener("change", updateMobileNav);
+    window.addEventListener("keydown", closeMenu);
+    return () => {
+      mobileQuery.removeEventListener("change", updateMobileNav);
+      window.removeEventListener("keydown", closeMenu);
+    };
+  }, []);
 
   async function calculate(event?: FormEvent) {
     event?.preventDefault();
@@ -191,11 +213,11 @@ export default function Home() {
     return "core";
   }
 
-  async function checkCoverage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const area = String(new FormData(event.currentTarget).get("coverageArea") ?? coverageArea).trim();
+  async function runCoverageCheck(areaInput: string) {
+    const area = areaInput.trim();
     const matched = locations.find((location) => area.toLowerCase().includes(location.split(" ")[0].toLowerCase()));
     const selectedZone = routeZoneForArea(area || matched || "core");
+    setPendingAction("coverage");
     setCoverageStatus("Checking coverage and route map...");
     try {
       const response = await fetch(`/api/route-preview?zone=${encodeURIComponent(selectedZone)}&area=${encodeURIComponent(area || matched || "Core Accra route")}`);
@@ -206,7 +228,19 @@ export default function Home() {
     } catch (error) {
       setRoutePreview(buildRoutePreview(selectedZone, area || matched || "Core Accra route"));
       setCoverageStatus(error instanceof Error ? error.message : "Unable to check route preview.");
+    } finally {
+      setPendingAction(null);
     }
+  }
+
+  async function checkCoverage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runCoverageCheck(String(new FormData(event.currentTarget).get("coverageArea") ?? coverageArea));
+  }
+
+  async function choosePopularArea(area: string) {
+    setCoverageArea(area);
+    await runCoverageCheck(area);
   }
 
   function chooseVendor(name: string) {
@@ -260,7 +294,7 @@ export default function Home() {
           <span>{mobileOpen ? "Close" : "Menu"}</span>
           <span className="menuIcon" aria-hidden="true">{mobileOpen ? "×" : "☰"}</span>
         </button>
-        <nav id="site-navigation" className={mobileOpen ? "navLinks open" : "navLinks"} data-open={mobileOpen}>
+        <nav id="site-navigation" className={mobileOpen ? "navLinks open" : "navLinks"} data-open={mobileOpen} aria-hidden={isMobileNav && !mobileOpen ? true : undefined}>
           <a href="#services" onClick={() => setMobileOpen(false)}>Services</a>
           <a href="#plans" onClick={() => setMobileOpen(false)}>Pricing</a>
           <a href="#locations" onClick={() => setMobileOpen(false)}>Coverage</a>
@@ -280,10 +314,10 @@ export default function Home() {
             <label className="coverageLabel" htmlFor="coverageArea">Check if we serve your area</label>
             <div className="coverageRow">
               <input id="coverageArea" name="coverageArea" value={coverageArea} onChange={(event) => setCoverageArea(event.target.value)} placeholder="e.g. Osu, Labone, East Legon" autoComplete="address-level2" />
-              <button className="button primary" type="submit">Check Coverage</button>
+              <button className="button primary" type="submit" disabled={pendingAction === "coverage"}>{pendingAction === "coverage" ? "Checking..." : "Check Coverage"}</button>
             </div>
             <div className="coverageQuickChips" aria-label="Popular coverage areas">
-              {popularAreas.map((area) => <button key={area} type="button" onClick={() => setCoverageArea(area)}>{area}</button>)}
+              {popularAreas.map((area) => <button key={area} type="button" onClick={() => choosePopularArea(area)} disabled={pendingAction === "coverage"}>{area}</button>)}
             </div>
           </form>
           <p className="status" role="status" aria-live="polite">{coverageStatus}</p>
@@ -435,7 +469,7 @@ export default function Home() {
         <div className="trackingGrid">
           <form className="panel trackingPanel" onSubmit={trackOrder}>
             <h3>Track a Bubble Wash request</h3>
-            <input name="trackingId" placeholder="Reference e.g. BW-1760000000000" aria-label="Tracking reference" />
+            <label>Tracking reference<input name="trackingId" placeholder="Reference e.g. BW-1760000000000" autoComplete="off" /></label>
             <button className="button primary full" type="submit" disabled={pendingAction === "track"}>{pendingAction === "track" ? "Checking..." : "Check Status"}</button>
             <p className="status" role="status" aria-live="polite">{trackingStatus}</p>
           </form>

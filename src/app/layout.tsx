@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://710ab5d0e640f0.lhr.life"),
+  metadataBase: new URL("https://bubblewash.co"),
   title: "Bubble Wash — Laundry pickup for busy teams",
-  description: "Book laundry pickups, compare plans, estimate delivery fees, apply as a vendor, and manage Bubble Wash pilot operations in Accra.",
+  description: "Book laundry pickups, compare plans, estimate delivery fees, track orders, and manage Bubble Wash pilot operations in Accra.",
   icons: {
     icon: "/bubble-wash-icon.jpg",
     shortcut: "/bubble-wash-icon.jpg",

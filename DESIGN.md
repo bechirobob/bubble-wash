@@ -42,11 +42,20 @@
 - Vendor trust: use image-backed cards with opaque overlays so partner cards feel more like real laundry operations while keeping text legible.
 - Payment lanes: use recognizable payment badges/icons for card, mobile money, bank, and invoice lanes. Keep accessible labels for screen readers, but avoid spelling every lane as plain text chips.
 
+## Release standards pass
+
+- Frontend: every interactive control needs semantic HTML, visible labels or equivalent accessible names, keyboard/focus states, disabled/pending states, and reduced-motion behavior.
+- Mobile: menu state must be exposed with `aria-expanded`, hidden state must be reflected for assistive tech, Escape should close the menu, and tap targets remain at least 44px.
+- UX: quick actions should do the complete job, not just decorate the page. Coverage chips should run the same route preview flow as typed search.
+- Backend: public API inputs must validate allowed enum values and numeric ranges before reaching domain logic, return safe JSON errors, and avoid stack traces.
+- Production metadata: share URLs should point at the stable Bubble Wash domain, not old tunnel URLs.
+
 ## Critique checklist
 
 - Buttons must not be decorative; every visible action navigates, submits, calculates, tracks, or opens contact.
-- Mobile nav must open, expose links, and close after selecting a link.
-- Form labels cannot rely only on placeholders.
+- Mobile nav must open, expose links, reflect hidden/open state, support Escape close, and close after selecting a link.
+- Form labels cannot rely only on placeholders; tracking and quote inputs need visible labels or clearly grouped label text.
 - Public UI must not imply live payments/email until credentials are wired.
 - Staff features must not crowd the customer conversion path.
 - Public pages must not expose staff-only operational fields or customer records.
+- API routes must fail closed on invalid plan, zone, discount, add-on, and quantity inputs.
