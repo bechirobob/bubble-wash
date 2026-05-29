@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 import type { StaffRole } from "@/lib/auth";
 
@@ -168,7 +169,7 @@ function PortalShell({ title, eyebrow, description, role, userName, children }: 
   return (
     <main className="portalPage">
       <header className="portalNav">
-        <Link className="brand" href="/"><span className="brandMark textMark">BW</span><span>Bubble Wash</span></Link>
+        <Link className="brand" href="/" aria-label="Bubble Wash home"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} /><span>Bubble Wash</span></Link>
         <nav className="portalLinks">
           {portalLinks.map(([href, label]) => <Link key={href} href={href}>{label}</Link>)}
           <a className="button secondary" href="/api/logout">Logout</a>

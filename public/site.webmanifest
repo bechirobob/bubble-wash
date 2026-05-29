@@ -1,0 +1,21 @@
+{
+  "name": "Bubble Wash",
+  "short_name": "Bubble Wash",
+  "description": "Laundry pickup, tracking, and support workflows for Accra.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#061b31",
+  "theme_color": "#14a8ec",
+  "icons": [
+    {
+      "src": "/apple-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

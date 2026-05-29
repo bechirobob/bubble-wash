@@ -833,10 +833,94 @@ input:focus, select:focus, textarea:focus {
   background-size: 36px 36px;
 }
 .credentialCard:hover, .faqItem:hover, .staffCard:hover { transform: translateY(-2px); }
+.bubbleAtmosphere {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+main, .nav { position: relative; z-index: 1; }
+.foamOrb {
+  position: absolute;
+  display: block;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.72);
+  background:
+    radial-gradient(circle at 32% 26%, rgba(255,255,255,.98) 0 12%, rgba(255,255,255,.34) 13% 42%, rgba(103,232,255,.16) 43% 100%);
+  box-shadow: inset rgba(255,255,255,.74) 0 0 28px, rgba(0,167,225,.12) 0 24px 80px -44px;
+  opacity: .58;
+  animation: bubbleDrift 18s ease-in-out infinite alternate;
+}
+.orbOne { width: 172px; height: 172px; left: -42px; top: 140px; }
+.orbTwo { width: 96px; height: 96px; right: 7vw; top: 330px; animation-duration: 14s; animation-delay: -5s; }
+.orbThree { width: 132px; height: 132px; left: 18vw; bottom: 16vh; animation-duration: 22s; animation-delay: -9s; }
+.orbFour { width: 58px; height: 58px; right: 26vw; bottom: 24vh; animation-duration: 16s; animation-delay: -3s; }
+.hero { position: relative; }
+.hero::before {
+  content: "";
+  position: absolute;
+  left: min(5vw, 72px);
+  right: min(5vw, 72px);
+  bottom: 36px;
+  height: 76px;
+  pointer-events: none;
+  background-image: radial-gradient(circle, rgba(255,255,255,.82) 0 18%, transparent 20%), radial-gradient(circle, rgba(103,232,255,.28) 0 16%, transparent 18%);
+  background-size: 42px 42px, 64px 64px;
+  background-position: 0 0, 28px 22px;
+  opacity: .72;
+  mask-image: linear-gradient(90deg, transparent, black 12%, black 88%, transparent);
+}
+.washerPortal {
+  position: absolute;
+  right: 58px;
+  top: 74px;
+  width: 250px;
+  height: 250px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 32%, rgba(255,255,255,.98), rgba(255,255,255,.2) 64%, rgba(103,232,255,.16));
+  box-shadow: rgba(103,232,255,.28) 0 32px 90px -42px, inset rgba(255,255,255,.8) 0 0 44px;
+  z-index: 2;
+}
+.washerPortal img { width: 126px; height: 126px; border-radius: 34px; object-fit: cover; box-shadow: rgba(6,21,34,.24) 0 28px 60px -36px; }
+.washerRing, .washerBubble { position: absolute; border-radius: 999px; pointer-events: none; }
+.washerRing { inset: 22px; border: 1px dashed rgba(255,255,255,.78); animation: spinCycle 19s linear infinite; }
+.ringTwo { inset: 46px; border-style: solid; border-color: rgba(183,243,107,.32); animation-duration: 13s; animation-direction: reverse; }
+.washerBubble { background: rgba(255,255,255,.72); border: 1px solid rgba(255,255,255,.82); box-shadow: inset rgba(103,232,255,.2) 0 0 16px; animation: bubbleRise 7s ease-in-out infinite; }
+.b1 { width: 26px; height: 26px; left: 34px; bottom: 48px; }
+.b2 { width: 18px; height: 18px; right: 44px; bottom: 64px; animation-delay: -2s; }
+.b3 { width: 38px; height: 38px; right: 20px; top: 52px; animation-delay: -4s; }
+.b4 { width: 14px; height: 14px; left: 72px; top: 28px; animation-delay: -1s; }
+.foamTicket {
+  position: absolute;
+  right: 58px;
+  bottom: 132px;
+  z-index: 3;
+  transform: rotate(-3deg);
+  padding: 14px 16px;
+  border-radius: 20px;
+  background: rgba(255,253,245,.94);
+  border: 1px solid rgba(6,21,34,.14);
+  box-shadow: var(--shadow);
+}
+.foamTicket span { display: block; color: var(--blue-dark); font-size: 11px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+.foamTicket b { display: block; margin-top: 4px; font-family: "Space Grotesk", Manrope, sans-serif; font-size: 20px; }
+@keyframes bubbleDrift { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(18px, -36px, 0) scale(1.06); } }
+@keyframes bubbleRise { 0%, 100% { transform: translateY(0) scale(1); opacity: .62; } 50% { transform: translateY(-24px) scale(1.08); opacity: .96; } }
+@keyframes spinCycle { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .foamOrb, .washerRing, .washerBubble, .testimonialTrack { animation: none !important; }
+}
 @media (max-width: 780px) {
   body { background-size: 28px 28px; }
   h1 { letter-spacing: -.075em; }
   .heroCopy::before { margin-bottom: 12px; font-size: 10px; }
   .heroVisual { background-size: 30px 30px, 30px 30px, auto, auto; }
   .navLinks { background: #fffdf5; contain: none; }
+  .bubbleAtmosphere { display: none; }
+  .washerPortal { right: 22px; top: 58px; width: 174px; height: 174px; }
+  .washerPortal img { width: 82px; height: 82px; border-radius: 24px; }
+  .foamTicket { right: 22px; bottom: 104px; transform: rotate(-2deg) scale(.88); transform-origin: right bottom; }
 }

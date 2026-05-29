@@ -275,6 +275,12 @@ export default function Home() {
   return (
     <main>
       <a className="skipLink" href="#booking">Skip to booking</a>
+      <div className="bubbleAtmosphere" aria-hidden="true">
+        <span className="foamOrb orbOne" />
+        <span className="foamOrb orbTwo" />
+        <span className="foamOrb orbThree" />
+        <span className="foamOrb orbFour" />
+      </div>
       <header className="nav">
         <a className="brand" href="#top" aria-label="Bubble Wash home">
           <Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} priority />
@@ -330,6 +336,16 @@ export default function Home() {
         </div>
         <div className="heroVisual heroSlider" aria-label="Bubble Wash live operations summary">
           <div className="slideOverlay" />
+          <div className="washerPortal" aria-hidden="true">
+            <Image src="/bubble-wash-icon.jpg" alt="" width={180} height={180} priority />
+            <span className="washerRing ringOne" />
+            <span className="washerRing ringTwo" />
+            <span className="washerBubble b1" />
+            <span className="washerBubble b2" />
+            <span className="washerBubble b3" />
+            <span className="washerBubble b4" />
+          </div>
+          <div className="foamTicket" aria-hidden="true"><span>soap trail</span><b>Osu → Labone</b></div>
           <div className="visualCard orderCard"><span>Your order</span><strong>BW-2081</strong><small>Pickup scheduled · Washing started · Delivery window set</small></div>
           <div className="visualCard mainBasket"><span>Today’s pickup</span><strong>82kg</strong><small>Growth plan · Core Accra · ironing added · WhatsApp updates on</small></div>
           <div className="routeCard"><b>Route fee</b><span>{zones[zone].label}</span><strong>{formatMoney(zones[zone].fee)}</strong></div>

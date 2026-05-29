@@ -59,6 +59,8 @@
 - Color roles: navy command background, cyan action, lime/mint live-status accents, cream page warmth, blue-gray text. Avoid default purple/gradient AI slop.
 - Interaction/motion: small transform/opacity only, no large paint-heavy mobile animations; reduced-motion keeps everything static.
 - Component map/data shape: hero coverage checker, route preview, quote calculator, booking forms, tracking panel, staff login, and role dashboards stay intact while the skin becomes more distinctive.
+- Memorable homepage layer: Bubble Wash should carry its icon and bubble motif everywhere — browser tab, install metadata, nav, hero, footer, and share previews. Bubbles are used as spatial memory: floating foam, lens-like route orbs, and handwritten operational notes; never as generic AI confetti.
+- Interaction/motion: bubble effects drift with opacity/transform only, pause on hover where useful, and shut off under `prefers-reduced-motion`. The hero should feel alive, but not slow the booking form.
 - Critique risk: visual experiments cannot break forms, role auth, or mobile nav. If a redesign makes actions less obvious, it failed.
 
 ## Staff workflow target
