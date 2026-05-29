@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { appendSubmissionRecord } from "@/lib/data-store";
 import { getCurrentStaffUser } from "@/lib/auth";
+import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
 import { automationActionsForOrder } from "@/lib/order-workflow";
 import { buildOrderSummaries, orderBoardRecords, readSubmissions } from "@/lib/submissions";
 
@@ -42,7 +43,8 @@ export async function POST(request: NextRequest) {
     };
 
     appendSubmissionRecord(record);
-    return NextResponse.json({ ok: true, message: `${selected.label} saved.`, id: record.id, nextStatus: selected.nextStatus });
+    const notifications = await dispatchSubmissionNotifications(record);
+    return NextResponse.json({ ok: true, message: `${selected.label} saved. ${notificationSummary(notifications)}`, id: record.id, nextStatus: selected.nextStatus, notifications });
   } catch {
     return NextResponse.json({ ok: false, error: "Unable to run automation." }, { status: 500 });
   }

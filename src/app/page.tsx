@@ -42,6 +42,13 @@ type TrackingResult = {
   route?: RoutePreview;
 };
 
+type PaymentCheckout = {
+  reference: string;
+  authorizationUrl: string;
+  accessCode: string;
+  amountGhs: number;
+};
+
 const services = [
   ["Wash + fold", "Everyday laundry returned clean, packed, and tied to one order reference.", "01"],
   ["Ironing", "Uniforms, shirts, napkins, and guest-facing linen finished before delivery.", "02"],
@@ -68,8 +75,8 @@ const testimonials = [
 
 const faqs = [
   ["Can I book a one-time pickup?", "Yes. The service supports subscriptions, but the booking form can also capture one-time requests and custom pickup notes."],
-  ["Do payments work on the site yet?", "The payment screen is ready as a checkout request flow. Real card or MoMo charging needs Paystack, Flutterwave, or mobile money credentials before we turn on live payments."],
-  ["Will I receive email alerts?", "The site now captures alert preferences with every booking. Real email sending needs SMTP, Resend, SendGrid, or another email provider key."],
+  ["Do payments work on the site yet?", "Yes. Bubble Wash now initializes secure Paystack checkout for Ghana-ready card and mobile money payments when the Paystack secret key is configured."],
+  ["Will I receive email or WhatsApp alerts?", "Yes. Booking, checkout, onboarding, and workflow updates can send through Resend email and WhatsApp Cloud API once provider credentials and verified sender details are configured."],
   ["What areas are covered?", "Core Accra routes have no extra route fee. Near-route and outer-route pickups add delivery fees so pricing stays honest."],
   ["Can vendors manage their availability?", "Yes. Vendors use the staff login to update daily capacity, route area, services, and job status without crowding the customer page."],
   ["What does the admin section do?", "Admin work now lives behind login on separate pages for operations, vendor coordination, and support tickets."],
@@ -84,9 +91,9 @@ const proof = [
 
 const operationsPillars = [
   ["Book", "Schedule pickup, service type, area, alerts, and payment preference from one flow."],
+  ["Pay", "Paystack checkout handles Ghana-ready card and mobile money payments when live credentials are configured."],
   ["Route", "Dispatch sees route zone, bag count, pickup notes, vendor assignment, and ETA."],
-  ["Track", "Customer, admin, vendor, driver, and support read from the same Order ID timeline."],
-  ["Resolve", "Support can connect delays, missing items, QR intake notes, and payment status."],
+  ["Notify", "Email and WhatsApp updates can fire from the same order timeline instead of manual staff messages."],
 ];
 
 const trackingStages = ["Received", "Pickup scheduled", "Vendor assigned", "In washing", "Ready for delivery", "Delivered"];
@@ -141,6 +148,7 @@ export default function Home() {
   const [routePreview, setRoutePreview] = useState<RoutePreview>(() => buildRoutePreview("core", "Core Accra route"));
   const [trackingStatus, setTrackingStatus] = useState("Enter a booking/reference ID after submitting a request.");
   const [trackingResult, setTrackingResult] = useState<TrackingResult | null>(null);
+  const [paymentStatus, setPaymentStatus] = useState("Pay by card or mobile money through Paystack after entering billing details.");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   const addonEntries = useMemo(() => Object.entries(addons) as Array<[AddonKey, (typeof addons)[AddonKey]]>, []);
@@ -165,6 +173,26 @@ export default function Home() {
     return () => {
       mobileQuery.removeEventListener("change", updateMobileNav);
       window.removeEventListener("keydown", closeMenu);
+    };
+  }, []);
+
+  useEffect(() => {
+    const reference = new URLSearchParams(window.location.search).get("payment_reference");
+    if (!reference) return;
+    let active = true;
+    setPaymentStatus("Verifying Paystack payment status...");
+    fetch(`/api/payments/verify?reference=${encodeURIComponent(reference)}`)
+      .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+      .then(({ ok, data }) => {
+        if (!active) return;
+        if (!ok || !data.ok) throw new Error(data.error ?? "Payment verification failed.");
+        setPaymentStatus(`Payment ${data.payment.status || "verified"}. Reference: ${data.payment.reference || reference}`);
+      })
+      .catch((error) => {
+        if (active) setPaymentStatus(error instanceof Error ? error.message : "Unable to verify payment.");
+      });
+    return () => {
+      active = false;
     };
   }, []);
 
@@ -196,6 +224,23 @@ export default function Home() {
       form.reset();
     } catch (error) {
       setFormStatus((current) => ({ ...current, [type]: error instanceof Error ? error.message : "Unable to save request." }));
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function submitPayment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const payload = Object.fromEntries(new FormData(form).entries());
+    setPendingAction("payment-checkout");
+    setPaymentStatus("Creating secure Paystack checkout...");
+    try {
+      const data = await postJSON<{ ok: boolean; message: string; id: string; payment: PaymentCheckout }>("/api/payments/initialize", payload);
+      setPaymentStatus(`${data.message} Redirecting to Paystack... Reference: ${data.payment.reference}`);
+      window.location.href = data.payment.authorizationUrl;
+    } catch (error) {
+      setPaymentStatus(error instanceof Error ? error.message : "Unable to create Paystack checkout.");
     } finally {
       setPendingAction(null);
     }
@@ -538,17 +583,17 @@ export default function Home() {
             {formStatus["pickup-booking"] && <p className="status success" role="status" aria-live="polite">{formStatus["pickup-booking"]}</p>}
           </form>
 
-          <form className="panel paymentPanel" onSubmit={(event) => submitLead(event, "checkout-request")}>
-            <h3>Payment checkout request</h3>
-            <p className="formHint">This records a checkout request only. Live charging still needs payment-provider credentials.</p>
+          <form className="panel paymentPanel" onSubmit={submitPayment}>
+            <h3>Secure Paystack checkout</h3>
+            <p className="formHint">Paystack is the selected Ghana-ready payment gateway for card and mobile money checkout. Live charging activates when the production secret key is configured.</p>
             <label>Billing name<input name="name" placeholder="Billing name" autoComplete="name" required /></label>
             <label>Billing email<input name="email" type="email" placeholder="Billing email" autoComplete="email" required /></label>
             <label>Phone / MoMo number<input name="phone" placeholder="Phone / MoMo number" autoComplete="tel" required /></label>
             <label>Business / account name<input name="company" placeholder="Business / account name" autoComplete="organization" required /></label>
-            <div className="two"><label>Amount<input name="amount" placeholder="GHS 2250" inputMode="decimal" /></label><label>Payment method<select name="paymentMethod"><option>MTN MoMo</option><option>Telecel Cash</option><option>Visa / Mastercard</option><option>Bank transfer</option></select></label></div>
+            <div className="two"><label>Amount<input name="amount" placeholder="GHS 2250" inputMode="decimal" required /></label><label>Payment method<select name="paymentMethod"><option>MTN MoMo</option><option>Telecel Cash</option><option>Visa / Mastercard</option><option>Bank transfer</option></select></label></div>
             <label>Invoice notes<textarea name="message" placeholder="Payment reference, invoice notes, or account instructions..." /></label>
-            <button className="button secondary full" type="submit" disabled={pendingAction === "checkout-request"}>{pendingAction === "checkout-request" ? "Saving checkout request..." : "Create Checkout Request"}</button>
-            {formStatus["checkout-request"] && <p className="status success" role="status" aria-live="polite">{formStatus["checkout-request"]}</p>}
+            <button className="button secondary full" type="submit" disabled={pendingAction === "payment-checkout"}>{pendingAction === "payment-checkout" ? "Opening Paystack..." : "Pay Securely with Paystack"}</button>
+            <p className="status success" role="status" aria-live="polite">{paymentStatus}</p>
           </form>
         </div>
       </section>

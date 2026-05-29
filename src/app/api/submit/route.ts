@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { canAccess, getCurrentStaffUser, type StaffRole } from "@/lib/auth";
 import { appendSubmissionRecord } from "@/lib/data-store";
+import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 
 const emailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -106,7 +107,8 @@ export async function POST(request: NextRequest) {
     };
 
     appendSubmissionRecord(record);
-    return NextResponse.json({ ok: true, message: "Thanks — your request was received.", id: record.id });
+    const notifications = await dispatchSubmissionNotifications(record);
+    return NextResponse.json({ ok: true, message: `Thanks — your request was received. ${notificationSummary(notifications)}`, id: record.id, notifications });
   } catch {
     return NextResponse.json({ ok: false, error: "Unable to save submission." }, { status: 500 });
   }

@@ -33,6 +33,8 @@
 - Public homepage: nav, hero/coverage, proof strip, plans, operations engine, services, vendors, locations, quote, assurance, tracking, booking, onboarding, testimonials, staff teaser, FAQ, payment strip, footer.
 - Forms submit typed intent through `/api/submit`: pickup booking, checkout request, client onboarding.
 - Quote uses `/api/quote` with plan, kg, zone, add-ons, and discount.
+- Payments use `/api/payments/initialize` and `/api/payments/verify` against Paystack transactions in GHS with card/mobile money channels.
+- Notifications use Resend email and WhatsApp Cloud API from server-only provider wrappers; missing credentials must skip safely and report setup status instead of pretending messages were sent.
 - Tracking uses `/api/track?id=` and displays only customer-safe fields.
 
 ## Compact refinement pass
@@ -85,3 +87,5 @@
 - Staff features must not crowd the customer conversion path.
 - Public pages must not expose staff-only operational fields or customer records.
 - API routes must fail closed on invalid plan, zone, discount, add-on, and quantity inputs.
+- Payment checkout must never expose the Paystack secret key client-side; initialize and verify transactions only in route handlers.
+- WhatsApp and email sends must be best-effort with clear provider status, not blockers that lose a booking if an external API is down.
