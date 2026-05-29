@@ -31,6 +31,7 @@ export async function GET(request: NextRequest) {
       payment: order.payment,
       vendor: order.vendor,
       eventCount: order.eventCount,
+      route: order.route,
     },
   });
 }

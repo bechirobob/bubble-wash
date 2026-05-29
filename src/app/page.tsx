@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { FormEvent, useMemo, useState } from "react";
+import { buildRoutePreview, type RoutePreview } from "@/lib/maps";
 import { addons, discounts, plans, zones, type AddonKey, type DiscountKey, type PlanName, type ZoneKey } from "@/lib/pricing";
 
 type Quote = {
@@ -35,6 +36,7 @@ type TrackingResult = {
   vendor?: string;
   eventCount?: number;
   updatedAt?: string;
+  route?: RoutePreview;
 };
 
 const services = [
@@ -84,6 +86,12 @@ const operationsPillars = [
 
 const trackingStages = ["Received", "Pickup scheduled", "Vendor assigned", "In washing", "Ready for delivery", "Delivered"];
 
+const liveTrackingPlan = [
+  ["MVP now", "Customers see status, vendor, route zone, and Google Maps directions from the saved order timeline."],
+  ["Driver app next", "Drivers opt into browser Geolocation on HTTPS and send timed location pings while active on a delivery."],
+  ["Production later", "Use Maps JavaScript API for live markers, Routes API for ETA/traffic, and server-side retention rules for privacy."],
+];
+
 const assuranceItems = [
   ["Clear intake", "Route, textile notes, alert preference, and payment lane are captured before dispatch."],
   ["Vendor accountability", "Acceptance, washing, finishing, and ready-for-driver updates attach to the timeline."],
@@ -123,6 +131,7 @@ export default function Home() {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const [mobileOpen, setMobileOpen] = useState(false);
   const [coverageStatus, setCoverageStatus] = useState("Enter your area to check pickup coverage.");
+  const [routePreview, setRoutePreview] = useState<RoutePreview>(() => buildRoutePreview("core", "Core Accra route"));
   const [trackingStatus, setTrackingStatus] = useState("Enter a booking/reference ID after submitting a request.");
   const [trackingResult, setTrackingResult] = useState<TrackingResult | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -168,11 +177,30 @@ export default function Home() {
     setSelectedAddons((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]));
   }
 
-  function checkCoverage(event: FormEvent<HTMLFormElement>) {
+  function routeZoneForArea(area: string): ZoneKey {
+    const normalized = area.toLowerCase();
+    if (["tema", "community", "outer"].some((item) => normalized.includes(item))) return "outer";
+    if (["spintex", "madina", "dzorwulu", "ridge", "near"].some((item) => normalized.includes(item))) return "near";
+    if (["custom", "kasoa", "adenta"].some((item) => normalized.includes(item))) return "custom";
+    return "core";
+  }
+
+  async function checkCoverage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const area = String(new FormData(event.currentTarget).get("coverageArea") ?? "").trim();
     const matched = locations.find((location) => area.toLowerCase().includes(location.split(" ")[0].toLowerCase()));
-    setCoverageStatus(matched ? `${matched} is covered. Book a pickup and we will confirm the route window.` : `${area || "That area"} may still be serviceable. Submit a booking so dispatch can confirm route pricing.`);
+    const selectedZone = routeZoneForArea(area || matched || "core");
+    setCoverageStatus("Checking coverage and route map...");
+    try {
+      const response = await fetch(`/api/route-preview?zone=${encodeURIComponent(selectedZone)}&area=${encodeURIComponent(area || matched || "Core Accra route")}`);
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error ?? "Route preview failed.");
+      setRoutePreview(data.route);
+      setCoverageStatus(matched ? `${matched} is covered. Route map and Google Maps directions are ready below.` : `${area || "That area"} may still be serviceable. Dispatch can confirm route pricing; use the map preview as a planning estimate.`);
+    } catch (error) {
+      setRoutePreview(buildRoutePreview(selectedZone, area || matched || "Core Accra route"));
+      setCoverageStatus(error instanceof Error ? error.message : "Unable to check route preview.");
+    }
   }
 
   function chooseVendor(name: string) {
@@ -231,6 +259,7 @@ export default function Home() {
           <a href="#plans" onClick={() => setMobileOpen(false)}>Plans</a>
           <a href="#booking" onClick={() => setMobileOpen(false)}>Book</a>
           <a href="#track" onClick={() => setMobileOpen(false)}>Track</a>
+          <a href="#locations" onClick={() => setMobileOpen(false)}>Map</a>
           <a href="#vendors-public" onClick={() => setMobileOpen(false)}>Vendors</a>
           <a href="#onboarding" onClick={() => setMobileOpen(false)}>Create account</a>
           <a href="#faq" onClick={() => setMobileOpen(false)}>FAQ</a>
@@ -326,11 +355,36 @@ export default function Home() {
 
       <section id="locations" className="section locationSection">
         <div className="sectionHead">
-          <p className="eyebrow">Route coverage</p>
+          <p className="eyebrow">Route coverage + Google Maps</p>
           <h2>Start with clear Accra zones instead of promising the whole city overnight.</h2>
-          <p>These areas feed the zone pricing in the calculator, so delivery fees stay connected to actual route distance.</p>
+          <p>These areas feed the zone pricing in the calculator. Google Maps links open real search/directions without storing customer GPS coordinates.</p>
         </div>
-        <div className="locationGrid">{locations.map((item) => <span key={item}>{item}</span>)}</div>
+        <div className="mapCoverageGrid">
+          <div>
+            <div className="locationGrid">{locations.map((item) => <span key={item}>{item}</span>)}</div>
+            <div className="mapResearchCard">
+              <h3>Google Maps integration approach</h3>
+              <p>Research call: Maps URLs work without an API key for search/directions. Live embedded maps, styled markers, traffic ETAs, and Routes API need Google Cloud billing, restricted API keys, and privacy controls.</p>
+            </div>
+          </div>
+          <aside className="routeMapCard" aria-label="Route map preview">
+            <div className="routeMapCanvas">
+              <span className="mapPin hubPin">Hub</span>
+              <span className="routeLine" />
+              <span className="mapPin pickupPin">Pickup</span>
+            </div>
+            <div className="routeMapBody">
+              <span className="badge">{routePreview.zoneLabel}</span>
+              <h3>{routePreview.pickup.label}</h3>
+              <p>{routePreview.zoneNote}</p>
+              <div className="miniRows light"><span>Estimated drive: {routePreview.estimatedDriveMinutes ? `${routePreview.estimatedDriveMinutes} min` : "Confirm first"}</span><span>Planning distance: {routePreview.estimatedDistanceKm ? `${routePreview.estimatedDistanceKm} km` : "Custom route"}</span></div>
+              <div className="mapActions">
+                <a className="button primary" href={routePreview.directionsUrl} target="_blank" rel="noreferrer">Open Directions</a>
+                <a className="button secondary" href={routePreview.googleMapsUrl} target="_blank" rel="noreferrer">View Area</a>
+              </div>
+            </div>
+          </aside>
+        </div>
       </section>
 
       <section id="quote" className="section quoteSection">
@@ -383,11 +437,15 @@ export default function Home() {
               <p>{trackingResult.customer}</p>
               <div className="miniRows"><span>Vendor: {trackingResult.vendor || "Pending assignment"}</span><span>Area: {trackingResult.area}</span><span>Payment: {trackingResult.payment}</span><span>Events: {trackingResult.eventCount ?? 1}</span><span>Updated: {new Date(trackingResult.updatedAt || trackingResult.createdAt).toLocaleString()}</span></div>
               <p>{trackingResult.nextStep}</p>
+              {trackingResult.route && <div className="trackingMapActions"><a className="button primary" href={trackingResult.route.directionsUrl} target="_blank" rel="noreferrer">Open Google Maps Route</a><a className="button secondary" href={trackingResult.route.googleMapsUrl} target="_blank" rel="noreferrer">View Pickup Area</a></div>}
             </> : <>
               <span>Tracking stages</span>
               <div className="stageList">{trackingStages.map((stage, index) => <div key={stage}><b>{index + 1}</b><span>{stage}</span></div>)}</div>
             </>}
           </aside>
+        </div>
+        <div className="liveTrackingGrid">
+          {liveTrackingPlan.map(([title, copy]) => <article key={title}><h3>{title}</h3><p>{copy}</p></article>)}
         </div>
       </section>
 

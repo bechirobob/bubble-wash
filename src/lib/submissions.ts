@@ -2,6 +2,8 @@ import "server-only";
 
 import type { StaffRole } from "@/lib/auth";
 import { readSubmissionRecords } from "@/lib/data-store";
+import { buildRoutePreview, type RoutePreview } from "@/lib/maps";
+import { type ZoneKey, zones } from "@/lib/pricing";
 
 export type SubmissionRecord = {
   id: string;
@@ -23,6 +25,7 @@ export type OrderSummary = {
   nextStep: string;
   eventCount: number;
   lastEventType: string;
+  route: RoutePreview;
   timeline: Array<{
     id: string;
     createdAt: string;
@@ -56,6 +59,15 @@ export function text(value: unknown) {
 
 function canonicalOrderId(record: SubmissionRecord) {
   return text(record.data.orderId) || record.id;
+}
+
+function zoneKeyFrom(value: string): ZoneKey {
+  if (value in zones) return value as ZoneKey;
+  const normalized = value.toLowerCase();
+  if (normalized.includes("outer") || normalized.includes("tema")) return "outer";
+  if (normalized.includes("near") || normalized.includes("spintex") || normalized.includes("madina") || normalized.includes("dzorwulu")) return "near";
+  if (normalized.includes("custom")) return "custom";
+  return "core";
 }
 
 function recordStatus(record: SubmissionRecord) {
@@ -122,12 +134,14 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
     const lastEventType = text(latest.data.submissionType) || "request";
     const status = recordStatus(latest);
     const vendor = findLatest("vendorName", "vendor");
+    const area = findLatest("area", "zone", "routeArea") || "Route pending";
+    const route = buildRoutePreview(zoneKeyFrom(findLatest("zone", "routeArea", "area")), area);
     const summary: OrderSummary = {
       orderId,
       createdAt: first.createdAt,
       updatedAt: latest.createdAt,
       customer: findCustomer(),
-      area: findLatest("area", "zone", "routeArea") || "Route pending",
+      area,
       vendor: vendor || "Unassigned",
       status,
       payment: findLatest("paymentPreference", "paymentMethod") || "Payment not confirmed",
@@ -135,6 +149,7 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
       nextStep: "",
       eventCount: chronological.length,
       lastEventType,
+      route,
       timeline: chronological.map((record) => ({
         id: record.id,
         createdAt: record.createdAt,
