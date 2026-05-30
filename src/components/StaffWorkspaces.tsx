@@ -6,18 +6,11 @@ import { FormEvent, ReactNode, useEffect, useState } from "react";
 import type { StaffRole } from "@/lib/auth";
 import { automationActionsForOrder } from "@/lib/order-workflow";
 
-const adminQueues = [
-  ["Intake", "New pickup requests, payment checks, and customer confirmation."],
-  ["Dispatch", "Auto-assign vendor from capacity, attach admin-onboarded drivers, and review every handoff."],
-  ["Quality", "Log washing issues, missing items, stain escalations, and rework."],
-];
-
 const supportTypes = ["Pickup delay", "Payment issue", "Missing item", "Quality complaint", "Vendor escalation", "General question"];
 
 type PortalShellProps = {
   title: string;
   eyebrow: string;
-  description: string;
   role: StaffRole;
   userName: string;
   children: ReactNode;
@@ -60,6 +53,87 @@ type DriverAvailabilityRow = { driverId: string; driverName: string; serviceZone
 type VendorDeclineRow = { id: string; orderId: string; vendorName: string; reason: string; declinedBy: string; createdAt: string };
 
 type AutomationAction = ReturnType<typeof automationActionsForOrder>[number];
+
+type QueueStats = { focusLabel: string; focusCount: number; automationCount: number; riskCount: number; capacityLabel: string };
+
+function rolePromise(role: StaffRole) {
+  if (role === "admin") return { eyebrow: "Control room", title: "Exceptions. Dispatch. Closeout." };
+  if (role === "vendor") return { eyebrow: "Vendor lane", title: "Accept. Wash. Ready." };
+  if (role === "driver") return { eyebrow: "Route lane", title: "Pickup. Handoff. Deliver." };
+  return { eyebrow: "Support lane", title: "Tickets. Escalations. Resolutions." };
+}
+
+function isRiskOrder(order: OrderSummary) {
+  return order.workflowStage.key === "exception" || order.stageTimer.tone === "breached" || order.priority === "Urgent";
+}
+
+function orderMatchesRoleFocus(order: OrderSummary, role: StaffRole, userName: string) {
+  const actions = automationActionsForOrder(order, role, userName);
+  if (role === "admin") return isRiskOrder(order) || actions.some((action) => action.key.includes("assign") || action.key.includes("schedule"));
+  if (role === "vendor") return actions.some((action) => action.key.includes("vendor"));
+  if (role === "driver") return actions.some((action) => action.key.includes("driver"));
+  return isRiskOrder(order) || actions.some((action) => action.key.includes("support"));
+}
+
+function queueStats(orders: OrderSummary[], role: StaffRole, userName: string, availabilityCount = 0): QueueStats {
+  const automationCount = orders.reduce((count, order) => count + automationActionsForOrder(order, role, userName).length, 0);
+  const focusCount = orders.filter((order) => orderMatchesRoleFocus(order, role, userName)).length;
+  const riskCount = orders.filter(isRiskOrder).length;
+  return {
+    focusLabel: role === "admin" ? "needs dispatch" : role === "vendor" ? "ready for vendor" : role === "driver" ? "route actions" : "needs support",
+    focusCount,
+    automationCount,
+    riskCount,
+    capacityLabel: availabilityCount ? `${availabilityCount} live capacity rows` : "capacity waiting",
+  };
+}
+
+function formatShortTime(value: string) {
+  return new Date(value).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function formatMetricTime(value: string) {
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDuration(totalSeconds: number) {
+  const seconds = Math.max(0, totalSeconds);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  const core = `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+  return `${String(hours).padStart(2, "0")}:${core}`;
+}
+
+function StageCountdown({ order }: { order: OrderSummary }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  if (!order.stageTimer.targetMinutes) {
+    return <div className="slaPill timer-paused" aria-label="SLA timer complete"><span>SLA</span><b>Complete</b><small>{order.priority}</small></div>;
+  }
+
+  const startedAt = new Date(order.updatedAt).getTime();
+  const targetMs = order.stageTimer.targetMinutes * 60_000;
+  const remainingSeconds = Math.ceil((startedAt + targetMs - now) / 1000);
+  const overdue = remainingSeconds < 0;
+  const dueSoon = !overdue && remainingSeconds <= 20 * 60;
+  const tone = overdue ? "breached" : dueSoon ? "due" : "ok";
+  const label = overdue ? "Overdue" : "SLA";
+  const duration = formatDuration(Math.abs(remainingSeconds));
+
+  return (
+    <div className={`slaPill countdown timer-${tone}`} aria-label={`${label} ${duration}`}>
+      <span>{label}</span>
+      <b>{duration}</b>
+      <small>{order.workflowStage.label} · {order.priority}</small>
+    </div>
+  );
+}
 
 function AvailabilityBoard({ role }: { role: StaffRole }) {
   const [vendors, setVendors] = useState<VendorAvailabilityRow[]>([]);
@@ -104,7 +178,7 @@ function AvailabilityBoard({ role }: { role: StaffRole }) {
 
   return (
     <section className="section portalSection availabilitySection">
-      <div className="activityHeader"><div><p className="eyebrow">Availability table</p><h2>Real roster capacity for assignment automation.</h2><p>Admin auto-assignment now reads these SQLite-backed vendor and driver rows instead of guessing from activity logs.</p></div><button className="button secondary" type="button" onClick={() => loadAvailability()}>Refresh Availability</button></div>
+      <div className="activityHeader"><div><p className="eyebrow">Availability</p><h2>Roster capacity</h2></div><button className="button secondary" type="button" onClick={() => loadAvailability()}>Refresh</button></div>
       <div className="orderBoardGrid">
         {vendors.slice(0, 6).map((vendor) => <article className="orderBoardCard" key={vendor.vendorId}><div className="orderBoardTop"><strong>{vendor.vendorName}</strong><span>{vendor.availabilityStatus}</span></div><div className="orderMeta"><span>Capacity: {vendor.capacityRemaining}</span><span>Zones: {vendor.serviceZones.join(", ") || "Any"}</span><span>Services: {vendor.serviceTypes.join(", ") || "Any"}</span></div><p>{vendor.notes || "No vendor note."}</p></article>)}
         {(role === "admin" || role === "driver") && drivers.slice(0, 6).map((driver) => <article className="orderBoardCard" key={driver.driverId}><div className="orderBoardTop"><strong>{driver.driverName}</strong><span>{driver.availabilityStatus}</span></div><div className="orderMeta"><span>Route slots: {driver.capacityRemaining}</span><span>Zones: {driver.serviceZones.join(", ") || "Any"}</span><span>Vehicle: {driver.vehicle || "Not set"}</span></div><p>{driver.notes || "No driver note."}</p></article>)}
@@ -114,13 +188,6 @@ function AvailabilityBoard({ role }: { role: StaffRole }) {
     </section>
   );
 }
-
-const workflowStages = [
-  ["01", "Received → Pickup Scheduled", "Admin validates the original booking once, then schedules pickup from inherited customer data."],
-  ["02", "Auto-assign → Vendor accepts/declines", "Admin can auto-assign from vendor capacity and the driver roster; vendors accept or decline without retyping order context."],
-  ["03", "Driver Route → At Vendor", "Driver route, pickup, and vendor drop-off actions append checkpoints to the same Order ID."],
-  ["04", "Washing → Ready → Delivered", "Vendor and driver move the order through production and return delivery; support handles only exceptions."],
-];
 
 function RecentActivity({ filter }: { filter?: string }) {
   const [records, setRecords] = useState<SubmissionRecord[]>([]);
@@ -172,10 +239,10 @@ function AutomatedOrderActions({ order, role, userName, onSaved }: { order: Orde
 
   async function run(action: AutomationAction) {
     setPendingLabel(action.label);
-    setStatus(`Running ${action.label.toLowerCase()}…`);
+    setStatus(`${action.label}…`);
     try {
       const data = await postJSON<{ ok: boolean; message: string; id: string; nextStatus: string }>("/api/orders/advance", { orderId: order.orderId, actionKey: action.key });
-      setStatus(`${data.message} Automation event: ${data.id}. Next: ${data.nextStatus}`);
+      setStatus(`Saved ${data.id} → ${data.nextStatus}`);
       await onSaved();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to run automation.");
@@ -186,12 +253,12 @@ function AutomatedOrderActions({ order, role, userName, onSaved }: { order: Orde
 
   return (
     <div className="automationPanel">
-      <div>
-        <b>Automation shortcuts</b>
-        <span>No retyping: these actions reuse the original order data and append the next event to this timeline.</span>
+      <div className="automationSummary">
+        <b>{actions.length ? "Action rail" : "No action"}</b>
+        <span>{actions.length ? `${actions.length} available` : "Waiting"}</span>
       </div>
       <div className="automationActions">
-        {actions.length ? actions.map((action) => <button className="button secondary" disabled={Boolean(pendingLabel)} key={action.label} onClick={() => run(action)} title={action.description} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>) : <span className="status">No safe automated action for this role at the current stage.</span>}
+        {actions.length ? actions.map((action, index) => <button className={`button ${index === 0 ? "primary" : "secondary"}`} disabled={Boolean(pendingLabel)} key={action.label} onClick={() => run(action)} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>) : <span className="status">Waiting</span>}
       </div>
       {status && <p className="status success" role="status" aria-live="polite">{status}</p>}
     </div>
@@ -211,43 +278,69 @@ function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: strin
       return;
     }
     setOrders(data.orders.slice(0, 10));
-    setStatus(data.orders.length ? "Shared order board loaded from the same event log." : "No shared orders yet.");
+    setStatus(data.orders.length ? "Updated." : "No shared orders yet.");
   }
 
   useEffect(() => {
     let active = true;
-    fetch("/api/orders")
-      .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
-      .then(({ ok, data }) => {
+    async function refresh(showLoading = false) {
+      if (!active) return;
+      if (showLoading) setStatus("Loading shared order board…");
+      try {
+        const response = await fetch("/api/orders");
+        const data = await response.json();
         if (!active) return;
-        if (!ok || !data.ok) {
+        if (!response.ok || !data.ok) {
           setStatus(data.error ?? "Unable to load shared orders.");
           return;
         }
         setOrders(data.orders.slice(0, 10));
-        setStatus(data.orders.length ? "Shared order board loaded from the same event log." : "No shared orders yet.");
-      })
-      .catch(() => {
+        setStatus(data.orders.length ? "Updated." : "No shared orders yet.");
+      } catch {
         if (active) setStatus("Unable to load shared orders.");
-      });
+      }
+    }
+    refresh(true);
+    const interval = window.setInterval(() => refresh(false), 30_000);
     return () => {
       active = false;
+      window.clearInterval(interval);
     };
   }, []);
 
+  const focusOrders = orders.filter((order) => orderMatchesRoleFocus(order, role, userName));
+  const visibleOrders = (focusOrders.length ? focusOrders : orders).slice(0, 6);
+  const stats = queueStats(orders, role, userName);
+
   return (
     <section className="section sharedBoardSection">
-      <div className="activityHeader"><div><p className="eyebrow">Automation workflow board</p><h2>One order entry feeds admin, vendor, driver, support, and tracking.</h2><p>Customer booking data now follows the order. Staff use one-click workflow actions instead of retyping details that already exist.</p></div><button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh Board</button></div>
-      <div className="workflowStages">{workflowStages.map(([step, title, copy]) => <article key={step}><b>{step}</b><h3>{title}</h3><p>{copy}</p></article>)}</div>
-      <div className="orderBoardList">
-        {orders.map((order) => <article className="orderBoardCard" key={order.orderId}>
+      <div className="staffCommandHeader">
+        <div>
+          <p className="eyebrow">Live command board</p>
+          <h2>{stats.focusCount ? `${stats.focusCount} ${stats.focusLabel}` : "No urgent moves right now"}</h2>
+        </div>
+        <button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh</button>
+      </div>
+      <div className="queueMetricGrid" aria-label="Queue summary">
+        <article><span>{stats.focusLabel}</span><strong>{stats.focusCount}</strong></article>
+        <article><span>next actions</span><strong>{stats.automationCount}</strong></article>
+        <article><span>risk / SLA</span><strong>{stats.riskCount}</strong></article>
+        <article><span>last refresh</span><strong>{orders[0] ? formatMetricTime(orders[0].updatedAt) : "—"}</strong></article>
+      </div>
+      <div className="orderBoardList compactOrders">
+        {visibleOrders.map((order) => <article className={`orderBoardCard compactOrderCard timer-${order.stageTimer.tone}`} key={order.orderId}>
           <div className="orderBoardTop"><strong>{order.orderId}</strong><span>{order.workflowStage.label}</span></div>
-          <h3>{order.customer}</h3>
-          <div className="orderMeta"><span>Status detail: {order.status}</span><span>Vendor: {order.vendor}</span><span>Driver: {order.driver}</span><span>ETA/window: {order.routeWindow}</span><span>Timer: {order.stageTimer.label}</span><span>Driver note: {order.locationNote}</span><span>Area: {order.area}</span><span>Payment: {order.payment}</span><span>Priority: {order.priority}</span><span>Events: {order.eventCount}</span><span>Updated: {new Date(order.updatedAt).toLocaleString()}</span></div>
-          <div className="mapActions"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noreferrer">Open Route</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noreferrer">View Area</a></div>
+          <div className="orderFocusRow">
+            <div>
+              <h3>{order.customer}</h3>
+              <div className="operatorFacts"><span>{order.phone || "No phone"}</span><span>{order.email || "No email"}</span><span>{order.eventCount} events</span></div>
+            </div>
+            <StageCountdown order={order} />
+          </div>
+          <div className="orderMeta minimalMeta"><span>{order.area}</span><span>{order.routeWindow}</span><span>{order.vendor}</span><span>{order.driver}</span><span>{order.payment}</span></div>
           <AutomatedOrderActions order={order} role={role} userName={userName} onSaved={() => loadOrders(false)} />
-          <p>{order.nextStep}</p>
-          <details><summary>Timeline</summary><div className="timelineList">{order.timeline.slice(0, 5).map((event) => <div key={`${order.orderId}-${event.id}-${event.createdAt}`}><b>{event.status}</b><span>{event.type} · {event.actor} · {new Date(event.createdAt).toLocaleString()}</span><p>{event.note}</p></div>)}</div></details>
+          <div className="mapActions"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noreferrer">Route</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noreferrer">Area</a></div>
+          <details className="quietDetails"><summary>Timeline and full context</summary><div className="timelineList">{order.timeline.slice(0, 5).map((event) => <div key={`${order.orderId}-${event.id}-${event.createdAt}`}><b>{event.status}</b><span>{event.type} · {event.actor} · {formatShortTime(event.createdAt)}</span><p>{event.note}</p></div>)}</div></details>
         </article>)}
       </div>
       <p className="status">{role.toUpperCase()} view · {status}</p>
@@ -262,8 +355,9 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
   return data;
 }
 
-function PortalShell({ title, eyebrow, description, role, userName, children }: PortalShellProps) {
+function PortalShell({ title, eyebrow, role, userName, children }: PortalShellProps) {
   const portalLinks = role === "admin" ? [["/admin", "Admin"], ["/vendors", "Vendors"], ["/drivers", "Drivers"], ["/support", "Support"]] : role === "vendor" ? [["/vendors", "Vendor workspace"]] : role === "driver" ? [["/drivers", "Driver workspace"]] : [["/support", "Support desk"]];
+  const promise = rolePromise(role);
   return (
     <main className="portalPage">
       <header className="portalNav">
@@ -275,9 +369,9 @@ function PortalShell({ title, eyebrow, description, role, userName, children }: 
       </header>
       <section className="section portalHero">
         <div>
-          <p className="eyebrow">{eyebrow}</p>
-          <h1>{title}</h1>
-          <p className="lead">{description}</p>
+          <p className="eyebrow">{promise.eyebrow}</p>
+          <h1>{promise.title}</h1>
+          <div className="roleBreadcrumb"><span>{eyebrow}</span><span>{title}</span></div>
         </div>
         <aside className="portalIdentity">
           <span>Signed in</span>
@@ -295,7 +389,6 @@ function SupportTicketForm({ userName, role, onSubmit, status }: { userName: str
   return (
     <form className="panel supportForm" onSubmit={(event) => onSubmit(event, "support-ticket")}>
       <h3>Create support ticket</h3>
-      <p className="formHint">Use this when an order needs help from support. Support can attend, assign, escalate, de-escalate, or resolve it from the ticket desk.</p>
       <div className="two"><input name="name" placeholder="Your name" defaultValue={userName} required /><input name="email" type="email" placeholder="Email" defaultValue={`${role}@bubblewash.local`} required /></div>
       <div className="two"><input name="phone" placeholder="Phone / WhatsApp" required /><input name="company" placeholder="Team, vendor, or customer" defaultValue={role === "admin" ? "Bubble Wash Operations" : role === "driver" ? "Bubble Wash Route Team" : role === "vendor" ? "Vendor Partner" : "Bubble Wash Support"} required /></div>
       <div className="two"><input name="orderId" placeholder="Related Order ID" /><select name="issueType">{supportTypes.map((item) => <option key={item}>{item}</option>)}</select></div>
@@ -349,7 +442,7 @@ function SupportTicketDesk({ userName }: { userName: string }) {
 
   return (
     <section className="section supportDeskSection">
-      <div className="activityHeader"><div><p className="eyebrow">Ticket command desk</p><h2>Attend, assign, escalate, de-escalate, and resolve support tickets.</h2><p>Tickets raised by admin, vendors, drivers, and support land here with the related Order ID.</p></div><button className="button secondary" type="button" onClick={() => loadTickets()}>Refresh Tickets</button></div>
+      <div className="activityHeader"><div><p className="eyebrow">Ticket desk</p><h2>Open tickets</h2></div><button className="button secondary" type="button" onClick={() => loadTickets()}>Refresh</button></div>
       <div className="supportTicketList">
         {records.map((record) => <article className="orderBoardCard supportTicketCard" key={record.id}>
           <div className="orderBoardTop"><strong>{record.data.orderId || record.id}</strong><span>{record.data.ticketStatus || record.data.issueType || "Open"}</span></div>
@@ -388,12 +481,11 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
   }
 
   return (
-    <PortalShell role={role} userName={userName} eyebrow="Admin operations" title="Admin dashboard" description="A dedicated control room for intake, dispatch, payments, priority changes, and quality checks.">
-      <section className="section opsSection portalSection">
-        <div className="opsGrid">
-          <div className="opsBoard">
-            {adminQueues.map(([title, copy]) => <article key={title}><h3>{title}</h3><p>{copy}</p></article>)}
-          </div>
+    <PortalShell role={role} userName={userName} eyebrow="Admin operations" title="Admin dashboard">
+      <section className="section opsSection portalSection manualSection">
+        <details className="manualToolbox">
+          <summary><span>Exception tools</span><small>Admin</small></summary>
+          <div className="opsGrid compactManualGrid">
           <form className="panel opsForm" onSubmit={(event) => submitLead(event, "admin-operation")}> 
             <h3>Log admin action</h3>
             <div className="two"><input name="name" placeholder="Operator name" defaultValue={userName} required /><input name="email" type="email" placeholder="Operator email" defaultValue="admin@bubblewash.local" required /></div>
@@ -408,7 +500,6 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
           </form>
           <form className="panel opsForm routeLogForm" onSubmit={(event) => submitLead(event, "driver-onboarding")}>
             <h3>Onboard driver</h3>
-            <p className="formHint">Drivers do not self-onboard. Admin adds the route roster, then automated dispatch can attach active drivers to orders.</p>
             <div className="two"><input name="name" placeholder="Driver full name" required /><input name="email" type="email" placeholder="Driver email" required /></div>
             <div className="two"><input name="phone" placeholder="Driver phone / WhatsApp" required /><input name="company" placeholder="Route team / contractor" defaultValue="Bubble Wash Route Team" required /></div>
             <div className="two"><input name="area" placeholder="Primary route zones e.g. Osu, Labone" /><input name="vehicle" placeholder="Vehicle / bike ID" /></div>
@@ -428,10 +519,14 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
             <button className="button primary full" type="submit">Log Linen Count</button>
             {formStatus["linen-inventory-log"] && <p className="status success">{formStatus["linen-inventory-log"]}</p>}
           </form>
-        </div>
+          </div>
+        </details>
       </section>
-      <section className="section portalSection supportCreateSection">
-        <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
+      <section className="section portalSection supportCreateSection manualSection">
+        <details className="manualToolbox">
+          <summary><span>Raise ticket</span><small>Exception</small></summary>
+          <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
+        </details>
       </section>
       <SharedOrderBoard role={role} userName={userName} />
       <AvailabilityBoard role={role} />
@@ -458,9 +553,11 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
   }
 
   return (
-    <PortalShell role={role} userName={userName} eyebrow="Vendor operations" title="Vendor dashboard" description="A separate lane for laundromat partners to report capacity, accept work, and update job status.">
-      <section className="section vendorSection dark portalSection">
-        <div className="vendorGrid">
+    <PortalShell role={role} userName={userName} eyebrow="Vendor operations" title="Vendor dashboard">
+      <section className="section vendorSection dark portalSection manualSection">
+        <details className="manualToolbox">
+          <summary><span>Exception tools</span><small>Vendor</small></summary>
+          <div className="vendorGrid">
           <form className="panel vendorForm" onSubmit={(event) => submitLead(event, "vendor-application")}>
             <h3>Register / update vendor capacity</h3>
             <div className="two"><input name="name" placeholder="Contact name" defaultValue={userName} required /><input name="email" type="email" placeholder="Email" defaultValue="vendor@bubblewash.local" required /></div>
@@ -490,10 +587,14 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
             <button className="button primary full" type="submit">Save QR Intake</button>
             {formStatus["qr-bag-intake"] && <p className="status success">{formStatus["qr-bag-intake"]}</p>}
           </form>
-        </div>
+          </div>
+        </details>
       </section>
-      <section className="section portalSection supportCreateSection">
-        <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
+      <section className="section portalSection supportCreateSection manualSection">
+        <details className="manualToolbox">
+          <summary><span>Raise ticket</span><small>Exception</small></summary>
+          <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
+        </details>
       </section>
       <SharedOrderBoard role={role} userName={userName} />
       <AvailabilityBoard role={role} />
@@ -520,18 +621,19 @@ export function DriverWorkspace({ userName, role }: { userName: string; role: St
   }
 
   return (
-    <PortalShell role={role} userName={userName} eyebrow="Driver operations" title="Driver route board" description="A focused route workflow for pickup, vendor handoff, customer ETA, and delivery updates without exposing live GPS before consent is ready.">
-      <section className="section driverSection portalSection">
-        <div className="driverGrid">
-          <div className="driverChecklist">
-            <article><strong>1. Confirm assignment</strong><span>Use the shared Order ID from dispatch. Do not create a second order.</span></article>
-            <article><strong>2. Share ETA</strong><span>Update pickup/delivery window before moving, especially when traffic changes.</span></article>
-            <article><strong>3. Log handoff</strong><span>Record bag count, vendor/customer handoff, and any photo or QR reference.</span></article>
-            <article><strong>4. Escalate delays</strong><span>Mark delayed early so support can notify the customer before they chase.</span></article>
+    <PortalShell role={role} userName={userName} eyebrow="Driver operations" title="Driver route board">
+      <section className="section driverSection portalSection manualSection">
+        <details className="manualToolbox">
+          <summary><span>Exception tools</span><small>Route</small></summary>
+          <div className="driverGrid">
+          <div className="driverChecklist operatorChips">
+            <article><strong>Assignment</strong></article>
+            <article><strong>ETA</strong></article>
+            <article><strong>Handoff</strong></article>
+            <article><strong>Delay</strong></article>
           </div>
           <form className="panel driverForm" onSubmit={(event) => submitLead(event, "driver-route-log")}>
             <h3>Update route status</h3>
-            <p className="formHint">Pilot-safe driver workflow: manual ETA/checkpoint updates now; browser GPS only after explicit driver opt-in and production privacy rules.</p>
             <div className="two"><input name="name" placeholder="Driver name" defaultValue={userName} required /><input name="email" type="email" placeholder="Driver email" defaultValue="driver@bubblewash.local" required /></div>
             <div className="two"><input name="phone" placeholder="Driver phone" required /><input name="company" placeholder="Bubble Wash route team" defaultValue="Bubble Wash Route Team" required /></div>
             <div className="two"><input name="orderId" placeholder="Shared Order ID e.g. BW-1234" required /><select name="orderStatus"><option>Driver en route</option><option>Pickup scheduled</option><option>Picked up</option><option>Dropped at vendor</option><option>Collected from vendor</option><option>Out for delivery</option><option>Delivered</option><option>Delayed</option></select></div>
@@ -541,10 +643,14 @@ export function DriverWorkspace({ userName, role }: { userName: string; role: St
             <button className="button primary full" type="submit">Save Driver Route Update</button>
             {formStatus["driver-route-log"] && <p className="status success">{formStatus["driver-route-log"]}</p>}
           </form>
-        </div>
+          </div>
+        </details>
       </section>
-      <section className="section portalSection supportCreateSection">
-        <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
+      <section className="section portalSection supportCreateSection manualSection">
+        <details className="manualToolbox">
+          <summary><span>Raise ticket</span><small>Exception</small></summary>
+          <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
+        </details>
       </section>
       <SharedOrderBoard role={role} userName={userName} />
       <AvailabilityBoard role={role} />
@@ -571,7 +677,7 @@ export function SupportWorkspace({ userName, role }: { userName: string; role: S
   }
 
   return (
-    <PortalShell role={role} userName={userName} eyebrow="Support desk" title="Support dashboard" description="Customer, vendor, payment, and delivery issues now have their own ticket page after login.">
+    <PortalShell role={role} userName={userName} eyebrow="Support desk" title="Support dashboard">
       <section className="section supportSection portalSection">
         <div className="supportGrid">
           <form className="panel supportForm" onSubmit={(event) => submitLead(event, "support-ticket")}>
@@ -584,11 +690,11 @@ export function SupportWorkspace({ userName, role }: { userName: string; role: S
             <button className="button primary full" type="submit">Create Support Ticket</button>
             {formStatus["support-ticket"] && <p className="status success">{formStatus["support-ticket"]}</p>}
           </form>
-          <div className="supportRules">
-            <article><strong>Pickup delay</strong><span>Confirm driver, update ETA, notify customer.</span></article>
-            <article><strong>Missing item</strong><span>Check bag count, vendor intake notes, and delivery handoff.</span></article>
-            <article><strong>Quality issue</strong><span>Log photos, approve rewash, assign vendor correction.</span></article>
-            <article><strong>Payment issue</strong><span>Confirm method, reference, invoice, and receipt status.</span></article>
+          <div className="supportRules operatorChips">
+            <article><strong>Pickup delay</strong></article>
+            <article><strong>Missing item</strong></article>
+            <article><strong>Quality issue</strong></article>
+            <article><strong>Payment issue</strong></article>
           </div>
         </div>
       </section>

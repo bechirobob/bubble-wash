@@ -6,10 +6,10 @@ import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 const credentialCards = [
-  ["Admin", "admin@bubblewash.local", "Full access to admin, vendor, driver, and support workspaces."],
-  ["Vendor", "vendor@bubblewash.local", "Vendor capacity and job update workspace."],
-  ["Driver", "driver@bubblewash.local", "Route pickup, handoff, ETA, and delivery workspace."],
-  ["Support", "support@bubblewash.local", "Support ticket workspace."],
+  ["Admin", "admin@bubblewash.local"],
+  ["Vendor", "vendor@bubblewash.local"],
+  ["Driver", "driver@bubblewash.local"],
+  ["Support", "support@bubblewash.local"],
 ];
 
 function LoginForm() {
@@ -54,24 +54,20 @@ function LoginForm() {
         <div className="loginGrid">
           <form className="panel loginPanel" onSubmit={login}>
             <p className="eyebrow">Staff login</p>
-            <h1>Separate dashboards, cleaner public page.</h1>
-            <p className="lead">Sign in to open the admin, vendor, driver, or support workspace. Customers stay on the booking page; operations move behind credentials.</p>
-            <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Staff email" required />
-            <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" required />
+            <h1>Staff operations login.</h1>
+            <label>Staff email<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Staff email" autoComplete="username" required /></label>
+            <label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" autoComplete="current-password" required /></label>
             <button className="button primary full" type="submit">Sign in</button>
             <p className="status">Destination: {nextPath}</p>
             <p className="status success">{status}</p>
           </form>
           <aside className="credentialPanel">
             <h2>Staff access</h2>
-            <p>Authorized staff roles are listed so teams can pick the right workspace quickly. Use the issued staff password or environment-backed credentials.</p>
             <div className="credentialList">
-              {credentialCards.map(([role, emailValue, copy]) => (
+              {credentialCards.map(([role, emailValue]) => (
                 <button className="credentialCard" type="button" key={role} onClick={() => fillCredential(emailValue)}>
                   <strong>{role}</strong>
                   <span>{emailValue}</span>
-                  <small>Password held server-side / issued to staff</small>
-                  <small>{copy}</small>
                 </button>
               ))}
             </div>

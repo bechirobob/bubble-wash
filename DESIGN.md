@@ -21,6 +21,16 @@
 - Shadow: soft single-layer shadows for cards; remove heavy effects on mobile.
 - Color roles: navy for authority, blue for actions, cyan for status accents, white cards over pale wash backgrounds, green only for success states.
 
+## Staff workspace production correction
+
+- Research notes: Rinse and Hamperapp organize customer flows around pickup, service, tracking/proof, and simple CTAs; Poplin reduces the buying path to “start order” and service facts; Laundry Boss presents operator tools as dashboard/business-intelligence modules, not tutorial cards.
+- User goal and attention model: trained staff should scan queue, SLA, route/customer facts, and action rail. They do not need each tile to explain itself.
+- Principles: remove redundant descriptions, keep manual tools collapsed, and let actions/status/timers carry the workflow. Gestalt grouping becomes `Metrics → Orders → Exceptions`; Fitts favors one strong action rail per order; feedback is concise: saved, failed, refreshed.
+- Visual system tokens: dark command surface, compact ticket rows, monospaced countdown numerals, muted metadata chips, and color only for SLA state/action priority.
+- Interaction and motion: SLA timers must be real client-side countdowns from persisted stage timestamps/targets, not static labels. Reduced-motion keeps the same information without decorative movement.
+- Component map/data shape: `SharedOrderBoard` shows role metrics, current-stage countdown, customer/order facts, action buttons, and collapsible timeline. `PortalShell` trims role copy. Manual forms collect exceptions only.
+- Critique checklist: if a card reads like onboarding copy, cut it; if the SLA is not counting down, fix it; if staff cannot act without scrolling through explanations, the board failed.
+
 ## Interaction and motion language
 
 - Smooth anchor navigation on desktop; reduced-motion disables animations and smooth scrolling.
@@ -91,3 +101,14 @@
 - API routes must fail closed on invalid plan, zone, discount, add-on, and quantity inputs.
 - Payment checkout must never expose the Paystack secret key client-side; initialize and verify transactions only in route handlers.
 - WhatsApp and email sends must be best-effort with clear provider status, not blockers that lose a booking if an external API is down.
+
+
+## Production automation correction — no MVP-coded descriptions
+
+- Research synthesis: Rinse, Hamperapp, Poplin, and Laundryheap keep customer journeys direct: address/coverage, order/start CTA, service facts, app/tracking, and delivery promise. They do not explain every tile once the action is obvious.
+- Public UI: tiles should scan as service/status labels. Remove redundant card descriptions from services, operations, assurance, tracking, and staff entry cards unless the copy changes a decision.
+- Staff UI: trained operators get metrics, SLA countdowns, order facts, route links, and next actions above the fold. Descriptive tooltips and “safe/pilot/demo” phrasing make the product look unfinished.
+- Automation: order boards should refresh automatically, action buttons should append inherited-context events, and manual forms stay collapsed for exceptions/new facts only.
+- SLA: countdowns must tick from persisted `updatedAt + targetMinutes`, with due/overdue styling. Static elapsed labels are not enough.
+- Mobile motion: bubble/foam brand effects must still exist on mobile in a lighter layer; do not disable the whole motif unless `prefers-reduced-motion` is active.
+- Paystack: test mode is acceptable pre-launch. Other “provider not configured” notices should not dominate customer UI; keep failures in API/status responses and deployment notes.

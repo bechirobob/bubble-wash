@@ -50,10 +50,10 @@ type PaymentCheckout = {
 };
 
 const services = [
-  ["Wash + fold", "Everyday laundry returned clean, packed, and tied to one order reference.", "01"],
-  ["Ironing", "Uniforms, shirts, napkins, and guest-facing linen finished before delivery.", "02"],
-  ["Commercial linen", "Hotels, clinics, restaurants, and teams can schedule repeat pickup cycles.", "03"],
-  ["Express routing", "Urgent loads can be flagged for faster vendor assignment and dispatch follow-up.", "04"],
+  ["Wash + fold", "01"],
+  ["Ironing", "02"],
+  ["Commercial linen", "03"],
+  ["Express routing", "04"],
 ];
 
 const locations = ["Osu", "Labone", "Cantonments", "Airport", "East Legon", "Dzorwulu", "Spintex", "Madina", "Tema by confirmation"];
@@ -75,8 +75,8 @@ const testimonials = [
 
 const faqs = [
   ["Can I book a one-time pickup?", "Yes. The service supports subscriptions, but the booking form can also capture one-time requests and custom pickup notes."],
-  ["Do payments work on the site yet?", "Yes. Bubble Wash now initializes secure Paystack checkout for Ghana-ready card and mobile money payments when the Paystack secret key is configured."],
-  ["Will I receive email or WhatsApp alerts?", "Yes. Booking, checkout, onboarding, and workflow updates can send through Resend email and WhatsApp Cloud API once provider credentials and verified sender details are configured."],
+  ["Do payments work on the site yet?", "Yes. Paystack checkout is connected for Ghana-ready card and mobile money payments. Test mode can stay on until final launch."],
+  ["Will I receive email or WhatsApp alerts?", "Yes. Booking, checkout, onboarding, and workflow updates attach to the same order timeline."],
   ["What areas are covered?", "Core Accra routes have no extra route fee. Near-route and outer-route pickups add delivery fees so pricing stays honest."],
   ["Can vendors manage their availability?", "Yes. Vendors use the staff login to update daily capacity, route area, services, and job status without crowding the customer page."],
   ["What does the admin section do?", "Admin work now lives behind login on separate pages for operations, vendor coordination, and support tickets."],
@@ -89,26 +89,13 @@ const proof = [
   ["1", "order timeline from pickup to delivery"],
 ];
 
-const operationsPillars = [
-  ["Book", "Schedule pickup, service type, area, alerts, and payment preference from one flow."],
-  ["Pay", "Paystack checkout handles Ghana-ready card and mobile money payments when live credentials are configured."],
-  ["Route", "Dispatch sees route zone, bag count, pickup notes, vendor assignment, and ETA."],
-  ["Notify", "Email and WhatsApp updates can fire from the same order timeline instead of manual staff messages."],
-];
+const operationsPillars = ["Book", "Pay", "Route", "Notify"];
 
 const trackingStages = ["Received", "Pickup scheduled", "Vendor assigned", "In washing", "Ready for delivery", "Delivered"];
 
-const liveTrackingPlan = [
-  ["Order updates", "Customers see pickup status, vendor handoff, route zone, and the next step from the saved order timeline."],
-  ["Driver ETAs", "Drivers update ETA, pickup, delivery, and handoff notes against the same Bubble Wash reference ID."],
-  ["Privacy-safe maps", "Google Maps links help plan routes without collecting live GPS unless a future driver tracking feature is explicitly enabled."],
-];
+const liveTrackingPlan = ["Order updates", "Driver ETAs", "Map links"];
 
-const assuranceItems = [
-  ["Clear intake", "Route, textile notes, alert preference, and payment lane are captured before dispatch."],
-  ["Vendor accountability", "Acceptance, washing, finishing, and ready-for-driver updates attach to the timeline."],
-  ["Commercial controls", "Bag counts, shortages, and invoice notes stay tied to the customer account."],
-];
+const assuranceItems = ["Clear intake", "Vendor accountability", "Commercial controls"];
 
 const paymentMethods = [
   ["Visa", "visa"],
@@ -134,7 +121,7 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
 export default function Home() {
   const [quotePlan, setQuotePlan] = useState<PlanName>("Growth");
   const [zone, setZone] = useState<ZoneKey>("core");
-  const [discount, setDiscount] = useState<DiscountKey>("newPilot");
+  const [discount, setDiscount] = useState<DiscountKey>("none");
   const [kg, setKg] = useState(82);
   const [selectedAddons, setSelectedAddons] = useState<AddonKey[]>(["ironing"]);
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -203,7 +190,7 @@ export default function Home() {
     try {
       const result = await postJSON<{ ok: boolean; quote: Quote }>("/api/quote", { plan: quotePlan, kg, addons: selectedAddons, zone, discount });
       setQuote(result.quote);
-      setQuoteStatus("Estimate calculated. Use this as the starting point before checkout or booking.");
+      setQuoteStatus("Estimate ready.");
     } catch (error) {
       setQuoteStatus(error instanceof Error ? error.message : "Unable to calculate estimate.");
     } finally {
@@ -234,10 +221,10 @@ export default function Home() {
     const form = event.currentTarget;
     const payload = Object.fromEntries(new FormData(form).entries());
     setPendingAction("payment-checkout");
-    setPaymentStatus("Creating secure Paystack checkout...");
+    setPaymentStatus("Opening Paystack checkout...");
     try {
       const data = await postJSON<{ ok: boolean; message: string; id: string; payment: PaymentCheckout }>("/api/payments/initialize", payload);
-      setPaymentStatus(`${data.message} Redirecting to Paystack... Reference: ${data.payment.reference}`);
+      setPaymentStatus(`Paystack opening. Reference: ${data.payment.reference}`);
       window.location.href = data.payment.authorizationUrl;
     } catch (error) {
       setPaymentStatus(error instanceof Error ? error.message : "Unable to create Paystack checkout.");
@@ -269,7 +256,7 @@ export default function Home() {
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error ?? "Route preview failed.");
       setRoutePreview(data.route);
-      setCoverageStatus(matched ? `${matched} is covered. Route map and Google Maps directions are ready below.` : `${area || "That area"} may still be serviceable. Dispatch can confirm route pricing; use the map preview as a planning estimate.`);
+      setCoverageStatus(matched ? `${matched} covered. Route ready.` : `${area || "Area"} queued for route confirmation.`);
     } catch (error) {
       setRoutePreview(buildRoutePreview(selectedZone, area || matched || "Core Accra route"));
       setCoverageStatus(error instanceof Error ? error.message : "Unable to check route preview.");
@@ -308,7 +295,7 @@ export default function Home() {
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error ?? "Tracking lookup failed.");
       setTrackingResult(data.tracking);
-      setTrackingStatus("Tracking record loaded from saved order requests.");
+      setTrackingStatus("Tracking loaded.");
     } catch (error) {
       setTrackingResult(null);
       setTrackingStatus(error instanceof Error ? error.message : "Unable to load tracking details.");
@@ -413,14 +400,12 @@ export default function Home() {
         <div className="sectionHead">
           <p className="eyebrow">Plans that do not pretend every customer is the same</p>
           <h2>Pick a subscription rhythm, then adjust by weight, route, and add-ons.</h2>
-          <p>Each plan connects to weight, pickup rhythm, route fees, finishing add-ons, and payment preference — the same inputs dispatch needs to fulfil the order.</p>
         </div>
         <div className="plansGrid">
           {plans.map((plan) => (
             <article className={plan.badge ? "planCard featured" : "planCard"} key={plan.name}>
               {plan.badge && <span className="badge">{plan.badge}</span>}
               <h3>{plan.name}</h3>
-              <p>{plan.description}</p>
               <div className="price">{plan.name === "Enterprise" ? "From " : ""}{formatMoney(plan.subscription)}<small>/ month coordination fee</small></div>
               <p className="pickup">{plan.pickups}</p>
               <ul>{plan.features.map((feature) => <li key={feature}>✓ {feature}</li>)}</ul>
@@ -434,9 +419,8 @@ export default function Home() {
         <div className="sectionHead compactHead">
           <p className="eyebrow">Operations engine</p>
           <h2>One customer promise, one order timeline behind it.</h2>
-          <p>Booking, routing, vendor updates, and support stay connected so customers are not chasing four different people.</p>
         </div>
-        <div className="commandGrid">{operationsPillars.map(([title, copy], index) => <article key={title}><span>{String(index + 1).padStart(2, "0")}</span><h3>{title}</h3><p>{copy}</p></article>)}</div>
+        <div className="commandGrid">{operationsPillars.map((title, index) => <article key={title}><span>{String(index + 1).padStart(2, "0")}</span><h3>{title}</h3></article>)}</div>
       </section>
 
       <section id="services" className="section">
@@ -444,14 +428,13 @@ export default function Home() {
           <p className="eyebrow">What Bubble Wash handles</p>
           <h2>Core laundry jobs, without the clutter.</h2>
         </div>
-        <div className="serviceGrid compactServiceGrid">{services.map(([title, copy, number]) => <article className="serviceCard" key={title}><div className="serviceIcon">{number}</div><h3>{title}</h3><p>{copy}</p></article>)}</div>
+        <div className="serviceGrid compactServiceGrid">{services.map(([title, number]) => <article className="serviceCard" key={title}><div className="serviceIcon">{number}</div><h3>{title}</h3></article>)}</div>
       </section>
 
       <section id="vendors-public" className="section vendorShowcase">
         <div className="sectionHead">
           <p className="eyebrow">Trusted laundry partners</p>
           <h2>Vetted vendors with real capacity, route areas, and service tags.</h2>
-          <p>Partner cards show service coverage and operational strengths. Choosing a vendor moves straight to booking so dispatch can confirm capacity against the route.</p>
         </div>
         <div className="vendorShowcaseGrid">
           {vendors.map(([name, area, tagOne, tagTwo, metric, tone]) => (
@@ -469,14 +452,13 @@ export default function Home() {
         <div className="sectionHead">
           <p className="eyebrow">Route coverage + Google Maps</p>
           <h2>Start with clear Accra zones instead of promising the whole city overnight.</h2>
-          <p>These areas feed the zone pricing in the calculator. Google Maps links open real search/directions without storing customer GPS coordinates.</p>
         </div>
         <div className="mapCoverageGrid">
           <div>
             <div className="locationGrid">{locations.map((item) => <span key={item}>{item}</span>)}</div>
             <div className="mapResearchCard">
-              <h3>Google Maps integration approach</h3>
-              <p>Research call: Maps URLs work without an API key for search/directions. Live embedded maps, styled markers, traffic ETAs, and Routes API need Google Cloud billing, restricted API keys, and privacy controls.</p>
+              <h3>Map routing</h3>
+              <p>Directions open in Google Maps.</p>
             </div>
           </div>
           <aside className="routeMapCard" aria-label="Route map preview">
@@ -523,16 +505,14 @@ export default function Home() {
         <div className="sectionHead compactHead">
           <p className="eyebrow">Service assurance</p>
           <h2>Trust signals built into the workflow.</h2>
-          <p>Less promise-stacking, more practical controls for pickup, vendor handoff, and billing clarity.</p>
         </div>
-        <div className="assuranceGrid">{assuranceItems.map(([title, copy]) => <article key={title}><h3>{title}</h3><p>{copy}</p></article>)}</div>
+        <div className="assuranceGrid">{assuranceItems.map((title) => <article key={title}><h3>{title}</h3></article>)}</div>
       </section>
 
       <section id="track" className="section trackingSection soft">
         <div className="sectionHead">
           <p className="eyebrow">Order tracking</p>
           <h2>Customers can track a real order reference without calling support.</h2>
-          <p>Tracking reads the shared order timeline and returns a clean customer view: status, vendor, area, payment lane, event count, and next step.</p>
         </div>
         <div className="trackingGrid">
           <form className="panel trackingPanel" onSubmit={trackOrder}>
@@ -557,7 +537,7 @@ export default function Home() {
           </aside>
         </div>
         <div className="liveTrackingGrid">
-          {liveTrackingPlan.map(([title, copy]) => <article key={title}><h3>{title}</h3><p>{copy}</p></article>)}
+          {liveTrackingPlan.map((title) => <article key={title}><h3>{title}</h3></article>)}
         </div>
       </section>
 
@@ -567,12 +547,10 @@ export default function Home() {
         <div className="sectionHead">
           <p className="eyebrow">Booking + alerts + payment preference</p>
           <h2>Customers can request pickup, choose payment preference, and opt into alerts.</h2>
-          <p>Use this to request a pickup, record the service details dispatch needs, and receive a Bubble Wash reference ID for tracking.</p>
         </div>
         <div className="scheduleGrid twoCols">
           <form className="panel" onSubmit={(event) => submitLead(event, "pickup-booking")}>
             <h3>Book laundry pickup</h3>
-            <p className="formHint">Dispatch needs these details to confirm route, vendor capacity, and customer alerts.</p>
             <div className="two"><label>Contact name<input name="name" placeholder="Name" autoComplete="name" required /></label><label>Email<input name="email" type="email" placeholder="Email" autoComplete="email" required /></label></div>
             <div className="two"><label>Phone / WhatsApp<input name="phone" placeholder="Phone / WhatsApp" autoComplete="tel" required /></label><label>Company or household<input name="company" placeholder="Company or household" autoComplete="organization" required /></label></div>
             <div className="two"><label>Preferred plan<select name="preferredPlan">{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label><label>Pickup zone<select name="zone">{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label></div>
@@ -585,7 +563,7 @@ export default function Home() {
 
           <form className="panel paymentPanel" onSubmit={submitPayment}>
             <h3>Secure Paystack checkout</h3>
-            <p className="formHint">Paystack is the selected Ghana-ready payment gateway for card and mobile money checkout. Live charging activates when the production secret key is configured.</p>
+            <p className="formHint">Paystack test mode is okay until final launch.</p>
             <label>Billing name<input name="name" placeholder="Billing name" autoComplete="name" required /></label>
             <label>Billing email<input name="email" type="email" placeholder="Billing email" autoComplete="email" required /></label>
             <label>Phone / MoMo number<input name="phone" placeholder="Phone / MoMo number" autoComplete="tel" required /></label>
@@ -611,7 +589,7 @@ export default function Home() {
           <div className="two"><label>Legal business name<input name="legalBusinessName" placeholder="Legal business name" /></label><label>Registration number<input name="registrationNumber" placeholder="Registration number" /></label></div>
           <div className="two"><label>Tax ID<input name="taxId" placeholder="Tax ID" /></label><label>Authorized signer<input name="authorizedSigner" placeholder="Authorized signer" /></label></div>
           <div className="two"><label>Team access<select name="multiAdmin"><option>Invite team leads</option><option>Single admin only</option></select></label><label>Billing cycle<select name="billingCycle"><option>Monthly</option><option>Yearly</option></select></label></div>
-          <div className="two"><label>Preferred plan<select name="preferredPlan">{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label><label>Account goal<select name="accountGoal"><option>Start ordering this week</option><option>Request guided demo</option><option>Need vendor coverage check</option></select></label></div>
+          <div className="two"><label>Preferred plan<select name="preferredPlan">{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label><label>Account goal<select name="accountGoal"><option>Start ordering this week</option><option>Open account this week</option><option>Need vendor coverage check</option></select></label></div>
           <label>KYC / rollout notes<textarea name="message" placeholder="Signer email, proof-of-address reference, government ID reference, or rollout notes..." /></label>
           <button className="button primary full" type="submit" disabled={pendingAction === "client-onboarding"}>{pendingAction === "client-onboarding" ? "Saving account request..." : "Create Bubble Wash Account Request"}</button>
           {formStatus["client-onboarding"] && <p className="status success" role="status" aria-live="polite">{formStatus["client-onboarding"]}</p>}
@@ -619,7 +597,7 @@ export default function Home() {
       </section>
 
       <section className="section testimonialsSection">
-        <div className="sectionHead"><p className="eyebrow">Customer confidence</p><h2>Built for teams that care about predictable returns.</h2><p className="scrollHint">Customer notes move automatically on desktop and become a swipe row on mobile.</p></div>
+        <div className="sectionHead"><p className="eyebrow">Customer confidence</p><h2>Built for teams that care about predictable returns.</h2></div>
         <div className="testimonialTrack" aria-label="Customer testimonials">{testimonials.concat(testimonials).map(([quoteText, name, role], index) => <article className="testimonialCard" key={`${name}-${index}`}><p>“{quoteText}”</p><strong>{name}</strong><span>{role}</span></article>)}</div>
       </section>
 
@@ -627,19 +605,18 @@ export default function Home() {
         <div className="sectionHead">
           <p className="eyebrow">Staff workspace</p>
           <h2>Admin, vendor, driver, and support work now lives after login.</h2>
-          <p>Customers get a focused booking experience. Operators get separate pages for intake, vendor capacity, driver route updates, and support tickets once they sign in.</p>
         </div>
         <div className="staffCards">
-          <a className="staffCard" href="/login?next=/admin"><span>01</span><h3>Admin dashboard</h3><p>Order intake, dispatch, payments, priority, and quality actions.</p></a>
-          <a className="staffCard" href="/login?next=/vendors"><span>02</span><h3>Vendor dashboard</h3><p>Capacity reporting, vendor registration, and job status updates.</p></a>
-          <a className="staffCard" href="/login?next=/drivers"><span>03</span><h3>Driver route board</h3><p>Pickup, ETA, handoff, route checkpoint, and delivery updates.</p></a>
-          <a className="staffCard" href="/login?next=/support"><span>04</span><h3>Support desk</h3><p>Customer, vendor, and payment issues handled away from the landing page.</p></a>
+          <a className="staffCard" href="/login?next=/admin"><span>01</span><h3>Admin dashboard</h3></a>
+          <a className="staffCard" href="/login?next=/vendors"><span>02</span><h3>Vendor dashboard</h3></a>
+          <a className="staffCard" href="/login?next=/drivers"><span>03</span><h3>Driver route board</h3></a>
+          <a className="staffCard" href="/login?next=/support"><span>04</span><h3>Support desk</h3></a>
         </div>
       </section>
 
       <section id="faq" className="section faqTestimonials">
         <div><p className="eyebrow">Questions people actually ask</p><h2>Clear answers before pickup.</h2>{faqs.map(([question, answer], index) => <button className="faqItem" key={question} type="button" aria-expanded={activeFaq === index} onClick={() => setActiveFaq(activeFaq === index ? -1 : index)}><span>{question}</span><b>{activeFaq === index ? "−" : "+"}</b>{activeFaq === index && <p>{answer}</p>}</button>)}</div>
-        <div className="contactCard"><Image src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={180} height={180} /><h2>Need a faster answer?</h2><p>Use the WhatsApp button for quick customer support, vendor questions, or account setup.</p><a className="button primary full" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20need%20help" target="_blank" rel="noreferrer">Chat on WhatsApp</a></div>
+        <div className="contactCard"><Image src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={180} height={180} /><h2>Need a faster answer?</h2><a className="button primary full" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20need%20help" target="_blank" rel="noreferrer">Chat on WhatsApp</a></div>
       </section>
 
       <section className="paymentStrip" aria-labelledby="payment-heading"><p className="eyebrow">Payment references</p><h3 id="payment-heading">Accepted payment lanes</h3><div className="paymentLogoGrid">{paymentMethods.map(([label, className]) => <span className={`paymentLogo ${className}`} key={label} role="img" aria-label={label} title={label}><span className="srOnly">{label}</span></span>)}</div></section>
