@@ -4,10 +4,20 @@ import { canAccess, getCurrentStaffUser, type StaffRole } from "@/lib/auth";
 import { upsertDriverAvailability, upsertVendorAvailability } from "@/lib/availability-store";
 import { appendSubmissionRecord } from "@/lib/data-store";
 import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
+import { plans, zones } from "@/lib/pricing";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 
 const emailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const maxFieldLength = 1200;
+const maxPublicPaymentAmount = 250000;
+const planNames = new Set(plans.map((plan) => plan.name));
+const zoneNames = new Set(Object.keys(zones));
+const paymentPreferences = new Set(["MTN MoMo", "Telecel Cash", "Card", "Bank transfer", "Invoice me"]);
+const paymentMethods = new Set(["MTN MoMo", "Telecel Cash", "Visa / Mastercard", "Bank transfer"]);
+const alertPreferences = new Set(["Email + WhatsApp alerts", "WhatsApp only", "Email only", "Call me"]);
+const billingCycles = new Set(["Monthly", "Yearly"]);
+const multiAdminModes = new Set(["Invite team leads", "Single admin only"]);
+const accountGoals = new Set(["Start ordering this week", "Open account this week", "Need vendor coverage check"]);
 const publicSubmissionTypes = new Set(["pickup-booking", "checkout-request", "client-onboarding"]);
 const publicAllowedFields = new Set([
   "submissionType",
@@ -112,6 +122,53 @@ function cleanPayload(body: Record<string, unknown>, submissionType: string) {
   );
 }
 
+function validateEnum(body: Record<string, unknown>, field: string, allowed: Set<string>, label: string) {
+  const value = text(body[field]);
+  if (value && !allowed.has(value)) return NextResponse.json({ ok: false, error: `Select a valid ${label}.` }, { status: 400 });
+  return null;
+}
+
+function validatePublicPayload(body: Record<string, unknown>, submissionType: string) {
+  if (!publicSubmissionTypes.has(submissionType)) return null;
+
+  const enumChecks = [
+    validateEnum(body, "zone", zoneNames, "pickup zone"),
+    validateEnum(body, "plan", planNames, "plan"),
+    validateEnum(body, "preferredPlan", planNames, "preferred plan"),
+    validateEnum(body, "paymentPreference", paymentPreferences, "payment preference"),
+    validateEnum(body, "paymentMethod", paymentMethods, "payment method"),
+    validateEnum(body, "alertPreference", alertPreferences, "alert preference"),
+    validateEnum(body, "billingCycle", billingCycles, "billing cycle"),
+    validateEnum(body, "multiAdmin", multiAdminModes, "team access mode"),
+    validateEnum(body, "accountGoal", accountGoals, "account goal"),
+  ];
+  const enumError = enumChecks.find(Boolean);
+  if (enumError) return enumError;
+
+  const kg = text(body.kg);
+  if (kg) {
+    const parsedKg = Number(kg);
+    if (!Number.isFinite(parsedKg) || parsedKg <= 0 || parsedKg > 10000) {
+      return NextResponse.json({ ok: false, error: "Enter a realistic laundry weight or request a custom quote." }, { status: 400 });
+    }
+  }
+
+  const amountText = text(body.amount).replace(/[^\d.]/g, "");
+  if (amountText) {
+    const amount = Number(amountText);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > maxPublicPaymentAmount) {
+      return NextResponse.json({ ok: false, error: "Enter a valid payment amount or request invoice support." }, { status: 400 });
+    }
+  }
+
+  const pickupDate = text(body.pickupDate);
+  if (pickupDate && Number.isNaN(Date.parse(pickupDate))) {
+    return NextResponse.json({ ok: false, error: "Enter a valid pickup date." }, { status: 400 });
+  }
+
+  return null;
+}
+
 async function authorizeSubmission(submissionType: string) {
   if (publicSubmissionTypes.has(submissionType)) return null;
   const requiredRole = staffSubmissionRoles.get(submissionType);
@@ -136,6 +193,8 @@ export async function POST(request: NextRequest) {
     const body = cleanPayload(rawBody, submissionType);
     const authError = await authorizeSubmission(submissionType);
     if (authError) return authError;
+    const validationError = validatePublicPayload(body, submissionType);
+    if (validationError) return validationError;
 
     const required = ["submissionType", "name", "email", "phone", "company"];
     for (const field of required) {

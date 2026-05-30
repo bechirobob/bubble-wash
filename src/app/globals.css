@@ -205,6 +205,7 @@ textarea { min-height: 118px; resize: vertical; }
 .check input { width: auto; }
 .status { color: var(--soft-ink); font-size: 14px; line-height: 1.45; }
 .status.success { color: #0b8f52; font-weight: 900; }
+.status.error { color: #b42318; font-weight: 900; }
 .paymentPanel { background: linear-gradient(145deg, white, var(--sand)); }
 
 .opsSection { background: #fff; }

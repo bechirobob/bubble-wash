@@ -112,3 +112,12 @@
 - SLA: countdowns must tick from persisted `updatedAt + targetMinutes`, with due/overdue styling. Static elapsed labels are not enough.
 - Mobile motion: bubble/foam brand effects must still exist on mobile in a lighter layer; do not disable the whole motif unless `prefers-reduced-motion` is active.
 - Paystack: test mode is acceptable pre-launch. Other “provider not configured” notices should not dominate customer UI; keep failures in API/status responses and deployment notes.
+
+## 2026-05-30 frontend/backend standards change plan
+
+- What: tighten public UI actions and API validation without replacing the existing Bubble Wash build.
+- Why: release-grade UX requires buttons to perform complete actions, status messages to distinguish success from errors, and public APIs to reject invalid enum/numeric/date shapes before persistence.
+- Files likely touched: `src/app/page.tsx`, `src/app/globals.css`, `src/app/api/submit/route.ts`, and this blueprint.
+- Expected outcome: plan cards set the quote context instead of acting like generic anchors; public forms show error states in red instead of all-green status; `/api/submit` validates public zone/plan/payment/alert/account fields and bounded kg/amount/date values.
+- Risks and mitigation: keep changes small, preserve existing forms/routes, avoid dependencies, and verify with lint, tests, build, and API smoke checks.
+- Verification: run `npm run lint`, `npm test`, `npm run build`; smoke `/api/quote`, `/api/submit` valid payload, and `/api/submit` invalid payload.

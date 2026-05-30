@@ -111,6 +111,17 @@ function formatMoney(value: number) {
   return new Intl.NumberFormat("en-GH", { style: "currency", currency: "GHS", maximumFractionDigits: 0 }).format(value);
 }
 
+function statusTone(message?: string) {
+  if (!message) return "status";
+  if (/unable|failed|missing|invalid|too many|error|required|not configured|enter .*first/i.test(message)) return "status error";
+  if (/ready|covered|received|Reference:|selected|loaded|verified|opening/i.test(message)) return "status success";
+  return "status";
+}
+
+function scrollToSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 async function postJSON<T>(url: string, payload: unknown): Promise<T> {
   const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const data = await response.json();
@@ -275,6 +286,12 @@ export default function Home() {
     await runCoverageCheck(area);
   }
 
+  function choosePlan(planName: PlanName) {
+    setQuotePlan(planName);
+    setQuoteStatus(`${planName} selected. Adjust kg, route, and add-ons to finish the estimate.`);
+    scrollToSection("quote");
+  }
+
   function chooseVendor(name: string) {
     setFormStatus((current) => ({ ...current, ["vendor-choice"]: `${name} selected. Complete the booking form below so dispatch can confirm capacity.` }));
     document.getElementById("booking")?.scrollIntoView({ behavior: "smooth" });
@@ -363,7 +380,7 @@ export default function Home() {
               {popularAreas.map((area) => <button key={area} type="button" onClick={() => choosePopularArea(area)} disabled={pendingAction === "coverage"}>{area}</button>)}
             </div>
           </form>
-          <p className="status" role="status" aria-live="polite">{coverageStatus}</p>
+          <p className={statusTone(coverageStatus)} role="status" aria-live="polite">{coverageStatus}</p>
           <div className="heroActions">
             <a className="button primary" href="#booking">Book a Pickup</a>
             <a className="button secondary" href="#locations">Check Coverage</a>
@@ -409,7 +426,7 @@ export default function Home() {
               <div className="price">{plan.name === "Enterprise" ? "From " : ""}{formatMoney(plan.subscription)}<small>/ month coordination fee</small></div>
               <p className="pickup">{plan.pickups}</p>
               <ul>{plan.features.map((feature) => <li key={feature}>✓ {feature}</li>)}</ul>
-              <a className="button primary full" href="#booking">{plan.name === "Enterprise" ? "Request Quote" : "Start with this plan"}</a>
+              <button className="button primary full" type="button" onClick={() => choosePlan(plan.name as PlanName)}>{plan.name === "Enterprise" ? "Prepare enterprise quote" : "Estimate this plan"}</button>
             </article>
           ))}
         </div>
@@ -492,7 +509,7 @@ export default function Home() {
             <div className="two"><label>Pickup zone<select value={zone} onChange={(e) => setZone(e.target.value as ZoneKey)}>{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label} · {formatMoney(item.fee)}</option>)}</select></label><label>Discount<select value={discount} onChange={(e) => setDiscount(e.target.value as DiscountKey)}>{discountEntries.map(([key, item]) => <option key={key} value={key}>{item.label} · {Math.round(item.percent * 100)}%</option>)}</select></label></div>
             <div className="addonGrid">{addonEntries.map(([key, addon]) => <label key={key} className="check"><input type="checkbox" checked={selectedAddons.includes(key)} onChange={() => toggleAddon(key)} /> {addon.label}</label>)}</div>
             <button className="button primary full" type="submit" disabled={pendingAction === "quote"}>{pendingAction === "quote" ? "Calculating..." : "Calculate estimate"}</button>
-            <p className="status" role="status" aria-live="polite">{quoteStatus}</p>
+            <p className={statusTone(quoteStatus)} role="status" aria-live="polite">{quoteStatus}</p>
           </form>
           <aside className="quoteResult">
             <h3>Estimated monthly total</h3>
@@ -519,7 +536,7 @@ export default function Home() {
             <h3>Track a Bubble Wash request</h3>
             <label>Tracking reference<input name="trackingId" placeholder="Reference e.g. BW-1760000000000" autoComplete="off" /></label>
             <button className="button primary full" type="submit" disabled={pendingAction === "track"}>{pendingAction === "track" ? "Checking..." : "Check Status"}</button>
-            <p className="status" role="status" aria-live="polite">{trackingStatus}</p>
+            <p className={statusTone(trackingStatus)} role="status" aria-live="polite">{trackingStatus}</p>
           </form>
           <aside className="trackingResult">
             {trackingResult ? <>
@@ -558,12 +575,12 @@ export default function Home() {
             <div className="two"><label>Payment preference<select name="paymentPreference"><option>MTN MoMo</option><option>Telecel Cash</option><option>Card</option><option>Bank transfer</option><option>Invoice me</option></select></label><label>Alert preference<select name="alertPreference"><option>Email + WhatsApp alerts</option><option>WhatsApp only</option><option>Email only</option><option>Call me</option></select></label></div>
             <label>Pickup notes<textarea name="message" placeholder="Textile type, special instructions, preferred time window..." /></label>
             <button className="button primary full" type="submit" disabled={pendingAction === "pickup-booking"}>{pendingAction === "pickup-booking" ? "Saving pickup request..." : "Request Pickup"}</button>
-            {formStatus["pickup-booking"] && <p className="status success" role="status" aria-live="polite">{formStatus["pickup-booking"]}</p>}
+            {formStatus["pickup-booking"] && <p className={statusTone(formStatus["pickup-booking"])} role="status" aria-live="polite">{formStatus["pickup-booking"]}</p>}
           </form>
 
           <form className="panel paymentPanel" onSubmit={submitPayment}>
             <h3>Secure Paystack checkout</h3>
-            <p className="formHint">Paystack test mode is okay until final launch.</p>
+            <p className="formHint">Card and mobile money checkout opens securely through Paystack after billing details are confirmed.</p>
             <label>Billing name<input name="name" placeholder="Billing name" autoComplete="name" required /></label>
             <label>Billing email<input name="email" type="email" placeholder="Billing email" autoComplete="email" required /></label>
             <label>Phone / MoMo number<input name="phone" placeholder="Phone / MoMo number" autoComplete="tel" required /></label>
@@ -571,7 +588,7 @@ export default function Home() {
             <div className="two"><label>Amount<input name="amount" placeholder="GHS 2250" inputMode="decimal" required /></label><label>Payment method<select name="paymentMethod"><option>MTN MoMo</option><option>Telecel Cash</option><option>Visa / Mastercard</option><option>Bank transfer</option></select></label></div>
             <label>Invoice notes<textarea name="message" placeholder="Payment reference, invoice notes, or account instructions..." /></label>
             <button className="button secondary full" type="submit" disabled={pendingAction === "payment-checkout"}>{pendingAction === "payment-checkout" ? "Opening Paystack..." : "Pay Securely with Paystack"}</button>
-            <p className="status success" role="status" aria-live="polite">{paymentStatus}</p>
+            <p className={statusTone(paymentStatus)} role="status" aria-live="polite">{paymentStatus}</p>
           </form>
         </div>
       </section>
@@ -592,7 +609,7 @@ export default function Home() {
           <div className="two"><label>Preferred plan<select name="preferredPlan">{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label><label>Account goal<select name="accountGoal"><option>Start ordering this week</option><option>Open account this week</option><option>Need vendor coverage check</option></select></label></div>
           <label>KYC / rollout notes<textarea name="message" placeholder="Signer email, proof-of-address reference, government ID reference, or rollout notes..." /></label>
           <button className="button primary full" type="submit" disabled={pendingAction === "client-onboarding"}>{pendingAction === "client-onboarding" ? "Saving account request..." : "Create Bubble Wash Account Request"}</button>
-          {formStatus["client-onboarding"] && <p className="status success" role="status" aria-live="polite">{formStatus["client-onboarding"]}</p>}
+          {formStatus["client-onboarding"] && <p className={statusTone(formStatus["client-onboarding"])} role="status" aria-live="polite">{formStatus["client-onboarding"]}</p>}
         </form>
       </section>
 
