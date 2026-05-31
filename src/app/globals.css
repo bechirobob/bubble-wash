@@ -425,7 +425,7 @@ body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSyst
 .workflowStages p { color: var(--soft-ink); line-height: 1.5; }
 .orderBoardList { display: grid; gap: 14px; }
 .orderBoardCard { background: white; border: 1px solid var(--line); border-radius: 28px; padding: 22px; box-shadow: var(--shadow); }
-.orderBoardTop { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+.orderBoardTop { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
 .orderBoardTop strong { color: var(--blue-dark); font-size: 20px; }
 .orderBoardTop span { border-radius: 999px; background: #e8f8ff; color: var(--blue-dark); padding: 8px 11px; font-size: 12px; font-weight: 950; }
 .orderMeta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
@@ -1223,10 +1223,110 @@ main, .nav { position: relative; z-index: 1; }
 .operatorChips article { min-height: 74px; display: flex; align-items: center; justify-content: center; text-align: center; }
 .operatorChips strong { margin: 0; }
 .operatorChips span { display: none; }
-.availabilitySection, .activitySection, .supportDeskSection, .supportSection, .driverSection, .opsSection, .vendorSection { background: transparent; }
+.availabilitySection, .activitySection, .supportDeskSection, .supportSection, .driverSection, .opsSection, .vendorSection, .onboardingCenter, .supportOpsHero, .supportWatchlist { background: transparent; }
 .portalPage .activityHeader p { color: var(--portal-muted); }
+.onboardingCenter, .supportOpsHero, .supportWatchlist { padding-top: 24px; padding-bottom: 18px; }
+.onboardingHeader, .supportOpsHero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr);
+  gap: 18px;
+  align-items: stretch;
+}
+.onboardingHeader {
+  margin-bottom: 16px;
+  padding: 20px;
+  border: 1px solid rgba(183,243,107,.22);
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(183,243,107,.09), rgba(103,232,255,.055));
+}
+.onboardingHeader p, .supportOpsCopy p, .supportWatchCard p { color: var(--portal-muted); }
+.onboardingBadges, .supportLaneGrid, .supportWatchGrid, .onboardingGrid {
+  display: grid;
+  gap: 12px;
+}
+.onboardingBadges { align-content: center; }
+.onboardingBadges span, .supportLaneGrid article, .supportWatchCard {
+  border: 1px solid var(--portal-line);
+  border-radius: 18px;
+  background: var(--portal-panel);
+  color: var(--portal-text);
+}
+.onboardingBadges span {
+  padding: 13px 14px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.onboardingGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.formTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.formTitleRow h3 { margin: 0; }
+.formTitleRow span {
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: #e9fff4;
+  color: #075245;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.supportOpsHero {
+  border: 1px solid rgba(103,232,255,.2);
+  border-radius: 26px;
+  padding: 20px;
+  background: linear-gradient(135deg, rgba(103,232,255,.09), rgba(183,243,107,.045));
+}
+.supportLaneGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.supportLaneGrid article {
+  padding: 16px;
+}
+.supportLaneGrid span, .supportLaneGrid small {
+  display: block;
+  color: var(--portal-muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.supportLaneGrid strong {
+  display: block;
+  margin: 8px 0 6px;
+  color: var(--cyan);
+  font-family: "Space Grotesk", Manrope, sans-serif;
+  font-size: clamp(28px, 4vw, 52px);
+  letter-spacing: -.06em;
+}
+.supportWatchGrid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.supportWatchCard {
+  padding: 18px;
+}
+.supportWatchCard.timer-breached { border-color: rgba(255,180,168,.55); }
+.supportWatchCard.timer-due { border-color: rgba(103,232,255,.38); }
+.supportWatchCard.empty { min-height: 150px; display: grid; align-content: center; }
+.portalPage .supportTicketCard .ticketActionForm {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--portal-line);
+}
+.supportDeskStatus {
+  max-width: 1180px;
+  margin: 0 auto 26px;
+}
 @media (max-width: 900px) {
-  .staffCommandHeader, .orderFocusRow, .automationPanel, .compactManualGrid { grid-template-columns: 1fr; }
+  .staffCommandHeader, .orderFocusRow, .automationPanel, .compactManualGrid, .onboardingHeader, .onboardingGrid, .supportOpsHero, .supportLaneGrid { grid-template-columns: 1fr; }
   .staffCommandHeader { display: grid; }
   .automationActions { justify-content: flex-start; }
   .slaPill.countdown { text-align: left; }
@@ -2887,6 +2987,27 @@ label {
   padding-top: 26px;
   padding-bottom: 34px;
   background: linear-gradient(180deg, rgba(248,251,255,.95), #fff);
+}
+.portalPage .workflowMapSection {
+  background: linear-gradient(135deg, rgba(255,255,255,.07), rgba(103,232,255,.045));
+  color: var(--portal-text);
+}
+.portalPage .workflowMapHeader p:last-child,
+.portalPage .workflowPrinciples span {
+  color: rgba(248,251,255,.74);
+}
+.portalPage .workflowStepRail span,
+.portalPage .workflowPrinciples article {
+  border-color: var(--portal-line);
+  background: rgba(255,255,255,.07);
+  color: var(--portal-text);
+  box-shadow: rgba(0,0,0,.18) 0 18px 48px -34px;
+}
+.portalPage .workflowStepRail span:nth-child(3),
+.portalPage .workflowStepRail span:nth-child(4),
+.portalPage .workflowStepRail span:nth-child(5) {
+  border-color: rgba(103,232,255,.36);
+  background: rgba(103,232,255,.08);
 }
 .workflowMapHeader {
   max-width: 860px;

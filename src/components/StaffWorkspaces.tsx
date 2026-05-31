@@ -430,6 +430,90 @@ function SupportTicketForm({ userName, role, onSubmit, status }: { userName: str
   );
 }
 
+function AdminOnboardingCenter({ userName, onSubmit, status }: { userName: string; onSubmit: SubmitHandler; status: Record<string, string> }) {
+  return (
+    <section className="section portalSection onboardingCenter" aria-labelledby="admin-onboarding-title">
+      <div className="onboardingHeader">
+        <div>
+          <p className="eyebrow">Admin onboarding</p>
+          <h2 id="admin-onboarding-title">Roster control for vendors and riders.</h2>
+          <p>Admin owns who can receive work. These records feed dispatch automation, capacity matching, and active route selection.</p>
+        </div>
+        <div className="onboardingBadges" aria-label="Onboarding automation summary">
+          <span>Vendor capacity → assignment</span>
+          <span>Rider slots → dispatch</span>
+          <span>Paused rows excluded</span>
+        </div>
+      </div>
+      <div className="onboardingGrid">
+        <form className="panel opsForm onboardingForm" onSubmit={(event) => onSubmit(event, "vendor-application")}>
+          <div className="formTitleRow"><h3>Onboard vendor</h3><span>Admin owned</span></div>
+          <div className="two"><input name="name" placeholder="Admin contact" defaultValue={userName} required /><input name="email" type="email" placeholder="Admin email" defaultValue="admin@bubblewash.local" required /></div>
+          <div className="two"><input name="phone" placeholder="Vendor phone / WhatsApp" required /><input name="company" placeholder="Vendor / laundromat name" required /></div>
+          <div className="two"><input name="area" placeholder="Approved zones e.g. Osu, Labone" required /><input name="capacity" inputMode="numeric" placeholder="Order slots today e.g. 8" required /></div>
+          <div className="two"><select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited capacity</option><option>Paused today</option></select><select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></div>
+          <textarea name="message" placeholder="KYC checks, machine capacity, turnaround promise, pickup limits, service restrictions..." required />
+          <button className="button primary full" type="submit">Save Vendor Roster</button>
+          {status["vendor-application"] && <p className="status success">{status["vendor-application"]}</p>}
+        </form>
+        <form className="panel opsForm onboardingForm" onSubmit={(event) => onSubmit(event, "driver-onboarding")}>
+          <div className="formTitleRow"><h3>Onboard rider</h3><span>Dispatch source</span></div>
+          <div className="two"><input name="name" placeholder="Rider full name" required /><input name="email" type="email" placeholder="Rider email" required /></div>
+          <div className="two"><input name="phone" placeholder="Rider phone / WhatsApp" required /><input name="company" placeholder="Route team / contractor" defaultValue="Bubble Wash Route Team" required /></div>
+          <div className="two"><input name="area" placeholder="Approved route zones e.g. Osu, Labone" required /><input name="vehicle" placeholder="Bike / vehicle ID" required /></div>
+          <div className="two"><input name="routeCapacity" inputMode="numeric" placeholder="Route slots today e.g. 4" defaultValue="4" /><select name="driverStatus"><option>Active</option><option>Training</option><option>Inactive</option><option>Suspended</option></select></div>
+          <div className="two"><select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited route capacity</option><option>Paused today</option></select><input name="serviceZones" placeholder="Backup zones e.g. Airport, Cantonments" /></div>
+          <textarea name="message" placeholder="ID/license check, route restrictions, emergency contact, bag handoff rules..." required />
+          <button className="button primary full" type="submit">Save Rider Roster</button>
+          {status["driver-onboarding"] && <p className="status success">{status["driver-onboarding"]}</p>}
+        </form>
+      </div>
+    </section>
+  );
+}
+
+function SupportOpsCommand({ records, orders }: { records: SubmissionRecord[]; orders: OrderSummary[] }) {
+  const openTickets = records.filter((record) => !/closed|resolved/i.test(String(record.data.ticketStatus ?? "")));
+  const urgentTickets = records.filter((record) => /urgent|high/i.test(String(record.data.priority ?? "")));
+  const waitingTickets = records.filter((record) => /waiting/i.test(String(record.data.ticketStatus ?? "")));
+  const breachedOrders = orders.filter((order) => isRiskOrder(order));
+  const lanes = [
+    { label: "Triage", value: openTickets.length, note: "New or unresolved tickets" },
+    { label: "Escalate", value: urgentTickets.length + breachedOrders.length, note: "Urgent tickets + SLA risk" },
+    { label: "Waiting", value: waitingTickets.length, note: "Customer/vendor/driver response" },
+    { label: "Resolve", value: records.filter((record) => /resolved|closed/i.test(String(record.data.ticketStatus ?? ""))).length, note: "Closed support loops" },
+  ];
+  return (
+    <section className="section supportOpsHero" aria-label="Support command overview">
+      <div className="supportOpsCopy">
+        <p className="eyebrow">Support command desk</p>
+        <h2>Work the queue before writing notes.</h2>
+        <p>Support should open from customer impact: delayed pickup, payment issue, missing item, quality problem, vendor escalation. Ticket actions then assign, escalate, de-escalate, resolve, close, or reopen without losing the Order ID.</p>
+      </div>
+      <div className="supportLaneGrid">
+        {lanes.map((lane) => <article key={lane.label}><span>{lane.label}</span><strong>{lane.value}</strong><small>{lane.note}</small></article>)}
+      </div>
+    </section>
+  );
+}
+
+function SupportOrderWatchlist({ orders }: { orders: OrderSummary[] }) {
+  const watchlist = orders.filter(isRiskOrder).slice(0, 5);
+  return (
+    <section className="section supportWatchlist" aria-label="Support SLA watchlist">
+      <div className="activityHeader"><div><p className="eyebrow">SLA watch</p><h2>Orders support should watch now</h2></div></div>
+      <div className="supportWatchGrid">
+        {watchlist.length ? watchlist.map((order) => <article className={`supportWatchCard timer-${order.stageTimer.tone}`} key={order.orderId}>
+          <div className="orderBoardTop"><strong>{order.orderId}</strong><span>{order.workflowStage.label}</span></div>
+          <h3>{order.customer}</h3>
+          <div className="orderMeta minimalMeta"><span>{order.phone || "No phone"}</span><span>{order.area}</span><span>{order.routeWindow}</span><span>{order.stageTimer.label}</span></div>
+          <p>{order.nextStep}</p>
+        </article>) : <article className="supportWatchCard empty"><strong>No breached SLA right now</strong><p>The support desk can stay focused on new tickets and customer replies.</p></article>}
+      </div>
+    </section>
+  );
+}
+
 function SupportTicketDesk({ userName }: { userName: string }) {
   const [records, setRecords] = useState<SubmissionRecord[]>([]);
   const [status, setStatus] = useState("Loading support tickets…");
@@ -512,6 +596,9 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
 
   return (
     <PortalShell role={role} userName={userName} eyebrow="Admin operations" title="Admin dashboard">
+      <AdminOnboardingCenter userName={userName} onSubmit={submitLead} status={formStatus} />
+      <SharedOrderBoard role={role} userName={userName} />
+      <AvailabilityBoard role={role} />
       <section className="section opsSection portalSection manualSection">
         <details className="manualToolbox">
           <summary><span>Exception tools</span><small>Admin</small></summary>
@@ -527,17 +614,6 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
             <textarea name="message" placeholder="Action notes: customer, vendor, route, promised time, payment status, or quality issue..." required />
             <button className="button primary full" type="submit">Save Admin Action</button>
             {formStatus["admin-operation"] && <p className="status success">{formStatus["admin-operation"]}</p>}
-          </form>
-          <form className="panel opsForm routeLogForm" onSubmit={(event) => submitLead(event, "driver-onboarding")}>
-            <h3>Onboard driver</h3>
-            <div className="two"><input name="name" placeholder="Driver full name" required /><input name="email" type="email" placeholder="Driver email" required /></div>
-            <div className="two"><input name="phone" placeholder="Driver phone / WhatsApp" required /><input name="company" placeholder="Route team / contractor" defaultValue="Bubble Wash Route Team" required /></div>
-            <div className="two"><input name="area" placeholder="Primary route zones e.g. Osu, Labone" /><input name="vehicle" placeholder="Vehicle / bike ID" /></div>
-            <div className="two"><input name="routeCapacity" inputMode="numeric" placeholder="Route slots today e.g. 4" defaultValue="4" /><select name="driverStatus"><option>Active</option><option>Training</option><option>Inactive</option><option>Suspended</option></select></div>
-            <div className="two"><select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited route capacity</option><option>Paused today</option></select><input name="serviceZones" placeholder="Backup zones e.g. Airport, Cantonments" /></div>
-            <textarea name="message" placeholder="License check, ID check, route restrictions, emergency contact, or onboarding notes..." required />
-            <button className="button secondary full" type="submit">Save Driver Onboarding</button>
-            {formStatus["driver-onboarding"] && <p className="status success">{formStatus["driver-onboarding"]}</p>}
           </form>
           <form className="panel opsForm inventoryLogForm" onSubmit={(event) => submitLead(event, "linen-inventory-log")}> 
             <h3>Commercial linen inventory</h3>
@@ -558,8 +634,6 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
           <SupportTicketForm userName={userName} role="admin" onSubmit={submitLead} status={formStatus["support-ticket"]} />
         </details>
       </section>
-      <SharedOrderBoard role={role} userName={userName} />
-      <AvailabilityBoard role={role} />
       <RecentActivity />
     </PortalShell>
   );
@@ -589,13 +663,13 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
           <summary><span>Exception tools</span><small>Vendor</small></summary>
           <div className="vendorGrid">
           <form className="panel vendorForm" onSubmit={(event) => submitLead(event, "vendor-application")}>
-            <h3>Register / update vendor capacity</h3>
+            <h3>Update today&apos;s capacity</h3>
             <div className="two"><input name="name" placeholder="Contact name" defaultValue={userName} required /><input name="email" type="email" placeholder="Email" defaultValue="vendor@bubblewash.local" required /></div>
             <div className="two"><input name="phone" placeholder="Phone / WhatsApp" required /><input name="company" placeholder="Laundromat name" required /></div>
             <div className="two"><input name="area" placeholder="Service zones e.g. Osu, Labone" /><input name="capacity" inputMode="numeric" placeholder="Order slots today e.g. 8" /></div>
             <div className="two"><select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited capacity</option><option>Paused today</option></select><select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></div>
             <textarea name="message" placeholder="Machines available, turnaround time, pickup limits, delivery support, service notes..." />
-            <button className="button primary full" type="submit">Save Vendor Capacity</button>
+            <button className="button primary full" type="submit">Update Capacity</button>
             {formStatus["vendor-application"] && <p className="status success">{formStatus["vendor-application"]}</p>}
           </form>
           <form className="panel vendorForm" onSubmit={(event) => submitLead(event, "vendor-job-update")}>
@@ -691,6 +765,9 @@ export function DriverWorkspace({ userName, role }: { userName: string; role: St
 
 export function SupportWorkspace({ userName, role }: { userName: string; role: StaffRole }) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
+  const [records, setRecords] = useState<SubmissionRecord[]>([]);
+  const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const [deskStatus, setDeskStatus] = useState("Loading support command desk…");
 
   async function submitLead(event: FormEvent<HTMLFormElement>, type: string) {
     event.preventDefault();
@@ -701,36 +778,51 @@ export function SupportWorkspace({ userName, role }: { userName: string; role: S
       const data = await postJSON<{ ok: boolean; message: string; id: string }>("/api/submit", payload);
       setFormStatus((current) => ({ ...current, [type]: `${data.message} Reference: ${data.id}` }));
       form.reset();
+      await loadSupportDesk(false);
     } catch (error) {
       setFormStatus((current) => ({ ...current, [type]: error instanceof Error ? error.message : "Unable to save request." }));
     }
   }
 
+  async function loadSupportDesk(showLoading = true) {
+    if (showLoading) setDeskStatus("Loading support command desk…");
+    try {
+      const [submissionsResponse, ordersResponse] = await Promise.all([fetch("/api/submissions"), fetch("/api/orders")]);
+      const submissionsData = await submissionsResponse.json();
+      const ordersData = await ordersResponse.json();
+      if (!submissionsResponse.ok || !submissionsData.ok) {
+        setDeskStatus(submissionsData.error ?? "Unable to load support tickets.");
+        return;
+      }
+      if (!ordersResponse.ok || !ordersData.ok) {
+        setDeskStatus(ordersData.error ?? "Unable to load support order watchlist.");
+        return;
+      }
+      const supportRecords = submissionsData.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes("support-ticket"));
+      setRecords(supportRecords.slice(0, 24));
+      setOrders(ordersData.orders.slice(0, 12));
+      setDeskStatus("Support desk updated.");
+    } catch {
+      setDeskStatus("Unable to load support command desk.");
+    }
+  }
+
+  useEffect(() => { loadSupportDesk(); }, []);
+
   return (
     <PortalShell role={role} pageRole="support" userName={userName} eyebrow="Support desk" title="Support dashboard">
-      <section className="section supportSection portalSection">
-        <div className="supportGrid">
-          <form className="panel supportForm" onSubmit={(event) => submitLead(event, "support-ticket")}>
-            <h3>Open support ticket</h3>
-            <div className="two"><input name="name" placeholder="Your name" defaultValue={userName} required /><input name="email" type="email" placeholder="Email" defaultValue="support@bubblewash.local" required /></div>
-            <div className="two"><input name="phone" placeholder="Phone / WhatsApp" required /><input name="company" placeholder="Company / household / vendor" required /></div>
-            <div className="two"><input name="orderId" placeholder="Order ID if available" /><select name="issueType">{supportTypes.map((item) => <option key={item}>{item}</option>)}</select></div>
-            <div className="two"><select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select><select name="preferredContact"><option>WhatsApp</option><option>Phone call</option><option>Email</option></select></div>
-            <textarea name="message" placeholder="What happened? Include pickup area, time, items affected, photos requested, or payment reference..." required />
-            <button className="button primary full" type="submit">Create Support Ticket</button>
-            {formStatus["support-ticket"] && <p className="status success">{formStatus["support-ticket"]}</p>}
-          </form>
-          <div className="supportRules operatorChips">
-            <article><strong>Pickup delay</strong></article>
-            <article><strong>Missing item</strong></article>
-            <article><strong>Quality issue</strong></article>
-            <article><strong>Payment issue</strong></article>
-          </div>
-        </div>
-      </section>
+      <SupportOpsCommand records={records} orders={orders} />
+      <SupportOrderWatchlist orders={orders} />
       <SupportTicketDesk userName={userName} />
       <SharedOrderBoard role="support" userName={userName} />
+      <section className="section portalSection supportCreateSection manualSection">
+        <details className="manualToolbox">
+          <summary><span>Create ticket manually</span><small>Exception intake</small></summary>
+          <SupportTicketForm userName={userName} role="support" onSubmit={submitLead} status={formStatus["support-ticket"]} />
+        </details>
+      </section>
       <RecentActivity filter="support" />
+      <p className="status supportDeskStatus">{deskStatus}</p>
     </PortalShell>
   );
 }
