@@ -358,7 +358,7 @@ export default function Home() {
           <a href="#menu-desk" onClick={(event) => { event.preventDefault(); openMenuPanel("pricing"); }}>Pricing</a>
           <a href="#menu-desk" onClick={(event) => { event.preventDefault(); openMenuPanel("coverage"); }}>Coverage</a>
           <a href="#menu-desk" onClick={(event) => { event.preventDefault(); openMenuPanel("track"); }}>Track Order</a>
-          <a href="#menu-desk" onClick={(event) => { event.preventDefault(); openMenuPanel("faq"); }}>FAQ</a>
+          <a href="/staff" onClick={() => setMobileOpen(false)}>Staff Login</a>
           <a href="#booking" onClick={() => setMobileOpen(false)}>Book</a>
           <a className="navCta" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20want%20to%20schedule%20a%20laundry%20pickup" target="_blank" rel="noreferrer" onClick={() => setMobileOpen(false)}>WhatsApp</a>
         </nav>
@@ -379,8 +379,12 @@ export default function Home() {
           <div className="humanNote"><b>Clean handoff:</b> pickup, care notes, payment, and delivery updates stay on the same order trail.</div>
         </div>
         <div className="heroVisual heroSlider" aria-label="Bubble Wash live operations summary">
-          <div className="slideOverlay" /><div className="washerPortal" aria-hidden="true"><Image src="/bubble-wash-icon.jpg" alt="" width={180} height={180} priority /><span className="washerRing ringOne" /><span className="washerRing ringTwo" /><span className="washerBubble b1" /><span className="washerBubble b2" /><span className="washerBubble b3" /><span className="washerBubble b4" /></div>
-          <div className="foamTicket" aria-hidden="true"><span>soap trail</span><b>Osu → Labone</b></div><div className="careTag" aria-hidden="true"><span>care note</span><b>Sort · Wash · Fold</b><small>Partner checked</small></div><div className="visualCard orderCard"><span>Your order</span><strong>BW-2081</strong><small>Pickup scheduled · Washing started · Delivery window set</small></div><div className="visualCard mainBasket"><span>Today’s pickup</span><strong>82kg</strong><small>Growth plan · Core Accra · ironing added · WhatsApp updates on</small></div><div className="routeCard"><b>Route fee</b><span>{zones[zone].label}</span><strong>{formatMoney(zones[zone].fee)}</strong></div><div className="ratingCard"><b>4.8★</b><span>customer confidence</span></div>
+          <div className="slideOverlay" />
+          <div className="washerPortal" aria-hidden="true"><Image src="/bubble-wash-icon.jpg" alt="" width={160} height={160} priority /><span className="washerRing ringOne" /><span className="washerRing ringTwo" /><span className="washerBubble b1" /><span className="washerBubble b2" /><span className="washerBubble b3" /><span className="washerBubble b4" /><span className="washerBubble b5" /><span className="washerBubble b6" /></div>
+          <div className="visualCard orderCard"><span>Order trail</span><strong>BW-2081</strong><small>Pickup scheduled · Vendor washing · Delivery window set</small></div>
+          <div className="visualCard timelineCard"><span>Live timeline</span><strong>Scheduled → Washing → Ready → Delivered</strong><small>One reference follows the customer, vendor, driver, and support desk.</small></div>
+          <div className="visualCard mainBasket"><span>Today’s pickup</span><strong>82kg</strong><small>{zones[zone].label} · {formatMoney(zones[zone].fee)} route fee · Growth plan</small></div>
+          <div className="foamTicket" aria-hidden="true"><span>soap trail</span><b>Osu → Labone</b></div><div className="careTag" aria-hidden="true"><span>care note</span><b>Sort · Wash · Fold</b><small>Partner checked</small></div>
         </div>
       </section>
 

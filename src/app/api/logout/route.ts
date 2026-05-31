@@ -1,14 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sessionCookieName } from "@/lib/auth";
+import { sessionCookieName, sessionCookieOptions } from "@/lib/auth";
 
-export async function GET(request: NextRequest) {
-  const response = NextResponse.redirect(new URL("/login", request.url));
-  response.cookies.set({ name: sessionCookieName, value: "", path: "/", maxAge: 0 });
+function clearStaffSession(response: NextResponse) {
+  response.cookies.set({
+    name: sessionCookieName,
+    value: "",
+    ...sessionCookieOptions(),
+    maxAge: 0,
+    expires: new Date(0),
+  });
+  response.cookies.delete(sessionCookieName);
   return response;
 }
 
+export async function GET(request: NextRequest) {
+  return clearStaffSession(NextResponse.redirect(new URL("/login?loggedOut=1", request.url)));
+}
+
 export async function POST() {
-  const response = NextResponse.json({ ok: true });
-  response.cookies.set({ name: sessionCookieName, value: "", path: "/", maxAge: 0 });
-  return response;
+  return clearStaffSession(NextResponse.json({ ok: true }));
 }

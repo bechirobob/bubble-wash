@@ -364,13 +364,22 @@ function PortalShell({ title, eyebrow, role, pageRole = role, userName, children
     : pageRole === "driver" ? [["/drivers", "Driver workspace"]]
     : [["/support", "Support desk"]];
   const promise = rolePromise(pageRole);
+
+  async function logoutStaff() {
+    try {
+      await fetch("/api/logout", { method: "POST", cache: "no-store" });
+    } finally {
+      window.location.replace("/login");
+    }
+  }
+
   return (
     <main className="portalPage">
       <header className="portalNav">
         <Link className="brand" href="/" aria-label="Bubble Wash home"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} /><span>Bubble Wash</span></Link>
         <nav className="portalLinks">
           {portalLinks.map(([href, label]) => <Link key={href} href={href} aria-current={href === pageHome ? "page" : undefined}>{label}</Link>)}
-          <a className="button secondary" href="/api/logout">Logout</a>
+          <button className="button secondary logoutButton" type="button" onClick={logoutStaff}>Logout</button>
         </nav>
       </header>
       <section className="section portalHero">
