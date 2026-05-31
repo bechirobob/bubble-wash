@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800;900&family=Space+Grotesk:wght@500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=Manrope:wght@500;600;700;800;900&family=Space+Grotesk:wght@500;600;700&display=swap");
 
 :root {
   --ink: #14304a;
@@ -1761,4 +1761,272 @@ main, .nav { position: relative; z-index: 1; }
   .menuDeskSection { padding-top: 44px; }
   .menuPanelContent { border-radius: 26px; padding: 16px; }
   .menuPanelTabs button { padding: 10px 13px; }
+}
+
+/* Premium laundry refinement: calmer type, linen surfaces, organic Bubble Wash foam. */
+:root {
+  --ink: #10283a;
+  --soft-ink: #607281;
+  --blue: #1e98b8;
+  --blue-dark: #176f8f;
+  --cyan: #9edfeb;
+  --lime: #b9d8bf;
+  --linen: #fbf6ec;
+  --linen-deep: #f3ead9;
+  --ticket: #fffdf8;
+  --cream: #fbf6ec;
+  --line: #dce6e6;
+  --navy: #0d2232;
+  --shadow: rgba(16, 40, 58, .12) 0 18px 46px -30px, rgba(16, 40, 58, .07) 0 8px 20px -16px;
+}
+body {
+  background:
+    radial-gradient(circle at 6% 10%, rgba(158, 223, 235, .18), transparent 26%),
+    linear-gradient(180deg, var(--linen), #fffdf8 38%, #f8fbfb 100%);
+  background-size: auto;
+  font-family: "DM Sans", Manrope, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--ink);
+  font-size: 15.5px;
+  letter-spacing: -.006em;
+}
+h1, h2, h3, .brand, .price, .quoteResult strong, .mainBasket strong, .trackingResult strong, .portalIdentity strong {
+  font-family: "DM Sans", Manrope, ui-sans-serif, system-ui, sans-serif;
+}
+h1 {
+  max-width: 690px;
+  font-size: clamp(38px, 5.1vw, 64px);
+  line-height: 1.02;
+  letter-spacing: -.055em;
+  font-weight: 800;
+}
+h2 {
+  font-size: clamp(28px, 3.2vw, 44px);
+  line-height: 1.05;
+  letter-spacing: -.046em;
+  font-weight: 750;
+}
+h3 { letter-spacing: -.025em; font-weight: 750; }
+.lead, .sectionHead p {
+  max-width: 690px;
+  font-size: clamp(15.5px, 1.2vw, 16.5px);
+  line-height: 1.62;
+}
+.eyebrow {
+  color: var(--blue-dark);
+  font-family: "DM Sans", Manrope, sans-serif;
+  font-size: 11px;
+  letter-spacing: .18em;
+  font-weight: 800;
+}
+.nav {
+  padding-top: 11px;
+  padding-bottom: 11px;
+  background: rgba(251, 246, 236, .92);
+  border-color: rgba(16, 40, 58, .1);
+  backdrop-filter: blur(14px);
+}
+.brand span { font-size: 17px; letter-spacing: -.025em; }
+.brandMark { width: 50px; height: 50px; border-radius: 16px; }
+.navLinks { gap: 18px; font-size: 13.5px; font-weight: 700; }
+.navCta, .button {
+  border-radius: 16px;
+  padding: 12px 17px;
+  font-weight: 750;
+}
+.navCta, .button.primary,
+.commandGrid span, .stageList b, .staffCard span, .serviceIcon,
+.humanFlowGrid span, .detailGrid summary::after {
+  color: #082131;
+  background: linear-gradient(135deg, #c8e6d0, #9edfeb);
+  box-shadow: rgba(30, 152, 184, .16) 0 16px 30px -18px;
+}
+.button.secondary {
+  color: var(--ink);
+  background: rgba(255,253,248,.88);
+  border-color: rgba(16, 40, 58, .14);
+}
+.hero {
+  min-height: 650px;
+  gap: clamp(30px, 4vw, 48px);
+  background:
+    radial-gradient(circle at 80% 18%, rgba(158, 223, 235, .24), transparent 30%),
+    radial-gradient(circle at 12% 76%, rgba(243, 234, 217, .86), transparent 32%),
+    linear-gradient(180deg, var(--linen) 0%, #f7fcfc 72%, #fffdf8 100%);
+}
+.heroCopy::before {
+  background: rgba(13, 34, 50, .94);
+  color: #d7f5f7;
+  font-size: 10px;
+  letter-spacing: .15em;
+  border-radius: 14px;
+}
+.coverageForm, .humanNote, .planCard, .serviceCard, .panel, .vendorShowcaseCard, .staffCard, .faqItem, .contactCard, .quoteResult, .assuranceGrid article, .commandGrid article, .trackingResult, .mapResearchCard, .routeMapCard, .liveTrackingGrid article, .activityCard, .orderBoardCard, .menuPanelContent {
+  background: rgba(255,253,248,.92);
+  border-color: rgba(16, 40, 58, .12);
+  box-shadow: var(--shadow);
+}
+.coverageForm {
+  max-width: 680px;
+  border-radius: 24px;
+  padding: 18px;
+}
+input, select, textarea {
+  border-color: rgba(16, 40, 58, .14);
+  border-radius: 14px;
+  background: #fffefa;
+  padding: 12px 13px;
+}
+label { font-weight: 700; }
+.coverageQuickChips button,
+.locationGrid span,
+.badge {
+  background: #eef8f8;
+  border-color: rgba(30, 152, 184, .18);
+  color: #174053;
+}
+.humanNote {
+  border-radius: 18px;
+  padding: 14px 16px;
+  max-width: 650px;
+  color: #506575;
+}
+.heroVisual {
+  min-height: 520px;
+  border-radius: 38px;
+  background:
+    radial-gradient(circle at 24% 18%, rgba(255,255,255,.7) 0 6%, transparent 7%),
+    radial-gradient(circle at 76% 24%, rgba(158,223,235,.42), transparent 24%),
+    radial-gradient(circle at 18% 86%, rgba(243,234,217,.92), transparent 30%),
+    linear-gradient(145deg, #0d2232 0%, #164964 54%, #eefafa 100%);
+  background-size: 74px 74px, auto, auto, auto;
+  border-color: rgba(16,40,58,.16);
+}
+.heroSlider::before {
+  width: 68%;
+  height: 62%;
+  top: 17%;
+  right: 7%;
+  border-radius: 34px;
+  border-style: solid;
+  background:
+    linear-gradient(90deg, rgba(16,40,58,.045) 1px, transparent 1px),
+    linear-gradient(rgba(16,40,58,.035) 1px, transparent 1px),
+    linear-gradient(160deg, rgba(255,253,248,.95), rgba(238,248,248,.82));
+  background-size: 28px 28px, 28px 28px, auto;
+}
+.visualCard, .routeCard, .ratingCard, .careTag, .foamTicket {
+  background: rgba(255,253,248,.94);
+  border: 1px solid rgba(16,40,58,.12);
+  box-shadow: var(--shadow);
+}
+.mainBasket { width: min(74%, 386px); }
+.mainBasket strong { font-size: clamp(46px, 4.2vw, 60px); letter-spacing: -.05em; }
+.mainBasket span, .routeCard strong, .ratingCard b, .price { color: var(--blue-dark); }
+.routeCard strong { font-size: 28px; }
+.orderCard { top: 34px; right: 34px; }
+.careTag {
+  position: absolute;
+  right: 42px;
+  bottom: 38px;
+  z-index: 3;
+  display: grid;
+  gap: 4px;
+  width: 178px;
+  padding: 16px;
+  border-radius: 22px;
+  transform: rotate(-2deg);
+}
+.careTag::before {
+  content: "";
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #d9ebe9;
+  box-shadow: inset rgba(16,40,58,.15) 0 0 0 1px;
+}
+.careTag span, .careTag small {
+  color: var(--soft-ink);
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.careTag b { color: var(--navy); font-size: 16px; }
+.bubbleAtmosphere { opacity: .76; }
+.foamOrb {
+  border-color: rgba(255,255,255,.82);
+  background: radial-gradient(circle at 30% 24%, rgba(255,255,255,.98) 0 10%, rgba(255,255,255,.42) 11% 40%, rgba(158,223,235,.18) 41% 100%);
+  box-shadow: inset rgba(255,255,255,.68) 0 0 24px, rgba(30,152,184,.08) 0 20px 60px -42px;
+}
+.foamTrail {
+  opacity: .3;
+  background-image: radial-gradient(circle, rgba(255,255,255,.68) 0 16%, transparent 19%);
+}
+.proofStrip { background: #fffdf8; }
+.proofStrip div {
+  background: #f2f8f8;
+  border-color: rgba(16,40,58,.1);
+  border-radius: 18px;
+}
+.proofStrip strong { font-size: 28px; font-weight: 800; }
+.proofStrip span { font-size: 13.5px; font-weight: 700; }
+.humanFlowGrid article {
+  min-height: 190px;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 84% 18%, rgba(158,223,235,.24), transparent 24%),
+    linear-gradient(145deg, rgba(255,253,248,.96), rgba(242,248,248,.9));
+}
+.humanFlowGrid article::before {
+  background-image: radial-gradient(circle, rgba(30,152,184,.13) 0 16%, transparent 19%);
+  background-size: 24px 24px;
+  opacity: .85;
+}
+.planCard, .panel, .vendorShowcaseCard, .staffCard, .faqItem, .quoteResult { border-radius: 24px; }
+.planCard.featured {
+  transform: translateY(-4px);
+  border-color: rgba(30,152,184,.4);
+  background: linear-gradient(180deg, #fffdf8, #eef8f8);
+}
+.price { font-size: 29px; font-weight: 800; }
+.price small { font-size: 12px; }
+.menuDeskSection { background: #f4f8f6; }
+.menuPanelTabs button {
+  border-color: rgba(16,40,58,.12);
+  background: rgba(255,253,248,.9);
+  color: #294456;
+  font-weight: 750;
+}
+.menuPanelTabs button.active,
+.menuPanelTabs button[aria-selected="true"] {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: #f9fffe;
+}
+.quoteResult {
+  background: linear-gradient(145deg, #10283a, #164257);
+}
+.quoteResult strong { color: #c9eef1; font-size: clamp(34px, 4.4vw, 54px); }
+.paymentPanel { background: linear-gradient(145deg, #fffdf8, #f3ead9); }
+.paymentStrip { background: #f3ead9; }
+.footer {
+  background:
+    radial-gradient(circle at 12% 18%, rgba(158,223,235,.16), transparent 26%),
+    linear-gradient(135deg, #0d2232, #102d40 70%, #0d2232);
+}
+@media (max-width: 980px) {
+  h1 { font-size: clamp(36px, 9vw, 54px); }
+  .heroVisual { min-height: 500px; }
+  .careTag { position: static; width: 100%; transform: none; }
+}
+@media (max-width: 780px) {
+  body { font-size: 15px; }
+  .hero { min-height: auto; }
+  .heroVisual { contain: none; background-size: auto; }
+  .visualCard, .routeCard, .ratingCard, .orderCard, .mainBasket, .careTag { border-radius: 18px; }
+  .mainBasket strong { font-size: 44px; }
+  .proofStrip strong { font-size: 25px; }
 }
