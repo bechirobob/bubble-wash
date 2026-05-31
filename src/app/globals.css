@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=Manrope:wght@500;600;700;800;900&family=Space+Grotesk:wght@500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=Manrope:wght@500;600;700;800;900&family=Space+Grotesk:wght@500;600;700&display=swap");
 
 :root {
   --ink: #14304a;
@@ -2466,4 +2466,391 @@ label { font-weight: 700; }
   .selectedPlanWorkbench .button {
     width: 100%;
   }
+}
+
+/* Lovable reference skin — keep Bubble Wash flows intact, tune font/UI system. */
+:root {
+  --ink: #0f1d2e;
+  --soft-ink: #5d6d7e;
+  --blue: #2563eb;
+  --blue-dark: #1d4ed8;
+  --wash: #f5f9ff;
+  --foam: #ffffff;
+  --cream: #ffffff;
+  --line: rgba(229, 231, 235, .9);
+  --mint: #eefbf6;
+  --sand: #fff8ee;
+  --navy: #0f1d2e;
+  --shadow: rgba(15, 29, 46, .10) 0 10px 15px -3px, rgba(15, 29, 46, .10) 0 4px 6px -4px;
+  --shadow-soft: rgba(15, 29, 46, .08) 0 18px 42px -24px;
+}
+html { background: #fff; }
+body {
+  color: var(--ink);
+  background: #fff;
+  font-family: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  letter-spacing: 0;
+}
+body::selection { background: rgba(37, 99, 235, .18); }
+a { text-underline-offset: 3px; }
+.nav {
+  padding: 16px min(5vw, 72px);
+  background: rgba(255,255,255,.88);
+  border-bottom: 1px solid rgba(229, 231, 235, .72);
+  backdrop-filter: blur(16px);
+}
+.brand {
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+.brandMark {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border-color: rgba(229,231,235,.95);
+  box-shadow: rgba(15,29,46,.08) 0 8px 20px -14px;
+}
+.navLinks {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  gap: 24px;
+}
+.navLinks a:not(.navCta):hover { text-decoration: underline; }
+.navCta,
+.button {
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+  box-shadow: none;
+  transition: transform .16s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease, opacity .16s ease;
+}
+.navCta,
+.button.primary {
+  background: #0f1d2e;
+  color: #fff;
+  box-shadow: rgba(255,255,255,.22) 0 .5px 0 inset, rgba(0,0,0,.2) 0 0 0 .5px inset, rgba(15,29,46,.14) 0 10px 18px -14px;
+}
+.button.secondary,
+.menuButton {
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid rgba(15,29,46,.18);
+  box-shadow: none;
+}
+.button:hover,
+.navCta:hover {
+  transform: translateY(-1px);
+  box-shadow: rgba(15,29,46,.14) 0 12px 22px -16px;
+}
+:focus-visible,
+.menuPanelTabs button:focus-visible,
+.planCard .button:focus-visible,
+.selectedPlanWorkbench .button:focus-visible {
+  outline: none;
+  box-shadow: rgba(59,130,246,.28) 0 0 0 4px, rgba(15,29,46,.10) 0 4px 12px;
+}
+.section {
+  padding: clamp(62px, 8vw, 104px) min(5vw, 72px);
+}
+.hero {
+  min-height: 700px;
+  background:
+    radial-gradient(circle at 82% 18%, rgba(77, 190, 255, .20), transparent 30%),
+    radial-gradient(circle at 16% 86%, rgba(32, 197, 166, .14), transparent 24%),
+    linear-gradient(180deg, #fff 0%, #f8fbff 72%, #fff 100%);
+  gap: clamp(34px, 5vw, 64px);
+}
+.eyebrow {
+  color: var(--blue-dark);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+h1,
+h2,
+h3,
+h4,
+.mainBasket strong,
+.price,
+.quoteResult strong,
+.selectedPlanWorkbench strong,
+.proofStrip strong {
+  font-family: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+}
+h1 {
+  max-width: 760px;
+  font-size: clamp(44px, 5vw, 72px);
+  line-height: 1.05;
+  letter-spacing: -.035em;
+  font-weight: 600;
+}
+h2 {
+  font-size: clamp(30px, 3.4vw, 48px);
+  line-height: 1.08;
+  letter-spacing: -.02em;
+  font-weight: 600;
+}
+h3 {
+  letter-spacing: -.012em;
+  font-weight: 600;
+}
+.lead,
+.sectionHead p {
+  color: var(--soft-ink);
+  font-size: clamp(16px, 1.4vw, 18px);
+  line-height: 1.55;
+}
+.coverageForm,
+.humanNote {
+  background: rgba(255,255,255,.95);
+  border: 1px solid rgba(229,231,235,.88);
+  border-radius: 18px;
+  box-shadow: var(--shadow-soft);
+}
+.coverageQuickChips button,
+.locationGrid span,
+.tagRow span,
+.badge,
+.selectedPlanPill {
+  border-radius: 999px;
+  background: #f4f7fb;
+  border: 1px solid rgba(229,231,235,.95);
+  color: var(--ink);
+  font-weight: 600;
+}
+.heroVisual {
+  border-radius: 24px;
+  background: linear-gradient(145deg, #f9fbff, #fff 62%, #eef9ff);
+  border: 1px solid rgba(229,231,235,.9);
+  box-shadow: rgba(15,29,46,.12) 0 24px 60px -36px;
+}
+.visualCard,
+.routeCard,
+.ratingCard,
+.careTag,
+.foamTicket,
+.planCard,
+.serviceCard,
+.panel,
+.faqItem,
+.contactCard,
+.quoteResult,
+.coverageSummaryCard,
+.coverageRouteGroup,
+.vendorShowcaseCard,
+.staffEntryCard,
+.staffAccessCard,
+.opsBoard article,
+.supportRules article,
+.liveTrackingGrid article,
+.staffMetric,
+.staffQueueCard,
+.staffActionCard,
+.roleHero,
+.staffLoginCard,
+.trackingPanel,
+.paymentPanel {
+  background: rgba(255,255,255,.95);
+  border: 1px solid rgba(229,231,235,.86);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+.planCard,
+.panel,
+.quoteResult,
+.coverageSummaryCard,
+.vendorShowcaseCard {
+  padding: 24px;
+}
+.planCard.featured {
+  border: 1px solid rgba(37,99,235,.42);
+  transform: translateY(-6px);
+  box-shadow: rgba(37,99,235,.14) 0 24px 46px -32px;
+}
+.planCard.selectedPlanCard,
+.planCard.featured.selectedPlanCard {
+  border-color: rgba(37,99,235,.62);
+  background: linear-gradient(180deg, #fff, #f4f8ff);
+  box-shadow: rgba(37,99,235,.15) 0 22px 44px -30px;
+}
+.planCard:hover,
+.vendorShowcaseCard:hover,
+.faqItem:hover {
+  transform: translateY(-2px);
+  border-color: rgba(37,99,235,.28);
+  box-shadow: rgba(15,29,46,.13) 0 18px 30px -22px;
+}
+.price {
+  color: var(--ink);
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: -.03em;
+}
+.price small,
+.planCardTop p,
+.planFeatureList,
+.planMetrics small,
+.serviceCard p,
+.coveragePanelHead p,
+.coverageSummaryCard p,
+.vendorShowcaseCard p,
+.status,
+.formHint {
+  color: var(--soft-ink);
+  font-weight: 400;
+}
+.planMetrics span,
+.routeFacts span,
+.paymentLogo,
+.miniRows.light span {
+  background: #f8fafc;
+  border: 1px solid rgba(229,231,235,.9);
+  border-radius: 12px;
+}
+.proofStrip {
+  background: #fff;
+  gap: 14px;
+  padding-bottom: 36px;
+}
+.proofStrip div {
+  background: #fff;
+  border: 1px solid rgba(229,231,235,.86);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+.proofStrip strong {
+  font-size: clamp(26px, 3vw, 42px);
+  font-weight: 600;
+}
+.proofStrip span { font-weight: 500; }
+.soft,
+.locationSection,
+.opsSection,
+.driverSection,
+.quoteSection,
+.menuDeskSection {
+  background: #f8fbff;
+}
+.menuPanelTabs {
+  max-width: 1050px;
+  gap: 10px;
+  padding-bottom: 22px;
+}
+.menuPanelTabs button {
+  border: 1px solid rgba(229,231,235,.95);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--soft-ink);
+  font-weight: 600;
+  min-height: 44px;
+}
+.menuPanelTabs button[aria-selected="true"],
+.menuPanelTabs button.active {
+  background: #0f1d2e;
+  color: #fff;
+  border-color: #0f1d2e;
+  box-shadow: rgba(15,29,46,.18) 0 14px 28px -20px;
+}
+.selectedPlanWorkbench {
+  border-radius: 16px;
+  background: linear-gradient(135deg, #0f1d2e, #18324e);
+  border-color: rgba(15,29,46,.18);
+  box-shadow: rgba(15,29,46,.16) 0 18px 44px -28px;
+}
+.selectedPlanWorkbench span {
+  color: rgba(255,255,255,.66);
+  letter-spacing: .08em;
+  font-weight: 600;
+}
+.selectedPlanWorkbench strong {
+  font-weight: 600;
+  letter-spacing: -.02em;
+}
+.quoteResult {
+  background: #0f1d2e;
+  color: #fff;
+}
+.quoteResult strong {
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: -.04em;
+}
+input,
+select,
+textarea {
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid rgba(209,213,219,.95);
+  border-radius: 10px;
+  padding: 11px 13px;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: rgba(37,99,235,.72);
+  box-shadow: rgba(59,130,246,.22) 0 0 0 4px;
+}
+label {
+  color: var(--soft-ink);
+  font-weight: 600;
+}
+.check {
+  border-radius: 12px;
+  background: #fff;
+  border-color: rgba(229,231,235,.95);
+}
+.footer {
+  background: #0f1d2e;
+  color: #fff;
+  border-top: 0;
+}
+.footer p,
+.footer a { color: rgba(255,255,255,.72); }
+.footer a:hover { color: #fff; text-decoration: underline; }
+.backToTop {
+  border-radius: 999px;
+  background: #0f1d2e;
+  color: #fff;
+  box-shadow: rgba(15,29,46,.18) 0 12px 28px -18px;
+}
+.bubbleAtmosphere,
+.foamOrb,
+.foamTrail {
+  opacity: .45;
+}
+@media (max-width: 980px) {
+  .hero { grid-template-columns: 1fr; min-height: auto; }
+  .heroVisual { min-height: 460px; }
+}
+@media (max-width: 780px) {
+  body { font-size: 14px; }
+  .nav { padding: 12px 18px; }
+  .navLinks.open {
+    background: rgba(255,255,255,.98);
+    border: 1px solid rgba(229,231,235,.95);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+  }
+  h1 { font-size: clamp(34px, 10vw, 48px); line-height: 1.12; letter-spacing: -.025em; }
+  h2 { font-size: clamp(28px, 8vw, 38px); }
+  .section { padding: 58px 18px; }
+  .heroVisual { border-radius: 18px; }
+  .planCard.featured { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .planCard,
+  .vendorShowcaseCard,
+  .faqItem,
+  .button,
+  .navCta { transition: none; }
+  .planCard:hover,
+  .vendorShowcaseCard:hover,
+  .faqItem:hover,
+  .button:hover,
+  .navCta:hover { transform: none; }
 }

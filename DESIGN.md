@@ -138,3 +138,11 @@
 - Interaction: selected plan state is visible on the cards and mirrored in a selected-plan workbench with an `Update estimate` action.
 - Accessibility: tab controls, plan actions, and estimate actions keep visible focus states and live status feedback.
 - Critique checklist: no hidden side-scroll for primary navigation, no empty pricing cards on any breakpoint, and no decorative card state without a real quote/selection flow.
+
+## 2026-05-31 Lovable reference visual skin
+
+- Reference: `https://bubblewash.lovable.app/` uses Instrument Sans, navy text, white/very-light-blue surfaces, restrained shadows, compact B2B cards, and clean rounded CTAs.
+- Change: apply the reference visual language as a CSS skin over the current Bubble Wash app so existing customer, pricing, payment, tracking, staff, and API workflows remain intact.
+- Tokens: `Instrument Sans`, white page base, navy `#0f1d2e`, soft slate body text, subtle `#e5e7eb` borders, black/navy primary buttons, smaller border radii than the previous bubbly build, and lighter shadows.
+- Interaction: preserve selected pricing state, quote recalculation, menu panels, coverage chips, booking form, and staff links while making hover/focus states cleaner.
+- Verification: lint, tests, build, local visual checks on desktop/tablet/mobile, functional quote/coverage smoke, then push and confirm live markers.
