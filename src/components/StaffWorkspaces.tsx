@@ -12,6 +12,7 @@ type PortalShellProps = {
   title: string;
   eyebrow: string;
   role: StaffRole;
+  pageRole?: StaffRole;
   userName: string;
   children: ReactNode;
 };
@@ -355,15 +356,20 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
   return data;
 }
 
-function PortalShell({ title, eyebrow, role, userName, children }: PortalShellProps) {
-  const portalLinks = role === "admin" ? [["/admin", "Admin"], ["/vendors", "Vendors"], ["/drivers", "Drivers"], ["/support", "Support"]] : role === "vendor" ? [["/vendors", "Vendor workspace"]] : role === "driver" ? [["/drivers", "Driver workspace"]] : [["/support", "Support desk"]];
-  const promise = rolePromise(role);
+function PortalShell({ title, eyebrow, role, pageRole = role, userName, children }: PortalShellProps) {
+  const pageHome = pageRole === "admin" ? "/admin" : pageRole === "vendor" ? "/vendors" : pageRole === "driver" ? "/drivers" : "/support";
+  const portalLinks = role === "admin"
+    ? [["/admin", "Admin home"], ["/vendors", "Vendor lane"], ["/drivers", "Driver lane"], ["/support", "Support lane"]]
+    : pageRole === "vendor" ? [["/vendors", "Vendor workspace"]]
+    : pageRole === "driver" ? [["/drivers", "Driver workspace"]]
+    : [["/support", "Support desk"]];
+  const promise = rolePromise(pageRole);
   return (
     <main className="portalPage">
       <header className="portalNav">
         <Link className="brand" href="/" aria-label="Bubble Wash home"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} /><span>Bubble Wash</span></Link>
         <nav className="portalLinks">
-          {portalLinks.map(([href, label]) => <Link key={href} href={href}>{label}</Link>)}
+          {portalLinks.map(([href, label]) => <Link key={href} href={href} aria-current={href === pageHome ? "page" : undefined}>{label}</Link>)}
           <a className="button secondary" href="/api/logout">Logout</a>
         </nav>
       </header>
@@ -371,13 +377,28 @@ function PortalShell({ title, eyebrow, role, userName, children }: PortalShellPr
         <div>
           <p className="eyebrow">{promise.eyebrow}</p>
           <h1>{promise.title}</h1>
-          <div className="roleBreadcrumb"><span>{eyebrow}</span><span>{title}</span></div>
+          <div className="roleBreadcrumb"><Link href={pageHome}>Current lane</Link><span>{eyebrow}</span><span>{title}</span></div>
         </div>
         <aside className="portalIdentity">
           <span>Signed in</span>
           <strong>{userName}</strong>
-          <small>{role.toUpperCase()} access</small>
+          <small>{role.toUpperCase()} access · viewing {pageRole.toUpperCase()}</small>
         </aside>
+      </section>
+      <section className="section workflowMapSection" aria-label="Staff workflow overview">
+        <div className="workflowMapHeader">
+          <p className="eyebrow">Automation-first workflow</p>
+          <h2>One Order ID moves through every lane.</h2>
+          <p>Customer booking is the source of truth. Staff should use the action rail first; manual forms are only for exceptions, capacity changes, or notes that did not come from the customer order.</p>
+        </div>
+        <div className="workflowStepRail" aria-label="Order workflow stages">
+          <span>Received</span><span>Schedule</span><span>Assign</span><span>Accept</span><span>Pickup</span><span>Wash</span><span>Ready</span><span>Deliver</span><span>Close</span>
+        </div>
+        <div className="workflowPrinciples">
+          <article><strong>Inherited context</strong><span>Name, phone, area, route window, payment, vendor, and driver stay attached.</span></article>
+          <article><strong>Action rail first</strong><span>Buttons append the next valid event server-side instead of asking staff to retype the order.</span></article>
+          <article><strong>Exceptions only</strong><span>Manual tools stay collapsed for declines, delays, count mismatches, payment issues, or support cases.</span></article>
+        </div>
       </section>
       {children}
     </main>
@@ -525,7 +546,7 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
       <section className="section portalSection supportCreateSection manualSection">
         <details className="manualToolbox">
           <summary><span>Raise ticket</span><small>Exception</small></summary>
-          <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
+          <SupportTicketForm userName={userName} role="admin" onSubmit={submitLead} status={formStatus["support-ticket"]} />
         </details>
       </section>
       <SharedOrderBoard role={role} userName={userName} />
@@ -553,7 +574,7 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
   }
 
   return (
-    <PortalShell role={role} userName={userName} eyebrow="Vendor operations" title="Vendor dashboard">
+    <PortalShell role={role} pageRole="vendor" userName={userName} eyebrow="Vendor operations" title="Vendor dashboard">
       <section className="section vendorSection dark portalSection manualSection">
         <details className="manualToolbox">
           <summary><span>Exception tools</span><small>Vendor</small></summary>
@@ -593,11 +614,11 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
       <section className="section portalSection supportCreateSection manualSection">
         <details className="manualToolbox">
           <summary><span>Raise ticket</span><small>Exception</small></summary>
-          <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
+          <SupportTicketForm userName={userName} role="vendor" onSubmit={submitLead} status={formStatus["support-ticket"]} />
         </details>
       </section>
-      <SharedOrderBoard role={role} userName={userName} />
-      <AvailabilityBoard role={role} />
+      <SharedOrderBoard role="vendor" userName={userName} />
+      <AvailabilityBoard role="vendor" />
       <RecentActivity filter="vendor" />
     </PortalShell>
   );
@@ -621,7 +642,7 @@ export function DriverWorkspace({ userName, role }: { userName: string; role: St
   }
 
   return (
-    <PortalShell role={role} userName={userName} eyebrow="Driver operations" title="Driver route board">
+    <PortalShell role={role} pageRole="driver" userName={userName} eyebrow="Driver operations" title="Driver route board">
       <section className="section driverSection portalSection manualSection">
         <details className="manualToolbox">
           <summary><span>Exception tools</span><small>Route</small></summary>
@@ -649,11 +670,11 @@ export function DriverWorkspace({ userName, role }: { userName: string; role: St
       <section className="section portalSection supportCreateSection manualSection">
         <details className="manualToolbox">
           <summary><span>Raise ticket</span><small>Exception</small></summary>
-          <SupportTicketForm userName={userName} role={role} onSubmit={submitLead} status={formStatus["support-ticket"]} />
+          <SupportTicketForm userName={userName} role="driver" onSubmit={submitLead} status={formStatus["support-ticket"]} />
         </details>
       </section>
-      <SharedOrderBoard role={role} userName={userName} />
-      <AvailabilityBoard role={role} />
+      <SharedOrderBoard role="driver" userName={userName} />
+      <AvailabilityBoard role="driver" />
       <RecentActivity filter="driver-route-log" />
     </PortalShell>
   );
@@ -677,7 +698,7 @@ export function SupportWorkspace({ userName, role }: { userName: string; role: S
   }
 
   return (
-    <PortalShell role={role} userName={userName} eyebrow="Support desk" title="Support dashboard">
+    <PortalShell role={role} pageRole="support" userName={userName} eyebrow="Support desk" title="Support dashboard">
       <section className="section supportSection portalSection">
         <div className="supportGrid">
           <form className="panel supportForm" onSubmit={(event) => submitLead(event, "support-ticket")}>
@@ -699,7 +720,7 @@ export function SupportWorkspace({ userName, role }: { userName: string; role: S
         </div>
       </section>
       <SupportTicketDesk userName={userName} />
-      <SharedOrderBoard role={role} userName={userName} />
+      <SharedOrderBoard role="support" userName={userName} />
       <RecentActivity filter="support" />
     </PortalShell>
   );

@@ -2854,3 +2854,112 @@ label {
   .button:hover,
   .navCta:hover { transform: none; }
 }
+
+/* Bubble Wash identity pass: keep foam motion visible inside the calmer Lovable-style skin. */
+.bubbleAtmosphere {
+  opacity: .72;
+  mix-blend-mode: multiply;
+}
+.foamOrb {
+  border-color: rgba(191, 239, 255, .92);
+  background:
+    radial-gradient(circle at 32% 26%, rgba(255,255,255,.98) 0 10%, rgba(255,255,255,.62) 11% 22%, transparent 23%),
+    radial-gradient(circle at 64% 68%, rgba(59,130,246,.16), transparent 34%),
+    rgba(224, 247, 255, .48);
+  box-shadow: inset rgba(255,255,255,.88) 0 0 30px, rgba(37,99,235,.16) 0 22px 60px -34px;
+  opacity: .66;
+}
+.foamTrail {
+  opacity: .42;
+  background-image: radial-gradient(circle, rgba(59,130,246,.20) 0 7px, rgba(255,255,255,.70) 8px 12px, transparent 13px);
+}
+.heroVisual .washerBubble {
+  background: rgba(255,255,255,.84);
+  border-color: rgba(191,239,255,.92);
+  box-shadow: inset rgba(59,130,246,.18) 0 0 18px, rgba(15,29,46,.08) 0 10px 22px -16px;
+}
+.washerPortal {
+  box-shadow: rgba(37,99,235,.12) 0 22px 48px -32px, rgba(255,255,255,.8) 0 1px 0 inset;
+}
+
+/* Staff workflow clarity: explain the automation path without turning dashboards into tutorials. */
+.workflowMapSection {
+  padding-top: 26px;
+  padding-bottom: 34px;
+  background: linear-gradient(180deg, rgba(248,251,255,.95), #fff);
+}
+.workflowMapHeader {
+  max-width: 860px;
+  margin-bottom: 18px;
+}
+.workflowMapHeader h2 {
+  margin-bottom: 10px;
+  font-size: clamp(26px, 3vw, 38px);
+}
+.workflowMapHeader p:last-child {
+  color: var(--soft-ink);
+  max-width: 760px;
+}
+.workflowStepRail {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(88px, 1fr));
+  gap: 8px;
+  overflow-x: auto;
+  padding: 6px 0 12px;
+  scrollbar-width: thin;
+}
+.workflowStepRail span {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(229,231,235,.95);
+  background: #fff;
+  color: var(--ink);
+  font-weight: 650;
+  white-space: nowrap;
+  box-shadow: rgba(15,29,46,.06) 0 8px 20px -18px;
+}
+.workflowStepRail span:nth-child(3),
+.workflowStepRail span:nth-child(4),
+.workflowStepRail span:nth-child(5) {
+  border-color: rgba(37,99,235,.28);
+  background: #f5f8ff;
+}
+.workflowPrinciples {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.workflowPrinciples article {
+  border: 1px solid rgba(229,231,235,.88);
+  border-radius: 16px;
+  background: #fff;
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+.workflowPrinciples strong,
+.workflowPrinciples span {
+  display: block;
+}
+.workflowPrinciples span {
+  color: var(--soft-ink);
+  margin-top: 6px;
+}
+.portalLinks a[aria-current="page"],
+.portalLinks a:hover {
+  background: rgba(37,99,235,.08);
+}
+.roleBreadcrumb a {
+  color: var(--blue-dark);
+  font-weight: 700;
+}
+@media (max-width: 900px) {
+  .workflowPrinciples { grid-template-columns: 1fr; }
+  .workflowStepRail { grid-template-columns: repeat(9, minmax(110px, 1fr)); }
+}
+@media (max-width: 780px) {
+  .bubbleAtmosphere { opacity: .58; }
+  .foamTrail { display: block; opacity: .22; }
+}

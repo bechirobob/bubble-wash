@@ -146,3 +146,11 @@
 - Tokens: `Instrument Sans`, white page base, navy `#0f1d2e`, soft slate body text, subtle `#e5e7eb` borders, black/navy primary buttons, smaller border radii than the previous bubbly build, and lighter shadows.
 - Interaction: preserve selected pricing state, quote recalculation, menu panels, coverage chips, booking form, and staff links while making hover/focus states cleaner.
 - Verification: lint, tests, build, local visual checks on desktop/tablet/mobile, functional quote/coverage smoke, then push and confirm live markers.
+
+## 2026-05-31 bubble identity + staff workflow clarification
+
+- Keep the Lovable-style calmer UI but restore visible Bubble Wash foam: fixed background bubbles, soap trail, and hero washer bubbles remain decorative (`aria-hidden`) and respect reduced motion.
+- Staff workflow now presents the real operational model up front: one customer Order ID moves through Received → Schedule → Assign → Accept → Pickup → Wash → Ready → Deliver → Close.
+- Automation-first rule: staff should use action-rail buttons before manual forms. Manual tools stay collapsed for exceptions, capacity changes, support cases, declines, delays, and count/payment issues.
+- Admin cross-role access separates auth role from page/workflow role so an admin can preview vendor/driver/support lanes and still navigate back to Admin home without logging out.
+- PDF/handoff alignment check: current staff pages still match the boss handoff scope — admin oversight, vendor capacity/job acceptance/decline, driver route updates, support ticket lifecycle, shared Order IDs, `/api/orders/advance`, availability, and role-scoped access.
