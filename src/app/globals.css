@@ -3165,3 +3165,53 @@ label {
 /* Pixel nudge: remove final desktop card overlap. */
 .timelineCard { top: 200px; }
 .mainBasket { bottom: 18px; }
+
+/* Live viewport fix: hero cards use a flow rail, not absolute stacking, so laptop widths cannot overlap. */
+.heroVisual.heroSlider {
+  display: grid;
+  align-content: end;
+  justify-items: start;
+  gap: 12px;
+  padding: 28px;
+}
+.heroVisual .visualCard,
+.heroVisual .orderCard,
+.heroVisual .timelineCard,
+.heroVisual .mainBasket {
+  position: relative;
+  inset: auto;
+  width: min(100%, 430px);
+  max-width: 430px;
+}
+.heroVisual .timelineCard {
+  width: min(100%, 500px);
+  max-width: 500px;
+}
+.heroVisual .mainBasket {
+  width: min(100%, 390px);
+  max-width: 390px;
+}
+.heroVisual .washerPortal {
+  z-index: 1;
+}
+@media (min-width: 1180px) {
+  .heroVisual .timelineCard {
+    margin-left: 46px;
+  }
+  .heroVisual .mainBasket {
+    margin-left: 0;
+  }
+}
+@media (max-width: 780px) {
+  .heroVisual.heroSlider {
+    padding: 14px;
+  }
+  .heroVisual .visualCard,
+  .heroVisual .orderCard,
+  .heroVisual .timelineCard,
+  .heroVisual .mainBasket {
+    width: 100%;
+    max-width: none;
+    margin-left: 0;
+  }
+}
