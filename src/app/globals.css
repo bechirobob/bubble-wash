@@ -3336,3 +3336,41 @@ label {
     margin-left: 0;
   }
 }
+
+/* Booking context continuity pass */
+.bookingContextSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(17, 134, 212, .18);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(232,248,255,.92), rgba(255,255,255,.96));
+}
+.bookingContextSummary span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  color: var(--blue-dark);
+  font-size: 12px;
+  font-weight: 950;
+}
+.bookingOnlyGrid .panel:first-child {
+  position: relative;
+}
+.bookingOnlyGrid .panel:first-child::before {
+  content: "Selected choices stay attached to this request";
+  display: block;
+  margin-bottom: 14px;
+  color: var(--soft-ink);
+  font-size: 13px;
+  font-weight: 900;
+}
+@media (max-width: 780px) {
+  .bookingContextSummary { gap: 7px; padding: 10px; }
+  .bookingContextSummary span { flex: 1 1 calc(50% - 7px); justify-content: center; text-align: center; }
+}

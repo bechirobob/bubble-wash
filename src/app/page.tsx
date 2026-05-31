@@ -126,6 +126,9 @@ export default function Home() {
   const [zone, setZone] = useState<ZoneKey>("core");
   const [discount, setDiscount] = useState<DiscountKey>("none");
   const [kg, setKg] = useState(82);
+  const [bookingPlan, setBookingPlan] = useState<PlanName>("Growth");
+  const [bookingZone, setBookingZone] = useState<ZoneKey>("core");
+  const [bookingArea, setBookingArea] = useState("");
   const [selectedAddons, setSelectedAddons] = useState<AddonKey[]>(["ironing"]);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteStatus, setQuoteStatus] = useState("Choose your plan, route, and add-ons to see a realistic monthly estimate.");
@@ -269,10 +272,16 @@ export default function Home() {
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error ?? "Route preview failed.");
       setRoutePreview(data.route);
+      setZone(selectedZone);
+      setBookingZone(selectedZone);
+      setBookingArea(area || matched || "");
       setActiveMenuPanel("coverage");
-      setCoverageStatus(matched ? `${matched} covered. Route ready.` : `${area || "Area"} queued for route confirmation.`);
+      setCoverageStatus(matched ? `${matched} covered. Route ready and added to booking.` : `${area || "Area"} queued for route confirmation and added to booking.`);
     } catch (error) {
       setRoutePreview(buildRoutePreview(selectedZone, area || matched || "Core Accra route"));
+      setZone(selectedZone);
+      setBookingZone(selectedZone);
+      setBookingArea(area || matched || "");
       setCoverageStatus(error instanceof Error ? error.message : "Unable to check route preview.");
     } finally {
       setPendingAction(null);
@@ -291,8 +300,9 @@ export default function Home() {
 
   function choosePlan(planName: PlanName) {
     setQuotePlan(planName);
+    setBookingPlan(planName);
     setActiveMenuPanel("pricing");
-    setQuoteStatus(`${planName} selected. Adjust kg, route, and add-ons to finish the estimate.`);
+    setQuoteStatus(`${planName} selected and added to booking. Adjust kg, route, and add-ons to finish the estimate.`);
     scrollToSection("menu-desk");
   }
 
@@ -344,6 +354,12 @@ export default function Home() {
   ];
   const selectedPlan = plans.find((plan) => plan.name === quotePlan) ?? plans[1];
   const selectedStartingBand = selectedPlan.bands[0];
+  const bookingContext = [
+    `${bookingPlan} plan`,
+    zones[bookingZone].label,
+    bookingArea ? bookingArea : "area open",
+    requestedVendor ? requestedVendor : "vendor auto-assigned",
+  ];
 
   return (
     <main>
@@ -434,7 +450,7 @@ export default function Home() {
 
       <section id="booking" className="section schedule soft compactBookingSection">
         <div className="sectionHead compactHead"><p className="eyebrow">Book pickup</p><h2>Send the details once. Dispatch uses the same order record.</h2></div>
-        <div className="scheduleGrid twoCols bookingOnlyGrid"><form className="panel" onSubmit={(event) => submitLead(event, "pickup-booking")}><h3>Pickup request</h3><div className="two"><label>Contact name<input name="name" placeholder="Name" autoComplete="name" required /></label><label>Email<input name="email" type="email" placeholder="Email" autoComplete="email" required /></label></div><div className="two"><label>Phone / WhatsApp<input name="phone" placeholder="Phone / WhatsApp" autoComplete="tel" required /></label><label>Company or household<input name="company" placeholder="Company or household" autoComplete="organization" required /></label></div><div className="two"><label>Preferred plan<select name="preferredPlan">{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label><label>Pickup zone<select name="zone">{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label></div>{requestedVendor && <div className="selectedVendor" role="status" aria-live="polite"><span>Requested vendor</span><strong>{requestedVendor}</strong><button type="button" onClick={clearRequestedVendor}>Clear</button></div>}<input type="hidden" name="requestedVendor" value={requestedVendor} /><div className="two"><label>Pickup area<input name="area" placeholder="Osu, Labone, East Legon..." autoComplete="address-level2" /></label><label>Preferred pickup date<input name="pickupDate" type="date" min={minPickupDate} /></label></div><div className="two"><label>Payment preference<select name="paymentPreference"><option>MTN MoMo</option><option>Telecel Cash</option><option>Card</option><option>Bank transfer</option><option>Invoice me</option></select></label><label>Alert preference<select name="alertPreference"><option>Email + WhatsApp alerts</option><option>WhatsApp only</option><option>Email only</option><option>Call me</option></select></label></div><label>Pickup notes<textarea name="message" placeholder="Textile type, special instructions, preferred time window..." /></label><button className="button primary full" type="submit" disabled={pendingAction === "pickup-booking"}>{pendingAction === "pickup-booking" ? "Saving pickup request..." : "Request Pickup"}</button>{formStatus["pickup-booking"] && <p className={statusTone(formStatus["pickup-booking"])} role="status" aria-live="polite">{formStatus["pickup-booking"]}</p>}</form><aside className="bookingSideCard panel"><h3>Want the extra details?</h3><p>Pricing, route coverage, order tracking, FAQs, and staff workspace links are now opened from the menu desk instead of living as long homepage sections.</p><button className="button secondary full" type="button" onClick={() => openMenuPanel("pricing")}>Open menu desk</button><a className="button primary full" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20want%20to%20schedule%20a%20laundry%20pickup" target="_blank" rel="noreferrer">WhatsApp Bubble Wash</a></aside></div>
+        <div className="scheduleGrid twoCols bookingOnlyGrid"><form className="panel" onSubmit={(event) => submitLead(event, "pickup-booking")}><h3>Pickup request</h3><div className="two"><label>Contact name<input name="name" placeholder="Name" autoComplete="name" required /></label><label>Email<input name="email" type="email" placeholder="Email" autoComplete="email" required /></label></div><div className="two"><label>Phone / WhatsApp<input name="phone" placeholder="Phone / WhatsApp" autoComplete="tel" required /></label><label>Company or household<input name="company" placeholder="Company or household" autoComplete="organization" required /></label></div><div className="two"><label>Preferred plan<select name="preferredPlan" value={bookingPlan} onChange={(event) => setBookingPlan(event.target.value as PlanName)}>{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label><label>Pickup zone<select name="zone" value={bookingZone} onChange={(event) => setBookingZone(event.target.value as ZoneKey)}>{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label></div><div className="bookingContextSummary" aria-label="Current booking context">{bookingContext.map((item) => <span key={item}>{item}</span>)}</div>{requestedVendor && <div className="selectedVendor" role="status" aria-live="polite"><span>Requested vendor</span><strong>{requestedVendor}</strong><button type="button" onClick={clearRequestedVendor}>Clear</button></div>}<input type="hidden" name="requestedVendor" value={requestedVendor} /><div className="two"><label>Pickup area<input name="area" value={bookingArea} onChange={(event) => setBookingArea(event.target.value)} placeholder="Osu, Labone, East Legon..." autoComplete="address-level2" /></label><label>Preferred pickup date<input name="pickupDate" type="date" min={minPickupDate} /></label></div><div className="two"><label>Payment preference<select name="paymentPreference"><option>MTN MoMo</option><option>Telecel Cash</option><option>Card</option><option>Bank transfer</option><option>Invoice me</option></select></label><label>Alert preference<select name="alertPreference"><option>Email + WhatsApp alerts</option><option>WhatsApp only</option><option>Email only</option><option>Call me</option></select></label></div><label>Pickup notes<textarea name="message" placeholder="Textile type, special instructions, preferred time window..." /></label><button className="button primary full" type="submit" disabled={pendingAction === "pickup-booking"}>{pendingAction === "pickup-booking" ? "Saving pickup request..." : "Request Pickup"}</button>{formStatus["pickup-booking"] && <p className={statusTone(formStatus["pickup-booking"])} role="status" aria-live="polite">{formStatus["pickup-booking"]}</p>}</form><aside className="bookingSideCard panel"><h3>Want the extra details?</h3><p>Pricing, route coverage, order tracking, FAQs, and staff workspace links are now opened from the menu desk instead of living as long homepage sections.</p><button className="button secondary full" type="button" onClick={() => openMenuPanel("pricing")}>Open menu desk</button><a className="button primary full" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20want%20to%20schedule%20a%20laundry%20pickup" target="_blank" rel="noreferrer">WhatsApp Bubble Wash</a></aside></div>
       </section>
 
       <section className="paymentStrip" aria-labelledby="payment-heading"><p className="eyebrow">Payment references</p><h3 id="payment-heading">Accepted payment lanes</h3><div className="paymentLogoGrid">{paymentMethods.map(([label, className]) => <span className={`paymentLogo ${className}`} key={label} role="img" aria-label={label} title={label}><span className="srOnly">{label}</span></span>)}</div></section>
