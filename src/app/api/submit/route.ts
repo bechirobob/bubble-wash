@@ -15,6 +15,7 @@ const zoneNames = new Set(Object.keys(zones));
 const paymentPreferences = new Set(["MTN MoMo", "Telecel Cash", "Card", "Bank transfer", "Invoice me"]);
 const paymentMethods = new Set(["MTN MoMo", "Telecel Cash", "Visa / Mastercard", "Bank transfer"]);
 const alertPreferences = new Set(["Email + WhatsApp alerts", "WhatsApp only", "Email only", "Call me"]);
+const pickupWindows = new Set(["Any available window", "Morning pickup", "Afternoon pickup", "Evening pickup"]);
 const billingCycles = new Set(["Monthly", "Yearly"]);
 const multiAdminModes = new Set(["Invite team leads", "Single admin only"]);
 const accountGoals = new Set(["Start ordering this week", "Open account this week", "Need vendor coverage check"]);
@@ -148,6 +149,7 @@ function validatePublicPayload(body: Record<string, unknown>, submissionType: st
     validateEnum(body, "paymentPreference", paymentPreferences, "payment preference"),
     validateEnum(body, "paymentMethod", paymentMethods, "payment method"),
     validateEnum(body, "alertPreference", alertPreferences, "alert preference"),
+    validateEnum(body, "pickupWindow", pickupWindows, "pickup window"),
     validateEnum(body, "billingCycle", billingCycles, "billing cycle"),
     validateEnum(body, "multiAdmin", multiAdminModes, "team access mode"),
     validateEnum(body, "accountGoal", accountGoals, "account goal"),
@@ -169,6 +171,11 @@ function validatePublicPayload(body: Record<string, unknown>, submissionType: st
     if (!Number.isFinite(amount) || amount <= 0 || amount > maxPublicPaymentAmount) {
       return NextResponse.json({ ok: false, error: "Enter a valid payment amount or request invoice support." }, { status: 400 });
     }
+  }
+
+  const phone = text(body.phone).replace(/[\s()+-]/g, "");
+  if (phone && (phone.length < 7 || phone.length > 16 || !/^\d+$/.test(phone))) {
+    return NextResponse.json({ ok: false, error: "Enter a valid phone or WhatsApp number." }, { status: 400 });
   }
 
   const pickupDate = text(body.pickupDate);
@@ -201,9 +208,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Too many requests. Try again shortly." }, { status: 429 });
   }
   try {
-    const rawBody = await request.json();
+    let rawBody: unknown;
+    try {
+      rawBody = await request.json();
+    } catch {
+      return NextResponse.json({ ok: false, error: "Invalid JSON submission payload." }, { status: 400 });
+    }
     if (!isObject(rawBody)) {
       return NextResponse.json({ ok: false, error: "Invalid submission payload." }, { status: 400 });
+    }
+    const oversizedField = Object.entries(rawBody).find(([, value]) => typeof value === "string" && value.length > maxFieldLength);
+    if (oversizedField) {
+      return NextResponse.json({ ok: false, error: `Field too long: ${oversizedField[0]}` }, { status: 400 });
     }
     const submissionType = text(rawBody.submissionType);
     if (publicSubmissionTypes.has(submissionType)) {

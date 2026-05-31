@@ -119,6 +119,7 @@
 - Why: frontend standards require every visible action to complete a real user flow, preserve accessible feedback, and avoid stale decorative state; backend standards require typed request bodies, allowlisted public fields, bounded values, and safe JSON errors.
 - Files likely touched: `src/app/page.tsx`, `src/app/globals.css`, `src/app/api/submit/route.ts`, and this blueprint.
 - Expected outcome: vendor request cards carry the chosen vendor into the booking payload, pickup date/weight/payment inputs expose safer client-side constraints, public submit rejects non-object/unknown/staff-only fields instead of silently accepting cursed payloads, and successful bookings keep the same customer/order data contract.
+- Approved sleep-mode scope: preserve the existing public/staff/product flows, add booking weight/window constraints, turn saved pickup references into immediate tracking guidance, reject malformed JSON and oversized public fields with safe `400` responses, and validate phone/window inputs server-side.
 - Risks and mitigation: keep changes targeted, preserve current auth/payment/order routes, avoid new dependencies, and verify with lint, tests, build, and API smoke checks.
 - Verification: run `npm run lint`, `npm test`, `npm run build`; smoke `/api/quote`, `/api/submit` valid payload with `requestedVendor`, and `/api/submit` invalid payload with staff-only/public-forbidden fields.
 
