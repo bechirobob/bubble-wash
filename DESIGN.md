@@ -113,11 +113,11 @@
 - Mobile motion: bubble/foam brand effects must still exist on mobile in a lighter layer; do not disable the whole motif unless `prefers-reduced-motion` is active.
 - Paystack: test mode is acceptable pre-launch. Other “provider not configured” notices should not dominate customer UI; keep failures in API/status responses and deployment notes.
 
-## 2026-05-30 frontend/backend standards change plan
+## 2026-05-31 frontend/backend standards execution plan
 
-- What: tighten public UI actions and API validation without replacing the existing Bubble Wash build.
-- Why: release-grade UX requires buttons to perform complete actions, status messages to distinguish success from errors, and public APIs to reject invalid enum/numeric/date shapes before persistence.
+- What: tighten Bubble Wash release UX and public API validation without replacing the existing build.
+- Why: frontend standards require every visible action to complete a real user flow, preserve accessible feedback, and avoid stale decorative state; backend standards require typed request bodies, allowlisted public fields, bounded values, and safe JSON errors.
 - Files likely touched: `src/app/page.tsx`, `src/app/globals.css`, `src/app/api/submit/route.ts`, and this blueprint.
-- Expected outcome: plan cards set the quote context instead of acting like generic anchors; public forms show error states in red instead of all-green status; `/api/submit` validates public zone/plan/payment/alert/account fields and bounded kg/amount/date values.
-- Risks and mitigation: keep changes small, preserve existing forms/routes, avoid dependencies, and verify with lint, tests, build, and API smoke checks.
-- Verification: run `npm run lint`, `npm test`, `npm run build`; smoke `/api/quote`, `/api/submit` valid payload, and `/api/submit` invalid payload.
+- Expected outcome: vendor request cards carry the chosen vendor into the booking payload, pickup date/weight/payment inputs expose safer client-side constraints, public submit rejects non-object/unknown/staff-only fields instead of silently accepting cursed payloads, and successful bookings keep the same customer/order data contract.
+- Risks and mitigation: keep changes targeted, preserve current auth/payment/order routes, avoid new dependencies, and verify with lint, tests, build, and API smoke checks.
+- Verification: run `npm run lint`, `npm test`, `npm run build`; smoke `/api/quote`, `/api/submit` valid payload with `requestedVendor`, and `/api/submit` invalid payload with staff-only/public-forbidden fields.

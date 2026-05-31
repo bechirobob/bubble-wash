@@ -823,6 +823,38 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--blue);
   box-shadow: 0 0 0 4px rgba(0,167,225,.14);
 }
+.selectedVendor {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  align-items: center;
+  border: 1px solid rgba(0,167,225,.24);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #eefaff, #fffdf5);
+}
+.selectedVendor span {
+  grid-column: 1 / -1;
+  color: var(--blue-dark);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.selectedVendor strong {
+  color: var(--navy);
+  font-family: "Space Grotesk", Manrope, sans-serif;
+}
+.selectedVendor button {
+  min-height: 38px;
+  border: 1px solid rgba(6,21,34,.16);
+  border-radius: 999px;
+  background: white;
+  color: var(--navy);
+  cursor: pointer;
+  font-weight: 900;
+  padding: 7px 12px;
+}
 .vendorPhoto::after {
   border-style: dashed;
   border-color: rgba(255,255,255,.48);
@@ -1254,3 +1286,479 @@ main, .nav { position: relative; z-index: 1; }
 }
 .commandGrid article p, .serviceCard p, .assuranceGrid article p, .liveTrackingGrid article p, .staffCard p { display: none; }
 .commandGrid h3, .serviceCard h3, .assuranceGrid h3, .liveTrackingGrid h3, .staffCard h3 { margin-bottom: 0; }
+
+
+/* Human-feel homepage compaction pass: shorter journey, editorial rhythm, useful disclosure. */
+.hero {
+  min-height: 660px;
+  padding-top: 86px;
+  padding-bottom: 54px;
+  gap: 42px;
+}
+.heroCopy h1 {
+  max-width: 780px;
+  text-wrap: balance;
+}
+.lead {
+  max-width: 660px;
+}
+.heroActions {
+  margin: 22px 0 16px;
+}
+.heroActions .button.secondary {
+  display: none;
+}
+.humanNote {
+  max-width: 650px;
+  font-size: 15px;
+}
+.heroVisual {
+  min-height: 500px;
+}
+.washerPortal {
+  width: 216px;
+  height: 216px;
+}
+.mainBasket strong {
+  font-size: clamp(52px, 5vw, 68px);
+}
+.tightProof {
+  margin-top: -12px;
+  padding-bottom: 18px;
+}
+.quickActionRail {
+  position: sticky;
+  top: 92px;
+  z-index: 18;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  max-width: 1180px;
+  margin: 0 auto 18px;
+  padding: 0 min(5vw, 0px);
+}
+.quickActionRail a {
+  display: grid;
+  gap: 2px;
+  min-height: 66px;
+  padding: 13px 16px;
+  border: 1px solid rgba(6,21,34,.14);
+  border-radius: 18px;
+  background: rgba(255,253,245,.92);
+  box-shadow: rgba(6,21,34,.12) 0 18px 44px -30px;
+  backdrop-filter: blur(12px);
+}
+.quickActionRail b {
+  font-family: "Space Grotesk", Manrope, sans-serif;
+  color: var(--navy);
+  letter-spacing: -.04em;
+}
+.quickActionRail span {
+  color: var(--soft-ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+.humanFlowSection,
+.planBand,
+.compactQuoteSection,
+.compactBookingSection,
+.detailDock {
+  padding-top: 58px;
+  padding-bottom: 58px;
+}
+.humanFlowGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.humanFlowGrid article {
+  position: relative;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: hidden;
+  border: 1px solid rgba(6,21,34,.14);
+  border-radius: 24px;
+  padding: 22px;
+  background:
+    linear-gradient(145deg, rgba(255,253,245,.92), rgba(239,251,255,.9)),
+    radial-gradient(circle at 80% 18%, rgba(103,232,255,.26), transparent 28%);
+  box-shadow: var(--shadow);
+}
+.humanFlowGrid article::before {
+  content: "";
+  position: absolute;
+  inset: 16px 16px auto auto;
+  width: 86px;
+  height: 86px;
+  border-radius: 50%;
+  background-image: radial-gradient(circle, rgba(0,167,225,.18) 0 18%, transparent 20%);
+  background-size: 18px 18px;
+}
+.humanFlowGrid span {
+  position: absolute;
+  top: 18px;
+  left: 20px;
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  color: #04101c;
+  background: linear-gradient(135deg, var(--lime), var(--cyan));
+  font-family: "Space Grotesk", Manrope, sans-serif;
+  font-weight: 900;
+}
+.humanFlowGrid h3 {
+  margin-bottom: 8px;
+}
+.humanFlowGrid p {
+  margin: 0;
+  color: var(--soft-ink);
+  line-height: 1.58;
+}
+.slimPlans {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.slimPlans .planCard {
+  padding: 22px;
+}
+.slimPlans .planCard ul {
+  display: none;
+}
+.serviceWorkbench {
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr);
+}
+.sideStack {
+  display: grid;
+  gap: 14px;
+}
+.detailDock {
+  background: #fffdf7;
+}
+.detailGrid {
+  display: grid;
+  gap: 14px;
+}
+.detailGrid details {
+  border: 1px solid rgba(6,21,34,.14);
+  border-radius: 24px;
+  background: rgba(255,253,245,.96);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.detailGrid summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 70px;
+  padding: 20px 24px;
+  cursor: pointer;
+  color: var(--navy);
+  font-family: "Space Grotesk", Manrope, sans-serif;
+  font-size: clamp(20px, 2vw, 28px);
+  font-weight: 800;
+  letter-spacing: -.055em;
+}
+.detailGrid summary::after {
+  content: "+";
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  color: #04101c;
+  background: linear-gradient(135deg, var(--lime), var(--cyan));
+  font-family: Manrope, sans-serif;
+  letter-spacing: 0;
+}
+.detailGrid details[open] summary::after {
+  content: "–";
+}
+.detailBody,
+.detailGrid details > .vendorShowcaseGrid,
+.detailGrid details > .onboardingPanel,
+.detailGrid details > .faqListCompact,
+.detailGrid details > .staffCards,
+.detailGrid details > .status {
+  margin: 0 18px 18px;
+}
+.detailBody {
+  display: grid;
+  grid-template-columns: .85fr 1.15fr;
+  gap: 16px;
+  align-items: start;
+}
+.compactVendorGrid,
+.compactStaffCards {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.faqListCompact {
+  display: grid;
+  gap: 10px;
+}
+.faqListCompact .faqItem {
+  margin-bottom: 0;
+  box-shadow: none;
+}
+.compactStaffCards .staffCard {
+  padding: 18px;
+}
+.paymentStrip {
+  padding-top: 32px;
+  padding-bottom: 34px;
+}
+.footer {
+  padding-top: 42px;
+  padding-bottom: 42px;
+}
+@media (max-width: 1120px) {
+  .quickActionRail {
+    top: 78px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-inline: 18px;
+  }
+  .humanFlowGrid,
+  .slimPlans,
+  .serviceWorkbench,
+  .detailBody,
+  .compactVendorGrid,
+  .compactStaffCards {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 780px) {
+  .hero {
+    padding-top: 28px;
+    padding-bottom: 42px;
+  }
+  .heroActions .textLink {
+    width: 100%;
+    text-align: center;
+  }
+  .quickActionRail {
+    position: relative;
+    top: auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0;
+    padding: 12px 16px 8px;
+    background: #fffdf7;
+  }
+  .quickActionRail a {
+    min-height: 58px;
+    padding: 11px 12px;
+    border-radius: 16px;
+    backdrop-filter: none;
+  }
+  .quickActionRail span {
+    font-size: 12px;
+  }
+  .humanFlowSection,
+  .planBand,
+  .compactQuoteSection,
+  .compactBookingSection,
+  .detailDock {
+    padding-top: 44px;
+    padding-bottom: 44px;
+  }
+  .humanFlowGrid,
+  .slimPlans,
+  .serviceWorkbench,
+  .detailBody,
+  .compactVendorGrid,
+  .compactStaffCards {
+    grid-template-columns: 1fr;
+  }
+  .humanFlowGrid article {
+    min-height: 190px;
+  }
+  .detailGrid summary {
+    min-height: 62px;
+    padding: 16px 18px;
+  }
+  .detailBody,
+  .detailGrid details > .vendorShowcaseGrid,
+  .detailGrid details > .onboardingPanel,
+  .detailGrid details > .faqListCompact,
+  .detailGrid details > .staffCards,
+  .detailGrid details > .status {
+    margin: 0 12px 12px;
+  }
+  .paymentStrip {
+    padding-top: 26px;
+  }
+}
+
+.trackingMiniResult {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(0,167,225,.22);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: #eefaff;
+}
+.trackingMiniResult strong {
+  color: var(--blue-dark);
+  font-family: "Space Grotesk", Manrope, sans-serif;
+}
+.trackingMiniResult span,
+.trackingMiniResult small {
+  color: var(--soft-ink);
+  font-weight: 850;
+}
+
+.compactSideStack details {
+  border: 1px solid rgba(6,21,34,.14);
+  border-radius: 22px;
+  background: rgba(255,253,245,.96);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.compactSideStack summary {
+  min-height: 68px;
+  padding: 18px 20px;
+  cursor: pointer;
+  color: var(--navy);
+  font-family: "Space Grotesk", Manrope, sans-serif;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -.05em;
+}
+.compactSideStack .panel {
+  margin: 0 12px 12px;
+  box-shadow: none;
+}
+@media (max-width: 780px) {
+  .humanFlowGrid,
+  .slimPlans {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(260px, 84vw);
+    grid-template-columns: none;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 8px;
+  }
+  .humanFlowGrid article,
+  .slimPlans .planCard {
+    scroll-snap-align: start;
+  }
+  .compactSideStack summary {
+    min-height: 60px;
+    font-size: 20px;
+  }
+}
+
+.orderCard,
+.orderCard small {
+  display: grid;
+  gap: 5px;
+}
+.orderCard strong {
+  display: block;
+  margin: 2px 0;
+}
+@media (max-width: 780px) {
+  .orderCard {
+    align-items: start;
+  }
+  .orderCard small {
+    line-height: 1.45;
+  }
+  .humanFlowGrid,
+  .slimPlans {
+    padding-right: 16px;
+  }
+}
+
+
+/* Menu-gated homepage pass */
+.compactHumanFlowSection {
+  padding-bottom: 58px;
+}
+.menuDeskSection {
+  position: relative;
+  padding-top: 62px;
+}
+.menuPanelTabs {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 6px 0 18px;
+  margin-bottom: 8px;
+  scrollbar-width: thin;
+}
+.menuPanelTabs button {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255,255,255,.9);
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 950;
+  padding: 12px 16px;
+  transition: background .16s ease, color .16s ease, border-color .16s ease, transform .16s ease;
+}
+.menuPanelTabs button:hover { transform: translateY(-1px); }
+.menuPanelTabs button.active,
+.menuPanelTabs button[aria-selected="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: white;
+}
+.menuPanelContent {
+  display: grid;
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-radius: 34px;
+  padding: clamp(18px, 2.8vw, 30px);
+  background: rgba(255,255,255,.78);
+  box-shadow: var(--shadow);
+}
+.embeddedWorkbench { margin-top: 10px; }
+.coverageMenuGrid,
+.trackPaymentGrid,
+.bookingOnlyGrid {
+  display: grid;
+  grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr);
+  gap: 18px;
+  align-items: start;
+}
+.bookingSideCard {
+  align-self: start;
+  background: linear-gradient(145deg, white, #f3fbff);
+}
+.bookingSideCard p {
+  color: var(--soft-ink);
+  line-height: 1.6;
+}
+
+@media (max-width: 980px) {
+  .coverageMenuGrid,
+  .trackPaymentGrid,
+  .bookingOnlyGrid {
+    grid-template-columns: 1fr;
+  }
+  .menuPanelContent .plansGrid,
+  .menuPanelContent .vendorShowcaseGrid,
+  .menuPanelContent .staffCards {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    padding-bottom: 8px;
+  }
+  .menuPanelContent .planCard,
+  .menuPanelContent .vendorShowcaseCard,
+  .menuPanelContent .staffCard {
+    min-width: min(82vw, 320px);
+    scroll-snap-align: start;
+  }
+}
+
+@media (max-width: 620px) {
+  .menuDeskSection { padding-top: 44px; }
+  .menuPanelContent { border-radius: 26px; padding: 16px; }
+  .menuPanelTabs button { padding: 10px 13px; }
+}

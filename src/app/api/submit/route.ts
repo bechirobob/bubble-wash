@@ -37,6 +37,7 @@ const publicAllowedFields = new Set([
   "addons",
   "paymentPreference",
   "alertPreference",
+  "requestedVendor",
   "amount",
   "paymentMethod",
   "locations",
@@ -61,6 +62,10 @@ const staffSubmissionRoles = new Map<string, StaffRole>([
   ["support-ticket-action", "support"],
 ]);
 const crossRoleStaffSubmissionTypes = new Set(["support-ticket"]);
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -131,6 +136,11 @@ function validateEnum(body: Record<string, unknown>, field: string, allowed: Set
 function validatePublicPayload(body: Record<string, unknown>, submissionType: string) {
   if (!publicSubmissionTypes.has(submissionType)) return null;
 
+  const forbiddenFields = Object.keys(body).filter((key) => !publicAllowedFields.has(key));
+  if (forbiddenFields.length > 0) {
+    return NextResponse.json({ ok: false, error: `Unsupported public field: ${forbiddenFields[0]}` }, { status: 400 });
+  }
+
   const enumChecks = [
     validateEnum(body, "zone", zoneNames, "pickup zone"),
     validateEnum(body, "plan", planNames, "plan"),
@@ -162,8 +172,11 @@ function validatePublicPayload(body: Record<string, unknown>, submissionType: st
   }
 
   const pickupDate = text(body.pickupDate);
-  if (pickupDate && Number.isNaN(Date.parse(pickupDate))) {
+  if (pickupDate && !/^\d{4}-\d{2}-\d{2}$/.test(pickupDate)) {
     return NextResponse.json({ ok: false, error: "Enter a valid pickup date." }, { status: 400 });
+  }
+  if (pickupDate && pickupDate < new Date().toISOString().slice(0, 10)) {
+    return NextResponse.json({ ok: false, error: "Choose today or a future pickup date." }, { status: 400 });
   }
 
   return null;
@@ -189,7 +202,16 @@ export async function POST(request: NextRequest) {
   }
   try {
     const rawBody = await request.json();
+    if (!isObject(rawBody)) {
+      return NextResponse.json({ ok: false, error: "Invalid submission payload." }, { status: 400 });
+    }
     const submissionType = text(rawBody.submissionType);
+    if (publicSubmissionTypes.has(submissionType)) {
+      const forbiddenField = Object.keys(rawBody).find((key) => !publicAllowedFields.has(key));
+      if (forbiddenField) {
+        return NextResponse.json({ ok: false, error: `Unsupported public field: ${forbiddenField}` }, { status: 400 });
+      }
+    }
     const body = cleanPayload(rawBody, submissionType);
     const authError = await authorizeSubmission(submissionType);
     if (authError) return authError;

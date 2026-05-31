@@ -9,6 +9,10 @@ function text(value: unknown) {
   return typeof value === "string" ? value.trim().slice(0, 1200) : "";
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export async function POST(request: NextRequest) {
   if (isRateLimited(clientKey(request.headers, "payments-initialize"), 12, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many checkout attempts. Try again shortly." }, { status: 429 });
@@ -16,6 +20,9 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
+    if (!isObject(body)) {
+      return NextResponse.json({ ok: false, error: "Invalid checkout payload." }, { status: 400 });
+    }
     const amountGhs = parseGhsAmount(body.amount);
     const input = {
       name: text(body.name),
