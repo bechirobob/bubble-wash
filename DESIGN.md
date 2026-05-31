@@ -130,3 +130,11 @@
 - Change: use a wrapping/grid tab selector so every option is visible without side-scrolling.
 - Map note: avoid fake map-like panels unless they show a real map or route action. Coverage should read as route details with Google Maps links, not a decorative map preview.
 - Verification: mobile visual inspection should confirm no horizontal tab dependency and plan cards remain readable without excessive height.
+
+## 2026-05-31 cross-platform pricing interaction correction
+
+- User correction: the pricing/menu improvement must not be mobile-only. Desktop, tablet, and mobile should all read as deliberate product UI.
+- Change: pricing cards behave as a cross-platform comparison board — four columns on wide screens, two on tablet, one on mobile.
+- Interaction: selected plan state is visible on the cards and mirrored in a selected-plan workbench with an `Update estimate` action.
+- Accessibility: tab controls, plan actions, and estimate actions keep visible focus states and live status feedback.
+- Critique checklist: no hidden side-scroll for primary navigation, no empty pricing cards on any breakpoint, and no decorative card state without a real quote/selection flow.

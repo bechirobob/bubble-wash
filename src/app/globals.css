@@ -2345,3 +2345,125 @@ label { font-weight: 700; }
     padding-right: 0;
   }
 }
+
+/* Cross-platform pricing desk: desktop comparison, tablet clarity, mobile stack. */
+.menuPanelTabs {
+  align-items: stretch;
+  max-width: 1080px;
+  margin-inline: auto;
+}
+.menuPanelTabs button {
+  box-shadow: rgba(8,35,61,.05) 0 10px 24px -18px;
+}
+.menuPanelTabs button:focus-visible,
+.planCard .button:focus-visible,
+.selectedPlanWorkbench .button:focus-visible {
+  outline: 3px solid rgba(42, 213, 224, .55);
+  outline-offset: 3px;
+}
+.menuPanelTabs button[aria-selected="true"] {
+  box-shadow: rgba(8,35,61,.2) 0 18px 34px -22px;
+}
+.plansGrid.slimPlans {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+.planFlagRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 31px;
+}
+.planFlagRow .badge {
+  margin-bottom: 0;
+}
+.selectedPlanPill {
+  display: inline-grid;
+  place-items: center;
+  min-height: 28px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(7, 51, 72, .08);
+  color: var(--blue-dark);
+  font-size: 12px;
+  font-weight: 900;
+}
+.planCard {
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+.planCard:hover {
+  transform: translateY(-3px);
+  border-color: rgba(24, 151, 184, .28);
+  box-shadow: rgba(8,35,61,.16) 0 28px 55px -36px;
+}
+.planCard.featured:hover {
+  transform: translateY(-6px);
+}
+.planCard.selectedPlanCard,
+.planCard.featured.selectedPlanCard {
+  border-color: var(--blue-dark);
+  background: linear-gradient(180deg, #fffef7, #ecfbfb);
+  box-shadow: rgba(13, 86, 136, .18) 0 30px 62px -34px;
+}
+.selectedPlanWorkbench {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 18px 0;
+  padding: 18px 20px;
+  border: 1px solid rgba(16,40,58,.12);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 10% 18%, rgba(158,223,235,.2), transparent 24%),
+    linear-gradient(135deg, #10283a, #17445a);
+  color: #f8fffd;
+  box-shadow: rgba(8,35,61,.16) 0 24px 52px -34px;
+}
+.selectedPlanWorkbench span {
+  display: block;
+  color: #a9eaf1;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.selectedPlanWorkbench strong {
+  display: block;
+  margin-top: 4px;
+  font-family: "Space Grotesk", Manrope, sans-serif;
+  font-size: clamp(24px, 3vw, 38px);
+  line-height: 1;
+}
+.selectedPlanWorkbench p {
+  margin: 8px 0 0;
+  color: rgba(248,255,253,.8);
+  line-height: 1.45;
+}
+.selectedPlanWorkbench .button {
+  flex: 0 0 auto;
+  background: #fffdf8;
+  color: var(--navy);
+  border-color: rgba(255,255,255,.45);
+}
+@media (max-width: 1180px) {
+  .plansGrid.slimPlans {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .menuPanelTabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .plansGrid.slimPlans {
+    grid-template-columns: 1fr;
+  }
+  .selectedPlanWorkbench {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .selectedPlanWorkbench .button {
+    width: 100%;
+  }
+}
