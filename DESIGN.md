@@ -121,3 +121,12 @@
 - Expected outcome: vendor request cards carry the chosen vendor into the booking payload, pickup date/weight/payment inputs expose safer client-side constraints, public submit rejects non-object/unknown/staff-only fields instead of silently accepting cursed payloads, and successful bookings keep the same customer/order data contract.
 - Risks and mitigation: keep changes targeted, preserve current auth/payment/order routes, avoid new dependencies, and verify with lint, tests, build, and API smoke checks.
 - Verification: run `npm run lint`, `npm test`, `npm run build`; smoke `/api/quote`, `/api/submit` valid payload with `requestedVendor`, and `/api/submit` invalid payload with staff-only/public-forbidden fields.
+
+## 2026-05-31 mobile pricing/menu correction
+
+- Screenshot critique: the pricing cards showed only the subscription fee and pickup rhythm, which made the plans hard to compare on mobile.
+- Change: each plan card should expose audience fit, monthly pickup count, starting kg/rate, key features, and then the action button.
+- Screenshot critique: the laundry desk tab row depended on horizontal scrolling, hiding tracking/FAQ/staff options off-screen.
+- Change: use a wrapping/grid tab selector so every option is visible without side-scrolling.
+- Map note: avoid fake map-like panels unless they show a real map or route action. Coverage should read as route details with Google Maps links, not a decorative map preview.
+- Verification: mobile visual inspection should confirm no horizontal tab dependency and plan cards remain readable without excessive height.

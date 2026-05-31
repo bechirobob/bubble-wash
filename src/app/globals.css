@@ -2017,10 +2017,178 @@ label { font-weight: 700; }
     radial-gradient(circle at 12% 18%, rgba(158,223,235,.16), transparent 26%),
     linear-gradient(135deg, #0d2232, #102d40 70%, #0d2232);
 }
+.refinedCoverageGrid {
+  grid-template-columns: minmax(0, 1.05fr) minmax(290px, .95fr);
+  align-items: stretch;
+}
+.coverageRoutesPanel,
+.coverageSummaryCard,
+.staffEntryCard,
+.staffAccessCard {
+  position: relative;
+  overflow: hidden;
+}
+.coveragePanelHead {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.coveragePanelHead p,
+.coverageSummaryCard p,
+.staffEntryCard p,
+.staffAccessHero p,
+.staffAccessCard p {
+  color: var(--soft-ink);
+  line-height: 1.58;
+}
+.coverageRouteList {
+  display: grid;
+  gap: 12px;
+}
+.coverageRouteGroup {
+  display: grid;
+  grid-template-columns: minmax(120px, .58fr) 1fr;
+  gap: 14px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid rgba(16,40,58,.1);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 94% 12%, rgba(158,223,235,.22), transparent 22%),
+    rgba(255,253,248,.78);
+}
+.coverageRouteGroup strong,
+.staffEntryCard span,
+.staffAccessCard span {
+  display: block;
+  color: var(--navy);
+  font-weight: 850;
+}
+.coverageRouteGroup small {
+  display: block;
+  margin-top: 4px;
+  color: var(--soft-ink);
+  font-weight: 700;
+  line-height: 1.35;
+}
+.coverageRouteGroup ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.coverageRouteGroup li {
+  padding: 8px 11px;
+  border: 1px solid rgba(30,152,184,.16);
+  border-radius: 999px;
+  background: #eef8f8;
+  color: #174053;
+  font-size: 13px;
+  font-weight: 800;
+}
+.coverageSummaryCard {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  min-height: 100%;
+  padding: 24px;
+  border: 1px solid rgba(16,40,58,.12);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 84% 14%, rgba(158,223,235,.28), transparent 26%),
+    linear-gradient(145deg, #fffdf8, #eef8f8);
+  box-shadow: var(--shadow);
+}
+.coverageSummaryCard::after,
+.staffEntryCard::after,
+.staffAccessCard::after {
+  content: "";
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  right: -44px;
+  top: -44px;
+  border-radius: 50%;
+  border: 1px solid rgba(158,223,235,.45);
+  background: radial-gradient(circle at 32% 28%, rgba(255,255,255,.9) 0 12%, rgba(158,223,235,.18) 13% 100%);
+}
+.routeFacts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.routeFacts span {
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255,255,255,.72);
+  border: 1px solid rgba(16,40,58,.08);
+}
+.routeFacts b {
+  color: var(--blue-dark);
+  font-size: 18px;
+}
+.routeFacts small {
+  color: var(--soft-ink);
+  font-size: 11px;
+  font-weight: 750;
+}
+.staffEntryCard {
+  display: grid;
+  gap: 8px;
+  min-height: 230px;
+  padding: clamp(22px, 3vw, 34px);
+  border: 1px solid rgba(16,40,58,.12);
+  border-radius: 26px;
+  background: linear-gradient(145deg, #fffdf8, #eef8f8);
+  box-shadow: var(--shadow);
+}
+.staffEntryCard b,
+.staffAccessCard b {
+  color: var(--blue-dark);
+  font-weight: 850;
+}
+.staffAccessShell {
+  max-width: 1060px;
+}
+.staffAccessHero {
+  display: grid;
+  gap: 12px;
+  margin: clamp(34px, 6vw, 72px) 0 24px;
+  max-width: 760px;
+}
+.staffAccessHero h1 {
+  margin: 0;
+}
+.staffAccessGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.staffAccessCard {
+  display: grid;
+  gap: 10px;
+  min-height: 220px;
+  padding: 24px;
+  border: 1px solid rgba(16,40,58,.12);
+  border-radius: 24px;
+  background: rgba(255,253,248,.92);
+  box-shadow: var(--shadow);
+}
+.staffAccessCard h2 {
+  margin: 0;
+  font-size: clamp(24px, 2.4vw, 34px);
+}
 @media (max-width: 980px) {
   h1 { font-size: clamp(36px, 9vw, 54px); }
   .heroVisual { min-height: 500px; }
   .careTag { position: static; width: 100%; transform: none; }
+  .refinedCoverageGrid,
+  .staffAccessGrid { grid-template-columns: 1fr; }
 }
 @media (max-width: 780px) {
   body { font-size: 15px; }
@@ -2029,4 +2197,151 @@ label { font-weight: 700; }
   .visualCard, .routeCard, .ratingCard, .orderCard, .mainBasket, .careTag { border-radius: 18px; }
   .mainBasket strong { font-size: 44px; }
   .proofStrip strong { font-size: 25px; }
+  .coverageRouteGroup { grid-template-columns: 1fr; }
+  .routeFacts { grid-template-columns: 1fr; }
+  .staffAccessCard { min-height: auto; }
+}
+
+/* Mobile pricing/menu correction: expose all tabs and useful plan details. */
+.menuPanelTabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(112px, 1fr));
+  gap: 10px;
+  overflow: visible;
+  padding: 6px 0 18px;
+  scrollbar-width: none;
+}
+.menuPanelTabs::-webkit-scrollbar { display: none; }
+.menuPanelTabs button {
+  width: 100%;
+  min-height: 46px;
+  white-space: normal;
+  text-align: center;
+}
+.slimPlans {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+.slimPlans .planCard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+}
+.planCardTop {
+  display: grid;
+  gap: 6px;
+}
+.planCardTop h3,
+.planCardTop p,
+.planFeatureList {
+  margin: 0;
+}
+.planCardTop p {
+  color: var(--soft-ink);
+  line-height: 1.45;
+  font-size: 14px;
+}
+.planMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.planMetrics span {
+  display: grid;
+  gap: 2px;
+  padding: 11px 10px;
+  border: 1px solid rgba(16,40,58,.1);
+  border-radius: 16px;
+  background: rgba(238,248,248,.75);
+}
+.planMetrics b {
+  color: var(--navy);
+  font-size: 16px;
+  line-height: 1;
+}
+.planMetrics small {
+  color: var(--soft-ink);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.2;
+}
+.slimPlans .planCard .planFeatureList,
+.planFeatureList {
+  display: grid;
+  gap: 8px;
+  color: var(--soft-ink);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.planFeatureList li {
+  position: relative;
+  padding-left: 18px;
+}
+.planFeatureList li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: .55em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--lime), var(--cyan));
+}
+.slimPlans .button { margin-top: auto; }
+.coveragePanelHead p { max-width: 58ch; }
+
+@media (max-width: 920px) {
+  .menuPanelTabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .slimPlans {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .menuPanelTabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .menuPanelTabs button {
+    min-height: 44px;
+    padding: 10px 9px;
+    font-size: 13px;
+  }
+  .menuPanelTabs button:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .slimPlans .planCard {
+    padding: 20px;
+  }
+  .planMetrics {
+    grid-template-columns: 1fr;
+  }
+  .price {
+    font-size: 34px;
+  }
+}
+
+/* Override older carousel rules: pricing comparisons must not depend on side-scroll. */
+.plansGrid.slimPlans {
+  display: grid;
+  grid-auto-flow: row;
+  overflow: visible;
+  overscroll-behavior-inline: auto;
+  scroll-snap-type: none;
+  padding-right: 0;
+}
+.plansGrid.slimPlans .planCard {
+  width: auto;
+  min-width: 0;
+  scroll-snap-align: unset;
+}
+@media (max-width: 920px) {
+  .plansGrid.slimPlans {
+    grid-template-columns: 1fr;
+    grid-auto-columns: auto;
+    padding-right: 0;
+  }
 }
