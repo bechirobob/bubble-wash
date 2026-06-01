@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
+import { securityHeaders } from "./src/lib/security";
 
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
   allowedDevOrigins: [
     "127.0.0.1",
     "localhost",
@@ -10,6 +12,14 @@ const nextConfig: NextConfig = {
   ],
   images: {
     remotePatterns: [{ protocol: "https", hostname: "images.unsplash.com" }],
+  },
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: securityHeaders(),
+      },
+    ];
   },
 };
 

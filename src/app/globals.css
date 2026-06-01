@@ -3606,3 +3606,169 @@ label {
     grid-template-columns: 1fr;
   }
 }
+
+/* Premium release polish: Apple/Stripe-inspired clarity without replacing working flows */
+:root {
+  --navy: #061b31;
+  --premium-ink: #071827;
+  --premium-blue: #0797df;
+  --premium-cyan: #72dbff;
+  --premium-gold: #f6bf58;
+  --premium-shadow: rgba(6, 27, 49, .18) 0 34px 90px -48px, rgba(20, 168, 236, .18) 0 20px 60px -42px;
+}
+body {
+  background:
+    radial-gradient(circle at 8% -8%, rgba(114, 219, 255, .22), transparent 30%),
+    radial-gradient(circle at 92% 12%, rgba(246, 191, 88, .16), transparent 28%),
+    var(--cream);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+.nav {
+  background: rgba(255, 255, 255, .78);
+  box-shadow: rgba(6, 27, 49, .05) 0 18px 48px -34px;
+}
+.navLinks a,
+.navLinks button {
+  border-radius: 999px;
+  padding: 9px 11px;
+}
+.navLinks a:hover,
+.navLinks button:hover {
+  background: rgba(20, 168, 236, .09);
+  color: var(--blue-dark);
+}
+.hero {
+  position: relative;
+  background:
+    linear-gradient(115deg, rgba(255,255,255,.96) 0 36%, rgba(240,250,255,.88) 36% 66%, rgba(7,151,223,.16) 100%),
+    radial-gradient(circle at 86% 18%, rgba(114,219,255,.54), transparent 31%),
+    radial-gradient(circle at 18% 96%, rgba(246,191,88,.26), transparent 28%);
+}
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 24px min(3vw, 42px);
+  pointer-events: none;
+  border: 1px solid rgba(20, 168, 236, .16);
+  border-radius: 44px;
+  background: linear-gradient(135deg, rgba(255,255,255,.42), rgba(255,255,255,0));
+  mask-image: linear-gradient(90deg, #000, transparent 76%);
+}
+.hero > * { position: relative; z-index: 1; }
+h1 {
+  color: var(--premium-ink);
+  text-wrap: balance;
+}
+.lead,
+.sectionHead p {
+  font-size: clamp(17px, 1.5vw, 20px);
+}
+.heroVisual,
+.planCard,
+.serviceCard,
+.panel,
+.faqItem,
+.contactCard,
+.quoteResult,
+.routeMapCard,
+.mapResearchCard,
+.liveTrackingGrid article,
+.opsBoard article,
+.supportRules article,
+.driverChecklist article,
+.credentialPanel,
+.loginPanel {
+  box-shadow: var(--premium-shadow);
+}
+.heroVisual {
+  border-radius: clamp(30px, 4vw, 58px);
+  background:
+    radial-gradient(circle at 74% 28%, rgba(255,255,255,.95), transparent 24%),
+    linear-gradient(145deg, #dff7ff 0%, #ffffff 56%, #fff3dd 100%);
+}
+.logoBubble {
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,.7);
+}
+.visualCard,
+.routeCard,
+.panel,
+.planCard,
+.serviceCard {
+  backdrop-filter: blur(12px);
+}
+.button.primary,
+.navCta {
+  background: linear-gradient(135deg, #09a8ee 0%, #0879bd 52%, #055481 100%);
+  box-shadow: rgba(8, 121, 189, .32) 0 20px 44px -22px;
+}
+.button.secondary {
+  background: rgba(255,255,255,.92);
+  box-shadow: rgba(6, 27, 49, .06) 0 14px 34px -26px;
+}
+.proofStrip div,
+.locationGrid span,
+.paymentLogo {
+  background: rgba(255,255,255,.78);
+  backdrop-filter: blur(10px);
+}
+.planCard.featured,
+.selectedPlanCard {
+  background:
+    linear-gradient(white, white) padding-box,
+    linear-gradient(135deg, rgba(20,168,236,.9), rgba(246,191,88,.78)) border-box;
+  border: 2px solid transparent;
+}
+.price {
+  background: linear-gradient(135deg, var(--blue-dark), #10aee8 65%, #0d4266);
+  -webkit-background-clip: text;
+  color: transparent;
+}
+.quoteResult {
+  background:
+    radial-gradient(circle at 88% 12%, rgba(114,219,255,.2), transparent 30%),
+    linear-gradient(135deg, #061b31, #0d3658 64%, #0b6f9f);
+}
+.dark {
+  background:
+    radial-gradient(circle at 80% 10%, rgba(114,219,255,.16), transparent 28%),
+    linear-gradient(135deg, #061b31, #123b61 62%, #071827);
+}
+.secureAccessPanel {
+  align-content: center;
+  background:
+    radial-gradient(circle at 82% 16%, rgba(114,219,255,.22), transparent 32%),
+    linear-gradient(145deg, #061b31, #0d3658);
+  color: white;
+}
+.secureAccessPanel p { color: rgba(255,255,255,.76); line-height: 1.65; }
+.secureAccessPanel span {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 999px;
+  padding: 9px 12px;
+  color: #91e5ff;
+  font-weight: 900;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .button,
+  .navCta,
+  .planCard,
+  .serviceCard,
+  .panel,
+  .credentialCard {
+    transition: transform .18s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease;
+  }
+  .planCard:hover,
+  .serviceCard:hover,
+  .panel:hover,
+  .credentialCard:hover {
+    transform: translateY(-3px);
+  }
+}
+@media (max-width: 780px) {
+  .hero::before { inset: 12px; border-radius: 28px; }
+  .nav { background: rgba(255,255,255,.93); }
+}

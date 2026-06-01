@@ -340,7 +340,7 @@ function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: strin
           </div>
           <div className="orderMeta minimalMeta"><span>{order.area}</span><span>{order.routeWindow}</span><span>{order.vendor}</span><span>{order.driver}</span><span>{order.payment}</span></div>
           <AutomatedOrderActions order={order} role={role} userName={userName} onSaved={() => loadOrders(false)} />
-          <div className="mapActions"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noreferrer">Route</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noreferrer">Area</a></div>
+          <div className="mapActions"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noopener noreferrer">Route</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Area</a></div>
           <details className="quietDetails"><summary>Timeline and full context</summary><div className="timelineList">{order.timeline.slice(0, 5).map((event) => <div key={`${order.orderId}-${event.id}-${event.createdAt}`}><b>{event.status}</b><span>{event.type} · {event.actor} · {formatShortTime(event.createdAt)}</span><p>{event.note}</p></div>)}</div></details>
         </article>)}
       </div>
@@ -367,7 +367,7 @@ function PortalShell({ title, eyebrow, role, pageRole = role, userName, children
 
   async function logoutStaff() {
     try {
-      await fetch("/api/logout", { method: "POST", cache: "no-store" });
+      await fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: "{}" });
     } finally {
       window.location.replace("/login");
     }

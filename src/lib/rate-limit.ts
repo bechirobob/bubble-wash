@@ -1,11 +1,10 @@
 import "server-only";
 
 import { consumeRateLimit } from "@/lib/data-store";
+import { clientScopeKey } from "@/lib/security";
 
 export function clientKey(headers: Headers, scope: string) {
-  const forwarded = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const realIp = headers.get("x-real-ip")?.trim();
-  return `${scope}:${forwarded || realIp || "local"}`;
+  return clientScopeKey(headers, scope);
 }
 
 export function isRateLimited(key: string, limit: number, windowMs: number) {

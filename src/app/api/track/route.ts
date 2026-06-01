@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
+import { publicTrackingView } from "@/lib/security";
 import { findOrderById, readSubmissions } from "@/lib/submissions";
 
 export async function GET(request: NextRequest) {
@@ -19,22 +20,6 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    tracking: {
-      id: order.orderId,
-      createdAt: order.createdAt,
-      updatedAt: order.updatedAt,
-      type: order.lastEventType,
-      customer: order.customer,
-      status: order.status,
-      nextStep: order.nextStep,
-      area: order.area,
-      payment: order.payment,
-      vendor: order.vendor,
-      driver: order.driver,
-      routeWindow: order.routeWindow,
-      locationNote: order.locationNote,
-      eventCount: order.eventCount,
-      route: order.route,
-    },
+    tracking: publicTrackingView(order),
   });
 }

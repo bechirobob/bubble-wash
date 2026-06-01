@@ -42,3 +42,8 @@ next-env.d.ts
 
 # local pilot data / PII
 /data/
+/env/
+
+# local mission logs / agent working memory (never commit)
+/knowledge/
+/.hermes/

@@ -5,6 +5,8 @@ import Link from "next/link";
 import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
+const showCredentialCards = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_BUBBLEWASH_SHOW_DEMO_LOGIN === "true";
+
 const credentialCards = [
   ["Admin", "admin@bubblewash.local"],
   ["Vendor", "vendor@bubblewash.local"],
@@ -18,7 +20,7 @@ function LoginForm() {
     const value = searchParams.get("next");
     return value && ["/admin", "/vendors", "/drivers", "/support"].includes(value) ? value : "/admin";
   }, [searchParams]);
-  const [email, setEmail] = useState("admin@bubblewash.local");
+  const [email, setEmail] = useState(showCredentialCards ? "admin@bubblewash.local" : "");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState("Enter staff credentials to open a separate workspace.");
 
@@ -61,17 +63,25 @@ function LoginForm() {
             <p className="status">Destination: {nextPath}</p>
             <p className="status success">{status}</p>
           </form>
-          <aside className="credentialPanel">
-            <h2>Staff access</h2>
-            <div className="credentialList">
-              {credentialCards.map(([role, emailValue]) => (
-                <button className="credentialCard" type="button" key={role} onClick={() => fillCredential(emailValue)}>
-                  <strong>{role}</strong>
-                  <span>{emailValue}</span>
-                </button>
-              ))}
-            </div>
-          </aside>
+          {showCredentialCards ? (
+            <aside className="credentialPanel">
+              <h2>Staff access</h2>
+              <div className="credentialList">
+                {credentialCards.map(([role, emailValue]) => (
+                  <button className="credentialCard" type="button" key={role} onClick={() => fillCredential(emailValue)}>
+                    <strong>{role}</strong>
+                    <span>{emailValue}</span>
+                  </button>
+                ))}
+              </div>
+            </aside>
+          ) : (
+            <aside className="credentialPanel secureAccessPanel">
+              <h2>Secure staff access</h2>
+              <p>Use your assigned Bubble Wash credentials. Demo shortcuts are disabled on the production site.</p>
+              <span>Protected operations workspace</span>
+            </aside>
+          )}
         </div>
       </section>
     </main>

@@ -7,6 +7,7 @@ import { getCurrentStaffUser } from "@/lib/auth";
 import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
 import { automationActionsForOrder } from "@/lib/order-workflow";
 import { buildOrderSummaries, orderBoardRecords, readSubmissions } from "@/lib/submissions";
+import { staffWriteGuard } from "@/lib/security";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -15,6 +16,8 @@ function text(value: unknown) {
 export async function POST(request: NextRequest) {
   const user = await getCurrentStaffUser();
   if (!user) return NextResponse.json({ ok: false, error: "Authentication required." }, { status: 401 });
+  const staffGuardError = staffWriteGuard(request.headers);
+  if (staffGuardError) return staffGuardError;
 
   try {
     const body = await request.json();

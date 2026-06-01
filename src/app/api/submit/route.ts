@@ -6,6 +6,7 @@ import { appendSubmissionRecord } from "@/lib/data-store";
 import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
 import { plans, zones } from "@/lib/pricing";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
+import { staffWriteGuard } from "@/lib/security";
 
 const emailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const maxFieldLength = 1200;
@@ -229,6 +230,10 @@ export async function POST(request: NextRequest) {
       }
     }
     const body = cleanPayload(rawBody, submissionType);
+    if (!publicSubmissionTypes.has(submissionType)) {
+      const staffGuardError = staffWriteGuard(request.headers);
+      if (staffGuardError) return staffGuardError;
+    }
     const authError = await authorizeSubmission(submissionType);
     if (authError) return authError;
     const validationError = validatePublicPayload(body, submissionType);

@@ -23,6 +23,7 @@ const sessionMaxAgeSeconds = 60 * 60 * 8;
 const demoPassword = "Admin123!";
 
 function demoCredentialFallbackEnabled() {
+  if (process.env.NODE_ENV === "production") return false;
   return process.env.BUBBLEWASH_DISABLE_DEMO_LOGIN !== "true";
 }
 
@@ -43,13 +44,13 @@ function verifyPassword(password: string, passwordHash: string) {
 function staffCredential(role: StaffRole, demoEmail: string, displayName: string): StaffUser | null {
   const prefix = `BUBBLEWASH_${role.toUpperCase()}`;
   const configuredHash = process.env[`${prefix}_PASSWORD_HASH`];
-  const allowDemoFallback = process.env.NODE_ENV !== "production" || demoCredentialFallbackEnabled();
+  const allowDemoFallback = demoCredentialFallbackEnabled();
   const email = process.env[`${prefix}_EMAIL`] ?? (allowDemoFallback ? demoEmail : "");
   const devPassword = process.env[`${prefix}_PASSWORD`] ?? (role === "admin" ? demoPassword : `${role[0].toUpperCase()}${role.slice(1)}123!`);
 
   if (!email) return null;
   if (configuredHash) return { name: displayName, email, passwordHash: configuredHash, role };
-  if (process.env.NODE_ENV === "production" && !demoCredentialFallbackEnabled()) return null;
+  if (process.env.NODE_ENV === "production") return null;
   return { name: displayName, email, passwordHash: createPasswordHash(devPassword), role };
 }
 
@@ -65,7 +66,6 @@ const allowedNextPaths = new Set(["/admin", "/vendors", "/drivers", "/support"])
 function sessionSecret() {
   const secret = process.env.BUBBLEWASH_SESSION_SECRET;
   if (secret) return secret;
-  if (process.env.NODE_ENV === "production" && demoCredentialFallbackEnabled()) return "bubblewash-pilot-review-session-secret-change-before-live-ops";
   if (process.env.NODE_ENV === "production") throw new Error("BUBBLEWASH_SESSION_SECRET is required in production.");
   return "bubblewash-local-dev-session-secret-change-before-production";
 }

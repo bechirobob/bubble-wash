@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { sessionCookieName, sessionCookieOptions } from "@/lib/auth";
+import { staffWriteGuard } from "@/lib/security";
 
 function clearStaffSession(response: NextResponse) {
   response.cookies.set({
@@ -13,10 +14,12 @@ function clearStaffSession(response: NextResponse) {
   return response;
 }
 
-export async function GET(request: NextRequest) {
-  return clearStaffSession(NextResponse.redirect(new URL("/login?loggedOut=1", request.url)));
+export async function GET() {
+  return NextResponse.json({ ok: false, error: "Use POST to sign out." }, { status: 405, headers: { Allow: "POST" } });
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+  const staffGuardError = staffWriteGuard(request.headers);
+  if (staffGuardError) return staffGuardError;
   return clearStaffSession(NextResponse.json({ ok: true }));
 }

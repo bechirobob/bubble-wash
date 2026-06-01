@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { encodeSession, findStaffUser, sanitizeNextPath, sessionCookieName, sessionCookieOptions } from "@/lib/auth";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
+import { staffWriteGuard } from "@/lib/security";
 
 export async function POST(request: NextRequest) {
   if (isRateLimited(clientKey(request.headers, "login"), 10, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many login attempts. Try again shortly." }, { status: 429 });
   }
+  const staffGuardError = staffWriteGuard(request.headers);
+  if (staffGuardError) return staffGuardError;
   try {
     const body = await request.json();
     const email = typeof body.email === "string" ? body.email : "";
