@@ -3773,7 +3773,7 @@ h1 {
   .nav { background: rgba(255,255,255,.93); }
 }
 
-/* 2026-06-03 Joscol-inspired anti-AI/operator pass: lower radii, denser sheets, actions first. */
+/* 2026-06-03 Joscol-inspired operator pass: lower radii, denser sheets, actions first. */
 :root {
   --operator-radius: 6px;
   --operator-radius-lg: 10px;
@@ -4143,4 +4143,265 @@ h2 { font-size: clamp(27px, 3vw, 42px); }
   .automationPanel { grid-template-columns: 1fr; }
   .automationActions { justify-content: flex-start; }
   .slaPill.countdown { text-align: left; }
+}
+
+/* 2026-06-03 bubble-spice pass: keep foam identity, remove generated gloss. */
+:root {
+  --handmade-linen: #fff9ed;
+  --ticket-paper: #fffdf6;
+  --ticket-edge: rgba(6, 27, 49, .2);
+  --foam-blue: rgba(103, 232, 255, .28);
+  --care-amber: #d8952f;
+}
+body {
+  background:
+    radial-gradient(circle at 10% 8%, rgba(255, 255, 255, .86) 0 8%, transparent 9% 100%),
+    linear-gradient(90deg, rgba(6, 27, 49, .035) 1px, transparent 1px),
+    linear-gradient(180deg, #fff8ea 0%, #f6fbfa 46%, #fffdf6 100%);
+  background-size: auto, 52px 52px, auto;
+}
+.bubbleAtmosphere {
+  opacity: .72 !important;
+  mix-blend-mode: normal;
+}
+.foamOrb {
+  opacity: .52 !important;
+  border-color: rgba(255, 255, 255, .86);
+  background:
+    radial-gradient(circle at 34% 24%, #ffffff 0 11%, rgba(255, 255, 255, .62) 12% 36%, rgba(103,232,255,.18) 37% 100%);
+  box-shadow: inset rgba(255,255,255,.9) 0 0 20px, rgba(7,95,159,.09) 0 18px 55px -38px;
+}
+.foamTrail {
+  opacity: .34 !important;
+  background-size: 30px 30px;
+}
+.hero {
+  background:
+    linear-gradient(180deg, rgba(255,249,237,.98) 0%, rgba(246,251,250,.96) 62%, rgba(255,253,246,.98) 100%);
+}
+.hero::after {
+  content: "";
+  position: absolute;
+  right: min(6vw, 82px);
+  bottom: 26px;
+  width: min(520px, 64vw);
+  height: 82px;
+  pointer-events: none;
+  opacity: .42;
+  background-image:
+    radial-gradient(circle, rgba(255,255,255,.86) 0 17%, transparent 19%),
+    radial-gradient(circle, rgba(103,232,255,.32) 0 14%, transparent 16%);
+  background-size: 38px 38px, 56px 56px;
+  background-position: 0 0, 24px 20px;
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 84%, transparent);
+}
+.heroVisual.heroSlider {
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid rgba(6, 27, 49, .18);
+  background:
+    linear-gradient(90deg, rgba(6,27,49,.045) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(6,27,49,.035) 1px, transparent 1px),
+    radial-gradient(circle at 72% 20%, rgba(103,232,255,.32), transparent 28%),
+    linear-gradient(145deg, #fffaf0 0%, #eefbff 56%, #fffdf6 100%) !important;
+  background-size: 34px 34px, 34px 34px, auto, auto;
+}
+.heroVisual.heroSlider::before {
+  content: "WASH ROUTE / ACCRA";
+  position: absolute;
+  left: 20px;
+  top: 18px;
+  z-index: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--ticket-edge);
+  border-radius: 4px;
+  color: rgba(6, 27, 49, .72);
+  background: rgba(255, 253, 246, .78);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .16em;
+}
+.heroVisual.heroSlider::after {
+  content: "";
+  position: absolute;
+  inset: auto -30px -44px 18px;
+  height: 128px;
+  z-index: 0;
+  opacity: .54;
+  background-image: radial-gradient(circle, rgba(255,255,255,.88) 0 18%, transparent 20%);
+  background-size: 38px 38px;
+  transform: rotate(-4deg);
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 82%, transparent);
+}
+.slideOverlay {
+  background:
+    linear-gradient(160deg, rgba(255,255,255,.42), transparent 42%),
+    linear-gradient(0deg, rgba(6,27,49,.06), transparent 64%);
+}
+.visualCard,
+.routeCard,
+.panel,
+.planCard,
+.serviceCard,
+.vendorDirectoryCard,
+.staffEntryCard,
+.faqItem,
+.contactCard,
+.routeDecisionNote,
+.bookingContextSummary,
+.selectedPlanWorkbench,
+.trackingMiniResult {
+  background: var(--ticket-paper) !important;
+  border: 1px solid var(--ticket-edge) !important;
+  box-shadow: rgba(6, 27, 49, .08) 0 14px 34px -26px !important;
+}
+.visualCard,
+.vendorDirectoryCard,
+.laneCard,
+.planChoiceList .planCard {
+  position: relative;
+}
+.visualCard::before,
+.vendorDirectoryCard::before,
+.laneCard::before,
+.planChoiceList .planCard::before {
+  content: "";
+  position: absolute;
+  inset: 8px auto 8px -1px;
+  width: 4px;
+  background: repeating-linear-gradient(180deg, var(--foam-blue) 0 9px, transparent 9px 15px);
+}
+.visualCard span,
+.foamTicket span,
+.careTag span,
+.badge,
+.selectedPlanPill,
+.eyebrow {
+  letter-spacing: .11em;
+}
+.washerPortal {
+  background:
+    radial-gradient(circle at 48% 42%, rgba(255,255,255,.96) 0 34%, rgba(213,246,255,.58) 35% 58%, rgba(6,27,49,.08) 59% 100%);
+  border: 1px solid rgba(255,255,255,.86);
+  box-shadow: inset rgba(255,255,255,.9) 0 0 42px, rgba(7,95,159,.16) 0 24px 72px -42px;
+}
+.washerPortal img {
+  border-radius: 20px !important;
+  border: 1px solid rgba(6, 27, 49, .14);
+}
+.washerBubble {
+  opacity: .94;
+  background: radial-gradient(circle at 34% 24%, #fff 0 18%, rgba(255,255,255,.58) 19% 58%, rgba(103,232,255,.2) 59% 100%);
+}
+.foamTicket,
+.careTag,
+.humanNote {
+  border-radius: 5px !important;
+  background: #fffdf6 !important;
+  border: 1px solid var(--ticket-edge) !important;
+  box-shadow: rgba(6,27,49,.1) 0 16px 36px -28px !important;
+}
+.foamTicket {
+  transform: rotate(-2deg) translateZ(0);
+}
+.foamTicket::after,
+.careTag::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  pointer-events: none;
+  border: 1px dashed rgba(6, 27, 49, .16);
+}
+.careTag b,
+.foamTicket b,
+.visualCard strong,
+.price {
+  color: #07243b !important;
+}
+.button.primary,
+.navCta {
+  background: #064f82 !important;
+  border-color: #064f82 !important;
+}
+.button.primary:hover,
+.navCta:hover {
+  background: #043c64 !important;
+}
+.button.secondary,
+.menuButton,
+.coverageQuickChips button,
+.menuPanelTabs button,
+.selectedVendor button {
+  background: #fffdf6 !important;
+  border-color: var(--ticket-edge) !important;
+}
+.paymentLogo,
+.locationGrid span,
+.planMetrics span,
+.orderMeta span,
+.routeFacts span,
+.operatorFacts span,
+.miniRows span,
+.bookingContextSummary span {
+  background: #fffaf0 !important;
+  border-color: rgba(6, 27, 49, .14) !important;
+}
+.routeDecisionNote {
+  border-left: 4px solid var(--care-amber) !important;
+}
+.staffEntryCard {
+  display: grid;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+.staffEntryCard b {
+  color: var(--blue-dark);
+}
+.backToTop {
+  min-height: 38px !important;
+  padding: 6px 9px !important;
+  opacity: .68;
+  z-index: 18;
+}
+.backToTop span {
+  width: 24px !important;
+  height: 24px !important;
+}
+.backToTop b {
+  font-size: 12px;
+}
+.orbOne {
+  left: -96px !important;
+  top: 260px !important;
+  opacity: .34 !important;
+}
+.orbTwo {
+  opacity: .36 !important;
+}
+.humanFlowGrid article {
+  min-height: 168px !important;
+  padding: 72px 18px 18px !important;
+  justify-content: start !important;
+}
+.humanFlowGrid span {
+  z-index: 1;
+}
+.humanFlowGrid h3,
+.humanFlowGrid p {
+  position: relative;
+  z-index: 1;
+}
+@media (max-width: 780px) {
+  .bubbleAtmosphere { opacity: .5 !important; }
+  .hero::after { width: 88vw; right: 6vw; opacity: .3; }
+  .heroVisual.heroSlider::before { left: 14px; top: 14px; }
+  .heroVisual.heroSlider::after { height: 88px; }
+  .visualCard::before,
+  .vendorDirectoryCard::before,
+  .laneCard::before,
+  .planChoiceList .planCard::before { inset-block: 6px; }
+  .backToTop { right: 10px !important; bottom: 10px !important; }
+  .orbOne { top: 190px !important; }
+  .humanFlowGrid article { min-height: 150px !important; }
 }
