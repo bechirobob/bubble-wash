@@ -3772,3 +3772,375 @@ h1 {
   .hero::before { inset: 12px; border-radius: 28px; }
   .nav { background: rgba(255,255,255,.93); }
 }
+
+/* 2026-06-03 Joscol-inspired anti-AI/operator pass: lower radii, denser sheets, actions first. */
+:root {
+  --operator-radius: 6px;
+  --operator-radius-lg: 10px;
+  --operator-line: rgba(6, 27, 49, .16);
+  --operator-shadow: rgba(6, 27, 49, .08) 0 12px 28px -22px;
+}
+body { font-size: 15px; }
+h1 { font-size: clamp(40px, 5vw, 66px); }
+h2 { font-size: clamp(27px, 3vw, 42px); }
+.lead,
+.sectionHead p { font-size: clamp(15px, 1.15vw, 16.5px); }
+.nav,
+.portalNav {
+  border-radius: var(--operator-radius-lg);
+  box-shadow: var(--operator-shadow);
+  backdrop-filter: none;
+}
+.navLinks a,
+.navLinks button,
+.navCta,
+.button,
+.menuButton,
+.coverageQuickChips button,
+.locationGrid span,
+.badge,
+.selectedPlanPill,
+.bookingContextSummary span,
+.roleBreadcrumb span,
+.portalLinks a:not(.button),
+.formTitleRow span,
+.selectedVendor button,
+.backToTop,
+.backToTop span {
+  border-radius: var(--operator-radius) !important;
+}
+.button,
+.navCta,
+.menuButton {
+  min-height: 42px;
+  box-shadow: none !important;
+  letter-spacing: -.01em;
+}
+.button:hover,
+.navCta:hover,
+.menuButton:hover,
+.planCard:hover,
+.serviceCard:hover,
+.panel:hover,
+.credentialCard:hover,
+.staffCard:hover {
+  transform: none !important;
+}
+.button.primary,
+.navCta {
+  color: #ffffff;
+  background: #075f9f;
+}
+.button.secondary {
+  background: #fffdf8;
+  border: 1px solid var(--operator-line);
+}
+.hero {
+  min-height: 610px;
+  gap: clamp(24px, 3vw, 38px);
+  background: linear-gradient(180deg, #fbf6ec 0%, #f7fbfb 58%, #fffdf8 100%);
+}
+.hero::before { display: none; }
+.heroVisual {
+  border-radius: var(--operator-radius-lg);
+  min-height: 500px;
+  box-shadow: var(--operator-shadow);
+}
+.visualCard,
+.routeCard,
+.careTag,
+.foamTicket,
+.humanNote,
+.coverageForm,
+.menuPanelContent,
+.planCard,
+.serviceCard,
+.panel,
+.faqItem,
+.contactCard,
+.quoteResult,
+.vendorShowcaseCard,
+.staffCard,
+.routeMapCard,
+.mapResearchCard,
+.liveTrackingGrid article,
+.opsBoard article,
+.supportRules article,
+.driverChecklist article,
+.credentialPanel,
+.loginPanel,
+.activityCard,
+.orderBoardCard,
+.supportWatchCard,
+.supportLaneGrid article,
+.portalPage .portalIdentity,
+.workflowPrinciples article {
+  border-radius: var(--operator-radius-lg) !important;
+  box-shadow: var(--operator-shadow) !important;
+  backdrop-filter: none !important;
+}
+
+.loginShell {
+  max-width: 960px !important;
+  padding: 34px 20px !important;
+}
+
+.loginGrid {
+  align-items: stretch !important;
+  gap: 14px !important;
+}
+
+.loginPanel,
+.credentialPanel {
+  padding: clamp(22px, 3vw, 34px) !important;
+}
+
+.loginPanel h1 {
+  font-size: clamp(32px, 4vw, 52px) !important;
+  line-height: .94 !important;
+}
+
+.credentialPanel {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  border-left: 4px solid rgba(101, 201, 211, .82) !important;
+}
+
+.credentialPanel h2,
+.secureAccessPanel h2 {
+  color: #f8fbff !important;
+}
+
+.credentialPanel p,
+.secureAccessPanel p {
+  color: rgba(248, 251, 255, .78) !important;
+}
+
+.secureAccessPanel span {
+  width: fit-content !important;
+  border-radius: var(--operator-radius) !important;
+  color: #f8fbff !important;
+  border-color: rgba(248, 251, 255, .32) !important;
+  background: rgba(248, 251, 255, .08) !important;
+}
+
+.proofStrip {
+  margin-top: 0;
+  padding-bottom: 18px;
+}
+.proofStrip div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 10px;
+  border-radius: 0 !important;
+  padding: 14px 16px;
+  box-shadow: none !important;
+  border-right-width: 0;
+}
+.proofStrip strong { font-size: 24px; }
+.planChoiceList .planCard,
+.vendorDirectoryCard,
+.laneCard,
+.activityCard,
+.supportTicketCard,
+.compactOrderCard {
+  border-left: 4px solid var(--blue-dark);
+}
+.planChoiceList .planCard {
+  padding: 14px 16px;
+  gap: 12px;
+}
+.planChoiceList .planCard.featured,
+.selectedPlanCard {
+  border: 1px solid var(--operator-line);
+  border-left: 4px solid var(--blue-dark);
+  background: #fffdf8;
+}
+.plansGrid.slimPlans.planChoiceList .planCard {
+  grid-template-columns: minmax(200px, .8fr) minmax(160px, .55fr) minmax(240px, 1fr) minmax(138px, auto);
+}
+.price { font-size: 25px; background: none; color: var(--blue-dark); }
+.planMetrics span,
+.orderMeta span,
+.operatorFacts span,
+.routeFacts span,
+.miniRows span {
+  border-radius: var(--operator-radius) !important;
+}
+.menuPanelTabs { gap: 6px; }
+.menuPanelTabs button {
+  border-radius: var(--operator-radius) !important;
+  padding: 10px 12px;
+}
+.menuPanelContent { padding: 18px; }
+.coverageRouteGroup,
+.routeDecisionNote,
+.bookingContextSummary,
+.selectedVendor,
+.trackingMiniResult {
+  border-radius: var(--operator-radius) !important;
+}
+.humanFlowGrid article {
+  min-height: 0;
+  border-radius: var(--operator-radius-lg) !important;
+  padding: 18px;
+}
+.humanFlowGrid article p,
+.serviceCard p,
+.coveragePanelHead p,
+.staffEntryCard p,
+.bookingSideCard p,
+.opsBoard p,
+.supportRules span,
+.driverChecklist span,
+.vendorSteps p {
+  line-height: 1.42;
+}
+.paymentLogo { border-radius: var(--operator-radius) !important; }
+.bubbleAtmosphere { opacity: .38; }
+.foamTrail { opacity: .14; }
+.foamOrb { opacity: .24; }
+.portalPage {
+  background: #07111f;
+}
+.portalPage .section {
+  padding-top: 24px;
+  padding-bottom: 24px;
+}
+.portalPage .portalHero {
+  min-height: auto;
+  padding-top: 38px;
+  padding-bottom: 20px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+}
+.portalPage .portalHero h1 {
+  font-size: clamp(34px, 4.8vw, 58px);
+  max-width: 720px;
+}
+.portalIdentity {
+  padding: 16px !important;
+}
+.compactWorkflowMap {
+  display: grid;
+  grid-template-columns: minmax(170px, .28fr) 1fr;
+  gap: 14px;
+  align-items: end;
+  padding-top: 12px !important;
+  padding-bottom: 12px !important;
+}
+.compactWorkflowMap .workflowMapHeader { margin: 0; }
+.compactWorkflowMap h2 { margin: 0; font-size: clamp(22px, 2.5vw, 32px); }
+.workflowStepRail {
+  grid-template-columns: repeat(9, minmax(74px, 1fr));
+  padding: 0;
+}
+.workflowStepRail span {
+  min-height: 34px;
+  border-radius: var(--operator-radius) !important;
+  box-shadow: none !important;
+  font-size: 12px;
+}
+.workflowPrinciples { display: none; }
+.staffCommandHeader {
+  border-radius: var(--operator-radius-lg) !important;
+  padding: 16px;
+  margin-bottom: 10px;
+}
+.staffCommandHeader h2 { font-size: clamp(24px, 3vw, 36px); }
+.queueMetricGrid {
+  gap: 0;
+  border: 1px solid var(--portal-line);
+  border-radius: var(--operator-radius-lg);
+  overflow: hidden;
+  background: var(--portal-panel);
+}
+.queueMetricGrid article {
+  border: 0;
+  border-right: 1px solid var(--portal-line);
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 12px 14px;
+}
+.queueMetricGrid article:last-child { border-right: 0; }
+.queueMetricGrid strong {
+  margin-top: 4px;
+  font-size: clamp(21px, 2.3vw, 30px);
+}
+.compactOrders { gap: 8px; }
+.compactOrderCard {
+  gap: 10px;
+  padding: 14px !important;
+  border-radius: var(--operator-radius-lg) !important;
+  box-shadow: none !important;
+}
+.orderFocusRow {
+  grid-template-columns: minmax(0, 1fr) minmax(155px, 210px);
+  gap: 10px;
+}
+.orderFocusRow h3 { margin-bottom: 5px; }
+.slaPill {
+  border-radius: var(--operator-radius) !important;
+  padding: 10px;
+}
+.slaPill b { font-size: clamp(23px, 3vw, 34px); }
+.automationPanel {
+  grid-template-columns: minmax(120px, .28fr) 1fr;
+  border-radius: var(--operator-radius) !important;
+  padding: 10px;
+  gap: 10px;
+}
+.automationActions { gap: 6px; }
+.automationActions .button,
+.mapActions .button,
+.trackingMapActions .button {
+  min-height: 36px;
+  padding: 8px 10px;
+}
+.manualToolbox,
+.onboardingHeader,
+.supportOpsHero {
+  border-radius: var(--operator-radius-lg) !important;
+  box-shadow: none !important;
+}
+.onboardingBadges span,
+.supportLaneGrid article,
+.supportWatchCard {
+  border-radius: var(--operator-radius) !important;
+}
+.supportOpsCopy p,
+.onboardingHeader p,
+.workflowMapHeader p:last-child {
+  display: none;
+}
+.supportLaneGrid article {
+  padding: 12px 14px;
+}
+.supportLaneGrid strong { font-size: clamp(24px, 3vw, 38px); }
+.ticketActionForm textarea,
+.supportForm textarea,
+.onboardingForm textarea { min-height: 88px; }
+@media (max-width: 980px) {
+  .plansGrid.slimPlans.planChoiceList .planCard,
+  .compactWorkflowMap,
+  .portalPage .portalHero {
+    grid-template-columns: 1fr;
+  }
+  .queueMetricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .queueMetricGrid article:nth-child(2) { border-right: 0; }
+  .queueMetricGrid article:nth-child(-n + 2) { border-bottom: 1px solid var(--portal-line); }
+}
+@media (max-width: 780px) {
+  .nav { border-radius: 0; }
+  .navLinks { border-radius: var(--operator-radius-lg); contain: layout; }
+  .hero { padding-top: 28px; }
+  .heroVisual { border-radius: var(--operator-radius-lg); }
+  .proofStrip div { grid-template-columns: 1fr; gap: 2px; }
+  .menuPanelContent { padding: 14px; }
+  .coverageForm { border-radius: var(--operator-radius-lg); padding: 12px; }
+  .orderFocusRow,
+  .automationPanel { grid-template-columns: 1fr; }
+  .automationActions { justify-content: flex-start; }
+  .slaPill.countdown { text-align: left; }
+}

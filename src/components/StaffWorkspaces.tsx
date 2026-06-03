@@ -394,19 +394,13 @@ function PortalShell({ title, eyebrow, role, pageRole = role, userName, children
           <small>{role.toUpperCase()} access · viewing {pageRole.toUpperCase()}</small>
         </aside>
       </section>
-      <section className="section workflowMapSection" aria-label="Staff workflow overview">
+      <section className="section workflowMapSection compactWorkflowMap" aria-label="Staff workflow overview">
         <div className="workflowMapHeader">
-          <p className="eyebrow">Automation-first workflow</p>
-          <h2>One Order ID moves through every lane.</h2>
-          <p>Customer booking is the source of truth. Staff should use the action rail first; manual forms are only for exceptions, capacity changes, or notes that did not come from the customer order.</p>
+          <p className="eyebrow">Order lanes</p>
+          <h2>One ID. Next action first.</h2>
         </div>
         <div className="workflowStepRail" aria-label="Order workflow stages">
           <span>Received</span><span>Schedule</span><span>Assign</span><span>Accept</span><span>Pickup</span><span>Wash</span><span>Ready</span><span>Deliver</span><span>Close</span>
-        </div>
-        <div className="workflowPrinciples">
-          <article><strong>Inherited context</strong><span>Name, phone, area, route window, payment, vendor, and driver stay attached.</span></article>
-          <article><strong>Action rail first</strong><span>Buttons append the next valid event server-side instead of asking staff to retype the order.</span></article>
-          <article><strong>Exceptions only</strong><span>Manual tools stay collapsed for declines, delays, count mismatches, payment issues, or support cases.</span></article>
         </div>
       </section>
       {children}
