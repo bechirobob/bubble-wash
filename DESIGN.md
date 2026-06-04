@@ -155,3 +155,12 @@
 - Automation-first rule: staff should use action-rail buttons before manual forms. Manual tools stay collapsed for exceptions, capacity changes, support cases, declines, delays, and count/payment issues.
 - Admin cross-role access separates auth role from page/workflow role so an admin can preview vendor/driver/support lanes and still navigate back to Admin home without logging out.
 - PDF/handoff alignment check: current staff pages still match the boss handoff scope — admin oversight, vendor capacity/job acceptance/decline, driver route updates, support ticket lifecycle, shared Order IDs, `/api/orders/advance`, availability, and role-scoped access.
+
+## 2026-06-04 color, opacity, and foam-motion polish
+
+- Research synthesis: Rinse uses a direct pickup-first hierarchy with calm high-contrast text; Tide Cleaners leans on bold primary actions and clear service categories; Poplin uses strong simple CTAs and motion as brand energy, not over content.
+- User goal and attention model: preserve the approved Instrument Sans visual system while making the page feel cleaner and more premium on laptop/desktop and mobile.
+- Color roles: warm linen page base, deep navy body/headings, high-contrast blue/navy CTAs, aqua as foam/status accent, amber only as a soft warmth layer. No pale text on cream panels.
+- Opacity rule: text-bearing cards, forms, plan metrics, booking summaries, and estimate rows use near-opaque surfaces. Transparency is reserved for decorative background bubbles/trails.
+- Motion rule: foam orbs and trails move diagonally/across the viewport using transform/background-position only; `prefers-reduced-motion` disables the motion. Bubbles stay behind content and must not cover forms or estimates.
+- Verification: local lint/build pass, desktop 1366px and mobile 390px visual checks confirm the page loads, keeps the font, and does not block text with colors, opacity, or bubble effects.

@@ -4451,3 +4451,178 @@ body {
   color: #f9fffe !important;
   padding: 10px 12px !important;
 }
+
+/* Research-led polish pass: keep the approved font, reduce washed glass, move foam across the page. */
+:root {
+  --ink: #0a2537;
+  --soft-ink: #40596b;
+  --blue: #0879bd;
+  --blue-dark: #054c7c;
+  --foam-blue: #86dff2;
+  --linen: #fbf3e7;
+  --ticket-paper: #fffdf7;
+  --ticket-edge: rgba(6, 27, 49, .16);
+  --shadow: rgba(6, 27, 49, .13) 0 22px 48px -32px, rgba(6, 27, 49, .06) 0 8px 18px -14px;
+}
+body {
+  background:
+    radial-gradient(circle at 8% 7%, rgba(134, 223, 242, .16), transparent 28%),
+    radial-gradient(circle at 88% 18%, rgba(255, 220, 164, .22), transparent 26%),
+    linear-gradient(180deg, #fff7eb 0%, #fffdf7 34%, #f6fbfb 100%);
+}
+.nav,
+.coverageForm,
+.humanNote,
+.planCard,
+.serviceCard,
+.panel,
+.vendorShowcaseCard,
+.staffCard,
+.faqItem,
+.contactCard,
+.menuPanelContent,
+.routeDecisionNote,
+.bookingContextSummary,
+.trackingMiniResult {
+  background: rgba(255, 253, 247, .97) !important;
+  color: var(--ink) !important;
+}
+.lead,
+.sectionHead p,
+.planCardTop p,
+.planFeatureList,
+.formHint,
+.status,
+.humanNote,
+.coveragePanelHead p,
+.coverageSummaryCard p,
+.bookingSideCard p,
+.faqItem p,
+.contactCard p,
+.routeDecisionNote span,
+.trackingMiniResult small {
+  color: var(--soft-ink) !important;
+}
+.button.primary,
+.navCta {
+  background: linear-gradient(135deg, #075f9f, #053c66) !important;
+  color: #fff !important;
+  box-shadow: rgba(5, 76, 124, .24) 0 18px 34px -20px !important;
+}
+.button.primary:hover,
+.navCta:hover { background: linear-gradient(135deg, #054c7c, #032f50) !important; }
+.button.secondary,
+.menuButton,
+.coverageQuickChips button,
+.menuPanelTabs button,
+.selectedVendor button {
+  color: #073956 !important;
+  background: #fffaf0 !important;
+  border-color: rgba(6, 27, 49, .2) !important;
+}
+.menuPanelTabs button.active,
+.menuPanelTabs button[aria-selected="true"] {
+  background: #09283c !important;
+  border-color: #09283c !important;
+  color: #ffffff !important;
+  box-shadow: rgba(6, 27, 49, .18) 0 16px 32px -22px;
+}
+.selectedPlanCard {
+  border-color: rgba(5, 76, 124, .5) !important;
+  box-shadow: rgba(5, 76, 124, .18) 0 24px 46px -30px !important;
+}
+.selectedPlanPill,
+.badge {
+  color: #073956 !important;
+  background: #e2f8f8 !important;
+  border: 1px solid rgba(5, 76, 124, .18) !important;
+}
+.planMetrics span,
+.routeFacts span,
+.orderMeta span,
+.operatorFacts span,
+.bookingContextSummary span,
+.locationGrid span,
+.paymentLogo {
+  background: #fff8ea !important;
+  border-color: rgba(6, 27, 49, .18) !important;
+  color: #123247 !important;
+}
+.planMetrics small,
+.routeFacts small,
+.orderMeta span,
+.bookingContextSummary span { color: #4a6375 !important; }
+.selectedPlanWorkbench {
+  background:
+    radial-gradient(circle at 8% 14%, rgba(134, 223, 242, .24), transparent 26%),
+    linear-gradient(135deg, #08283c, #13475e) !important;
+  border-color: rgba(255, 255, 255, .22) !important;
+  box-shadow: rgba(8, 40, 60, .2) 0 22px 48px -30px !important;
+}
+.selectedPlanWorkbench span { color: #9eeef3 !important; }
+.selectedPlanWorkbench strong,
+.selectedPlanWorkbench p { color: #f9fffe !important; }
+.selectedPlanWorkbench p { color: rgba(249, 255, 254, .86) !important; }
+.quoteResult {
+  background:
+    radial-gradient(circle at 86% 12%, rgba(134, 223, 242, .32), transparent 32%),
+    linear-gradient(145deg, #09283c, #144a61) !important;
+}
+.quoteResult p { color: rgba(249, 255, 254, .82) !important; }
+.quoteResult strong { color: #d8fbff !important; }
+.quoteResult .miniRows span {
+  background: rgba(255, 255, 255, .12) !important;
+  border-color: rgba(255, 255, 255, .22) !important;
+}
+.hero::after,
+.section:nth-of-type(odd)::after {
+  opacity: .2 !important;
+}
+.bubbleAtmosphere {
+  opacity: .52 !important;
+  mix-blend-mode: normal;
+}
+.foamOrb {
+  opacity: var(--orb-opacity, .34) !important;
+  animation-name: bubbleTraverse !important;
+  animation-timing-function: ease-in-out !important;
+  animation-iteration-count: infinite !important;
+  animation-direction: alternate !important;
+  will-change: transform;
+}
+.orbOne { --orb-opacity: .24; --bubble-x: 34vw; --bubble-y: -16vh; animation-duration: 34s !important; }
+.orbTwo { --orb-opacity: .28; --bubble-x: -28vw; --bubble-y: 18vh; animation-duration: 29s !important; }
+.orbThree { --orb-opacity: .22; --bubble-x: 42vw; --bubble-y: -22vh; animation-duration: 38s !important; }
+.orbFour { --orb-opacity: .3; --bubble-x: -22vw; --bubble-y: -18vh; animation-duration: 31s !important; }
+.orbFive { --orb-opacity: .2; --bubble-x: 30vw; --bubble-y: 20vh; animation-duration: 36s !important; }
+.orbSix { --orb-opacity: .22; --bubble-x: -36vw; --bubble-y: -24vh; animation-duration: 42s !important; }
+.foamTrail {
+  opacity: .18 !important;
+  animation-name: soapTrailTraverse !important;
+  animation-duration: 44s !important;
+  animation-timing-function: ease-in-out !important;
+  animation-iteration-count: infinite !important;
+  animation-direction: alternate !important;
+  will-change: transform, background-position;
+}
+.trailOne { --trail-x: 72vw; --trail-y: -18vh; }
+.trailTwo { --trail-x: -68vw; --trail-y: 20vh; }
+@keyframes bubbleTraverse {
+  0% { transform: translate3d(0, 0, 0) scale(.96); }
+  45% { transform: translate3d(calc(var(--bubble-x) * .48), calc(var(--bubble-y) * .72), 0) scale(1.04); }
+  100% { transform: translate3d(var(--bubble-x), var(--bubble-y), 0) scale(1.08); }
+}
+@keyframes soapTrailTraverse {
+  0% { transform: translate3d(0, 0, 0) rotate(-12deg); background-position: 0 0; }
+  100% { transform: translate3d(var(--trail-x), var(--trail-y), 0) rotate(10deg); background-position: 160px -68px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .foamOrb,
+  .foamTrail { animation: none !important; }
+}
+@media (max-width: 780px) {
+  .bubbleAtmosphere { opacity: .34 !important; }
+  .orbOne { --bubble-x: 42vw; --bubble-y: -10vh; }
+  .orbTwo { --bubble-x: -38vw; --bubble-y: 12vh; }
+  .orbThree { --bubble-x: 36vw; --bubble-y: -14vh; }
+}
