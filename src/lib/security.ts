@@ -9,11 +9,11 @@ const cspDirectives = [
   "form-action 'self'",
   "frame-ancestors 'none'",
   "object-src 'none'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob: https://images.unsplash.com",
   "font-src 'self' data: https://fonts.gstatic.com",
-  "connect-src 'self' https://api.paystack.co https://api.resend.com https://graph.facebook.com https://wa.me https://api.whatsapp.com https://www.google.com https://maps.google.com",
+  "connect-src 'self' https://api.paystack.co",
   "frame-src https://checkout.paystack.com",
   "upgrade-insecure-requests",
 ];

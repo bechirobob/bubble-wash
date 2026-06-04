@@ -28,9 +28,17 @@ function addonList(value: unknown) {
   return value.filter((item): item is AddonKey => typeof item === "string" && addonNames.has(item)).slice(0, 12);
 }
 
+async function readQuotePayload(request: NextRequest) {
+  try {
+    return await request.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const rawBody: unknown = await request.json();
+    const rawBody: unknown = await readQuotePayload(request);
     if (!isObject(rawBody)) throw new Error("Invalid quote request.");
 
     const plan = enumValue<PlanName>(rawBody.plan, planNames, null, "plan");

@@ -8,7 +8,11 @@ function headers(input = {}) {
 
 test("securityHeaders includes OWASP baseline browser protections without powered-by leakage", () => {
   const map = new Map(securityHeaders().map((item) => [item.key.toLowerCase(), item.value]));
-  assert.match(map.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
+  const csp = map.get("content-security-policy") ?? "";
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.doesNotMatch(csp, /'unsafe-eval'/);
+  assert.match(csp, /connect-src 'self' https:\/\/api\.paystack\.co(?:;|$)/);
+  assert.doesNotMatch(csp, /api\.resend\.com|graph\.facebook\.com|api\.whatsapp\.com|maps\.google\.com/);
   assert.match(map.get("strict-transport-security") ?? "", /max-age=31536000/);
   assert.equal(map.get("x-content-type-options"), "nosniff");
   assert.equal(map.get("referrer-policy"), "strict-origin-when-cross-origin");

@@ -13,13 +13,21 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+async function readCheckoutPayload(request: NextRequest) {
+  try {
+    return await request.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   if (isRateLimited(clientKey(request.headers, "payments-initialize"), 12, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many checkout attempts. Try again shortly." }, { status: 429 });
   }
 
   try {
-    const body = await request.json();
+    const body = await readCheckoutPayload(request);
     if (!isObject(body)) {
       return NextResponse.json({ ok: false, error: "Invalid checkout payload." }, { status: 400 });
     }
