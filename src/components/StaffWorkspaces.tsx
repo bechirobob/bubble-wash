@@ -241,8 +241,18 @@ function AutomatedOrderActions({ order, role, userName, onSaved }: { order: Orde
   async function run(action: AutomationAction) {
     setPendingLabel(action.label);
     setStatus(`${action.label}…`);
+    const payload: Record<string, string> = { orderId: order.orderId, actionKey: action.key };
+    if (action.key === "vendor-decline-job") {
+      const reason = window.prompt("Why is this job being declined? Admin needs the reason for reassignment.");
+      if (!reason?.trim()) {
+        setStatus("Decline cancelled — reason required for reassignment.");
+        setPendingLabel("");
+        return;
+      }
+      payload.reason = reason.trim();
+    }
     try {
-      const data = await postJSON<{ ok: boolean; message: string; id: string; nextStatus: string }>("/api/orders/advance", { orderId: order.orderId, actionKey: action.key });
+      const data = await postJSON<{ ok: boolean; message: string; id: string; nextStatus: string }>("/api/orders/advance", payload);
       setStatus(`Saved ${data.id} → ${data.nextStatus}`);
       await onSaved();
     } catch (error) {

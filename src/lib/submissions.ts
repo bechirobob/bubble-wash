@@ -75,12 +75,24 @@ export function orderBoardRecords(records: SubmissionRecord[], role: StaffRole) 
     if (role === "driver" && (type === "driver-route-log" || text(record.data.driverName) || text(record.data.driver))) {
       accessibleOrderIds.add(orderId);
     }
-    if (role === "support" && (type.startsWith("support") || text(record.data.ticketStatus) || text(record.data.issueType))) {
+    if (role === "support" && (type.startsWith("support") || text(record.data.ticketStatus) || text(record.data.issueType) || isSupportRiskRecord(record))) {
       accessibleOrderIds.add(orderId);
     }
   }
 
   return records.filter((record) => accessibleOrderIds.has(canonicalOrderId(record)));
+}
+
+function isSupportRiskRecord(record: SubmissionRecord) {
+  const riskText = [
+    record.data.priority,
+    record.data.ticketStatus,
+    record.data.orderStatus,
+    record.data.jobStatus,
+    record.data.issueType,
+    record.data.message,
+  ].map(text).join(" ");
+  return /urgent|high|delayed|declined|issue|missing|quality|escalated|needs attention|waiting/i.test(riskText);
 }
 
 export function text(value: unknown) {
