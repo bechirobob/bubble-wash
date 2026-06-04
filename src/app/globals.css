@@ -4626,3 +4626,45 @@ body {
   .orbTwo { --bubble-x: -38vw; --bubble-y: 12vh; }
   .orbThree { --bubble-x: 36vw; --bubble-y: -14vh; }
 }
+
+/* Mobile nav layering fix: keep the opened menu above hero cards, bubbles, and Safari/TikTok chrome quirks. */
+@media (max-width: 780px) {
+  main > .nav {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 1200 !important;
+    isolation: isolate;
+    overflow: visible !important;
+    transform: none !important;
+  }
+  main > .nav .menuButton {
+    position: relative;
+    z-index: 1202;
+  }
+  main > .nav .navLinks {
+    position: fixed !important;
+    top: calc(env(safe-area-inset-top, 0px) + 82px) !important;
+    left: 14px !important;
+    right: 14px !important;
+    z-index: 1201 !important;
+    max-height: calc(100dvh - 104px) !important;
+    padding: 12px !important;
+    background: #fffdf7 !important;
+    border: 1px solid rgba(6, 27, 49, .18) !important;
+    box-shadow: rgba(6, 27, 49, .24) 0 28px 70px -30px !important;
+    backdrop-filter: none !important;
+    contain: none !important;
+  }
+  main > .nav .navLinks a {
+    position: relative;
+    z-index: 1;
+    color: #0a2537 !important;
+    background: #f7fbff !important;
+    border: 1px solid rgba(6, 27, 49, .12) !important;
+  }
+  main > .nav .navLinks .navCta {
+    color: #fff !important;
+    background: linear-gradient(135deg, #075f9f, #053c66) !important;
+    border-color: transparent !important;
+  }
+}
