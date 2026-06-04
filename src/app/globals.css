@@ -4405,3 +4405,49 @@ body {
   .orbOne { top: 190px !important; }
   .humanFlowGrid article { min-height: 150px !important; }
 }
+
+/* Estimate module contrast fix: keep ticket skin from washing out dark estimate cards. */
+.selectedPlanWorkbench {
+  min-height: 0 !important;
+  background:
+    radial-gradient(circle at 10% 18%, rgba(158, 223, 235, .2), transparent 24%),
+    linear-gradient(135deg, #10283a, #17445a) !important;
+  border-color: rgba(255, 255, 255, .18) !important;
+  color: #f8fffd !important;
+}
+.selectedPlanWorkbench span {
+  color: #a9eaf1 !important;
+}
+.selectedPlanWorkbench strong,
+.selectedPlanWorkbench p {
+  color: #f8fffd !important;
+}
+.selectedPlanWorkbench p {
+  color: rgba(248, 255, 253, .82) !important;
+}
+.selectedPlanWorkbench .button {
+  background: #fffdf8 !important;
+  border-color: rgba(255, 255, 255, .45) !important;
+  color: #0f1d2e !important;
+}
+.quoteResult {
+  background:
+    radial-gradient(circle at 84% 10%, rgba(40, 180, 210, .28), transparent 30%),
+    linear-gradient(145deg, #10283a, #164257) !important;
+  border-color: rgba(255, 255, 255, .18) !important;
+  color: #f9fffe !important;
+}
+.quoteResult h3,
+.quoteResult strong,
+.quoteResult p {
+  color: #f9fffe !important;
+}
+.quoteResult strong {
+  color: #c9eef1 !important;
+}
+.quoteResult .miniRows span {
+  background: rgba(255, 255, 255, .1) !important;
+  border: 1px solid rgba(255, 255, 255, .18) !important;
+  color: #f9fffe !important;
+  padding: 10px 12px !important;
+}
