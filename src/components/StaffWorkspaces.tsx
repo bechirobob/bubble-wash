@@ -55,6 +55,7 @@ type VendorDeclineRow = { id: string; orderId: string; vendorName: string; reaso
 type AutomationAction = ReturnType<typeof automationActionsForOrder>[number];
 
 type QueueStats = { focusLabel: string; focusCount: number; automationCount: number; riskCount: number; capacityLabel: string };
+type PortalLink = { href: string; label: string; icon: "admin" | "vendor" | "routes" | "support" };
 
 function rolePromise(role: StaffRole) {
   if (role === "admin") return { eyebrow: "Operations desk", title: "Admin queue", subtitle: "Review active jobs, reassign work, and resolve exceptions before the customer has to chase." };
@@ -86,6 +87,22 @@ function queueStats(orders: OrderSummary[], role: StaffRole, userName: string, a
     riskCount,
     capacityLabel: availabilityCount ? `${availabilityCount} live capacity rows` : "capacity waiting",
   };
+}
+
+function StaffNavIcon({ type }: { type: PortalLink["icon"] | "exit" }) {
+  if (type === "admin") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 11.5 12 5l8 6.5" /><path d="M6.5 10.5v8h11v-8" /><path d="M10 18.5v-5h4v5" /></svg>;
+  }
+  if (type === "vendor") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3.5 8.5h6l1.6 2h9.4v7.5h-17z" /><path d="M3.5 8.5v-2h6.5l1.5 2" /></svg>;
+  }
+  if (type === "routes") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 19V9" /><path d="M10 19V5" /><path d="M15 19v-7" /><path d="M20 19V8" /></svg>;
+  }
+  if (type === "support") {
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 7.5h14" /><path d="M5 12h10" /><path d="M5 16.5h7" /><path d="M18 15.5v3l-2.5-2" /></svg>;
+  }
+  return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5H5v14h4" /><path d="M12 12h8" /><path d="m17 8 4 4-4 4" /></svg>;
 }
 
 function formatShortTime(value: string) {
@@ -802,10 +819,10 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
 function PortalShell({ title, role, pageRole = role, userName, children }: PortalShellProps) {
   const pageHome = pageRole === "admin" ? "/admin" : pageRole === "vendor" ? "/vendors" : pageRole === "driver" ? "/drivers" : "/support";
   const portalLinks = role === "admin"
-    ? [["/admin", "Admin"], ["/vendors", "Vendor"], ["/drivers", "Routes"], ["/support", "Support"]]
-    : pageRole === "vendor" ? [["/vendors", "Vendor desk"]]
-    : pageRole === "driver" ? [["/drivers", "Route desk"]]
-    : [["/support", "Support desk"]];
+    ? [{ href: "/admin", label: "Admin", icon: "admin" }, { href: "/vendors", label: "Vendor", icon: "vendor" }, { href: "/drivers", label: "Routes", icon: "routes" }, { href: "/support", label: "Support", icon: "support" }] satisfies PortalLink[]
+    : pageRole === "vendor" ? [{ href: "/vendors", label: "Vendor", icon: "vendor" }] satisfies PortalLink[]
+    : pageRole === "driver" ? [{ href: "/drivers", label: "Routes", icon: "routes" }] satisfies PortalLink[]
+    : [{ href: "/support", label: "Support", icon: "support" }] satisfies PortalLink[];
   const promise = rolePromise(pageRole);
 
   async function logoutStaff() {
@@ -821,8 +838,8 @@ function PortalShell({ title, role, pageRole = role, userName, children }: Porta
       <header className="portalNav">
         <Link className="brand" href="/" aria-label="Bubble Wash home"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} /><span>Bubble Wash</span></Link>
         <nav className="portalLinks">
-          {portalLinks.map(([href, label]) => <Link key={href} href={href} aria-current={href === pageHome ? "page" : undefined}>{label}</Link>)}
-          <button className="button secondary logoutButton" type="button" onClick={logoutStaff}>Logout</button>
+          {portalLinks.map(({ href, label, icon }) => <Link className="portalNavItem" key={href} href={href} aria-current={href === pageHome ? "page" : undefined}><StaffNavIcon type={icon} /><span>{label}</span></Link>)}
+          <button className="portalNavItem logoutButton" type="button" onClick={logoutStaff}><StaffNavIcon type="exit" /><span>Exit</span></button>
         </nav>
       </header>
       <section className="staffPageHeader">
