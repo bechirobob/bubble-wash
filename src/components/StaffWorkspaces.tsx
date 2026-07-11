@@ -825,19 +825,13 @@ function PortalShell({ title, role, pageRole = role, userName, children }: Porta
           <button className="button secondary logoutButton" type="button" onClick={logoutStaff}>Logout</button>
         </nav>
       </header>
-      <section className="section portalHero">
+      <section className="staffPageHeader">
         <div>
           <p className="eyebrow">{promise.eyebrow}</p>
           <h1>{promise.title}</h1>
-          <p className="lead">{promise.subtitle}</p>
-          <p className="portalHeroLine">{pageRole.toUpperCase()} workspace · order trail first · manual forms below</p>
+          <p>{promise.subtitle}</p>
         </div>
-        <aside className="portalIdentity">
-          <span>Signed in</span>
-          <strong>{userName}</strong>
-          <small>{title}</small>
-          <small>Start with the live queue.</small>
-        </aside>
+        <p className="staffSessionLine"><strong>{userName}</strong><span>{title}</span><span>{pageRole} workspace · queue first</span></p>
       </section>
       {children}
     </main>

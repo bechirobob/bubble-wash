@@ -253,8 +253,6 @@ export default function Home() {
   return (
     <main>
       <a className="skipLink" href="#booking">Skip to booking</a>
-      <div className="bubbleAtmosphere" aria-hidden="true"><span className="foamOrb orbOne" /><span className="foamOrb orbTwo" /><span className="foamOrb orbThree" /><span className="foamOrb orbFour" /><span className="foamOrb orbFive" /><span className="foamOrb orbSix" /><span className="foamTrail trailOne" /><span className="foamTrail trailTwo" /></div>
-      <a className="backToTop" href="#top" aria-label="Back to top"><span aria-hidden="true">↑</span><b>Top</b></a>
       <header className="nav">
         <a className="brand" href="#top" aria-label="Bubble Wash home" onClick={() => setMobileOpen(false)}><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} priority /><span>Bubble Wash</span></a>
         <button className="menuButton" type="button" aria-controls="site-navigation" aria-expanded={mobileOpen} aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"} onClick={() => setMobileOpen(!mobileOpen)}><span>{mobileOpen ? "Close" : "Menu"}</span><span className="menuIcon" aria-hidden="true">{mobileOpen ? "×" : "☰"}</span></button>
@@ -283,17 +281,18 @@ export default function Home() {
           <div className="heroActions"><a className="button primary" href="#booking">Book a Pickup</a><a className="button secondary" href="#quick-actions">Check routes</a><a className="textLink" href="#quick-actions">Estimate price →</a></div>
           <div className="humanNote"><b>Clean handoff:</b> pickup, care notes, payment, and delivery updates stay on the same order trail.</div>
         </div>
-        <div className="heroVisual heroSlider" aria-label="Bubble Wash live operations summary">
-          <div className="slideOverlay" />
-          <div className="washerPortal" aria-hidden="true"><Image src="/bubble-wash-icon.jpg" alt="" width={160} height={160} priority /><span className="washerRing ringOne" /><span className="washerRing ringTwo" /><span className="washerBubble b1" /><span className="washerBubble b2" /><span className="washerBubble b3" /><span className="washerBubble b4" /><span className="washerBubble b5" /><span className="washerBubble b6" /></div>
-          <div className="visualCard orderCard"><span>Order trail</span><strong>BW-2081</strong><small>Pickup scheduled · Vendor washing · Delivery window set</small></div>
-          <div className="visualCard timelineCard"><span>Live timeline</span><strong>Scheduled → Washing → Ready → Delivered</strong><small>One reference follows the customer, vendor, driver, and support desk.</small></div>
-          <div className="visualCard mainBasket"><span>Today’s pickup</span><strong>82kg</strong><small>{zones[zone].label} · {formatMoney(zones[zone].fee)} route fee · Growth plan</small></div>
-          <div className="foamTicket" aria-hidden="true"><span>soap trail</span><b>Osu → Labone</b></div><div className="careTag" aria-hidden="true"><span>care note</span><b>Sort · Wash · Fold</b><small>Partner checked</small></div>
-        </div>
+        <aside className="serviceRecord" aria-label="Today’s service desk">
+          <div className="serviceRecordHead"><span>Today’s service desk</span><strong>Open for pickup</strong></div>
+          <dl>
+            <div><dt>Pickup areas</dt><dd>Osu, Labone, East Legon, Airport</dd></div>
+            <div><dt>Updates</dt><dd>WhatsApp and email</dd></div>
+            <div><dt>Order reference</dt><dd>One code from pickup to delivery</dd></div>
+            <div><dt>Current lane</dt><dd>{zones[zone].label} · {formatMoney(zones[zone].fee)} route fee</dd></div>
+          </dl>
+        </aside>
       </section>
 
-      <section className="proofStrip tightProof" aria-label="service proof points">{proof.map(([number, label]) => <div key={label}><strong>{number}</strong><span>{label}</span></div>)}</section>
+      <section className="serviceFacts" aria-label="service proof points">{proof.map(([number, label]) => <div key={label}><strong>{number}</strong><span>{label}</span></div>)}</section>
 
       <section id="services" className="section humanFlowSection compactHumanFlowSection">
         <div className="sectionHead narrow compactHead"><p className="eyebrow">How it works</p><h2>A cleaner routine in three handoffs.</h2><p>Check your pickup lane, book once, then follow the same order reference through washing, payment, and delivery.</p></div>
@@ -303,7 +302,7 @@ export default function Home() {
       <section id="quick-actions" className="section publicPickupDesk" aria-labelledby="quick-actions-heading">
         <div className="sectionHead compactHead"><p className="eyebrow">Pickup desk</p><h2 id="quick-actions-heading">Price, route, and track without opening a dashboard.</h2><p>Three practical checks before the request form. No long sales page, no fake controls.</p></div>
         <div className="pickupDeskGrid">
-          <article className="pickupDeskPanel pickupDeskPrimary">
+          <article className="pickupDeskRecord pickupDeskPrimary">
             <span className="deskLabel">Selected plan</span>
             <h3>{selectedPlan.name}</h3>
             <p>{selectedPlan.audience}</p>
@@ -320,14 +319,14 @@ export default function Home() {
               <p className={statusTone(quoteStatus)} role="status" aria-live="polite">{quote ? `${formatMoney(quote.estimatedMonthlyTotal)} estimated monthly total` : quoteStatus}</p>
             </form>
           </article>
-          <article className="pickupDeskPanel">
+          <article className="pickupDeskRecord">
             <span className="deskLabel">Coverage</span>
             <h3>{routePreview.zoneLabel}</h3>
             <p>{routePreview.zoneNote}</p>
             <div className="coverageRouteList compactRouteList">{coverageGroups.map((group) => <div key={group.title}><strong>{group.title}</strong><small>{group.fee}</small><p>{group.areas.join(" · ")}</p></div>)}</div>
             <button className="button secondary full" type="button" onClick={() => document.getElementById("booking")?.scrollIntoView({ behavior: "smooth" })}>Use selected lane</button>
           </article>
-          <article className="pickupDeskPanel">
+          <article className="pickupDeskRecord">
             <span className="deskLabel">Track or pay</span>
             <h3>Follow one reference.</h3>
             <form className="deskMiniForm" method="post" onSubmit={trackOrder}>

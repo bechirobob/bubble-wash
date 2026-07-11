@@ -6004,3 +6004,399 @@ td,
   .proofStrip { grid-template-columns: 1fr !important; }
   .queueMetricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
 }
+
+/* Special-grade UI freeze — Bubble Wash service portal, 2026-07-11.
+   Preserve Bubble Wash blue/foam identity, remove decorative containers and AI/SaaS patterns. */
+:root {
+  --bw-page: #f8fbfd;
+  --bw-surface: #ffffff;
+  --bw-foam: #eefaff;
+  --bw-line: #cfdfe8;
+  --bw-line-strong: #aebfca;
+  --bw-ink: #102a38;
+  --bw-muted: #526573;
+  --bw-blue: #0b6f9f;
+  --bw-blue-dark: #073e5a;
+}
+
+html { font-size: 16px; }
+body {
+  font-family: var(--font-sans, "Source Sans 3", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif) !important;
+  background: var(--bw-page) !important;
+  color: var(--bw-ink) !important;
+  font-weight: 400 !important;
+}
+body::before,
+body::after,
+.bubbleAtmosphere,
+.foamOrb,
+.foamTrail,
+.backToTop,
+.slideOverlay,
+.washerPortal,
+.washerRing,
+.washerBubble,
+.foamTicket,
+.careTag,
+.visualCard,
+.heroVisual,
+.logoBubble,
+.routeCard,
+.portalIdentity,
+.portalHeroLine {
+  display: none !important;
+}
+
+h1, h2, h3, h4 {
+  color: var(--bw-ink) !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.025em !important;
+}
+h1 { font-size: clamp(2.4rem, 5vw, 4rem) !important; line-height: 1 !important; max-width: 720px !important; }
+h2 { font-size: clamp(1.65rem, 3vw, 2.35rem) !important; line-height: 1.08 !important; }
+h3 { font-size: 1.18rem !important; line-height: 1.25 !important; }
+p, li, dd, td, th, label, input, select, textarea, button, a { font-size: 1rem; }
+p, .lead, .sectionHead p, .formHint { color: var(--bw-muted) !important; line-height: 1.55 !important; }
+.eyebrow, .deskLabel {
+  color: var(--bw-blue-dark) !important;
+  font-size: .78rem !important;
+  font-weight: 700 !important;
+  letter-spacing: .04em !important;
+  text-transform: none !important;
+  margin-bottom: .55rem !important;
+}
+
+.nav,
+.portalNav,
+.redesignTopbar {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  background: rgba(255,255,255,.98) !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--bw-line) !important;
+}
+.brand,
+.navLinks,
+.portalLinks { font-weight: 650 !important; }
+.brandMark { border-radius: 8px !important; box-shadow: none !important; border: 1px solid var(--bw-line) !important; }
+
+.button,
+.navCta,
+.menuButton,
+.credentialCard,
+.activityChip,
+.activitySegmented button,
+.tableActionRow a,
+.logoutButton {
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  transform: none !important;
+  font-weight: 700 !important;
+  min-height: 40px !important;
+  padding: .58rem .8rem !important;
+}
+.button.primary,
+.navCta { background: var(--bw-blue-dark) !important; color: #fff !important; }
+.button.secondary,
+.logoutButton { background: #fff !important; color: var(--bw-blue-dark) !important; border: 1px solid var(--bw-line-strong) !important; }
+.navLinks a,
+.portalLinks a:not(.button) { border-radius: 0 !important; background: transparent !important; padding: .4rem 0 !important; }
+
+.section { padding: 42px min(5vw, 64px) !important; }
+.hero {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, .72fr) !important;
+  gap: 54px !important;
+  align-items: start !important;
+  padding-top: 52px !important;
+  background: transparent !important;
+}
+.heroCopy { max-width: 760px; }
+.heroActions { gap: 10px !important; margin: 22px 0 16px !important; }
+.humanNote {
+  background: transparent !important;
+  border: 0 !important;
+  border-left: 3px solid var(--bw-blue) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 4px 0 4px 14px !important;
+}
+.coverageForm,
+.redesignLoginForm,
+.redesignRoleList,
+.panel,
+.opsForm,
+.vendorForm,
+.driverForm,
+.supportForm,
+.manualToolbox,
+.activityGroup,
+.orderBoardCard,
+.supportWatchCard,
+.supportTicketCard,
+.queueMetricGrid,
+.onboardingGrid,
+.paymentStrip,
+.serviceFacts,
+.pickupDeskRecord,
+.serviceRecord,
+.opsTableWrap,
+.table-wrap,
+.staffSessionLine,
+.redesignLoginGrid,
+.supportLaneGrid article,
+.driverChecklist article {
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  border-radius: 0 !important;
+}
+.serviceRecord {
+  border-top: 3px solid var(--bw-blue-dark) !important;
+  border-bottom: 1px solid var(--bw-line) !important;
+  padding: 14px 0 0 !important;
+}
+.serviceRecordHead { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--bw-line); }
+.serviceRecordHead span { color: var(--bw-muted); font-weight: 700; }
+.serviceRecordHead strong { color: var(--bw-blue-dark); }
+.serviceRecord dl { margin: 0; }
+.serviceRecord dl div { display: grid; grid-template-columns: 130px 1fr; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--bw-line); }
+.serviceRecord dt { color: var(--bw-ink); font-weight: 700; }
+.serviceRecord dd { margin: 0; color: var(--bw-muted); }
+.serviceFacts {
+  max-width: 1180px !important;
+  margin: 0 auto !important;
+  padding: 0 min(5vw, 64px) 24px !important;
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  border-top: 1px solid var(--bw-line) !important;
+  border-bottom: 1px solid var(--bw-line) !important;
+}
+.serviceFacts div { padding: 14px 18px !important; border-right: 1px solid var(--bw-line) !important; }
+.serviceFacts div:last-child { border-right: 0 !important; }
+.serviceFacts strong { display: block; font-size: 1.65rem !important; line-height: 1 !important; color: var(--bw-blue-dark) !important; }
+.serviceFacts span { color: var(--bw-muted) !important; font-weight: 600 !important; }
+
+.pickupDeskGrid { gap: 22px !important; align-items: start !important; }
+.pickupDeskRecord {
+  border-top: 1px solid var(--bw-line) !important;
+  padding-top: 16px !important;
+  display: grid !important;
+  gap: 12px !important;
+}
+.deskFacts { border-top: 1px solid var(--bw-line); border-bottom: 1px solid var(--bw-line); padding: 10px 0; }
+.deskFacts span { border-radius: 0 !important; background: transparent !important; border: 0 !important; padding: 0 !important; }
+.coverageRouteList div { border-radius: 0 !important; background: transparent !important; border: 0 !important; border-bottom: 1px solid var(--bw-line) !important; padding: 10px 0 !important; }
+.bookingContextSummary { gap: 0 !important; border-top: 1px solid var(--bw-line); border-bottom: 1px solid var(--bw-line); }
+.bookingContextSummary span { border-radius: 0 !important; background: transparent !important; border: 0 !important; border-right: 1px solid var(--bw-line) !important; }
+.paymentLogoGrid { display: grid !important; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important; gap: 0 !important; border-top: 1px solid var(--bw-line); border-left: 1px solid var(--bw-line); }
+.paymentLogo { width: auto !important; height: 42px !important; border-radius: 0 !important; border: 0 !important; border-right: 1px solid var(--bw-line) !important; border-bottom: 1px solid var(--bw-line) !important; box-shadow: none !important; }
+
+.loginPage { background: var(--bw-page) !important; }
+.redesignLoginGrid { grid-template-columns: minmax(0, .85fr) minmax(320px, .55fr) !important; gap: 42px !important; border-top: 1px solid var(--bw-line); padding-top: 24px; }
+.redesignRoleRow { border-radius: 0 !important; border: 0 !important; border-bottom: 1px solid var(--bw-line) !important; background: transparent !important; padding: 11px 0 !important; }
+.redesignRoleRow > span { display: none !important; }
+.credentialList { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 0 !important; border-top: 1px solid var(--bw-line); border-left: 1px solid var(--bw-line); }
+.credentialCard { border: 0 !important; border-right: 1px solid var(--bw-line) !important; border-bottom: 1px solid var(--bw-line) !important; text-align: left !important; }
+.destination { border-radius: 0 !important; background: transparent !important; border: 1px solid var(--bw-line) !important; }
+
+.portalPage { background: var(--bw-page) !important; }
+.staffPageHeader {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 34px 0 18px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 28px;
+  align-items: end;
+  border-bottom: 1px solid var(--bw-line);
+}
+.staffPageHeader h1 { font-size: clamp(2rem, 4vw, 2.65rem) !important; margin-bottom: .45rem !important; }
+.staffSessionLine { margin: 0 !important; color: var(--bw-muted) !important; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; justify-content: end; }
+.staffSessionLine span, .staffSessionLine strong { border-left: 1px solid var(--bw-line); padding-left: 12px; }
+.sharedBoardSection,
+.portalSection,
+.activitySection,
+.supportOpsHero,
+.supportWatchlist,
+.supportDeskSection { max-width: 1180px !important; margin-inline: auto !important; padding-inline: 0 !important; }
+.staffQueueHeader,
+.activityHeader,
+.onboardingHeader,
+.work-area-header {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: end !important;
+  gap: 18px !important;
+  border-bottom: 1px solid var(--bw-line) !important;
+  padding-bottom: 12px !important;
+  margin-bottom: 12px !important;
+}
+.queueMetricGrid {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 0 !important;
+  border-top: 1px solid var(--bw-line) !important;
+  border-left: 1px solid var(--bw-line) !important;
+  margin: 12px 0 !important;
+}
+.queueMetricGrid article {
+  border-right: 1px solid var(--bw-line) !important;
+  border-bottom: 1px solid var(--bw-line) !important;
+  padding: 12px !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+}
+.queueMetricGrid strong { font-size: 1.65rem !important; color: var(--bw-blue-dark) !important; }
+.opsTableWrap { overflow-x: auto !important; border-top: 1px solid var(--bw-line-strong) !important; }
+.opsTable { border-collapse: collapse !important; min-width: 920px !important; background: transparent !important; }
+.opsTable th { background: var(--bw-blue-dark) !important; color: #fff !important; font-size: .78rem !important; text-transform: none !important; letter-spacing: .02em !important; }
+.opsTable td, .opsTable th { padding: 11px 12px !important; border-bottom: 1px solid var(--bw-line) !important; }
+.orderMeta span,
+.textFlag,
+.slaPill,
+.activityCountPill,
+.onboardingBadges span,
+.status,
+.badge,
+.locationGrid span {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.orderMeta { gap: 0 !important; border-top: 1px solid var(--bw-line); border-left: 1px solid var(--bw-line); }
+.orderMeta span { border: 0 !important; border-right: 1px solid var(--bw-line) !important; border-bottom: 1px solid var(--bw-line) !important; background: transparent !important; }
+.manualToolbox { border-top: 1px solid var(--bw-line) !important; border-bottom: 1px solid var(--bw-line) !important; padding: 0 !important; }
+.manualToolbox summary { border-radius: 0 !important; padding: 12px 0 !important; }
+.manualToolbox summary em { font-style: normal; color: var(--bw-blue-dark); }
+.activityGroup summary { padding: 12px 0 !important; border-bottom: 1px solid var(--bw-line); }
+.activityChipRow, .activityControlGroup { gap: 0 !important; }
+.activityChip, .activitySegmented button { border: 1px solid var(--bw-line) !important; margin-right: -1px !important; background: transparent !important; }
+.activityChip.active, .activitySegmented button.active { background: var(--bw-foam) !important; color: var(--bw-blue-dark) !important; }
+
+@media (max-width: 900px) {
+  .hero,
+  .redesignLoginGrid,
+  .staffPageHeader { grid-template-columns: 1fr !important; gap: 24px !important; }
+  .serviceFacts,
+  .queueMetricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .staffSessionLine { justify-content: start; }
+}
+@media (max-width: 640px) {
+  .section { padding: 30px 18px !important; }
+  .hero { padding-top: 30px !important; }
+  .serviceRecord dl div { grid-template-columns: 1fr !important; gap: 3px; }
+  .serviceFacts,
+  .queueMetricGrid,
+  .pickupDeskGrid,
+  .paymentLogoGrid,
+  .credentialList { grid-template-columns: 1fr !important; }
+  .staffQueueHeader,
+  .activityHeader,
+  .onboardingHeader { display: grid !important; align-items: start !important; }
+}
+
+/* Freeze tightening pass — remove remaining computed container/shadow residue. */
+.skipLink,
+.humanFlowGrid article,
+.humanFlowGrid article span,
+.bookingContextSummary,
+.panel,
+form.panel,
+.serviceCard,
+.planCard,
+.faqItem,
+.contactCard,
+.quoteResult,
+.researchGrid article,
+.opsFeatureGrid article,
+.assuranceGrid article,
+.commandGrid article,
+.staffCard,
+.vendorShowcaseCard {
+  box-shadow: none !important;
+}
+.humanFlowGrid {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 0 !important;
+  border-top: 1px solid var(--bw-line) !important;
+  border-left: 1px solid var(--bw-line) !important;
+}
+.humanFlowGrid article {
+  border: 0 !important;
+  border-right: 1px solid var(--bw-line) !important;
+  border-bottom: 1px solid var(--bw-line) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 18px !important;
+}
+.humanFlowGrid article span {
+  width: auto !important;
+  height: auto !important;
+  display: block !important;
+  background: transparent !important;
+  color: var(--bw-blue-dark) !important;
+  border-radius: 0 !important;
+  margin-bottom: 8px !important;
+}
+.panel,
+form.panel,
+.redesignLoginForm,
+.supportForm,
+.opsForm,
+.vendorForm,
+.driverForm,
+.onboardingForm {
+  border: 0 !important;
+  border-top: 1px solid var(--bw-line-strong) !important;
+  padding: 14px 0 0 !important;
+}
+.bookingContextSummary,
+.deskFacts,
+.orderMeta,
+.paymentLogoGrid,
+.credentialList {
+  box-shadow: none !important;
+}
+.status {
+  background: transparent !important;
+  border: 0 !important;
+  padding-inline: 0 !important;
+}
+@media (max-width: 780px) {
+  .humanFlowGrid { grid-template-columns: 1fr !important; }
+}
+
+/* Freeze mobile nav: no dropdown card shadow/container. */
+.navLinks,
+.navLinks.open,
+.navLinks[data-open="true"] {
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+@media (max-width: 780px) {
+  .navLinks {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    border: 0 !important;
+    border-top: 1px solid var(--bw-line) !important;
+  }
+  .navLinks a {
+    border-radius: 0 !important;
+    border: 0 !important;
+    border-bottom: 1px solid var(--bw-line) !important;
+    background: transparent !important;
+  }
+}
+
+/* Exact override for old mobile nav dropdown block. */
+@media (max-width: 780px) {
+  html body .nav .navLinks,
+  html body .nav .navLinks.open,
+  html body .nav .navLinks[data-open="true"] {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+  }
+}
