@@ -3,23 +3,23 @@
 :root {
   color-scheme: light;
   --font-sans: "Source Sans 3", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --page: #dff7fb;
-  --page-deep: #b9edf5;
-  --paper: #f8feff;
-  --surface: #ffffff;
-  --surface-soft: #fbfaf7;
+  --page: #073a4e;
+  --page-deep: #031c2a;
+  --paper: rgba(248, 254, 255, .9);
+  --surface: rgba(255, 255, 255, .92);
+  --surface-soft: rgba(248, 254, 255, .74);
   --ink: #102a38;
   --ink-strong: #082f40;
   --muted: #526573;
   --soft: #6d7d87;
-  --line: #ded8ce;
-  --line-strong: #c9c0b4;
+  --line: rgba(11, 73, 96, .22);
+  --line-strong: rgba(11, 73, 96, .36);
   --brand: #0b4960;
   --brand-dark: #083545;
-  --brand-soft: #e8f3f5;
+  --brand-soft: rgba(232, 243, 245, .82);
   --aqua: #d9f2f5;
-  --bubble-ring: rgba(255, 255, 255, .72);
-  --bubble-fill: rgba(255, 255, 255, .26);
+  --bubble-ring: rgba(255, 255, 255, .92);
+  --bubble-fill: rgba(212, 248, 255, .24);
   --danger: #a43d32;
   --warning: #8a650c;
   --success: #2f6847;
@@ -38,7 +38,10 @@ body {
   font-weight: 400;
   color: var(--ink);
   background:
-    linear-gradient(135deg, var(--page) 0%, #eefcff 46%, var(--page-deep) 100%);
+    radial-gradient(circle at 18% 10%, rgba(89, 225, 240, .42) 0 16%, transparent 34%),
+    radial-gradient(circle at 82% 18%, rgba(255, 255, 255, .2) 0 10%, transparent 28%),
+    radial-gradient(circle at 50% 96%, rgba(0, 142, 164, .38) 0 18%, transparent 44%),
+    linear-gradient(135deg, #052f43 0%, #0a5b70 38%, #06394c 68%, #021521 100%);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   isolation: isolate;
@@ -55,11 +58,13 @@ body > :not(.bubbleBackdrop) { position: relative; z-index: 1; }
   overflow: clip;
   contain: strict;
   background:
-    radial-gradient(circle at 10% 18%, rgba(255,255,255,.5) 0 9px, rgba(255,255,255,.28) 10px 12px, transparent 13px),
-    radial-gradient(circle at 78% 10%, rgba(255,255,255,.46) 0 13px, rgba(255,255,255,.24) 14px 17px, transparent 18px),
-    radial-gradient(circle at 86% 70%, rgba(255,255,255,.4) 0 8px, rgba(255,255,255,.22) 9px 11px, transparent 12px),
-    radial-gradient(circle at 18% 82%, rgba(255,255,255,.42) 0 15px, rgba(255,255,255,.22) 16px 19px, transparent 20px),
-    radial-gradient(circle at 50% 46%, rgba(255,255,255,.25) 0 5px, rgba(255,255,255,.16) 6px 8px, transparent 9px);
+    radial-gradient(circle at 10% 18%, rgba(255,255,255,.78) 0 9px, rgba(202,249,255,.3) 10px 15px, transparent 16px),
+    radial-gradient(circle at 78% 10%, rgba(255,255,255,.74) 0 13px, rgba(202,249,255,.26) 14px 21px, transparent 22px),
+    radial-gradient(circle at 86% 70%, rgba(255,255,255,.72) 0 8px, rgba(202,249,255,.24) 9px 14px, transparent 15px),
+    radial-gradient(circle at 18% 82%, rgba(255,255,255,.7) 0 15px, rgba(202,249,255,.24) 16px 23px, transparent 24px),
+    radial-gradient(circle at 50% 46%, rgba(255,255,255,.58) 0 5px, rgba(202,249,255,.18) 6px 10px, transparent 11px),
+    linear-gradient(115deg, rgba(255,255,255,.18), rgba(255,255,255,0) 34%, rgba(255,255,255,.08) 68%, rgba(255,255,255,0));
+  mix-blend-mode: screen;
   background-size: 420px 520px, 560px 640px, 380px 460px, 620px 700px, 300px 380px;
   animation: bubbleDrift 38s linear infinite;
 }
@@ -73,21 +78,21 @@ body > :not(.bubbleBackdrop) { position: relative; z-index: 1; }
 }
 .bubbleBackdrop::before {
   background-image:
-    radial-gradient(circle, var(--bubble-ring) 0 1px, var(--bubble-fill) 2px 11px, transparent 12px),
-    radial-gradient(circle, rgba(255,255,255,.48) 0 1px, rgba(255,255,255,.18) 2px 7px, transparent 8px),
-    radial-gradient(circle, rgba(255,255,255,.38) 0 1px, rgba(255,255,255,.14) 2px 15px, transparent 16px);
+    radial-gradient(circle, var(--bubble-ring) 0 2px, var(--bubble-fill) 3px 15px, transparent 16px),
+    radial-gradient(circle, rgba(255,255,255,.76) 0 2px, rgba(213,250,255,.22) 3px 10px, transparent 11px),
+    radial-gradient(circle, rgba(255,255,255,.68) 0 2px, rgba(213,250,255,.2) 3px 19px, transparent 20px);
   background-size: 190px 240px, 260px 310px, 340px 390px;
   background-position: 20px 40px, 130px 90px, 70px 210px;
   animation: bubbleRise 44s linear infinite;
 }
 .bubbleBackdrop::after {
   background-image:
-    radial-gradient(circle, rgba(255,255,255,.5) 0 1px, rgba(255,255,255,.18) 2px 9px, transparent 10px),
-    radial-gradient(circle, rgba(255,255,255,.32) 0 1px, rgba(255,255,255,.13) 2px 18px, transparent 19px);
+    radial-gradient(circle, rgba(255,255,255,.8) 0 2px, rgba(213,250,255,.22) 3px 13px, transparent 14px),
+    radial-gradient(circle, rgba(255,255,255,.58) 0 2px, rgba(213,250,255,.18) 3px 23px, transparent 24px);
   background-size: 240px 280px, 460px 520px;
   background-position: 90px 180px, 220px 40px;
   animation: bubbleRise 64s linear infinite reverse;
-  opacity: .48;
+  opacity: .68;
 }
 
 @keyframes bubbleDrift {
