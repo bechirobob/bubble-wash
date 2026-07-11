@@ -227,8 +227,48 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .credentialCard { text-align: left; min-height: auto; padding: 10px 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--ink); }
 .destination { border-top: 1px solid var(--line); padding-top: 12px; color: var(--muted); }
 
+.staffAccessShell { width: var(--space-page); margin: 36px auto 72px; }
+.staffAccessShell > .brand { margin-bottom: 34px; }
+.staffAccessHero { max-width: 760px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+.staffAccessHero h1 { margin-bottom: .85rem; font-size: clamp(2rem, 4.5vw, 3.2rem); }
+.staffAccessGrid { display: grid; gap: 0; margin-top: 12px; border-top: 1px solid var(--line); }
+.staffAccessCard {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  text-decoration: none;
+}
+.staffAccessCard:hover h2,
+.staffAccessCard:focus-visible h2 { text-decoration: underline; text-underline-offset: 4px; }
+.staffAccessCard span { color: var(--brand); font-weight: 700; }
+.staffAccessCard h2 { margin: 0; font-size: 1.2rem; line-height: 1.2; letter-spacing: -.02em; }
+.staffAccessCard p { margin: 0; font-size: .98rem; }
+.staffAccessCard b { color: var(--brand); font-size: .95rem; white-space: nowrap; }
+
 .portalPage { width: var(--space-page); margin-inline: auto; }
 .portalPage .portalNav { width: 100%; }
+.portalLinks {
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  border-radius: var(--radius-sm);
+}
+.portalLinks a,
+.portalLinks button {
+  min-height: 36px;
+  padding: .42rem .68rem;
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: .9rem;
+  text-decoration: none;
+}
+.portalLinks a[aria-current="page"] { background: var(--surface); color: var(--brand-dark); border: 1px solid var(--line-strong); }
+.portalLinks .logoutButton { margin-left: 6px; min-height: 36px; padding: .42rem .68rem; }
 .staffPageHeader {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
@@ -284,20 +324,29 @@ summary { cursor: pointer; color: var(--brand); font-weight: 700; }
 .timelineList > div { border-top: 1px solid var(--line); padding-top: 8px; }
 .timelineList p { margin: 4px 0 0; }
 
-.panel, form.panel, .opsForm, .supportForm, .onboardingForm, .activityGroup, .activityDetailPanel, .activityDetailCard, .activityDetailSection {
+.panel, form.panel, .opsForm, .supportForm, .onboardingForm, .activityDetailPanel, .activityDetailCard, .activityDetailSection {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   padding: 18px;
   box-shadow: none;
 }
+.activityGroup { background: transparent; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 18px 0 0; box-shadow: none; }
 .onboardingGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .formTitleRow, .activityGroup summary { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
-.onboardingBadges, .activityChipRow, .activitySegmented { display: flex; flex-wrap: wrap; gap: 8px; }
-.onboardingBadges span, .activityChip, .activitySegmented button { border: 1px solid var(--line); background: var(--surface-soft); color: var(--ink); border-radius: var(--radius-sm); padding: .45rem .6rem; font-weight: 700; }
-.activityChip.active, .activitySegmented button.active { background: var(--brand-soft); border-color: var(--brand); }
+.activityGroup summary h2 { font-size: 1.45rem; margin-bottom: .2rem; }
+.activitySummaryMeta { text-align: right; color: var(--muted); }
+.activitySummaryMeta em { display: block; margin-top: 4px; color: var(--brand); font-style: normal; font-weight: 700; }
+.onboardingBadges, .activityChipRow, .activitySegmented { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.onboardingBadges span, .activityChip, .activitySegmented button { border: 0; border-radius: 0; background: transparent; color: var(--muted); padding: 0; min-height: auto; font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 4px; }
+.activityChip span { margin-left: 4px; color: var(--soft); }
+.activityChip span::before { content: ""; }
+.activityChip.active, .activitySegmented button.active { color: var(--brand-dark); background: transparent; text-decoration-thickness: 2px; }
 .activityGroupBody { margin-top: 18px; display: grid; gap: 16px; }
-.activityUtilityBar, .activityGroupActions { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
+.activityUtilityBar, .activityGroupActions { display: grid; grid-template-columns: minmax(0, 1fr) auto; justify-content: space-between; align-items: start; gap: 16px; }
+.activityControlGroup { display: grid; gap: 8px; justify-items: end; }
+.activityLiveMeta { color: var(--muted); }
+.activityLiveMeta strong { color: var(--ink); margin-right: 4px; }
 .activityWorkbench { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 18px; align-items: start; }
 .activitySortButton { all: unset; color: inherit; cursor: pointer; font-weight: 700; }
 .activityTable tr { cursor: pointer; }
@@ -311,6 +360,14 @@ summary { cursor: pointer; color: var(--brand); font-weight: 700; }
 .activityDetailList { margin: 0; }
 .activityDetailList div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
 .activityCopyStatus { color: var(--success); font-weight: 700; }
+
+.activityDetailPanel {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  padding: 16px 0 0;
+}
 
 .supportLaneGrid { margin: 0; min-width: 360px; }
 .supportOpsHero { align-items: start; }
@@ -347,18 +404,54 @@ summary { cursor: pointer; color: var(--brand); font-weight: 700; }
   .serviceFacts { grid-template-columns: 1fr; }
   .serviceFacts div { border-right: 0; border-bottom: 1px solid var(--line); padding-left: 0; }
   .serviceSection { padding-block: 38px; }
-  .servicePanel, .serviceRecordBlock, .bookingForm, .redesignLoginForm, .redesignRoleList, .panel, form.panel, .opsForm, .supportForm, .onboardingForm, .activityGroup, .activityDetailPanel { padding: 16px; }
+  .servicePanel, .serviceRecordBlock, .bookingForm, .redesignLoginForm, .redesignRoleList, .panel, form.panel, .opsForm, .supportForm, .onboardingForm, .activityDetailPanel { padding: 16px; }
   .workflowList li { grid-template-columns: 42px minmax(0, 1fr); }
-  .portalLinks { width: 100%; overflow-x: auto; padding-bottom: 6px; align-items: center; }
-  .portalLinks a, .portalLinks button { flex: 0 0 auto; }
   .staffPageHeader { padding: 32px 0 20px; }
   .staffSessionLine { border-left-width: 3px; }
   .queueMetricGrid, .queue-summary, .supportLaneGrid { grid-template-columns: 1fr; }
   .queueMetricGrid article, .queue-summary article, .supportLaneGrid article { border-right: 0; }
   table, .opsTable, .activityTable { min-width: 760px; }
   th, td { padding: 11px 12px; }
-  .activityUtilityBar, .activityGroupActions, .staffQueueHeader, .activityHeader, .onboardingHeader { flex-direction: column; align-items: stretch; }
+  .staffQueueHeader, .activityHeader, .onboardingHeader { flex-direction: column; align-items: stretch; }
   .footer { padding-bottom: 42px; }
+
+  .staffAccessShell { margin: 22px auto 48px; }
+  .staffAccessShell > .brand { margin-bottom: 24px; }
+  .staffAccessHero { padding-bottom: 18px; }
+  .staffAccessHero h1 { font-size: clamp(1.9rem, 9vw, 2.5rem); }
+  .staffAccessGrid { margin-top: 4px; }
+  .staffAccessCard { grid-template-columns: 1fr; gap: 6px; padding: 16px 0; }
+  .staffAccessCard h2 { font-size: 1.12rem; }
+  .staffAccessCard p { font-size: .95rem; }
+  .staffAccessCard b { font-size: .92rem; }
+
+  .portalLinks {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+  }
+  .portalLinks a, .portalLinks button { min-height: 40px; padding: 9px 4px; font-size: .84rem; text-align: center; border-radius: 0; white-space: nowrap; flex: initial; border: 0; }
+  .portalLinks a[aria-current="page"] { border: 0; border-bottom: 2px solid var(--brand); background: transparent; }
+  .portalLinks .logoutButton { grid-column: 1 / -1; margin: 4px 0 0; border-top: 1px solid var(--line); }
+
+  .activityGroup { padding: 14px 0 0; }
+  .activityGroup summary { display: grid; grid-template-columns: 1fr auto; gap: 12px; }
+  .activityGroup summary h2 { font-size: 1.22rem; }
+  .activitySummaryMeta { font-size: .9rem; }
+  .activityGroupBody { gap: 12px; }
+  .activityUtilityBar, .activityGroupActions { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .activityControlGroup { justify-items: start; }
+  .activityChipRow, .activitySegmented { gap: 7px 12px; }
+  .activityChip, .activitySegmented button { font-size: .92rem; }
+  .activityActionButtons .button { min-height: 38px; padding: .5rem .7rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

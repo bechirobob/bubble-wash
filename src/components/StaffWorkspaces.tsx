@@ -802,7 +802,7 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
 function PortalShell({ title, role, pageRole = role, userName, children }: PortalShellProps) {
   const pageHome = pageRole === "admin" ? "/admin" : pageRole === "vendor" ? "/vendors" : pageRole === "driver" ? "/drivers" : "/support";
   const portalLinks = role === "admin"
-    ? [["/admin", "Admin queue"], ["/vendors", "Vendor queue"], ["/drivers", "Route queue"], ["/support", "Support queue"]]
+    ? [["/admin", "Admin"], ["/vendors", "Vendor"], ["/drivers", "Routes"], ["/support", "Support"]]
     : pageRole === "vendor" ? [["/vendors", "Vendor desk"]]
     : pageRole === "driver" ? [["/drivers", "Route desk"]]
     : [["/support", "Support desk"]];
