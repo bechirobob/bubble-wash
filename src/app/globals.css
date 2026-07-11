@@ -3,8 +3,8 @@
 :root {
   color-scheme: light;
   --font-sans: "Source Sans 3", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --page: #ffffff;
-  --page-soft: #f7fcfd;
+  --page: rgba(255, 255, 255, .76);
+  --page-soft: #eefbfe;
   --paper: #ffffff;
   --surface: #ffffff;
   --surface-soft: #f8fbfc;
@@ -28,6 +28,13 @@
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; font-size: 16px; }
+html {
+  background:
+    radial-gradient(circle at 14% 10%, rgba(217, 242, 245, .78) 0 18%, transparent 36%),
+    radial-gradient(circle at 86% 18%, rgba(232, 243, 245, .86) 0 14%, transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, #f4fbfc 48%, #ffffff 100%);
+  background-attachment: fixed;
+}
 html, body { margin: 0; min-height: 100%; }
 body {
   font-family: var(--font-sans);
@@ -35,11 +42,24 @@ body {
   line-height: 1.5;
   font-weight: 400;
   color: var(--ink);
-  background: linear-gradient(180deg, #ffffff 0%, var(--page-soft) 54%, #ffffff 100%);
+  background: transparent;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  isolation: isolate;
 }
-body::before, body::after { display: none !important; content: none !important; }
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.88) 0%, rgba(255,255,255,.68) 44%, rgba(255,255,255,.82) 100%);
+  -webkit-backdrop-filter: blur(18px) saturate(1.12);
+  backdrop-filter: blur(18px) saturate(1.12);
+}
+body::after { display: none !important; content: none !important; }
+body > * { position: relative; z-index: 1; }
 img, svg { max-width: 100%; display: block; }
 a { color: var(--brand); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 a:hover { color: var(--brand-dark); }
