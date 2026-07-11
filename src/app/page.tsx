@@ -251,39 +251,46 @@ export default function Home() {
   ];
 
   return (
-    <main>
+    <main className="siteShell">
       <a className="skipLink" href="#booking">Skip to booking</a>
-      <header className="nav">
-        <a className="brand" href="#top" aria-label="Bubble Wash home" onClick={() => setMobileOpen(false)}><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} priority /><span>Bubble Wash</span></a>
-        <button className="menuButton" type="button" aria-controls="site-navigation" aria-expanded={mobileOpen} aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"} onClick={() => setMobileOpen(!mobileOpen)}><span>{mobileOpen ? "Close" : "Menu"}</span><span className="menuIcon" aria-hidden="true">{mobileOpen ? "×" : "☰"}</span></button>
+
+      <header className="siteHeader" id="top">
+        <a className="brand" href="#top" aria-label="Bubble Wash home" onClick={() => setMobileOpen(false)}>
+          <Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} priority />
+          <span>Bubble Wash</span>
+        </a>
+        <button className="menuButton" type="button" aria-controls="site-navigation" aria-expanded={mobileOpen} aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"} onClick={() => setMobileOpen(!mobileOpen)}>
+          <span>{mobileOpen ? "Close" : "Menu"}</span>
+        </button>
         <nav id="site-navigation" className={mobileOpen ? "navLinks open" : "navLinks"} data-open={mobileOpen} aria-hidden={isMobileNav && !mobileOpen ? true : undefined}>
-          <a href="#services" onClick={() => setMobileOpen(false)}>Services</a>
-          <a href="#quick-actions" onClick={() => setMobileOpen(false)}>Pricing</a>
-          <a href="#quick-actions" onClick={() => setMobileOpen(false)}>Coverage</a>
-          <a href="#quick-actions" onClick={() => setMobileOpen(false)}>Track Order</a>
-          <a href="/staff" onClick={() => setMobileOpen(false)}>Staff Login</a>
-          <a href="#booking" onClick={() => setMobileOpen(false)}>Book</a>
+          <a href="#services" onClick={() => setMobileOpen(false)}>How it works</a>
+          <a href="#quick-actions" onClick={() => setMobileOpen(false)}>Price and track</a>
+          <a href="#booking" onClick={() => setMobileOpen(false)}>Book pickup</a>
+          <a href="/staff" onClick={() => setMobileOpen(false)}>Staff</a>
           <a className="navCta" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20want%20to%20schedule%20a%20laundry%20pickup" target="_blank" rel="noopener noreferrer" onClick={() => setMobileOpen(false)}>WhatsApp</a>
         </nav>
       </header>
 
-      <section id="top" className="hero section">
-        <div className="heroCopy">
-          <p className="eyebrow">Laundry pickup / Accra</p>
-          <h1>Laundry pickup and delivery in Accra.</h1>
+      <section className="homeHero pageShell" aria-labelledby="home-title">
+        <div className="homeHeroCopy">
+          <p className="sectionLabel">Laundry pickup / Accra</p>
+          <h1 id="home-title">Laundry pickup and delivery in Accra.</h1>
           <p className="lead">Book a pickup, track your order, and get updates from collection to delivery.</p>
-          <form className="coverageForm" method="post" onSubmit={checkCoverage}>
-            <label className="coverageLabel" htmlFor="coverageArea">Check if we serve your area</label>
-            <div className="coverageRow"><input id="coverageArea" name="coverageArea" value={coverageArea} onChange={(event) => setCoverageArea(event.target.value)} placeholder="e.g. Osu, Labone, East Legon" autoComplete="address-level2" /><button className="button primary" type="submit" disabled={pendingAction === "coverage"}>{pendingAction === "coverage" ? "Checking..." : "Check Coverage"}</button></div>
-            <div className="coverageQuickChips" aria-label="Popular coverage areas">{popularAreas.map((area) => <button key={area} type="button" onClick={() => choosePopularArea(area)} disabled={pendingAction === "coverage"}>{area}</button>)}</div>
+          <div className="heroActions">
+            <a className="button primary" href="#booking">Book pickup</a>
+            <a className="button secondary" href="#quick-actions">Track or price</a>
+          </div>
+          <form className="coverageForm serviceForm" method="post" onSubmit={checkCoverage}>
+            <label htmlFor="coverageArea">Check pickup coverage</label>
+            <div className="inlineFormRow"><input id="coverageArea" name="coverageArea" value={coverageArea} onChange={(event) => setCoverageArea(event.target.value)} placeholder="e.g. Osu, Labone, East Legon" autoComplete="address-level2" /><button className="button primary" type="submit" disabled={pendingAction === "coverage"}>{pendingAction === "coverage" ? "Checking..." : "Check"}</button></div>
+            <div className="quickTextLinks" aria-label="Popular coverage areas">{popularAreas.map((area) => <button key={area} type="button" onClick={() => choosePopularArea(area)} disabled={pendingAction === "coverage"}>{area}</button>)}</div>
           </form>
           <p className={statusTone(coverageStatus)} role="status" aria-live="polite">{coverageStatus}</p>
-          <div className="heroActions"><a className="button primary" href="#booking">Book a Pickup</a><a className="button secondary" href="#quick-actions">Check routes</a><a className="textLink" href="#quick-actions">Estimate price →</a></div>
-          <div className="humanNote"><b>Clean handoff:</b> pickup, care notes, payment, and delivery updates stay on the same order trail.</div>
         </div>
-        <aside className="serviceRecord" aria-label="Today’s service desk">
-          <div className="serviceRecordHead"><span>Today’s service desk</span><strong>Open for pickup</strong></div>
-          <dl>
+        <aside className="servicePanel" aria-labelledby="service-desk-title">
+          <p className="sectionLabel">Today</p>
+          <h2 id="service-desk-title">Today’s service desk</h2>
+          <dl className="recordList">
             <div><dt>Pickup areas</dt><dd>Osu, Labone, East Legon, Airport</dd></div>
             <div><dt>Updates</dt><dd>WhatsApp and email</dd></div>
             <div><dt>Order reference</dt><dd>One code from pickup to delivery</dd></div>
@@ -292,61 +299,67 @@ export default function Home() {
         </aside>
       </section>
 
-      <section className="serviceFacts" aria-label="service proof points">{proof.map(([number, label]) => <div key={label}><strong>{number}</strong><span>{label}</span></div>)}</section>
+      <section className="serviceFacts pageShell" aria-label="service proof points">{proof.map(([number, label]) => <div key={label}><strong>{number}</strong><span>{label}</span></div>)}</section>
 
-      <section id="services" className="section humanFlowSection compactHumanFlowSection">
-        <div className="sectionHead narrow compactHead"><p className="eyebrow">How it works</p><h2>A cleaner routine in three handoffs.</h2><p>Check your pickup lane, book once, then follow the same order reference through washing, payment, and delivery.</p></div>
-        <div className="humanFlowGrid">{customerFlow.map(([title, copy], index) => <article key={title}><span>{String(index + 1).padStart(2, "0")}</span><h3>{title}</h3><p>{copy}</p></article>)}</div>
+      <section id="services" className="serviceSection pageShell" aria-labelledby="services-heading">
+        <div className="sectionIntro"><p className="sectionLabel">How it works</p><h2 id="services-heading">A cleaner routine in three handoffs.</h2><p>Check your pickup lane, book once, then follow the same order reference through washing, payment, and delivery.</p></div>
+        <ol className="workflowList">{customerFlow.map(([title, copy], index) => <li key={title}><span>{String(index + 1).padStart(2, "0")}</span><div><h3>{title}</h3><p>{copy}</p></div></li>)}</ol>
       </section>
 
-      <section id="quick-actions" className="section publicPickupDesk" aria-labelledby="quick-actions-heading">
-        <div className="sectionHead compactHead"><p className="eyebrow">Pickup desk</p><h2 id="quick-actions-heading">Price, route, and track without opening a dashboard.</h2><p>Three practical checks before the request form. No long sales page, no fake controls.</p></div>
-        <div className="pickupDeskGrid">
-          <article className="pickupDeskRecord pickupDeskPrimary">
-            <span className="deskLabel">Selected plan</span>
+      <section id="quick-actions" className="serviceSection pageShell" aria-labelledby="quick-actions-heading">
+        <div className="sectionIntro"><p className="sectionLabel">Price, route, track</p><h2 id="quick-actions-heading">Useful checks before booking.</h2><p>Estimate a plan, confirm a pickup lane, or check an existing order reference.</p></div>
+        <div className="serviceRecordGrid">
+          <article className="serviceRecordBlock">
+            <p className="sectionLabel">Estimate</p>
             <h3>{selectedPlan.name}</h3>
             <p>{selectedPlan.audience}</p>
-            <div className="deskPrice"><strong>{selectedPlan.name === "Enterprise" ? "From " : ""}{formatMoney(selectedPlan.subscription)}</strong><span>/ month coordination fee</span></div>
-            <div className="deskFacts">
-              <span><b>{selectedPlan.monthlyPickups}</b><small>pickups / month</small></span>
-              <span><b>{selectedStartingBand ? `${selectedStartingBand.min}kg+` : "custom"}</b><small>per pickup</small></span>
-              <span><b>{selectedStartingBand ? formatMoney(selectedStartingBand.rate) : "Custom"}</b><small>/ kg from</small></span>
-            </div>
-            <form className="deskMiniForm" method="post" onSubmit={calculate}>
+            <dl className="miniFacts"><div><dt>Coordination fee</dt><dd>{selectedPlan.name === "Enterprise" ? "From " : ""}{formatMoney(selectedPlan.subscription)} / month</dd></div><div><dt>Pickups</dt><dd>{selectedPlan.monthlyPickups} / month</dd></div><div><dt>Rate starts</dt><dd>{selectedStartingBand ? `${formatMoney(selectedStartingBand.rate)} / kg from ${selectedStartingBand.min}kg` : "Custom"}</dd></div></dl>
+            <form className="serviceForm" method="post" onSubmit={calculate}>
               <label>Plan<select value={quotePlan} onChange={(event) => setQuotePlan(event.target.value as PlanName)}>{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label>
               <label>Estimated kg<input type="number" min={1} max={10000} step={1} inputMode="numeric" value={kg} onChange={(event) => setKg(Number(event.target.value))} /></label>
-              <button className="button primary full" type="submit" disabled={pendingAction === "quote"}>{pendingAction === "quote" ? "Calculating..." : "Run estimate"}</button>
+              <button className="button primary" type="submit" disabled={pendingAction === "quote"}>{pendingAction === "quote" ? "Calculating..." : "Run estimate"}</button>
               <p className={statusTone(quoteStatus)} role="status" aria-live="polite">{quote ? `${formatMoney(quote.estimatedMonthlyTotal)} estimated monthly total` : quoteStatus}</p>
             </form>
           </article>
-          <article className="pickupDeskRecord">
-            <span className="deskLabel">Coverage</span>
+          <article className="serviceRecordBlock">
+            <p className="sectionLabel">Coverage</p>
             <h3>{routePreview.zoneLabel}</h3>
             <p>{routePreview.zoneNote}</p>
-            <div className="coverageRouteList compactRouteList">{coverageGroups.map((group) => <div key={group.title}><strong>{group.title}</strong><small>{group.fee}</small><p>{group.areas.join(" · ")}</p></div>)}</div>
-            <button className="button secondary full" type="button" onClick={() => document.getElementById("booking")?.scrollIntoView({ behavior: "smooth" })}>Use selected lane</button>
+            <div className="coverageRouteList">{coverageGroups.map((group) => <div key={group.title}><strong>{group.title}</strong><small>{group.fee}</small><p>{group.areas.join(" · ")}</p></div>)}</div>
+            <button className="button secondary" type="button" onClick={() => document.getElementById("booking")?.scrollIntoView({ behavior: "smooth" })}>Use selected lane</button>
           </article>
-          <article className="pickupDeskRecord">
-            <span className="deskLabel">Track or pay</span>
+          <article className="serviceRecordBlock">
+            <p className="sectionLabel">Track</p>
             <h3>Follow one reference.</h3>
-            <form className="deskMiniForm" method="post" onSubmit={trackOrder}>
+            <form className="serviceForm" method="post" onSubmit={trackOrder}>
               <label>Order reference<input name="trackingId" placeholder="BW-2081 or saved reference" autoComplete="off" /></label>
-              <button className="button secondary full" type="submit" disabled={pendingAction === "track"}>{pendingAction === "track" ? "Checking..." : "Check order"}</button>
+              <button className="button secondary" type="submit" disabled={pendingAction === "track"}>{pendingAction === "track" ? "Checking..." : "Check order"}</button>
               <p className={statusTone(trackingStatus)} role="status" aria-live="polite">{trackingResult ? `${trackingResult.status} · ${trackingResult.nextStep}` : trackingStatus}</p>
             </form>
-            <a className="button primary full" href="#booking">Book pickup</a>
+            <a className="inlineAction" href="#booking">Book a new pickup</a>
           </article>
         </div>
       </section>
 
-      <section id="booking" className="section schedule soft compactBookingSection">
-        <div className="sectionHead compactHead"><p className="eyebrow">Book pickup</p><h2>Send the details once. Dispatch uses the same order record.</h2></div>
-        <div className="scheduleGrid twoCols bookingOnlyGrid"><form className="panel" method="post" onSubmit={(event) => submitLead(event, "pickup-booking")}><h3>Pickup request</h3><div className="two"><label>Contact name<input name="name" placeholder="Name" autoComplete="name" required /></label><label>Email<input name="email" type="email" placeholder="Email" autoComplete="email" required /></label></div><div className="two"><label>Phone / WhatsApp<input name="phone" placeholder="Phone / WhatsApp" autoComplete="tel" required /></label><label>Company or household<input name="company" placeholder="Company or household" autoComplete="organization" required /></label></div><div className="two"><label>Preferred plan<select name="preferredPlan" value={bookingPlan} onChange={(event) => setBookingPlan(event.target.value as PlanName)}>{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label><label>Pickup zone<select name="zone" value={bookingZone} onChange={(event) => setBookingZone(event.target.value as ZoneKey)}>{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label></div><div className="bookingContextSummary" aria-label="Current booking context">{bookingContext.map((item) => <span key={item}>{item}</span>)}</div><input type="hidden" name="requestedVendor" value="" /><div className="two"><label>Pickup area<input name="area" value={bookingArea} onChange={(event) => setBookingArea(event.target.value)} placeholder="Osu, Labone, East Legon..." autoComplete="address-level2" required /></label><label>Preferred pickup date<input name="pickupDate" type="date" min={minPickupDate} required /></label></div><div className="two"><label>Estimated laundry weight<input name="kg" type="number" min={1} max={10000} step={1} inputMode="numeric" placeholder="e.g. 24" required /></label><label>Pickup window<select name="pickupWindow" defaultValue="Any available window"><option>Any available window</option><option>Morning pickup</option><option>Afternoon pickup</option><option>Evening pickup</option></select></label></div><div className="two"><label>Payment preference<select name="paymentPreference"><option>MTN MoMo</option><option>Telecel Cash</option><option>Card</option><option>Bank transfer</option><option>Invoice me</option></select></label><label>Alert preference<select name="alertPreference"><option>Email + WhatsApp alerts</option><option>WhatsApp only</option><option>Email only</option><option>Call me</option></select></label></div><label>Pickup notes<textarea name="message" maxLength={1200} placeholder="Textile type, special instructions, stain/damage notes, access details..." /></label><button className="button primary full" type="submit" disabled={pendingAction === "pickup-booking"}>{pendingAction === "pickup-booking" ? "Saving pickup request..." : "Request Pickup"}</button>{formStatus["pickup-booking"] && <p className={statusTone(formStatus["pickup-booking"])} role="status" aria-live="polite">{formStatus["pickup-booking"]}</p>}</form><aside className="bookingSideCard panel"><h3>Need help before booking?</h3><p>Use the pickup desk above to estimate price, confirm coverage, or check an order reference. WhatsApp stays available for details that need a person.</p><a className="button secondary full" href="#quick-actions">Back to pickup desk</a><a className="button primary full" href="https://wa.me/233550000000?text=Hi%20Bubble%20Wash%2C%20I%20want%20to%20schedule%20a%20laundry%20pickup" target="_blank" rel="noopener noreferrer">WhatsApp Bubble Wash</a></aside></div>
+      <section id="booking" className="serviceSection pageShell" aria-labelledby="booking-heading">
+        <div className="sectionIntro"><p className="sectionLabel">Book pickup</p><h2 id="booking-heading">Send the details once.</h2><p>Dispatch uses the same order record for pickup, vendor handoff, payment, and delivery.</p></div>
+        <form className="bookingForm serviceForm" method="post" onSubmit={(event) => submitLead(event, "pickup-booking")}>
+          <div className="formGrid two"><label>Contact name<input name="name" placeholder="Name" autoComplete="name" required /></label><label>Email<input name="email" type="email" placeholder="Email" autoComplete="email" required /></label></div>
+          <div className="formGrid two"><label>Phone / WhatsApp<input name="phone" placeholder="Phone / WhatsApp" autoComplete="tel" required /></label><label>Company or household<input name="company" placeholder="Company or household" autoComplete="organization" required /></label></div>
+          <div className="formGrid two"><label>Preferred plan<select name="preferredPlan" value={bookingPlan} onChange={(event) => setBookingPlan(event.target.value as PlanName)}>{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label><label>Pickup zone<select name="zone" value={bookingZone} onChange={(event) => setBookingZone(event.target.value as ZoneKey)}>{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label></div>
+          <p className="bookingContextSummary">{bookingContext.join(" · ")}</p>
+          <input type="hidden" name="requestedVendor" value="" />
+          <div className="formGrid two"><label>Pickup area<input name="area" value={bookingArea} onChange={(event) => setBookingArea(event.target.value)} placeholder="Osu, Labone, East Legon..." autoComplete="address-level2" required /></label><label>Preferred pickup date<input name="pickupDate" type="date" min={minPickupDate} required /></label></div>
+          <div className="formGrid two"><label>Estimated laundry weight<input name="kg" type="number" min={1} max={10000} step={1} inputMode="numeric" placeholder="e.g. 24" required /></label><label>Pickup window<select name="pickupWindow" defaultValue="Any available window"><option>Any available window</option><option>Morning</option><option>Afternoon</option><option>Evening</option></select></label></div>
+          <textarea name="message" placeholder="Care notes, pickup instructions, stain notes, gate code, delivery constraints..." required />
+          <button className="button primary" type="submit" disabled={pendingAction === "pickup-booking"}>{pendingAction === "pickup-booking" ? "Saving..." : "Submit pickup request"}</button>
+          {formStatus["pickup-booking"] && <p className={statusTone(formStatus["pickup-booking"])} role="status" aria-live="polite">{formStatus["pickup-booking"]}</p>}
+        </form>
       </section>
 
-      <section className="paymentStrip" aria-labelledby="payment-heading"><p className="eyebrow">Payment references</p><h3 id="payment-heading">Accepted payment lanes</h3><div className="paymentLogoGrid">{paymentMethods.map(([label, className]) => <span className={`paymentLogo ${className}`} key={label} role="img" aria-label={label} title={label}><span className="srOnly">{label}</span></span>)}</div></section>
+      <section className="paymentStrip pageShell" aria-labelledby="payment-heading"><p className="sectionLabel">Payment references</p><h3 id="payment-heading">Accepted payment lanes</h3><p>{paymentMethods.map(([label]) => label).join(" · ")}</p></section>
 
-      <footer id="contact" className="footer"><div><div className="brand footerBrand"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} /><span>Bubble Wash</span></div><p>Laundry pickup and vendor fulfilment for Accra teams that need clean work without the back-and-forth.</p></div><div><h3>Use Bubble Wash</h3><a href="#booking">Book pickup</a><a href="#quick-actions">Estimate pricing</a><a href="#quick-actions">Coverage</a><a href="#quick-actions">Track order</a></div><div><h3>For operators</h3><a href="/staff">Staff login</a><a href="/login?next=/admin">Admin login</a><a href="/login?next=/vendors">Vendor login</a><a href="/login?next=/drivers">Driver login</a></div><div><h3>Get in touch</h3><p>Accra, Ghana</p><p>hello@bubblewashgh.com</p><p>WhatsApp: +233 55 000 0000</p></div></footer>
+      <footer id="contact" className="footer pageShell"><div><div className="brand footerBrand"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} /><span>Bubble Wash</span></div><p>Laundry pickup and vendor fulfilment for Accra teams that need clean work without the back-and-forth.</p></div><div><h3>Use Bubble Wash</h3><a href="#booking">Book pickup</a><a href="#quick-actions">Estimate pricing</a><a href="#quick-actions">Coverage</a><a href="#quick-actions">Track order</a></div><div><h3>For operators</h3><a href="/staff">Staff login</a><a href="/login?next=/admin">Admin login</a><a href="/login?next=/vendors">Vendor login</a><a href="/login?next=/drivers">Driver login</a></div><div><h3>Get in touch</h3><p>Accra, Ghana</p><p>hello@bubblewashgh.com</p><p>WhatsApp: +233 55 000 0000</p></div></footer>
     </main>
   );
 }
