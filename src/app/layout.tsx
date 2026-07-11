@@ -29,13 +29,16 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0f1d2e",
+  themeColor: "#dff7fb",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <div className="bubbleBackdrop" aria-hidden="true" />
+        {children}
+      </body>
     </html>
   );
 }

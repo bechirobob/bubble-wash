@@ -3,8 +3,9 @@
 :root {
   color-scheme: light;
   --font-sans: "Source Sans 3", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --page: #f7f4ee;
-  --paper: #fffdf8;
+  --page: #dff7fb;
+  --page-deep: #b9edf5;
+  --paper: #f8feff;
   --surface: #ffffff;
   --surface-soft: #fbfaf7;
   --ink: #102a38;
@@ -17,6 +18,8 @@
   --brand-dark: #083545;
   --brand-soft: #e8f3f5;
   --aqua: #d9f2f5;
+  --bubble-ring: rgba(255, 255, 255, .72);
+  --bubble-fill: rgba(255, 255, 255, .26);
   --danger: #a43d32;
   --warning: #8a650c;
   --success: #2f6847;
@@ -34,11 +37,72 @@ body {
   line-height: 1.5;
   font-weight: 400;
   color: var(--ink);
-  background: var(--page);
+  background:
+    linear-gradient(135deg, var(--page) 0%, #eefcff 46%, var(--page-deep) 100%);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  isolation: isolate;
 }
 body::before, body::after { display: none !important; content: none !important; }
+body > :not(.bubbleBackdrop) { position: relative; z-index: 1; }
+.bubbleBackdrop {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  max-width: 100vw;
+  z-index: 0;
+  pointer-events: none;
+  overflow: clip;
+  contain: strict;
+  background:
+    radial-gradient(circle at 10% 18%, rgba(255,255,255,.5) 0 9px, rgba(255,255,255,.28) 10px 12px, transparent 13px),
+    radial-gradient(circle at 78% 10%, rgba(255,255,255,.46) 0 13px, rgba(255,255,255,.24) 14px 17px, transparent 18px),
+    radial-gradient(circle at 86% 70%, rgba(255,255,255,.4) 0 8px, rgba(255,255,255,.22) 9px 11px, transparent 12px),
+    radial-gradient(circle at 18% 82%, rgba(255,255,255,.42) 0 15px, rgba(255,255,255,.22) 16px 19px, transparent 20px),
+    radial-gradient(circle at 50% 46%, rgba(255,255,255,.25) 0 5px, rgba(255,255,255,.16) 6px 8px, transparent 9px);
+  background-size: 420px 520px, 560px 640px, 380px 460px, 620px 700px, 300px 380px;
+  animation: bubbleDrift 38s linear infinite;
+}
+.bubbleBackdrop::before,
+.bubbleBackdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-repeat: repeat;
+  opacity: .72;
+}
+.bubbleBackdrop::before {
+  background-image:
+    radial-gradient(circle, var(--bubble-ring) 0 1px, var(--bubble-fill) 2px 11px, transparent 12px),
+    radial-gradient(circle, rgba(255,255,255,.48) 0 1px, rgba(255,255,255,.18) 2px 7px, transparent 8px),
+    radial-gradient(circle, rgba(255,255,255,.38) 0 1px, rgba(255,255,255,.14) 2px 15px, transparent 16px);
+  background-size: 190px 240px, 260px 310px, 340px 390px;
+  background-position: 20px 40px, 130px 90px, 70px 210px;
+  animation: bubbleRise 44s linear infinite;
+}
+.bubbleBackdrop::after {
+  background-image:
+    radial-gradient(circle, rgba(255,255,255,.5) 0 1px, rgba(255,255,255,.18) 2px 9px, transparent 10px),
+    radial-gradient(circle, rgba(255,255,255,.32) 0 1px, rgba(255,255,255,.13) 2px 18px, transparent 19px);
+  background-size: 240px 280px, 460px 520px;
+  background-position: 90px 180px, 220px 40px;
+  animation: bubbleRise 64s linear infinite reverse;
+  opacity: .48;
+}
+
+@keyframes bubbleDrift {
+  from { background-position: 0 0, 0 0, 0 0, 0 0, 0 0; }
+  to { background-position: 0 -520px, 120px -640px, -80px -460px, 160px -700px, -60px -380px; }
+}
+
+@keyframes bubbleRise {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(0, -18%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubbleBackdrop, .bubbleBackdrop::before, .bubbleBackdrop::after { animation: none; }
+}
 img, svg { max-width: 100%; display: block; }
 a { color: var(--brand); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 a:hover { color: var(--brand-dark); }
