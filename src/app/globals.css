@@ -441,8 +441,45 @@ summary { cursor: pointer; color: var(--brand); font-weight: 700; }
   .staffSessionLine { border: 0; padding: 0; }
   .queueMetricGrid, .queue-summary, .supportLaneGrid { grid-template-columns: 1fr; }
   .queueMetricGrid article, .queue-summary article, .supportLaneGrid article { border-right: 0; }
-  table, .opsTable, .activityTable { min-width: 760px; }
-  th, td { padding: 11px 12px; }
+  .opsTableWrap, .table-wrap, .activityTableWrap {
+    overflow-x: visible;
+    border-bottom: 0;
+  }
+  table, .opsTable, .activityTable,
+  thead, tbody, tr, th, td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+  thead { display: none; }
+  tbody tr {
+    border-top: 1px solid var(--line);
+    padding: 12px 0;
+  }
+  tbody tr:first-child { border-top: 0; }
+  th, td {
+    border-bottom: 0;
+    padding: 8px 0;
+    font-size: .95rem;
+  }
+  td[data-label] {
+    display: block;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  td[data-label]::before {
+    content: attr(data-label);
+    color: var(--soft);
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 4px;
+  }
+  td[colspan], td[colSpan] { display: block; }
+  .tableActionRow, .automationActions, .activityActionButtons { gap: 6px; }
+  .timelineList, .timelineList > div { min-width: 0; overflow-wrap: anywhere; }
   .staffQueueHeader, .activityHeader, .onboardingHeader { flex-direction: column; align-items: stretch; }
   .footer { padding-bottom: 42px; }
 

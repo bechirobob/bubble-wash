@@ -374,13 +374,13 @@ function AvailabilityBoard({ role }: { role: StaffRole }) {
             <tr><th scope="col">Desk</th><th scope="col">Status</th><th scope="col">Capacity</th><th scope="col">Coverage</th><th scope="col">Note</th></tr>
           </thead>
           <tbody>
-            {vendors.slice(0, 6).map((vendor) => <tr key={vendor.vendorId}><td><strong>{vendor.vendorName}</strong><small>Vendor</small></td><td>{vendor.availabilityStatus}</td><td>{vendor.capacityRemaining}</td><td>{vendor.serviceZones.join(", ") || "Any"}<small>{vendor.serviceTypes.join(", ") || "Any service"}</small></td><td>{vendor.notes || "No vendor note."}</td></tr>)}
-            {(role === "admin" || role === "driver") && drivers.slice(0, 6).map((driver) => <tr key={driver.driverId}><td><strong>{driver.driverName}</strong><small>Rider</small></td><td>{driver.availabilityStatus}</td><td>{driver.capacityRemaining}</td><td>{driver.serviceZones.join(", ") || "Any"}<small>{driver.vehicle || "Vehicle not set"}</small></td><td>{driver.notes || "No driver note."}</td></tr>)}
+            {vendors.slice(0, 6).map((vendor) => <tr key={vendor.vendorId}><td data-label="Desk"><strong>{vendor.vendorName}</strong><small>Vendor</small></td><td data-label="Status">{vendor.availabilityStatus}</td><td data-label="Capacity">{vendor.capacityRemaining}</td><td data-label="Coverage">{vendor.serviceZones.join(", ") || "Any"}<small>{vendor.serviceTypes.join(", ") || "Any service"}</small></td><td data-label="Note">{vendor.notes || "No vendor note."}</td></tr>)}
+            {(role === "admin" || role === "driver") && drivers.slice(0, 6).map((driver) => <tr key={driver.driverId}><td data-label="Desk"><strong>{driver.driverName}</strong><small>Rider</small></td><td data-label="Status">{driver.availabilityStatus}</td><td data-label="Capacity">{driver.capacityRemaining}</td><td data-label="Coverage">{driver.serviceZones.join(", ") || "Any"}<small>{driver.vehicle || "Vehicle not set"}</small></td><td data-label="Note">{driver.notes || "No driver note."}</td></tr>)}
             {!vendors.length && !(role === "admin" || role === "driver") ? <tr><td colSpan={5}>No capacity rows yet.</td></tr> : null}
           </tbody>
         </table>
       </div>
-      {role === "admin" && declines.length > 0 && <div className="opsTableWrap declineTableWrap"><table className="opsTable"><caption>Recent vendor declines</caption><thead><tr><th scope="col">Order</th><th scope="col">Vendor</th><th scope="col">Reason</th><th scope="col">Saved</th></tr></thead><tbody>{declines.slice(0, 4).map((decline) => <tr key={decline.id}><td><strong>{decline.orderId}</strong><small>By {decline.declinedBy}</small></td><td>{decline.vendorName}</td><td>{decline.reason}</td><td>{formatActivityTime(decline.createdAt)}</td></tr>)}</tbody></table></div>}
+      {role === "admin" && declines.length > 0 && <div className="opsTableWrap declineTableWrap"><table className="opsTable"><caption>Recent vendor declines</caption><thead><tr><th scope="col">Order</th><th scope="col">Vendor</th><th scope="col">Reason</th><th scope="col">Saved</th></tr></thead><tbody>{declines.slice(0, 4).map((decline) => <tr key={decline.id}><td data-label="Order"><strong>{decline.orderId}</strong><small>By {decline.declinedBy}</small></td><td data-label="Vendor">{decline.vendorName}</td><td data-label="Reason">{decline.reason}</td><td data-label="Saved">{formatActivityTime(decline.createdAt)}</td></tr>)}</tbody></table></div>}
       <p className="status">{status}</p>
     </section>
   );
@@ -630,11 +630,11 @@ function RecentActivity({ filter }: { filter?: string }) {
                 </thead>
                 <tbody>
                   {visibleRecords.length ? visibleRecords.map((record) => <tr className={`${selectedId === record.id ? "is-selected" : ""} ${freshIds.includes(record.id) ? "is-new" : ""}`} key={record.id} onClick={() => setSelectedId(record.id)}>
-                    <td><strong>{record.id}</strong></td>
-                    <td>{activityTypeLabel(activityType(record))}</td>
-                    <td>{activitySubject(record)}</td>
-                    <td>{changeSummaries.get(record.id)}</td>
-                    <td>{formatActivityTime(record.createdAt)}</td>
+                    <td data-label="Reference"><strong>{record.id}</strong></td>
+                    <td data-label="Type">{activityTypeLabel(activityType(record))}</td>
+                    <td data-label="Subject">{activitySubject(record)}</td>
+                    <td data-label="What changed">{changeSummaries.get(record.id)}</td>
+                    <td data-label="Saved">{formatActivityTime(record.createdAt)}</td>
                   </tr>) : <tr><td className="activityEmptyState" colSpan={5}>No matching activity yet.</td></tr>}
                 </tbody>
               </table>
@@ -793,12 +793,12 @@ function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: strin
           </thead>
           <tbody>
             {visibleOrders.map((order) => <tr className={`timer-${order.stageTimer.tone}`} key={order.orderId}>
-              <td><strong>{order.orderId}</strong><small>{order.customer}</small><small>{order.phone || "No phone"}</small></td>
-              <td><span className="textFlag">{order.workflowStage.label}</span><small>{workflowPhaseLabel(order.workflowStage.key)} · {isRiskOrder(order) ? "Needs intervention" : order.priority}</small><StageCountdown order={order} /></td>
-              <td>{order.area}<small>{order.routeWindow}</small><div className="tableActionRow"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noopener noreferrer">Directions</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Zone</a></div></td>
-              <td>{order.vendor !== "Unassigned" ? order.vendor : "Vendor pending"}<small>{order.driver !== "Unassigned" ? order.driver : "Driver pending"}</small></td>
-              <td>{order.payment}<small>{order.email || "No email"}</small></td>
-              <td><p className="nextActionLine"><strong>Next:</strong> {order.nextStep}</p><AutomatedOrderActions order={order} role={role} userName={userName} onSaved={() => loadOrders(false)} /><details className="quietDetails"><summary>Timeline · {compactTimelineLabel(order.eventCount)}</summary><div className="timelineList">{order.timeline.slice(0, 4).map((event) => <div key={`${order.orderId}-${event.id}-${event.createdAt}`}><b>{event.status}</b><span>{event.type} · {event.actor} · {formatShortTime(event.createdAt)}</span><p>{event.note}</p></div>)}</div></details></td>
+              <td data-label="Order"><strong>{order.orderId}</strong><small>{order.customer}</small><small>{order.phone || "No phone"}</small></td>
+              <td data-label="Stage"><span className="textFlag">{order.workflowStage.label}</span><small>{workflowPhaseLabel(order.workflowStage.key)} · {isRiskOrder(order) ? "Needs intervention" : order.priority}</small><StageCountdown order={order} /></td>
+              <td data-label="Route">{order.area}<small>{order.routeWindow}</small><div className="tableActionRow"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noopener noreferrer">Directions</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Zone</a></div></td>
+              <td data-label="Assignment">{order.vendor !== "Unassigned" ? order.vendor : "Vendor pending"}<small>{order.driver !== "Unassigned" ? order.driver : "Driver pending"}</small></td>
+              <td data-label="Payment">{order.payment}<small>{order.email || "No email"}</small></td>
+              <td data-label="Next action"><p className="nextActionLine"><strong>Next:</strong> {order.nextStep}</p><AutomatedOrderActions order={order} role={role} userName={userName} onSaved={() => loadOrders(false)} /><details className="quietDetails"><summary>Timeline · {compactTimelineLabel(order.eventCount)}</summary><div className="timelineList">{order.timeline.slice(0, 4).map((event) => <div key={`${order.orderId}-${event.id}-${event.createdAt}`}><b>{event.status}</b><span>{event.type} · {event.actor} · {formatShortTime(event.createdAt)}</span><p>{event.note}</p></div>)}</div></details></td>
             </tr>)}
             {!visibleOrders.length ? <tr><td colSpan={6}>No live order rows for this desk yet.</td></tr> : null}
           </tbody>
