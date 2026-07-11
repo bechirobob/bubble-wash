@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { FormEvent, ReactNode, useEffect, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { StaffRole } from "@/lib/auth";
 import { automationActionsForOrder } from "@/lib/order-workflow";
 
@@ -10,7 +10,6 @@ const supportTypes = ["Pickup delay", "Payment issue", "Missing item", "Quality 
 
 type PortalShellProps = {
   title: string;
-  eyebrow: string;
   role: StaffRole;
   pageRole?: StaffRole;
   userName: string;
@@ -58,10 +57,10 @@ type AutomationAction = ReturnType<typeof automationActionsForOrder>[number];
 type QueueStats = { focusLabel: string; focusCount: number; automationCount: number; riskCount: number; capacityLabel: string };
 
 function rolePromise(role: StaffRole) {
-  if (role === "admin") return { eyebrow: "Control room", title: "Exceptions. Dispatch. Closeout." };
-  if (role === "vendor") return { eyebrow: "Vendor lane", title: "Accept. Wash. Ready." };
-  if (role === "driver") return { eyebrow: "Route lane", title: "Pickup. Handoff. Deliver." };
-  return { eyebrow: "Support lane", title: "Tickets. Escalations. Resolutions." };
+  if (role === "admin") return { eyebrow: "Operations desk", title: "Admin queue", subtitle: "Review active jobs, reassign work, and resolve exceptions before the customer has to chase." };
+  if (role === "vendor") return { eyebrow: "Vendor workspace", title: "Washing queue", subtitle: "Start each load, mark it ready, or flag a problem without opening separate partner tools first." };
+  if (role === "driver") return { eyebrow: "Driver workspace", title: "Route handoffs", subtitle: "See the next stop, confirm arrival, and keep proof attached to the same order trail." };
+  return { eyebrow: "Support Desk", title: "Tickets and follow-up", subtitle: "Track at-risk orders, open cases, and customer-facing resolutions from one queue." };
 }
 
 function isRiskOrder(order: OrderSummary) {
@@ -81,7 +80,7 @@ function queueStats(orders: OrderSummary[], role: StaffRole, userName: string, a
   const focusCount = orders.filter((order) => orderMatchesRoleFocus(order, role, userName)).length;
   const riskCount = orders.filter(isRiskOrder).length;
   return {
-    focusLabel: role === "admin" ? "needs dispatch" : role === "vendor" ? "ready for vendor" : role === "driver" ? "route actions" : "needs support",
+    focusLabel: role === "admin" ? "awaiting intervention" : role === "vendor" ? "ready for action" : role === "driver" ? "route moves" : "follow-up now",
     focusCount,
     automationCount,
     riskCount,
@@ -106,6 +105,178 @@ function formatDuration(totalSeconds: number) {
   return `${String(hours).padStart(2, "0")}:${core}`;
 }
 
+function workflowPhaseLabel(stageKey: string) {
+  if (["received", "pickup-scheduled", "vendor-assigned", "vendor-accepted", "driver-en-route", "picked-up"].includes(stageKey)) return "Pickup leg";
+  if (["at-vendor", "washing"].includes(stageKey)) return "Vendor processing";
+  if (["ready", "out-for-delivery", "delivered", "closed"].includes(stageKey)) return "Return delivery";
+  return "Exception review";
+}
+
+function compactTimelineLabel(count: number) {
+  if (count <= 1) return "1 update";
+  return `${count} updates`;
+}
+
+function formatActivityTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date).replace(",", "");
+}
+
+type ActivityCategory = "all" | "orders" | "support" | "onboarding" | "payments" | "ops";
+type ActivityScope = "active" | "archived" | "all";
+type ActivityWindow = "20" | "50" | "today";
+type ActivitySortKey = "saved" | "type" | "subject";
+type ActivitySortDirection = "asc" | "desc";
+
+function activityValue(record: SubmissionRecord, ...keys: string[]) {
+  for (const key of keys) {
+    const value = record.data[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function activityType(record: SubmissionRecord) {
+  return activityValue(record, "submissionType") || "update";
+}
+
+function activitySubject(record: SubmissionRecord) {
+  return activityValue(record, "company", "name", "orderId", "ticketId") || "Bubble Wash request";
+}
+
+function activityEntityKey(record: SubmissionRecord) {
+  return activityValue(record, "orderId", "ticketId", "email", "phone") || `${activityType(record)}:${activitySubject(record)}`;
+}
+
+function activityCategory(record: SubmissionRecord): ActivityCategory {
+  const type = activityType(record).toLowerCase();
+  if (type.includes("payment") || type.includes("checkout")) return "payments";
+  if (type.includes("support")) return "support";
+  if (type.includes("onboarding")) return "onboarding";
+  if (type.includes("pickup") || type.includes("vendor") || type.includes("driver") || type.includes("qr-bag")) return "orders";
+  return "ops";
+}
+
+function activityScopeMatches(record: SubmissionRecord, scope: ActivityScope) {
+  if (scope === "all") return true;
+  const ageMs = Date.now() - new Date(record.createdAt).getTime();
+  const isActive = ageMs <= 24 * 60 * 60 * 1000;
+  return scope === "active" ? isActive : !isActive;
+}
+
+function activityWindowMatches(record: SubmissionRecord, window: ActivityWindow) {
+  if (window === "today") {
+    const created = new Date(record.createdAt);
+    const now = new Date();
+    return created.getFullYear() === now.getFullYear() && created.getMonth() === now.getMonth() && created.getDate() === now.getDate();
+  }
+  return true;
+}
+
+function activityChangeSummary(record: SubmissionRecord, previous?: SubmissionRecord) {
+  const type = activityType(record);
+  const currentStatus = activityValue(record, "ticketStatus", "orderStatus", "jobStatus", "availability", "issueType");
+  const previousStatus = previous ? activityValue(previous, "ticketStatus", "orderStatus", "jobStatus", "availability", "issueType") : "";
+  const currentVendor = activityValue(record, "vendorName", "vendor");
+  const previousVendor = previous ? activityValue(previous, "vendorName", "vendor") : "";
+  const currentDriver = activityValue(record, "driverName", "driver");
+  const previousDriver = previous ? activityValue(previous, "driverName", "driver") : "";
+  const currentCapacity = activityValue(record, "capacityRemaining", "capacity", "routeSlots");
+  const previousCapacity = previous ? activityValue(previous, "capacityRemaining", "capacity", "routeSlots") : "";
+  const currentPayment = activityValue(record, "paymentStatus", "paymentMethod", "paymentPreference");
+  const previousPayment = previous ? activityValue(previous, "paymentStatus", "paymentMethod", "paymentPreference") : "";
+  const note = activityValue(record, "message", "reason", "actionType", "itemCondition");
+
+  if (previous) {
+    if (currentVendor && currentVendor !== previousVendor) return `Vendor changed: ${previousVendor || "Unassigned"} → ${currentVendor}`;
+    if (currentDriver && currentDriver !== previousDriver) return `Driver changed: ${previousDriver || "Unassigned"} → ${currentDriver}`;
+    if (currentStatus && currentStatus !== previousStatus) return `Status changed: ${previousStatus || "Pending"} → ${currentStatus}`;
+    if (currentCapacity && currentCapacity !== previousCapacity) return `Capacity changed: ${previousCapacity || "0"} → ${currentCapacity}`;
+    if (currentPayment && currentPayment !== previousPayment) return `Payment updated: ${previousPayment || "Pending"} → ${currentPayment}`;
+    if (note) return note;
+  }
+
+  if (type.includes("pickup") || type.includes("checkout")) return "New customer order request logged";
+  if (type.includes("support")) return "New support case saved for follow-up";
+  if (type.includes("vendor-application")) return "Vendor capacity update saved";
+  if (type.includes("driver-route")) return "Driver route checkpoint saved";
+  if (type.includes("admin")) return "Manual admin action logged";
+  if (type.includes("payment")) return "Payment activity captured";
+  return note || "New activity saved";
+}
+
+function activityTypeLabel(type: string) {
+  return type.replace(/[-_]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function activityCsv(records: SubmissionRecord[], summaries: Map<string, string>) {
+  const escape = (value: string) => `"${value.replaceAll('"', '""')}"`;
+  const header = ["Reference", "Type", "Subject", "What changed", "Saved"];
+  const rows = records.map((record) => [
+    record.id,
+    activityTypeLabel(activityType(record)),
+    activitySubject(record),
+    summaries.get(record.id) || "",
+    formatActivityTime(record.createdAt),
+  ]);
+  return [header, ...rows].map((row) => row.map((cell) => escape(cell)).join(",")).join("\n");
+}
+
+function activitySectionedEntries(record: SubmissionRecord) {
+  const groups: Array<{ title: string; entries: Array<[string, string]> }> = [
+    {
+      title: "Identifiers",
+      entries: [
+        ["Reference", record.id],
+        ["Order", activityValue(record, "orderId")],
+        ["Ticket", activityValue(record, "ticketId")],
+        ["Type", activityTypeLabel(activityType(record))],
+      ],
+    },
+    {
+      title: "People and business",
+      entries: [
+        ["Subject", activitySubject(record)],
+        ["Company", activityValue(record, "company")],
+        ["Customer", activityValue(record, "name")],
+        ["Vendor", activityValue(record, "vendorName", "vendor")],
+        ["Driver", activityValue(record, "driverName", "driver")],
+      ],
+    },
+    {
+      title: "Workflow",
+      entries: [
+        ["Status", activityValue(record, "ticketStatus", "orderStatus", "jobStatus", "availability", "issueType")],
+        ["Payment", activityValue(record, "paymentStatus", "paymentMethod", "paymentPreference")],
+        ["Capacity", activityValue(record, "capacityRemaining", "capacity", "routeSlots")],
+        ["Saved", formatActivityTime(record.createdAt)],
+      ],
+    },
+    {
+      title: "Notes",
+      entries: [
+        ["Message", activityValue(record, "message")],
+        ["Reason", activityValue(record, "reason")],
+        ["Action", activityValue(record, "actionType")],
+        ["Condition", activityValue(record, "itemCondition")],
+        ["Phone", activityValue(record, "phone")],
+        ["Email", activityValue(record, "email")],
+      ],
+    },
+  ];
+
+  return groups
+    .map((group) => ({ title: group.title, entries: group.entries.filter(([, value]) => value.trim()) }))
+    .filter((group) => group.entries.length);
+}
+
 function StageCountdown({ order }: { order: OrderSummary }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -115,7 +286,7 @@ function StageCountdown({ order }: { order: OrderSummary }) {
   }, []);
 
   if (!order.stageTimer.targetMinutes) {
-    return <div className="slaPill timer-paused" aria-label="SLA timer complete"><span>SLA</span><b>Complete</b><small>{order.priority}</small></div>;
+    return <div className="slaPill timer-paused" aria-label="Phase timer complete"><span>Phase timer</span><b>Complete</b><small>{workflowPhaseLabel(order.workflowStage.key)} · {order.priority}</small></div>;
   }
 
   const startedAt = new Date(order.updatedAt).getTime();
@@ -129,9 +300,9 @@ function StageCountdown({ order }: { order: OrderSummary }) {
 
   return (
     <div className={`slaPill countdown timer-${tone}`} aria-label={`${label} ${duration}`}>
-      <span>{label}</span>
+      <span>{label === "SLA" ? "Phase timer" : label}</span>
       <b>{duration}</b>
-      <small>{order.workflowStage.label} · {order.priority}</small>
+      <small>{workflowPhaseLabel(order.workflowStage.key)} · {order.priority}</small>
     </div>
   );
 }
@@ -179,12 +350,20 @@ function AvailabilityBoard({ role }: { role: StaffRole }) {
 
   return (
     <section className="section portalSection availabilitySection">
-      <div className="activityHeader"><div><p className="eyebrow">Availability</p><h2>Roster capacity</h2></div><button className="button secondary" type="button" onClick={() => loadAvailability()}>Refresh</button></div>
-      <div className="orderBoardGrid">
-        {vendors.slice(0, 6).map((vendor) => <article className="orderBoardCard" key={vendor.vendorId}><div className="orderBoardTop"><strong>{vendor.vendorName}</strong><span>{vendor.availabilityStatus}</span></div><div className="orderMeta"><span>Capacity: {vendor.capacityRemaining}</span><span>Zones: {vendor.serviceZones.join(", ") || "Any"}</span><span>Services: {vendor.serviceTypes.join(", ") || "Any"}</span></div><p>{vendor.notes || "No vendor note."}</p></article>)}
-        {(role === "admin" || role === "driver") && drivers.slice(0, 6).map((driver) => <article className="orderBoardCard" key={driver.driverId}><div className="orderBoardTop"><strong>{driver.driverName}</strong><span>{driver.availabilityStatus}</span></div><div className="orderMeta"><span>Route slots: {driver.capacityRemaining}</span><span>Zones: {driver.serviceZones.join(", ") || "Any"}</span><span>Vehicle: {driver.vehicle || "Not set"}</span></div><p>{driver.notes || "No driver note."}</p></article>)}
+      <div className="activityHeader"><div><p className="eyebrow">Capacity summary</p><h2>Availability and coverage</h2></div><button className="button secondary" type="button" onClick={() => loadAvailability()}>Refresh summary</button></div>
+      <div className="opsTableWrap">
+        <table className="opsTable availabilityTable">
+          <thead>
+            <tr><th scope="col">Desk</th><th scope="col">Status</th><th scope="col">Capacity</th><th scope="col">Coverage</th><th scope="col">Note</th></tr>
+          </thead>
+          <tbody>
+            {vendors.slice(0, 6).map((vendor) => <tr key={vendor.vendorId}><td><strong>{vendor.vendorName}</strong><small>Vendor</small></td><td>{vendor.availabilityStatus}</td><td>{vendor.capacityRemaining}</td><td>{vendor.serviceZones.join(", ") || "Any"}<small>{vendor.serviceTypes.join(", ") || "Any service"}</small></td><td>{vendor.notes || "No vendor note."}</td></tr>)}
+            {(role === "admin" || role === "driver") && drivers.slice(0, 6).map((driver) => <tr key={driver.driverId}><td><strong>{driver.driverName}</strong><small>Rider</small></td><td>{driver.availabilityStatus}</td><td>{driver.capacityRemaining}</td><td>{driver.serviceZones.join(", ") || "Any"}<small>{driver.vehicle || "Vehicle not set"}</small></td><td>{driver.notes || "No driver note."}</td></tr>)}
+            {!vendors.length && !(role === "admin" || role === "driver") ? <tr><td colSpan={5}>No capacity rows yet.</td></tr> : null}
+          </tbody>
+        </table>
       </div>
-      {role === "admin" && declines.length > 0 && <div className="supportTicketList">{declines.slice(0, 4).map((decline) => <article className="orderBoardCard supportTicketCard" key={decline.id}><div className="orderBoardTop"><strong>{decline.orderId}</strong><span>Declined</span></div><p>{decline.vendorName}: {decline.reason}</p><div className="orderMeta"><span>By: {decline.declinedBy}</span><span>{new Date(decline.createdAt).toLocaleString()}</span></div></article>)}</div>}
+      {role === "admin" && declines.length > 0 && <div className="opsTableWrap declineTableWrap"><table className="opsTable"><caption>Recent vendor declines</caption><thead><tr><th scope="col">Order</th><th scope="col">Vendor</th><th scope="col">Reason</th><th scope="col">Saved</th></tr></thead><tbody>{declines.slice(0, 4).map((decline) => <tr key={decline.id}><td><strong>{decline.orderId}</strong><small>By {decline.declinedBy}</small></td><td>{decline.vendorName}</td><td>{decline.reason}</td><td>{formatActivityTime(decline.createdAt)}</td></tr>)}</tbody></table></div>}
       <p className="status">{status}</p>
     </section>
   );
@@ -193,41 +372,292 @@ function AvailabilityBoard({ role }: { role: StaffRole }) {
 function RecentActivity({ filter }: { filter?: string }) {
   const [records, setRecords] = useState<SubmissionRecord[]>([]);
   const [status, setStatus] = useState("Loading recent activity…");
+  const [isOpen, setIsOpen] = useState(true);
+  const [category, setCategory] = useState<ActivityCategory>("all");
+  const [scope, setScope] = useState<ActivityScope>("active");
+  const [windowMode, setWindowMode] = useState<ActivityWindow>("20");
+  const [sortKey, setSortKey] = useState<ActivitySortKey>("saved");
+  const [sortDirection, setSortDirection] = useState<ActivitySortDirection>("desc");
+  const [selectedId, setSelectedId] = useState("");
+  const [freshIds, setFreshIds] = useState<string[]>([]);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState("");
+  const [copyStatus, setCopyStatus] = useState("");
+  const recordsRef = useRef<SubmissionRecord[]>([]);
 
   async function loadRecords(showLoading = true) {
     if (showLoading) setStatus("Loading recent activity…");
-    const response = await fetch("/api/submissions");
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      setStatus(data.error ?? "Unable to load activity.");
-      return;
-    }
-    const filtered = filter ? data.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes(filter)) : data.records;
-    setRecords(filtered.slice(0, 8));
-    setStatus(filtered.length ? "Recent activity loaded." : "No matching activity yet.");
-  }
-
-  useEffect(() => {
-    async function loadInitialRecords() {
+    try {
       const response = await fetch("/api/submissions");
       const data = await response.json();
       if (!response.ok || !data.ok) {
         setStatus(data.error ?? "Unable to load activity.");
         return;
       }
-      const filtered = filter ? data.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes(filter)) : data.records;
-      setRecords(filtered.slice(0, 8));
-      setStatus(filtered.length ? "Recent activity loaded." : "No matching activity yet.");
+      const scoped = filter ? data.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes(filter)) : data.records;
+      const nextRecords = scoped.slice(0, 80);
+      const previousIds = new Set(recordsRef.current.map((record) => record.id));
+      const newIds = nextRecords.filter((record: SubmissionRecord) => !previousIds.has(record.id)).map((record: SubmissionRecord) => record.id);
+      recordsRef.current = nextRecords;
+      setRecords(nextRecords);
+      setFreshIds(newIds);
+      setLastUpdatedAt(new Date().toISOString());
+      if (newIds.length && !showLoading) {
+        setStatus(`${newIds.length} new update${newIds.length === 1 ? "" : "s"} just landed.`);
+        return;
+      }
+      setStatus(nextRecords.length ? "Recent activity loaded." : "No matching activity yet.");
+    } catch {
+      setStatus("Unable to load activity.");
     }
-    loadInitialRecords();
+  }
+
+  useEffect(() => {
+    let active = true;
+
+    async function refresh(showLoading = true) {
+      if (!active) return;
+      if (showLoading) setStatus("Loading recent activity…");
+      try {
+        const response = await fetch("/api/submissions");
+        const data = await response.json();
+        if (!active) return;
+        if (!response.ok || !data.ok) {
+          setStatus(data.error ?? "Unable to load activity.");
+          return;
+        }
+        const scoped = filter ? data.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes(filter)) : data.records;
+        const nextRecords = scoped.slice(0, 80);
+        const previousIds = new Set(recordsRef.current.map((record) => record.id));
+        const newIds = nextRecords.filter((record: SubmissionRecord) => !previousIds.has(record.id)).map((record: SubmissionRecord) => record.id);
+        recordsRef.current = nextRecords;
+        setRecords(nextRecords);
+        setFreshIds(newIds);
+        setLastUpdatedAt(new Date().toISOString());
+        if (newIds.length && !showLoading) {
+          setStatus(`${newIds.length} new update${newIds.length === 1 ? "" : "s"} just landed.`);
+          return;
+        }
+        setStatus(nextRecords.length ? "Recent activity loaded." : "No matching activity yet.");
+      } catch {
+        if (active) setStatus("Unable to load activity.");
+      }
+    }
+
+    recordsRef.current = [];
+    refresh(true);
+    const interval = window.setInterval(() => {
+      void refresh(false);
+    }, 30_000);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
   }, [filter]);
+
+  useEffect(() => {
+    if (!freshIds.length) return;
+    const timer = window.setTimeout(() => setFreshIds([]), 45_000);
+    return () => window.clearTimeout(timer);
+  }, [freshIds]);
+
+  const previousMap = useMemo(() => {
+    const byEntity = new Map<string, SubmissionRecord[]>();
+    for (const record of [...records].sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())) {
+      const key = activityEntityKey(record);
+      byEntity.set(key, [...(byEntity.get(key) ?? []), record]);
+    }
+    const map = new Map<string, SubmissionRecord | undefined>();
+    for (const group of byEntity.values()) {
+      group.forEach((record, index) => {
+        map.set(record.id, index > 0 ? group[index - 1] : undefined);
+      });
+    }
+    return map;
+  }, [records]);
+
+  const changeSummaries = useMemo(() => new Map(records.map((record) => [record.id, activityChangeSummary(record, previousMap.get(record.id))])), [records, previousMap]);
+
+  const categoryCounts = useMemo(() => ({
+    all: records.length,
+    orders: records.filter((record) => activityCategory(record) === "orders").length,
+    support: records.filter((record) => activityCategory(record) === "support").length,
+    onboarding: records.filter((record) => activityCategory(record) === "onboarding").length,
+    payments: records.filter((record) => activityCategory(record) === "payments").length,
+    ops: records.filter((record) => activityCategory(record) === "ops").length,
+  }), [records]);
+
+  const visibleRecords = useMemo(() => {
+    const filtered = records
+      .filter((record) => category === "all" || activityCategory(record) === category)
+      .filter((record) => activityScopeMatches(record, scope))
+      .filter((record) => activityWindowMatches(record, windowMode));
+
+    const sorted = [...filtered].sort((left, right) => {
+      const direction = sortDirection === "asc" ? 1 : -1;
+      if (sortKey === "saved") return (new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()) * direction;
+      if (sortKey === "type") return activityTypeLabel(activityType(left)).localeCompare(activityTypeLabel(activityType(right))) * direction;
+      return activitySubject(left).localeCompare(activitySubject(right)) * direction;
+    });
+
+    if (windowMode === "20") return sorted.slice(0, 20);
+    if (windowMode === "50") return sorted.slice(0, 50);
+    return sorted;
+  }, [records, category, scope, windowMode, sortKey, sortDirection]);
+
+  const selectedRecord = visibleRecords.find((record) => record.id === selectedId) ?? visibleRecords[0] ?? null;
+  const selectedSections = useMemo(() => selectedRecord ? activitySectionedEntries(selectedRecord) : [], [selectedRecord]);
+
+  function toggleSort(nextKey: ActivitySortKey) {
+    if (sortKey === nextKey) {
+      setSortDirection((current) => current === "asc" ? "desc" : "asc");
+      return;
+    }
+    setSortKey(nextKey);
+    setSortDirection(nextKey === "saved" ? "desc" : "asc");
+  }
+
+  function exportVisibleCsv() {
+    const csv = activityCsv(visibleRecords, changeSummaries);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `bubblewash-activity-${windowMode}-${scope}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function copyValue(label: string, value: string) {
+    if (!value.trim()) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyStatus(`${label} copied.`);
+      window.setTimeout(() => setCopyStatus(""), 2400);
+    } catch {
+      setCopyStatus(`Could not copy ${label.toLowerCase()}.`);
+    }
+  }
+
+  function filterToSubject(record: SubmissionRecord) {
+    setCategory(activityCategory(record));
+    setScope("all");
+  }
 
   return (
     <section className="section activitySection">
-      <div className="activityHeader"><div><p className="eyebrow">Live activity</p><h2>Recent saved requests</h2></div><button className="button secondary" type="button" onClick={() => loadRecords()}>Refresh</button></div>
-      <div className="activityList">
-        {records.map((record) => <article className="activityCard" key={record.id}><strong>{record.id}</strong><span>{record.data.submissionType}</span><p>{record.data.company || record.data.name || "Bubble Wash request"}</p><small>{new Date(record.createdAt).toLocaleString()}</small></article>)}
-      </div>
+      <details className="activityGroup" open={isOpen} onToggle={(event) => setIsOpen(event.currentTarget.open)}>
+        <summary>
+          <div>
+            <p className="eyebrow">Recent activity</p>
+            <h2>Latest saved updates</h2>
+            <small>{visibleRecords.length ? `${visibleRecords.length} saved updates in this view` : "No saved updates yet"}</small>
+          </div>
+          <div className="activitySummaryMeta">
+            <span className="activityCountPill">{visibleRecords.length} updates</span>
+            <em>{isOpen ? "Minimize" : "Expand"}</em>
+          </div>
+        </summary>
+        <div className="activityGroupBody">
+          <div className="activityUtilityBar">
+            <div className="activityChipRow" aria-label="Quick activity filters">
+              {([
+                ["all", "All"],
+                ["orders", "Orders"],
+                ["support", "Support"],
+                ["onboarding", "Onboarding"],
+                ["payments", "Payments"],
+                ["ops", "Ops"],
+              ] as Array<[ActivityCategory, string]>).map(([key, label]) => <button className={`activityChip ${category === key ? "active" : ""}`} key={key} onClick={() => setCategory(key)} type="button">{label}<span>{categoryCounts[key]}</span></button>)}
+            </div>
+            <div className="activityControlGroup">
+              <div className="activitySegmented" aria-label="Retention scope">
+                {([
+                  ["active", "Active"],
+                  ["archived", "Archived"],
+                  ["all", "All"],
+                ] as Array<[ActivityScope, string]>).map(([key, label]) => <button className={scope === key ? "active" : ""} key={key} onClick={() => setScope(key)} type="button">{label}</button>)}
+              </div>
+              <div className="activitySegmented" aria-label="Retention window">
+                {([
+                  ["20", "Last 20"],
+                  ["50", "Last 50"],
+                  ["today", "Today"],
+                ] as Array<[ActivityWindow, string]>).map(([key, label]) => <button className={windowMode === key ? "active" : ""} key={key} onClick={() => setWindowMode(key)} type="button">{label}</button>)}
+              </div>
+            </div>
+          </div>
+
+          <div className="activityGroupActions">
+            <div className="activityLiveMeta">
+              <strong>Auto-refresh</strong>
+              <span>Every 30s{lastUpdatedAt ? ` · Last sync ${formatMetricTime(lastUpdatedAt)}` : ""}</span>
+            </div>
+            <div className="activityActionButtons">
+              <button className="button secondary" type="button" onClick={exportVisibleCsv}>Export CSV</button>
+              <button className="button secondary" type="button" onClick={() => void loadRecords()}>Refresh</button>
+            </div>
+          </div>
+
+          <div className="activityWorkbench">
+            <div className="activityTableWrap">
+              <table className="activityTable">
+                <thead>
+                  <tr>
+                    <th scope="col"><button className="activitySortButton" onClick={() => toggleSort("saved")} type="button">Reference</button></th>
+                    <th scope="col"><button className="activitySortButton" onClick={() => toggleSort("type")} type="button">Type</button></th>
+                    <th scope="col"><button className="activitySortButton" onClick={() => toggleSort("subject")} type="button">Subject</button></th>
+                    <th scope="col">What changed</th>
+                    <th scope="col"><button className="activitySortButton" onClick={() => toggleSort("saved")} type="button">Saved</button></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleRecords.length ? visibleRecords.map((record) => <tr className={`${selectedId === record.id ? "is-selected" : ""} ${freshIds.includes(record.id) ? "is-new" : ""}`} key={record.id} onClick={() => setSelectedId(record.id)}>
+                    <td><strong>{record.id}</strong></td>
+                    <td>{activityTypeLabel(activityType(record))}</td>
+                    <td>{activitySubject(record)}</td>
+                    <td>{changeSummaries.get(record.id)}</td>
+                    <td>{formatActivityTime(record.createdAt)}</td>
+                  </tr>) : <tr><td className="activityEmptyState" colSpan={5}>No matching activity yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+
+            <aside className="activityDetailPanel" aria-live="polite">
+              {selectedRecord ? <>
+                <div className="activityDetailHeader">
+                  <p className="eyebrow">Update details</p>
+                  <h3>{activitySubject(selectedRecord)}</h3>
+                  <span>{activityTypeLabel(activityType(selectedRecord))}</span>
+                </div>
+                <div className="activityDetailCard">
+                  <strong>{changeSummaries.get(selectedRecord.id)}</strong>
+                  <small>Saved {formatActivityTime(selectedRecord.createdAt)} · Ref {selectedRecord.id}</small>
+                </div>
+                <div className="activityDetailActions">
+                  <button className="activityQuietButton" onClick={() => void copyValue("Reference", selectedRecord.id)} type="button">Copy ref</button>
+                  {activityValue(selectedRecord, "orderId") ? <button className="activityQuietButton" onClick={() => void copyValue("Order ID", activityValue(selectedRecord, "orderId"))} type="button">Copy order</button> : null}
+                  {activityValue(selectedRecord, "phone") ? <button className="activityQuietButton" onClick={() => void copyValue("Phone", activityValue(selectedRecord, "phone"))} type="button">Copy phone</button> : null}
+                  {activityValue(selectedRecord, "email") ? <button className="activityQuietButton" onClick={() => void copyValue("Email", activityValue(selectedRecord, "email"))} type="button">Copy email</button> : null}
+                  <button className="activityQuietButton" onClick={() => filterToSubject(selectedRecord)} type="button">Show similar</button>
+                  <button className="activityQuietButton" onClick={() => toggleSort("saved")} type="button">Newest first</button>
+                </div>
+                {copyStatus ? <p className="activityCopyStatus" role="status">{copyStatus}</p> : null}
+                <div className="activityDetailSections">
+                  {selectedSections.map((section) => <section className="activityDetailSection" key={section.title}>
+                    <header>
+                      <h4>{section.title}</h4>
+                    </header>
+                    <dl className="activityDetailList">
+                      {section.entries.map(([key, value]) => <div key={`${section.title}-${key}`}><dt>{key}</dt><dd>{value}</dd></div>)}
+                    </dl>
+                  </section>)}
+                </div>
+              </> : <div className="activityDetailEmpty"><strong>Select an update</strong><p>Click any row to inspect the saved payload without leaving the queue view.</p></div>}
+            </aside>
+          </div>
+        </div>
+      </details>
       <p className="status">{status}</p>
     </section>
   );
@@ -325,36 +755,39 @@ function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: strin
 
   return (
     <section className="section sharedBoardSection">
-      <div className="staffCommandHeader">
+      <div className="staffQueueHeader">
         <div>
-          <p className="eyebrow">Live command board</p>
-          <h2>{stats.focusCount ? `${stats.focusCount} ${stats.focusLabel}` : "No urgent moves right now"}</h2>
+          <p className="eyebrow">Live queue</p>
+          <h2>{stats.focusCount ? `${stats.focusCount} ${stats.focusLabel}` : "No urgent follow-up right now"}</h2>
+          <p className="formHint">{role === "admin" ? "Assignment, reassignment, and escalations should appear here before any manual office work." : role === "vendor" ? "Open the jobs that need a production action before touching secondary partner tools." : role === "driver" ? "Use this queue to work the next stop, handoff, or delay before opening manual route tools." : "Start with at-risk orders and follow-up work before creating manual tickets."}</p>
         </div>
-        <button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh</button>
+        <button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh queue</button>
       </div>
       <div className="queueMetricGrid" aria-label="Queue summary">
         <article><span>{stats.focusLabel}</span><strong>{stats.focusCount}</strong></article>
-        <article><span>next actions</span><strong>{stats.automationCount}</strong></article>
-        <article><span>risk / SLA</span><strong>{stats.riskCount}</strong></article>
-        <article><span>last refresh</span><strong>{orders[0] ? formatMetricTime(orders[0].updatedAt) : "—"}</strong></article>
+        <article><span>available actions</span><strong>{stats.automationCount}</strong></article>
+        <article><span>at risk</span><strong>{stats.riskCount}</strong></article>
+        <article><span>latest update</span><strong>{orders[0] ? formatMetricTime(orders[0].updatedAt) : "—"}</strong></article>
       </div>
-      <div className="orderBoardList compactOrders">
-        {visibleOrders.map((order) => <article className={`orderBoardCard compactOrderCard timer-${order.stageTimer.tone}`} key={order.orderId}>
-          <div className="orderBoardTop"><strong>{order.orderId}</strong><span>{order.workflowStage.label}</span></div>
-          <div className="orderFocusRow">
-            <div>
-              <h3>{order.customer}</h3>
-              <div className="operatorFacts"><span>{order.phone || "No phone"}</span><span>{order.email || "No email"}</span><span>{order.eventCount} events</span></div>
-            </div>
-            <StageCountdown order={order} />
-          </div>
-          <div className="orderMeta minimalMeta"><span>{order.area}</span><span>{order.routeWindow}</span><span>{order.vendor}</span><span>{order.driver}</span><span>{order.payment}</span></div>
-          <AutomatedOrderActions order={order} role={role} userName={userName} onSaved={() => loadOrders(false)} />
-          <div className="mapActions"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noopener noreferrer">Route</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Area</a></div>
-          <details className="quietDetails"><summary>Timeline and full context</summary><div className="timelineList">{order.timeline.slice(0, 5).map((event) => <div key={`${order.orderId}-${event.id}-${event.createdAt}`}><b>{event.status}</b><span>{event.type} · {event.actor} · {formatShortTime(event.createdAt)}</span><p>{event.note}</p></div>)}</div></details>
-        </article>)}
+      <div className="opsTableWrap queueTableWrap">
+        <table className="opsTable queueTable">
+          <thead>
+            <tr><th scope="col">Order</th><th scope="col">Stage</th><th scope="col">Route</th><th scope="col">Assignment</th><th scope="col">Payment</th><th scope="col">Next action</th></tr>
+          </thead>
+          <tbody>
+            {visibleOrders.map((order) => <tr className={`timer-${order.stageTimer.tone}`} key={order.orderId}>
+              <td><strong>{order.orderId}</strong><small>{order.customer}</small><small>{order.phone || "No phone"}</small></td>
+              <td><span className="textFlag">{order.workflowStage.label}</span><small>{workflowPhaseLabel(order.workflowStage.key)} · {isRiskOrder(order) ? "Needs intervention" : order.priority}</small><StageCountdown order={order} /></td>
+              <td>{order.area}<small>{order.routeWindow}</small><div className="tableActionRow"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noopener noreferrer">Directions</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Zone</a></div></td>
+              <td>{order.vendor !== "Unassigned" ? order.vendor : "Vendor pending"}<small>{order.driver !== "Unassigned" ? order.driver : "Driver pending"}</small></td>
+              <td>{order.payment}<small>{order.email || "No email"}</small></td>
+              <td><p className="nextActionLine"><strong>Next:</strong> {order.nextStep}</p><AutomatedOrderActions order={order} role={role} userName={userName} onSaved={() => loadOrders(false)} /><details className="quietDetails"><summary>Timeline · {compactTimelineLabel(order.eventCount)}</summary><div className="timelineList">{order.timeline.slice(0, 4).map((event) => <div key={`${order.orderId}-${event.id}-${event.createdAt}`}><b>{event.status}</b><span>{event.type} · {event.actor} · {formatShortTime(event.createdAt)}</span><p>{event.note}</p></div>)}</div></details></td>
+            </tr>)}
+            {!visibleOrders.length ? <tr><td colSpan={6}>No live order rows for this desk yet.</td></tr> : null}
+          </tbody>
+        </table>
       </div>
-      <p className="status">{role.toUpperCase()} view · {status}</p>
+      <p className="status">{status}</p>
     </section>
   );
 }
@@ -366,12 +799,12 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
   return data;
 }
 
-function PortalShell({ title, eyebrow, role, pageRole = role, userName, children }: PortalShellProps) {
+function PortalShell({ title, role, pageRole = role, userName, children }: PortalShellProps) {
   const pageHome = pageRole === "admin" ? "/admin" : pageRole === "vendor" ? "/vendors" : pageRole === "driver" ? "/drivers" : "/support";
   const portalLinks = role === "admin"
-    ? [["/admin", "Admin home"], ["/vendors", "Vendor lane"], ["/drivers", "Driver lane"], ["/support", "Support lane"]]
-    : pageRole === "vendor" ? [["/vendors", "Vendor workspace"]]
-    : pageRole === "driver" ? [["/drivers", "Driver workspace"]]
+    ? [["/admin", "Admin queue"], ["/vendors", "Vendor queue"], ["/drivers", "Route queue"], ["/support", "Support queue"]]
+    : pageRole === "vendor" ? [["/vendors", "Vendor desk"]]
+    : pageRole === "driver" ? [["/drivers", "Route desk"]]
     : [["/support", "Support desk"]];
   const promise = rolePromise(pageRole);
 
@@ -396,22 +829,15 @@ function PortalShell({ title, eyebrow, role, pageRole = role, userName, children
         <div>
           <p className="eyebrow">{promise.eyebrow}</p>
           <h1>{promise.title}</h1>
-          <div className="roleBreadcrumb"><Link href={pageHome}>Current lane</Link><span>{eyebrow}</span><span>{title}</span></div>
+          <p className="lead">{promise.subtitle}</p>
+          <p className="portalHeroLine">{pageRole.toUpperCase()} workspace · order trail first · manual forms below</p>
         </div>
         <aside className="portalIdentity">
           <span>Signed in</span>
           <strong>{userName}</strong>
-          <small>{role.toUpperCase()} access · viewing {pageRole.toUpperCase()}</small>
+          <small>{title}</small>
+          <small>Start with the live queue.</small>
         </aside>
-      </section>
-      <section className="section workflowMapSection compactWorkflowMap" aria-label="Staff workflow overview">
-        <div className="workflowMapHeader">
-          <p className="eyebrow">Order lanes</p>
-          <h2>One ID. Next action first.</h2>
-        </div>
-        <div className="workflowStepRail" aria-label="Order workflow stages">
-          <span>Received</span><span>Schedule</span><span>Assign</span><span>Accept</span><span>Pickup</span><span>Wash</span><span>Ready</span><span>Deliver</span><span>Close</span>
-        </div>
       </section>
       {children}
     </main>
@@ -422,7 +848,7 @@ function PortalShell({ title, eyebrow, role, pageRole = role, userName, children
 function SupportTicketForm({ userName, role, onSubmit, status }: { userName: string; role: StaffRole; onSubmit: SubmitHandler; status?: string }) {
   return (
     <form className="panel supportForm" onSubmit={(event) => onSubmit(event, "support-ticket")}>
-      <h3>Create support ticket</h3>
+      <h3>Open support ticket</h3>
       <div className="two"><input name="name" placeholder="Your name" defaultValue={userName} required /><input name="email" type="email" placeholder="Email" defaultValue={`${role}@bubblewash.local`} required /></div>
       <div className="two"><input name="phone" placeholder="Phone / WhatsApp" required /><input name="company" placeholder="Team, vendor, or customer" defaultValue={role === "admin" ? "Bubble Wash Operations" : role === "driver" ? "Bubble Wash Route Team" : role === "vendor" ? "Vendor Partner" : "Bubble Wash Support"} required /></div>
       <div className="two"><input name="orderId" placeholder="Related Order ID" /><select name="issueType">{supportTypes.map((item) => <option key={item}>{item}</option>)}</select></div>
@@ -439,9 +865,9 @@ function AdminOnboardingCenter({ userName, onSubmit, status }: { userName: strin
     <section className="section portalSection onboardingCenter" aria-labelledby="admin-onboarding-title">
       <div className="onboardingHeader">
         <div>
-          <p className="eyebrow">Admin onboarding</p>
-          <h2 id="admin-onboarding-title">Roster control for vendors and riders.</h2>
-          <p>Admin owns who can receive work. These records feed dispatch automation, capacity matching, and active route selection.</p>
+          <p className="eyebrow">Roster updates</p>
+          <h2 id="admin-onboarding-title">Vendor and rider access</h2>
+          <p>Use these forms only when roster access, capacity ownership, or route coverage actually needs a manual update.</p>
         </div>
         <div className="onboardingBadges" aria-label="Onboarding automation summary">
           <span>Vendor capacity → assignment</span>
@@ -476,7 +902,7 @@ function AdminOnboardingCenter({ userName, onSubmit, status }: { userName: strin
   );
 }
 
-function SupportOpsCommand({ records, orders }: { records: SubmissionRecord[]; orders: OrderSummary[] }) {
+function SupportOpsOverview({ records, orders }: { records: SubmissionRecord[]; orders: OrderSummary[] }) {
   const openTickets = records.filter((record) => !/closed|resolved/i.test(String(record.data.ticketStatus ?? "")));
   const urgentTickets = records.filter((record) => /urgent|high/i.test(String(record.data.priority ?? "")));
   const waitingTickets = records.filter((record) => /waiting/i.test(String(record.data.ticketStatus ?? "")));
@@ -488,11 +914,11 @@ function SupportOpsCommand({ records, orders }: { records: SubmissionRecord[]; o
     { label: "Resolve", value: records.filter((record) => /resolved|closed/i.test(String(record.data.ticketStatus ?? ""))).length, note: "Closed support loops" },
   ];
   return (
-    <section className="section supportOpsHero" aria-label="Support command overview">
+    <section className="section supportOpsHero" aria-label="Support queue overview">
       <div className="supportOpsCopy">
-        <p className="eyebrow">Support command desk</p>
-        <h2>Work the queue before writing notes.</h2>
-        <p>Support should open from customer impact: delayed pickup, payment issue, missing item, quality problem, vendor escalation. Ticket actions then assign, escalate, de-escalate, resolve, close, or reopen without losing the Order ID.</p>
+        <p className="eyebrow">Support desk</p>
+        <h2>Work the queue before opening manual case forms.</h2>
+        <p>Start from customer impact: delayed pickup, payment issue, missing item, quality problem, or vendor escalation. Ticket actions should keep the original Order ID attached.</p>
       </div>
       <div className="supportLaneGrid">
         {lanes.map((lane) => <article key={lane.label}><span>{lane.label}</span><strong>{lane.value}</strong><small>{lane.note}</small></article>)}
@@ -505,12 +931,12 @@ function SupportOrderWatchlist({ orders }: { orders: OrderSummary[] }) {
   const watchlist = orders.filter(isRiskOrder).slice(0, 5);
   return (
     <section className="section supportWatchlist" aria-label="Support SLA watchlist">
-      <div className="activityHeader"><div><p className="eyebrow">SLA watch</p><h2>Orders support should watch now</h2></div></div>
+      <div className="activityHeader"><div><p className="eyebrow">At-risk orders</p><h2>Orders support should watch now</h2></div></div>
       <div className="supportWatchGrid">
         {watchlist.length ? watchlist.map((order) => <article className={`supportWatchCard timer-${order.stageTimer.tone}`} key={order.orderId}>
           <div className="orderBoardTop"><strong>{order.orderId}</strong><span>{order.workflowStage.label}</span></div>
           <h3>{order.customer}</h3>
-          <div className="orderMeta minimalMeta"><span>{order.phone || "No phone"}</span><span>{order.area}</span><span>{order.routeWindow}</span><span>{order.stageTimer.label}</span></div>
+          <div className="orderMeta minimalMeta"><span>{order.phone || "No phone"}</span><span>{order.area}</span><span>{order.stageTimer.label}</span></div>
           <p>{order.nextStep}</p>
         </article>) : <article className="supportWatchCard empty"><strong>No breached SLA right now</strong><p>The support desk can stay focused on new tickets and customer replies.</p></article>}
       </div>
@@ -560,7 +986,7 @@ function SupportTicketDesk({ userName }: { userName: string }) {
 
   return (
     <section className="section supportDeskSection">
-      <div className="activityHeader"><div><p className="eyebrow">Ticket desk</p><h2>Open tickets</h2></div><button className="button secondary" type="button" onClick={() => loadTickets()}>Refresh</button></div>
+      <div className="activityHeader"><div><p className="eyebrow">Case queue</p><h2>Open tickets</h2></div><button className="button secondary" type="button" onClick={() => loadTickets()}>Refresh</button></div>
       <div className="supportTicketList">
         {records.map((record) => <article className="orderBoardCard supportTicketCard" key={record.id}>
           <div className="orderBoardTop"><strong>{record.data.orderId || record.id}</strong><span>{record.data.ticketStatus || record.data.issueType || "Open"}</span></div>
@@ -599,13 +1025,18 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
   }
 
   return (
-    <PortalShell role={role} userName={userName} eyebrow="Admin operations" title="Admin dashboard">
-      <AdminOnboardingCenter userName={userName} onSubmit={submitLead} status={formStatus} />
+    <PortalShell role={role} userName={userName} title="Admin workspace">
       <SharedOrderBoard role={role} userName={userName} />
       <AvailabilityBoard role={role} />
+      <section className="section portalSection manualSection">
+        <details className="manualToolbox">
+          <summary><div><span>Roster updates</span><small>Only when vendor or rider access changes</small></div><em>Secondary tools</em></summary>
+          <AdminOnboardingCenter userName={userName} onSubmit={submitLead} status={formStatus} />
+        </details>
+      </section>
       <section className="section opsSection portalSection manualSection">
         <details className="manualToolbox">
-          <summary><span>Exception tools</span><small>Admin</small></summary>
+          <summary><div><span>Manual Actions</span><small>Use only when the queue cannot advance the order</small></div><em>Secondary tools</em></summary>
           <div className="opsGrid compactManualGrid">
           <form className="panel opsForm" onSubmit={(event) => submitLead(event, "admin-operation")}> 
             <h3>Log admin action</h3>
@@ -619,22 +1050,12 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
             <button className="button primary full" type="submit">Save Admin Action</button>
             {formStatus["admin-operation"] && <p className="status success">{formStatus["admin-operation"]}</p>}
           </form>
-          <form className="panel opsForm inventoryLogForm" onSubmit={(event) => submitLead(event, "linen-inventory-log")}> 
-            <h3>Commercial linen inventory</h3>
-            <div className="two"><input name="name" placeholder="Inventory operator" defaultValue={userName} required /><input name="email" type="email" placeholder="Operator email" defaultValue="admin@bubblewash.local" required /></div>
-            <div className="two"><input name="phone" placeholder="Operator phone" required /><input name="company" placeholder="Client / property name" required /></div>
-            <div className="two"><input name="orderId" placeholder="Order or account ID" /><select name="itemCategory"><option>Towels</option><option>Bedsheets</option><option>Uniforms</option><option>Table linen</option><option>Medical gowns</option><option>Mixed inventory</option></select></div>
-            <div className="two"><input name="countReceived" placeholder="Count received" /><input name="countReturned" placeholder="Count returned / expected" /></div>
-            <textarea name="message" placeholder="Shortage notes, damaged items, replacement action, or invoice adjustment..." />
-            <button className="button primary full" type="submit">Log Linen Count</button>
-            {formStatus["linen-inventory-log"] && <p className="status success">{formStatus["linen-inventory-log"]}</p>}
-          </form>
           </div>
         </details>
       </section>
       <section className="section portalSection supportCreateSection manualSection">
         <details className="manualToolbox">
-          <summary><span>Raise ticket</span><small>Exception</small></summary>
+          <summary><div><span>Case Actions</span><small>Open a manual ticket only when automation is not enough</small></div><em>Secondary tools</em></summary>
           <SupportTicketForm userName={userName} role="admin" onSubmit={submitLead} status={formStatus["support-ticket"]} />
         </details>
       </section>
@@ -661,10 +1082,12 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
   }
 
   return (
-    <PortalShell role={role} pageRole="vendor" userName={userName} eyebrow="Vendor operations" title="Vendor dashboard">
-      <section className="section vendorSection dark portalSection manualSection">
+    <PortalShell role={role} pageRole="vendor" userName={userName} title="Vendor workspace">
+      <SharedOrderBoard role="vendor" userName={userName} />
+      <AvailabilityBoard role="vendor" />
+      <section className="section vendorSection portalSection manualSection">
         <details className="manualToolbox">
-          <summary><span>Exception tools</span><small>Vendor</small></summary>
+          <summary><div><span>Partner Actions</span><small>Use these only for manual partner-side updates</small></div><em>Secondary tools</em></summary>
           <div className="vendorGrid">
           <form className="panel vendorForm" onSubmit={(event) => submitLead(event, "vendor-application")}>
             <h3>Update today&apos;s capacity</h3>
@@ -700,12 +1123,10 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
       </section>
       <section className="section portalSection supportCreateSection manualSection">
         <details className="manualToolbox">
-          <summary><span>Raise ticket</span><small>Exception</small></summary>
+          <summary><div><span>Case Actions</span><small>Open a manual ticket only if the queue cannot resolve it</small></div><em>Secondary tools</em></summary>
           <SupportTicketForm userName={userName} role="vendor" onSubmit={submitLead} status={formStatus["support-ticket"]} />
         </details>
       </section>
-      <SharedOrderBoard role="vendor" userName={userName} />
-      <AvailabilityBoard role="vendor" />
       <RecentActivity filter="vendor" />
     </PortalShell>
   );
@@ -729,10 +1150,12 @@ export function DriverWorkspace({ userName, role }: { userName: string; role: St
   }
 
   return (
-    <PortalShell role={role} pageRole="driver" userName={userName} eyebrow="Driver operations" title="Driver route board">
+    <PortalShell role={role} pageRole="driver" userName={userName} title="Driver route board">
+      <SharedOrderBoard role="driver" userName={userName} />
+      <AvailabilityBoard role="driver" />
       <section className="section driverSection portalSection manualSection">
         <details className="manualToolbox">
-          <summary><span>Exception tools</span><small>Route</small></summary>
+          <summary><div><span>Route Actions</span><small>Use these only for manual route updates or exceptions</small></div><em>Secondary tools</em></summary>
           <div className="driverGrid">
           <div className="driverChecklist operatorChips">
             <article><strong>Assignment</strong></article>
@@ -756,12 +1179,10 @@ export function DriverWorkspace({ userName, role }: { userName: string; role: St
       </section>
       <section className="section portalSection supportCreateSection manualSection">
         <details className="manualToolbox">
-          <summary><span>Raise ticket</span><small>Exception</small></summary>
+          <summary><div><span>Case Actions</span><small>Open a manual ticket only if the route queue cannot resolve it</small></div><em>Secondary tools</em></summary>
           <SupportTicketForm userName={userName} role="driver" onSubmit={submitLead} status={formStatus["support-ticket"]} />
         </details>
       </section>
-      <SharedOrderBoard role="driver" userName={userName} />
-      <AvailabilityBoard role="driver" />
       <RecentActivity filter="driver-route-log" />
     </PortalShell>
   );
@@ -771,7 +1192,7 @@ export function SupportWorkspace({ userName, role }: { userName: string; role: S
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const [records, setRecords] = useState<SubmissionRecord[]>([]);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
-  const [deskStatus, setDeskStatus] = useState("Loading support command desk…");
+  const [deskStatus, setDeskStatus] = useState("Loading support desk…");
 
   async function submitLead(event: FormEvent<HTMLFormElement>, type: string) {
     event.preventDefault();
@@ -789,7 +1210,7 @@ export function SupportWorkspace({ userName, role }: { userName: string; role: S
   }
 
   async function loadSupportDesk(showLoading = true) {
-    if (showLoading) setDeskStatus("Loading support command desk…");
+    if (showLoading) setDeskStatus("Loading support desk…");
     try {
       const [submissionsResponse, ordersResponse] = await Promise.all([fetch("/api/submissions"), fetch("/api/orders")]);
       const submissionsData = await submissionsResponse.json();
@@ -807,21 +1228,21 @@ export function SupportWorkspace({ userName, role }: { userName: string; role: S
       setOrders(ordersData.orders.slice(0, 12));
       setDeskStatus("Support desk updated.");
     } catch {
-      setDeskStatus("Unable to load support command desk.");
+      setDeskStatus("Unable to load support desk.");
     }
   }
 
   useEffect(() => { loadSupportDesk(); }, []);
 
   return (
-    <PortalShell role={role} pageRole="support" userName={userName} eyebrow="Support desk" title="Support dashboard">
-      <SupportOpsCommand records={records} orders={orders} />
+    <PortalShell role={role} pageRole="support" userName={userName} title="Support workspace">
+      <SupportOpsOverview records={records} orders={orders} />
       <SupportOrderWatchlist orders={orders} />
       <SupportTicketDesk userName={userName} />
       <SharedOrderBoard role="support" userName={userName} />
       <section className="section portalSection supportCreateSection manualSection">
         <details className="manualToolbox">
-          <summary><span>Create ticket manually</span><small>Exception intake</small></summary>
+          <summary><div><span>Case Actions</span><small>Open a manual ticket only when existing orders do not cover the case</small></div><em>Secondary tools</em></summary>
           <SupportTicketForm userName={userName} role="support" onSubmit={submitLead} status={formStatus["support-ticket"]} />
         </details>
       </section>

@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=Manrope:wght@500;600;700;800;900&family=Space+Grotesk:wght@500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=Manrope:wght@500;600;700;800;900&family=Space+Grotesk:wght@500;600;700&display=swap");
 
 :root {
   --ink: #14304a;
@@ -1101,7 +1101,7 @@ main, .nav { position: relative; z-index: 1; }
   font-size: 12px;
   font-weight: 850;
 }
-.portalPage .portalIdentity, .staffCommandHeader, .queueMetricGrid article, .portalPage .orderBoardCard, .manualToolbox, .portalPage .activityCard {
+.portalPage .portalIdentity, .staffQueueHeader, .queueMetricGrid article, .portalPage .orderBoardCard, .manualToolbox, .portalPage .activityCard {
   background: var(--portal-panel);
   border: 1px solid var(--portal-line);
   box-shadow: rgba(0,0,0,.32) 0 24px 70px -42px;
@@ -1112,7 +1112,7 @@ main, .nav { position: relative; z-index: 1; }
   background: transparent;
   padding-top: 28px;
 }
-.staffCommandHeader {
+.staffQueueHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1121,8 +1121,8 @@ main, .nav { position: relative; z-index: 1; }
   padding: 22px;
   margin-bottom: 14px;
 }
-.staffCommandHeader h2 { margin-bottom: 6px; }
-.staffCommandHeader p { margin-bottom: 0; color: var(--portal-muted); }
+.staffQueueHeader h2 { margin-bottom: 6px; }
+.staffQueueHeader p { margin-bottom: 0; color: var(--portal-muted); }
 .queueMetricGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1326,8 +1326,8 @@ main, .nav { position: relative; z-index: 1; }
   margin: 0 auto 26px;
 }
 @media (max-width: 900px) {
-  .staffCommandHeader, .orderFocusRow, .automationPanel, .compactManualGrid, .onboardingHeader, .onboardingGrid, .supportOpsHero, .supportLaneGrid { grid-template-columns: 1fr; }
-  .staffCommandHeader { display: grid; }
+  .staffQueueHeader, .orderFocusRow, .automationPanel, .compactManualGrid, .onboardingHeader, .onboardingGrid, .supportOpsHero, .supportLaneGrid { grid-template-columns: 1fr; }
+  .staffQueueHeader { display: grid; }
   .automationActions { justify-content: flex-start; }
   .slaPill.countdown { text-align: left; }
   .queueMetricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1359,7 +1359,7 @@ main, .nav { position: relative; z-index: 1; }
 }
 .portalPage .automationSummary span { color: rgba(248,251,255,.76); }
 .portalPage .compactOrderCard { padding: 16px; }
-.portalPage .staffCommandHeader { padding: 18px; }
+.portalPage .staffQueueHeader { padding: 18px; }
 .sharedBoardSection > .status,
 .availabilitySection > .status,
 .activitySection > .status {
@@ -4003,7 +4003,20 @@ h2 { font-size: clamp(27px, 3vw, 42px); }
 .foamTrail { opacity: .14; }
 .foamOrb { opacity: .24; }
 .portalPage {
-  background: #07111f;
+  --portal-bg: #f7fbff;
+  --portal-panel: rgba(255,255,255,.92);
+  --portal-line: rgba(13, 42, 67, .12);
+  --portal-text: #0d2a43;
+  --portal-muted: #5f7184;
+  --lime: #0d8a57;
+  --cyan: #0f7bb8;
+  background:
+    radial-gradient(circle at 82% 14%, rgba(103, 232, 255, .18), transparent 20%),
+    linear-gradient(180deg, #fafdff 0%, #f4fbff 55%, #fbfdfd 100%);
+}
+.portalPage .portalNav {
+  background: rgba(255,255,255,.94);
+  border-bottom-color: rgba(13, 42, 67, .1);
 }
 .portalPage .section {
   padding-top: 24px;
@@ -4011,16 +4024,35 @@ h2 { font-size: clamp(27px, 3vw, 42px); }
 }
 .portalPage .portalHero {
   min-height: auto;
-  padding-top: 38px;
-  padding-bottom: 20px;
+  padding-top: 28px;
+  padding-bottom: 14px;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  background: linear-gradient(180deg, rgba(255,255,255,.75), rgba(244,251,255,.35));
 }
 .portalPage .portalHero h1 {
-  font-size: clamp(34px, 4.8vw, 58px);
-  max-width: 720px;
+  font-size: clamp(32px, 4.3vw, 50px);
+  max-width: 640px;
+}
+.portalHeroFlags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.portalHeroFlags span {
+  border: 1px solid rgba(13, 42, 67, .12);
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: rgba(13, 42, 67, .74);
+  background: rgba(255,255,255,.72);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }
 .portalIdentity {
   padding: 16px !important;
+  gap: 5px;
 }
 .compactWorkflowMap {
   display: grid;
@@ -4043,12 +4075,12 @@ h2 { font-size: clamp(27px, 3vw, 42px); }
   font-size: 12px;
 }
 .workflowPrinciples { display: none; }
-.staffCommandHeader {
+.staffQueueHeader {
   border-radius: var(--operator-radius-lg) !important;
   padding: 16px;
   margin-bottom: 10px;
 }
-.staffCommandHeader h2 { font-size: clamp(24px, 3vw, 36px); }
+.staffQueueHeader h2 { font-size: clamp(24px, 3vw, 36px); }
 .queueMetricGrid {
   gap: 0;
   border: 1px solid var(--portal-line);
@@ -4075,11 +4107,59 @@ h2 { font-size: clamp(27px, 3vw, 42px); }
   border-radius: var(--operator-radius-lg) !important;
   box-shadow: none !important;
 }
+.compactOrderSignals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.compactOrderSignals span {
+  border: 1px solid var(--portal-line);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--portal-muted);
+  background: rgba(255,255,255,.04);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
 .orderFocusRow {
   grid-template-columns: minmax(0, 1fr) minmax(155px, 210px);
   gap: 10px;
 }
 .orderFocusRow h3 { margin-bottom: 5px; }
+.operatorFacts { gap: 6px; }
+.orderClusterGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.orderMetaCluster {
+  display: grid;
+  gap: 6px;
+  padding: 11px 12px;
+  border: 1px solid var(--portal-line);
+  border-radius: var(--operator-radius-lg);
+  background: rgba(255,255,255,.035);
+}
+.orderMetaCluster b {
+  color: rgba(248,251,255,.56);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.orderMetaCluster span {
+  color: var(--portal-text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.nextActionLine {
+  margin: 0;
+  color: rgba(248,251,255,.82) !important;
+}
+.nextActionLine strong { color: var(--portal-text); }
 .slaPill {
   border-radius: var(--operator-radius) !important;
   padding: 10px;
@@ -4098,6 +4178,21 @@ h2 { font-size: clamp(27px, 3vw, 42px); }
   min-height: 36px;
   padding: 8px 10px;
 }
+.orderUtilityRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+.orderUtilityRow .mapActions { margin-top: 0; }
+.quietDetails {
+  min-width: min(100%, 250px);
+}
+.quietDetails summary {
+  font-size: 13px;
+  font-weight: 800;
+}
 .manualToolbox,
 .onboardingHeader,
 .supportOpsHero {
@@ -4109,15 +4204,340 @@ h2 { font-size: clamp(27px, 3vw, 42px); }
 .supportWatchCard {
   border-radius: var(--operator-radius) !important;
 }
-.supportOpsCopy p,
-.onboardingHeader p,
+.supportOpsCopy .eyebrow,
+.onboardingHeader .eyebrow,
 .workflowMapHeader p:last-child {
-  display: none;
+  display: block;
 }
 .supportLaneGrid article {
   padding: 12px 14px;
 }
 .supportLaneGrid strong { font-size: clamp(24px, 3vw, 38px); }
+.manualToolbox > summary {
+  align-items: start;
+}
+.manualToolbox > summary div {
+  display: grid;
+  gap: 3px;
+}
+.manualToolbox > summary em {
+  color: rgba(248,251,255,.52);
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.manualToolbox > .section {
+  padding-top: 14px;
+  padding-bottom: 12px;
+}
+.activityGroup {
+  border: 1px solid var(--portal-line);
+  border-radius: var(--operator-radius-lg);
+  background: var(--portal-panel);
+  overflow: hidden;
+}
+.activityGroup > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: start;
+  padding: 18px 20px;
+  cursor: pointer;
+  list-style: none;
+}
+.activityGroup > summary::-webkit-details-marker { display: none; }
+.activityGroup > summary h2 {
+  margin-bottom: 4px;
+}
+.activityGroup > summary small {
+  color: var(--portal-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.activitySummaryMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.activityCountPill {
+  border: 1px solid var(--portal-line);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,.04);
+  color: var(--portal-text);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.activityGroup > summary em {
+  color: rgba(248,251,255,.52);
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.activityGroup[open] > summary {
+  border-bottom: 1px solid var(--portal-line);
+}
+.activityGroupBody {
+  padding: 14px 18px 18px;
+}
+.activityUtilityBar {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.activityChipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.activityChip,
+.activitySegmented button,
+.activitySortButton {
+  border: 1px solid var(--portal-line);
+  border-radius: 999px;
+  background: rgba(255,255,255,.03);
+  color: var(--portal-text);
+  cursor: pointer;
+}
+.activityChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.activityChip span {
+  color: var(--portal-muted);
+  font-size: 11px;
+}
+.activityChip.active,
+.activitySegmented button.active {
+  background: rgba(255,255,255,.1);
+  border-color: rgba(255,255,255,.18);
+}
+.activityControlGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.activitySegmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.activitySegmented button {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.activityGroupActions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.activityLiveMeta {
+  display: grid;
+  gap: 3px;
+}
+.activityLiveMeta strong {
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.activityLiveMeta span {
+  color: var(--portal-muted);
+  font-size: 13px;
+}
+.activityActionButtons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.activityWorkbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, .95fr);
+  gap: 14px;
+  align-items: start;
+}
+.activityTableWrap {
+  overflow-x: auto;
+}
+.activityTable {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 700px;
+}
+.activitySortButton {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font-size: inherit;
+  font-weight: inherit;
+}
+.activityTable th,
+.activityTable td {
+  padding: 12px 14px;
+  text-align: left;
+  vertical-align: top;
+  border-top: 1px solid var(--portal-line);
+}
+.activityTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-top: 0;
+  background: rgba(9, 24, 39, .98);
+  color: rgba(248,251,255,.56);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.activityTable tbody td {
+  color: var(--portal-text);
+  font-size: 14px;
+}
+.activityTable tbody tr {
+  cursor: pointer;
+  transition: background-color .18s ease, box-shadow .18s ease;
+}
+.activityTable tbody tr:nth-child(even) {
+  background: rgba(255,255,255,.02);
+}
+.activityTable tbody tr.is-selected {
+  background: rgba(103,232,255,.08);
+}
+.activityTable tbody tr.is-new {
+  box-shadow: inset 4px 0 0 #67e8ff;
+}
+.activityTable tbody tr:hover {
+  background: rgba(255,255,255,.035);
+}
+.activityDetailPanel {
+  border: 1px solid var(--portal-line);
+  border-radius: var(--operator-radius-lg);
+  background: rgba(255,255,255,.03);
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+.activityDetailHeader h3 {
+  margin-bottom: 4px;
+}
+.activityDetailHeader span {
+  color: var(--portal-muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.activityDetailCard {
+  display: grid;
+  gap: 6px;
+  padding: 12px 13px;
+  border: 1px solid var(--portal-line);
+  border-radius: var(--operator-radius);
+  background: rgba(255,255,255,.04);
+}
+.activityDetailCard small {
+  color: var(--portal-muted);
+}
+.activityDetailActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.activityQuietButton {
+  border: 1px solid var(--portal-line);
+  border-radius: 999px;
+  background: rgba(255,255,255,.02);
+  color: rgba(248,251,255,.82);
+  padding: 7px 11px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.activityQuietButton:hover {
+  background: rgba(255,255,255,.06);
+}
+.activityCopyStatus {
+  margin: -2px 0 0;
+  color: var(--portal-muted);
+  font-size: 12px;
+}
+.activityDetailSections {
+  display: grid;
+  gap: 10px;
+}
+.activityDetailSection {
+  border: 1px solid var(--portal-line);
+  border-radius: var(--operator-radius);
+  background: rgba(255,255,255,.02);
+  padding: 12px 13px;
+}
+.activityDetailSection header {
+  margin-bottom: 8px;
+}
+.activityDetailSection h4 {
+  margin: 0;
+  color: rgba(248,251,255,.66);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.activityDetailList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+.activityDetailList div {
+  display: grid;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--portal-line);
+}
+.activityDetailList dt {
+  color: rgba(248,251,255,.56);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.activityDetailList dd {
+  margin: 0;
+  color: var(--portal-text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.activityDetailEmpty p {
+  margin-bottom: 0;
+}
+.activityEmptyState {
+  color: var(--portal-muted) !important;
+  text-align: center !important;
+}
+.supportWatchCard p {
+  margin-bottom: 0;
+}
 .ticketActionForm textarea,
 .supportForm textarea,
 .onboardingForm textarea { min-height: 88px; }
@@ -4130,6 +4550,8 @@ h2 { font-size: clamp(27px, 3vw, 42px); }
   .queueMetricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .queueMetricGrid article:nth-child(2) { border-right: 0; }
   .queueMetricGrid article:nth-child(-n + 2) { border-bottom: 1px solid var(--portal-line); }
+  .orderClusterGrid { grid-template-columns: 1fr; }
+  .activityWorkbench { grid-template-columns: 1fr; }
 }
 @media (max-width: 780px) {
   .nav { border-radius: 0; }
@@ -4141,8 +4563,22 @@ h2 { font-size: clamp(27px, 3vw, 42px); }
   .coverageForm { border-radius: var(--operator-radius-lg); padding: 12px; }
   .orderFocusRow,
   .automationPanel { grid-template-columns: 1fr; }
+  .orderUtilityRow,
+  .manualToolbox > summary,
+  .activityGroup > summary { display: grid; }
+  .activitySummaryMeta {
+    justify-content: flex-start;
+  }
+  .activityGroupActions {
+    align-items: flex-start;
+  }
+  .activityActionButtons {
+    justify-content: flex-start;
+  }
   .automationActions { justify-content: flex-start; }
   .slaPill.countdown { text-align: left; }
+  .portalHeroFlags { margin-top: 12px; }
+  .activityGroupBody { padding-inline: 12px; }
 }
 
 /* 2026-06-03 bubble-spice pass: keep foam identity, remove generated gloss. */
@@ -4667,4 +5103,904 @@ body {
     background: linear-gradient(135deg, #075f9f, #053c66) !important;
     border-color: transparent !important;
   }
+}
+
+
+/* Bubble Wash staff operations polish: compact desk tables and plain row controls. */
+.portalPage {
+  --portal-bg: #fffaf0;
+  --portal-panel: #fffdf7;
+  --portal-line: rgba(6, 27, 49, .16);
+  --portal-text: #08283c;
+  --portal-muted: #4a6375;
+  --portal-gold: #c59a35;
+  --portal-danger: #9d2b20;
+  background:
+    linear-gradient(90deg, rgba(197,154,53,.16) 0 1px, transparent 1px 100%),
+    linear-gradient(180deg, #fff8ea 0%, #fffdf7 38%, #f7fbfb 100%) !important;
+  background-size: 100% 100%, 100% 100% !important;
+}
+.portalPage .portalNav {
+  background: rgba(255, 253, 247, .97) !important;
+  border-bottom: 1px solid var(--portal-line) !important;
+  backdrop-filter: blur(10px);
+}
+.portalPage .portalLinks a:not(.button) {
+  border-radius: 4px !important;
+  color: var(--portal-text) !important;
+}
+.portalPage .portalLinks a[aria-current="page"] {
+  background: #08283c !important;
+  color: #fffdf7 !important;
+}
+.portalPage .portalHero {
+  min-height: 0 !important;
+  padding-top: 30px !important;
+  padding-bottom: 18px !important;
+  background: transparent !important;
+  border-bottom: 1px solid rgba(6, 27, 49, .08);
+}
+.portalPage .portalHero h1 {
+  color: var(--portal-text) !important;
+  font-size: clamp(30px, 4vw, 48px) !important;
+  letter-spacing: -.045em;
+}
+.portalHeroLine {
+  margin-top: 12px;
+  color: #6f5a23 !important;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.portalHeroFlags { display: none !important; }
+.portalPage .portalIdentity,
+.staffQueueHeader,
+.queueMetricGrid,
+.manualToolbox,
+.activityGroup,
+.opsTableWrap,
+.onboardingHeader,
+.supportOpsHero,
+.supportWatchCard,
+.portalPage .panel {
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+.portalIdentity {
+  border-left: 4px solid var(--portal-gold) !important;
+}
+.queueMetricGrid {
+  gap: 0 !important;
+  border: 1px solid var(--portal-line);
+  overflow: hidden;
+  background: var(--portal-panel);
+}
+.queueMetricGrid article {
+  background: transparent !important;
+  border-color: var(--portal-line) !important;
+  padding: 11px 14px !important;
+}
+.queueMetricGrid strong {
+  color: var(--portal-text) !important;
+  font-family: Poppins, Manrope, sans-serif !important;
+  font-size: clamp(20px, 2vw, 28px) !important;
+}
+.opsTableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--portal-line);
+  background: var(--portal-panel);
+}
+.opsTable {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+}
+.opsTable caption {
+  padding: 12px 14px;
+  text-align: left;
+  color: var(--portal-text);
+  font-weight: 900;
+  border-bottom: 1px solid var(--portal-line);
+}
+.opsTable th,
+.opsTable td {
+  padding: 13px 14px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--portal-line);
+  color: var(--portal-text);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.opsTable th {
+  background: #08283c;
+  color: #fffdf7;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.opsTable tbody tr:last-child td { border-bottom: 0; }
+.opsTable tbody tr.timer-breached td:first-child { border-left: 4px solid var(--portal-danger); }
+.opsTable tbody tr.timer-due td:first-child { border-left: 4px solid var(--portal-gold); }
+.opsTable tbody tr.timer-ok td:first-child { border-left: 4px solid #0d7d68; }
+.opsTable strong {
+  display: block;
+  color: var(--portal-text);
+  font-weight: 900;
+}
+.opsTable small {
+  display: block;
+  margin-top: 4px;
+  color: var(--portal-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+.queueTable td:last-child { min-width: 310px; }
+.textFlag {
+  display: block;
+  color: var(--portal-text);
+  font-weight: 900;
+}
+.tableActionRow,
+.automationActions,
+.activityActionButtons,
+.activityDetailActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.queueTable .slaPill {
+  margin-top: 8px;
+  min-width: 0;
+  padding: 8px 0 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  text-align: left !important;
+}
+.queueTable .slaPill b {
+  color: var(--portal-text) !important;
+  font-size: 22px !important;
+}
+.queueTable .slaPill span,
+.queueTable .slaPill small {
+  color: var(--portal-muted) !important;
+}
+.queueTable .automationPanel {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px !important;
+  border-radius: 4px !important;
+  background: #fff8ea !important;
+  border: 1px solid rgba(197,154,53,.28) !important;
+}
+.queueTable .automationSummary b,
+.queueTable .automationSummary span {
+  color: var(--portal-text) !important;
+}
+.nextActionLine {
+  color: var(--portal-muted) !important;
+  margin-bottom: 8px !important;
+}
+.nextActionLine strong { color: var(--portal-text) !important; }
+.button,
+.activityChip,
+.activitySegmented button,
+.activityQuietButton {
+  border-radius: 4px !important;
+}
+.activityChip,
+.activitySegmented button,
+.activityQuietButton,
+.activityCountPill {
+  background: #fffdf7 !important;
+  border-color: var(--portal-line) !important;
+  color: var(--portal-text) !important;
+}
+.activityChip.active,
+.activitySegmented button.active {
+  background: #08283c !important;
+  border-color: #08283c !important;
+  color: #fffdf7 !important;
+}
+.activityChip span { color: inherit !important; opacity: .72; }
+.activityTable thead th { background: #08283c !important; color: #fffdf7 !important; }
+.activityTable tbody tr:nth-child(even),
+.activityTable tbody tr:hover,
+.activityDetailPanel,
+.activityDetailCard,
+.activityDetailSection,
+.activityTable tbody tr.is-selected {
+  background: #fff8ea !important;
+}
+.activityGroup > summary em,
+.manualToolbox > summary em,
+.activitySummaryMeta { color: #6f5a23 !important; }
+.operatorFacts span,
+.compactOrderSignals span,
+.orderMeta span,
+.formTitleRow span,
+.onboardingBadges span,
+.minimalMeta span {
+  border-radius: 4px !important;
+  background: transparent !important;
+  border-color: rgba(6, 27, 49, .14) !important;
+}
+.portalPage .orderBoardTop span {
+  border-radius: 4px !important;
+  background: #fff8ea !important;
+  color: #6f5a23 !important;
+  border: 1px solid rgba(197,154,53,.28);
+}
+.declineTableWrap { margin-top: 12px; }
+@media (max-width: 900px) {
+  .portalPage .portalHero { grid-template-columns: 1fr !important; }
+  .opsTable { min-width: 760px; }
+  .queueTable .automationPanel { grid-template-columns: 1fr; }
+}
+
+/* Uploaded Bubble Wash redesign adaptation: navy/teal/warm paper, row-first workspaces. */
+:root {
+  --bw-ink: #06283b;
+  --bw-ink-2: #10384c;
+  --bw-muted: #617583;
+  --bw-line: #dce7e7;
+  --bw-line-strong: #b9cfd3;
+  --bw-paper: #fbf8ef;
+  --bw-surface: #fffdfa;
+  --bw-surface-2: #f7fbfb;
+  --bw-wash: #0aa5c2;
+  --bw-wash-dark: #04708b;
+  --bw-green: #2f7d5b;
+  --bw-amber: #b87817;
+  --bw-red: #b42318;
+}
+body {
+  color: var(--bw-ink);
+  background: radial-gradient(circle at 82% 8%, rgba(10,165,194,.11), transparent 25%), linear-gradient(180deg, var(--bw-paper) 0%, #f7fbfb 72%, #f9fbf7 100%) !important;
+  letter-spacing: -.01em;
+}
+.bubbleAtmosphere,
+.foamOrb,
+.foamTrail,
+.washerBubble,
+.washerRing,
+.hero::after,
+.section::after,
+.foamTicket,
+.careTag { display: none !important; }
+.nav,
+.redesignTopbar,
+.portalPage .portalNav {
+  width: min(1180px, calc(100% - 48px)) !important;
+  min-height: 76px !important;
+  margin: 14px auto 0 !important;
+  padding: 0 22px !important;
+  border: 1px solid rgba(6,40,59,.10) !important;
+  background: rgba(255,253,250,.9) !important;
+  box-shadow: 0 10px 30px rgba(6,40,59,.06) !important;
+  border-radius: 0 !important;
+  backdrop-filter: blur(14px);
+}
+.brand { gap: 12px !important; color: var(--bw-ink) !important; font-size: 19px !important; letter-spacing: -.03em !important; }
+.brandMark { width: 42px !important; height: 42px !important; border-radius: 0 !important; border: 1px solid rgba(10,165,194,.28) !important; background: linear-gradient(135deg, #fff, #e7fbff) !important; }
+.navLinks,
+.portalLinks,
+.redesignTextNav { gap: 22px !important; color: #17384a !important; font-size: 14px !important; font-weight: 650 !important; }
+.navLinks a,
+.portalLinks a:not(.button),
+.redesignTextNav a { border: 0 !important; background: transparent !important; color: inherit !important; padding: 0 !important; border-radius: 0 !important; }
+.portalLinks a[aria-current="page"] { border-bottom: 2px solid var(--bw-wash) !important; padding-bottom: 8px !important; background: transparent !important; color: var(--bw-ink) !important; }
+.button,
+.navCta,
+.redesignLoginForm button {
+  border-radius: 4px !important;
+  box-shadow: none !important;
+  min-height: 0 !important;
+  font-weight: 780 !important;
+}
+.button.primary,
+.navCta { background: var(--bw-ink) !important; border-color: var(--bw-ink) !important; color: #fff !important; }
+.button.secondary,
+.logoutButton,
+.menuButton { background: transparent !important; color: var(--bw-ink) !important; border: 1px solid var(--bw-line-strong) !important; }
+.hero.section {
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto;
+  min-height: 760px;
+  padding: 48px 0 70px !important;
+  display: grid;
+  grid-template-columns: 1.02fr .98fr;
+  gap: 72px;
+  align-items: center;
+  background: transparent !important;
+}
+.heroCopy > .eyebrow { display: block !important; }
+.eyebrow { color: var(--bw-wash-dark) !important; letter-spacing: .16em !important; font-size: 12px !important; font-weight: 850 !important; text-transform: uppercase; }
+.hero h1,
+.portalHero h1,
+.staffAccessHero h1,
+.redesignLoginForm h1 { color: var(--bw-ink) !important; letter-spacing: -.065em !important; }
+.hero h1 { font-size: clamp(48px, 6.4vw, 70px) !important; line-height: .98 !important; max-width: 620px; }
+.lead,
+.lede,
+.heroCopy .lead { color: #395462 !important; font-size: 18px !important; line-height: 1.55 !important; }
+.coverageForm {
+  border: 0 !important;
+  border-top: 1px solid var(--bw-line) !important;
+  border-bottom: 1px solid var(--bw-line) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 20px 0 !important;
+}
+.coverageRow input,
+input,
+select,
+textarea { border-radius: 0 !important; }
+.coverageQuickChips { gap: 18px !important; }
+.coverageQuickChips button { border: 0 !important; background: transparent !important; padding: 0 !important; color: var(--bw-muted) !important; box-shadow: none !important; }
+.heroVisual.heroSlider {
+  min-height: 530px;
+  border: 1px solid rgba(6,40,59,.12) !important;
+  background: rgba(255,253,250,.78) !important;
+  border-radius: 0 !important;
+  box-shadow: 0 18px 48px rgba(6,40,59,.08) !important;
+}
+.washerPortal { opacity: .14; }
+.visualCard {
+  border-radius: 0 !important;
+  border: 1px solid var(--bw-line) !important;
+  background: #fffefa !important;
+  box-shadow: 0 10px 28px rgba(6,40,59,.06) !important;
+}
+.proofStrip {
+  width: min(1180px, calc(100% - 48px));
+  margin: -72px auto 42px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--bw-line);
+  border-bottom: 1px solid var(--bw-line);
+  padding: 0 !important;
+}
+.proofStrip div { border-radius: 0 !important; box-shadow: none !important; border: 0 !important; border-right: 1px solid var(--bw-line) !important; background: transparent !important; padding: 18px 20px !important; }
+.proofStrip div:last-child { border-right: 0 !important; }
+.proofStrip strong { font-size: 30px !important; color: var(--bw-ink) !important; }
+.proofStrip span { color: var(--bw-muted) !important; font-size: 13px !important; text-transform: uppercase; letter-spacing: .08em; font-weight: 760; }
+.redesignLoginPage { min-height: 100vh; padding: 0 0 54px; }
+.redesignLoginGrid {
+  width: min(1020px, calc(100% - 48px));
+  margin: 54px auto 0;
+  display: grid;
+  grid-template-columns: .9fr 1.1fr;
+  background: rgba(255,253,250,.86);
+  border: 1px solid rgba(6,40,59,.12);
+  box-shadow: 0 18px 48px rgba(6,40,59,.08);
+}
+.redesignRoleList { padding: 48px; border-right: 1px solid var(--bw-line); background: #f9fbfb; }
+.redesignRoleList h2,
+.redesignLoginForm h1 { margin: 0 0 15px; font-size: 36px; line-height: 1.05; }
+.redesignRoleList p,
+.redesignLoginForm p { color: var(--bw-muted); line-height: 1.5; }
+.redesignRoleRow { display: grid; grid-template-columns: 18px 1fr; gap: 14px; padding: 18px 0; border-top: 1px solid var(--bw-line); }
+.redesignRoleRow:last-of-type { border-bottom: 1px solid var(--bw-line); }
+.redesignRoleRow > span { width: 9px; height: 9px; background: var(--bw-wash); margin-top: 7px; }
+.redesignRoleRow strong { display: block; font-size: 17px; }
+.redesignRoleRow small { color: var(--bw-muted); }
+.redesignLoginForm { padding: 48px 58px; }
+.redesignLoginForm label { display: block; margin-bottom: 18px; font-weight: 780; color: var(--bw-ink); }
+.redesignLoginForm input { width: 100%; margin-top: 8px; border: 1px solid #c9d7d9; background: #fff; padding: 14px; }
+.destination { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--bw-line); color: var(--bw-muted); font-size: 14px; }
+.redesignCredentialList { margin-top: 20px; }
+.portalPage { --portal-panel: rgba(255,253,250,.78); --portal-line: var(--bw-line); --portal-text: var(--bw-ink); --portal-muted: var(--bw-muted); background: radial-gradient(circle at 82% 8%, rgba(10,165,194,.11), transparent 25%), linear-gradient(180deg, var(--bw-paper) 0%, #f7fbfb 72%, #f9fbf7 100%) !important; }
+.portalPage .section { width: min(1180px, calc(100% - 48px)); }
+.portalPage .portalHero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 30px;
+  align-items: end;
+  padding: 36px 0 30px !important;
+  border-bottom: 1px solid var(--bw-line) !important;
+}
+.portalPage .portalHero h1 { font-size: clamp(40px, 5vw, 54px) !important; line-height: 1.02 !important; }
+.portalIdentity { min-width: 235px; text-align: right; background: transparent !important; border: 0 !important; padding: 0 !important; }
+.portalIdentity span { color: var(--bw-muted) !important; }
+.portalIdentity strong { font-size: 28px !important; color: var(--bw-ink) !important; }
+.staffQueueHeader { background: transparent !important; border: 0 !important; border-bottom: 1px solid var(--bw-line) !important; padding: 20px 0 !important; border-radius: 0 !important; }
+.queueMetricGrid { border: 0 !important; border-bottom: 1px solid var(--bw-line) !important; background: transparent !important; border-radius: 0 !important; margin-bottom: 22px; }
+.queueMetricGrid article { border: 0 !important; border-right: 1px solid var(--bw-line) !important; padding: 20px 18px !important; }
+.queueMetricGrid article:last-child { border-right: 0 !important; }
+.queueMetricGrid span { color: #536b79 !important; letter-spacing: .1em !important; font-size: 11px !important; text-transform: uppercase; }
+.queueMetricGrid strong { font-size: 32px !important; letter-spacing: -.05em; }
+.opsTableWrap,
+.activityGroup,
+.manualToolbox,
+.portalPage .panel,
+.supportWatchCard { background: rgba(255,253,250,.74) !important; border: 1px solid var(--bw-line) !important; border-radius: 0 !important; box-shadow: none !important; }
+.opsTable th,
+.activityTable thead th { background: var(--bw-ink) !important; color: #fff !important; padding: 14px 16px !important; letter-spacing: .12em !important; }
+.opsTable td,
+.activityTable td { padding: 18px 16px !important; border-bottom: 1px solid var(--bw-line) !important; color: var(--bw-ink) !important; }
+.opsTable small,
+.meta { color: var(--bw-muted) !important; }
+.queueTable .automationPanel { background: var(--bw-surface-2) !important; border: 1px solid var(--bw-line) !important; border-radius: 0 !important; }
+.manualToolbox > summary { border-bottom: 1px solid var(--bw-line); }
+.supportOpsHero,
+.onboardingHeader { background: transparent !important; border: 0 !important; border-left: 2px solid var(--bw-wash) !important; padding-left: 22px !important; }
+.staffAccessPage .loginShell { width: min(1020px, calc(100% - 48px)); }
+.staffAccessGrid { gap: 0 !important; border: 1px solid var(--bw-line); background: rgba(255,253,250,.78); }
+.staffAccessCard { border-radius: 0 !important; box-shadow: none !important; border: 0 !important; border-bottom: 1px solid var(--bw-line) !important; background: transparent !important; }
+@media (max-width: 900px) {
+  .hero.section,
+  .redesignLoginGrid,
+  .portalPage .portalHero { grid-template-columns: 1fr; }
+  .nav,
+  .redesignTopbar,
+  .portalPage .portalNav,
+  .hero.section,
+  .proofStrip,
+  .portalPage .section { width: min(100% - 28px, 1180px) !important; }
+  .redesignRoleList { border-right: 0; border-bottom: 1px solid var(--bw-line); }
+  .proofStrip { grid-template-columns: repeat(2, 1fr); margin-top: 0; }
+  .portalIdentity { text-align: left; }
+}
+@media (max-width: 780px) {
+  main > .nav { position: relative !important; }
+  .navLinks { background: #fffdfa !important; }
+  .hero h1 { font-size: 48px !important; }
+  .redesignRoleList,
+  .redesignLoginForm { padding: 28px; }
+}
+
+/* Bubble Wash public homepage correction: compact pickup desk replaces the old oversized menu slab. */
+.publicPickupDesk {
+  max-width: 1180px;
+  margin-inline: auto;
+  padding-top: clamp(3rem, 7vw, 6rem);
+}
+
+.pickupDeskGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr) minmax(260px, 0.85fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.pickupDeskPanel {
+  background: var(--paper);
+  border: 1px solid rgba(12, 50, 66, 0.16);
+  border-radius: 0;
+  padding: clamp(1.1rem, 2.4vw, 1.55rem);
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.pickupDeskPrimary {
+  border-left: 3px solid var(--aqua);
+}
+
+.deskLabel {
+  color: var(--teal);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.pickupDeskPanel h3,
+.pickupDeskPanel p {
+  margin: 0;
+}
+
+.deskPrice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding-block: 0.7rem;
+  border-block: 1px solid rgba(12, 50, 66, 0.12);
+}
+
+.deskPrice strong {
+  color: var(--ink);
+  font-size: clamp(1.7rem, 3vw, 2.4rem);
+  letter-spacing: -0.06em;
+}
+
+.deskPrice span,
+.deskFacts small,
+.compactRouteList small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.deskFacts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.deskFacts span {
+  border: 1px solid rgba(12, 50, 66, 0.12);
+  background: rgba(248, 246, 239, 0.72);
+  padding: 0.7rem;
+}
+
+.deskFacts b,
+.deskFacts small {
+  display: block;
+}
+
+.deskMiniForm {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: auto;
+}
+
+.deskMiniForm label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.deskMiniForm input,
+.deskMiniForm select {
+  width: 100%;
+  border-radius: 0;
+  border: 1px solid rgba(12, 50, 66, 0.18);
+  background: #fffdfa;
+  color: var(--ink);
+  padding: 0.78rem 0.82rem;
+  font: inherit;
+}
+
+.compactRouteList {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.compactRouteList > div {
+  border-block-start: 1px solid rgba(12, 50, 66, 0.12);
+  padding-block-start: 0.65rem;
+}
+
+.compactRouteList strong,
+.compactRouteList small,
+.compactRouteList p {
+  display: block;
+}
+
+.compactRouteList p {
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.legacyHomepageDesk[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 980px) {
+  .pickupDeskGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Bubble Wash foundation correction: keep foam/blue brand, remove AI-SaaS pills/containers. */
+:root {
+  --font-sans: "Source Sans 3", "Instrument Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --bw-page: #f4fbff;
+  --bw-surface: #ffffff;
+  --bw-soft: #edf9ff;
+  --bw-ink: #102f44;
+  --bw-muted: #587083;
+  --bw-line: #cfe4ee;
+  --bw-blue: #1186d4;
+  --bw-blue-dark: #075f9f;
+  --bw-aqua: #5bdcff;
+  --bw-radius: 10px;
+}
+
+html { font-size: 16px; }
+body {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--bw-ink);
+  background: var(--bw-page) !important;
+  letter-spacing: 0;
+}
+
+body::before,
+body::after,
+.bubbleAtmosphere,
+.foamOrb,
+.foamTrail,
+.backToTop,
+.slideOverlay,
+.washerRing,
+.washerBubble,
+.foamTicket,
+.careTag {
+  display: none !important;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--bw-ink);
+  font-family: var(--font-sans) !important;
+  font-weight: 700;
+  letter-spacing: -0.035em !important;
+}
+
+h1 { font-size: clamp(2.35rem, 5vw, 4rem) !important; line-height: 1 !important; }
+h2 { font-size: clamp(1.65rem, 3vw, 2.35rem) !important; line-height: 1.1 !important; }
+h3 { font-size: 1.18rem; line-height: 1.24; }
+p { color: var(--bw-muted); line-height: 1.55; }
+
+.nav,
+.portalPage .portalNav {
+  width: min(1180px, calc(100% - 40px)) !important;
+  left: auto !important;
+  transform: none !important;
+  top: 0 !important;
+  margin: 16px auto 0 !important;
+  border: 1px solid var(--bw-line) !important;
+  border-radius: var(--bw-radius) !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+.navLinks,
+.portalLinks { font-weight: 600 !important; }
+.navLinks a:not(.navCta),
+.portalLinks a:not(.button) {
+  border-radius: 6px !important;
+  background: transparent !important;
+}
+
+.navCta,
+.button,
+button,
+[type="submit"] {
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  transform: none !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+}
+
+.button.primary,
+.navCta {
+  background: var(--bw-blue-dark) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+.button.secondary,
+.textLink,
+.activityQuietButton {
+  background: #fff !important;
+  border: 1px solid var(--bw-line) !important;
+  color: var(--bw-blue-dark) !important;
+}
+
+.hero.section {
+  min-height: auto !important;
+  padding-top: clamp(3.5rem, 8vw, 6.5rem) !important;
+  padding-bottom: clamp(2.5rem, 6vw, 4.5rem) !important;
+  background: var(--bw-page) !important;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.76fr) !important;
+  gap: clamp(2rem, 5vw, 4rem) !important;
+  overflow: visible !important;
+}
+
+.heroCopy { max-width: 680px; }
+.heroCopy .lead { max-width: 560px; font-size: 1.08rem !important; line-height: 1.58; }
+.eyebrow,
+.deskLabel,
+.queueMetricGrid span,
+.slaPill span,
+.slaPill small,
+.automationSummary span {
+  color: var(--bw-blue-dark) !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase;
+}
+
+.coverageForm,
+.humanNote,
+.heroVisual,
+.visualCard,
+.timelineCard,
+.mainBasket,
+.proofStrip div,
+.planCard,
+.serviceCard,
+.panel,
+.faqItem,
+.contactCard,
+.quoteResult,
+.pickupDeskPanel,
+.staffCard,
+.vendorShowcaseCard,
+.researchGrid article,
+.opsFeatureGrid article,
+.orderBoardCard,
+.manualToolbox,
+.activityGroup,
+.supportWatchCard,
+.portalIdentity,
+.staffQueueHeader,
+.queueMetricGrid article {
+  border: 1px solid var(--bw-line) !important;
+  border-radius: var(--bw-radius) !important;
+  background: var(--bw-surface) !important;
+  box-shadow: none !important;
+}
+
+.heroVisual,
+.heroVisual.heroSlider {
+  min-height: 430px !important;
+  background: linear-gradient(180deg, #e9f8ff, #ffffff) !important;
+  border: 1px solid var(--bw-line) !important;
+  border-radius: var(--bw-radius) !important;
+  box-shadow: none !important;
+  overflow: hidden;
+}
+
+.heroSlider::before,
+.heroSlider::after { display: none !important; }
+.washerPortal {
+  inset: 30px auto auto 30px !important;
+  width: 118px !important;
+  height: 118px !important;
+  border-radius: 14px !important;
+  box-shadow: none !important;
+}
+
+.visualCard {
+  position: static !important;
+  width: auto !important;
+  margin: 16px !important;
+  padding: 14px 16px !important;
+}
+
+.orderCard { margin-top: 170px !important; }
+.mainBasket strong { font-size: clamp(2.2rem, 5vw, 4rem) !important; }
+.timelineCard strong { font-size: 1rem !important; line-height: 1.35; }
+
+.proofStrip {
+  max-width: 1180px !important;
+  margin: 0 auto !important;
+  padding: 0 0 24px !important;
+  background: transparent !important;
+}
+.proofStrip div { border-radius: 8px !important; padding: 16px !important; }
+.proofStrip strong { font-size: 1.7rem !important; }
+.proofStrip span { font-weight: 600 !important; color: var(--bw-muted) !important; }
+
+.section { padding-top: clamp(2.5rem, 6vw, 4.5rem) !important; padding-bottom: clamp(2.5rem, 6vw, 4.5rem) !important; }
+.sectionHead { margin-bottom: 1.25rem !important; }
+
+.coverageQuickChips button,
+.badge,
+.locationGrid span,
+.tagRow span,
+.orderBoardTop span,
+.operatorFacts span,
+.portalPage .minimalMeta span,
+.roleBreadcrumb span,
+.paymentLogo,
+.status {
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  font-weight: 600 !important;
+}
+
+input,
+select,
+textarea {
+  border-radius: 8px !important;
+  border-color: var(--bw-line) !important;
+  background: #fff !important;
+  box-shadow: none !important;
+  min-height: 42px;
+}
+
+.portalPage {
+  color: var(--bw-ink) !important;
+  background: var(--bw-page) !important;
+}
+.portalPage .portalHero {
+  min-height: auto !important;
+  padding: 32px 0 24px !important;
+  background: transparent !important;
+  border-bottom: 1px solid var(--bw-line) !important;
+}
+.portalPage .portalHero h1 {
+  color: var(--bw-ink) !important;
+  font-size: clamp(2.1rem, 4vw, 2.75rem) !important;
+}
+.portalPage .lead,
+.portalPage .status,
+.portalPage .orderBoardCard p,
+.portalPage .formHint,
+.portalPage .portalIdentity span,
+.portalPage .portalIdentity small {
+  color: var(--bw-muted) !important;
+}
+.portalPage h2,
+.portalPage h3,
+.portalPage .orderBoardTop strong,
+.portalPage .portalIdentity strong {
+  color: var(--bw-ink) !important;
+}
+.staffQueueHeader,
+.queueMetricGrid article,
+.manualToolbox,
+.activityGroup,
+.portalPage .orderBoardCard {
+  background: transparent !important;
+  border-radius: 0 !important;
+  border-left: 0 !important;
+  border-right: 0 !important;
+}
+.staffQueueHeader { padding: 16px 0 !important; }
+.queueMetricGrid { gap: 0 !important; border-block: 1px solid var(--bw-line) !important; }
+.queueMetricGrid article { border-top: 0 !important; border-bottom: 0 !important; padding: 14px 12px !important; }
+.queueMetricGrid strong { color: var(--bw-blue-dark) !important; font-size: clamp(1.5rem, 3vw, 2rem) !important; font-family: var(--font-sans) !important; }
+
+.opsTableWrap,
+.activityTableWrap,
+.table-wrap {
+  border: 1px solid var(--bw-line) !important;
+  background: var(--bw-surface) !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+th,
+.opsTable th,
+.activityTable thead th {
+  background: var(--bw-blue-dark) !important;
+  color: #fff !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+}
+td,
+.opsTable td,
+.activityTable td { padding: 12px 14px !important; }
+
+@media (max-width: 900px) {
+  .nav,
+  .portalPage .portalNav,
+  .hero.section,
+  .proofStrip,
+  .portalPage .section {
+    width: min(100% - 28px, 1180px) !important;
+  }
+  .hero.section { grid-template-columns: 1fr !important; }
+  .heroVisual { min-height: 360px !important; }
+  .proofStrip { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+
+@media (max-width: 640px) {
+  h1 { font-size: clamp(2rem, 11vw, 3rem) !important; }
+  .hero.section { padding-top: 2.5rem !important; }
+  .heroVisual { min-height: 330px !important; }
+  .proofStrip { grid-template-columns: 1fr !important; }
+  .queueMetricGrid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
 }

@@ -36,7 +36,7 @@ export const plans: Plan[] = [
     pickups: "2 pickups / week",
     monthlyPickups: 8,
     badge: "Most chosen",
-    audience: "Hotels, apartments, clinics, restaurants",
+    audience: "Apartments, clinics, restaurants, and busy teams",
     bands: [
       { min: 30, max: 59, rate: 17 },
       { min: 60, max: 99, rate: 15.5 },
@@ -46,11 +46,11 @@ export const plans: Plan[] = [
   },
   {
     name: "Scale",
-    description: "Built for larger teams with heavier linen cycles and tighter operating windows.",
+    description: "Built for larger teams with heavier laundry cycles and tighter operating windows.",
     subscription: 3250,
     pickups: "3 pickups / week",
     monthlyPickups: 12,
-    audience: "Large hotels and multi-unit operators",
+    audience: "Multi-unit operators and high-volume teams",
     bands: [
       { min: 50, max: 99, rate: 16 },
       { min: 100, max: 149, rate: 14.5 },
@@ -64,7 +64,7 @@ export const plans: Plan[] = [
     subscription: 4750,
     pickups: "5–6 pickups / week",
     monthlyPickups: 22,
-    audience: "Medical groups, hotel chains, large facilities",
+    audience: "Medical groups, large facilities, and custom accounts",
     bands: [{ min: 1, max: null, rate: 13.5 }],
     features: ["Custom routing", "Custom SLAs", "Dedicated support", "Contracted pricing", "Account review cadence"],
   },

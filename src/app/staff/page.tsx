@@ -1,11 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
 
+export const dynamic = "force-dynamic";
+
 const staffPaths = [
   {
     role: "Admin",
-    title: "Operations control",
-    copy: "Order oversight, reassignment, SLA timers, payments, and vendor/driver coordination.",
+    title: "Operations queue",
+    copy: "Order review, reassignment, timers, payments, and vendor or rider coordination.",
     href: "/login?next=/admin",
   },
   {
@@ -38,8 +40,8 @@ export default function StaffAccessPage() {
         </Link>
         <div className="staffAccessHero">
           <p className="eyebrow">Staff access</p>
-          <h1>Choose your workspace, then sign in.</h1>
-          <p>One staff entry point keeps the public menu clean while routing every role to the correct protected login process.</p>
+          <h1>Choose your workspace.</h1>
+          <p>Role-specific staff paths for orders, washing, routes, and support follow-up.</p>
         </div>
         <div className="staffAccessGrid">
           {staffPaths.map((path) => (

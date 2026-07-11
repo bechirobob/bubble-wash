@@ -64,7 +64,7 @@
 
 ## Outside-the-box visual direction
 
-- User goal and attention model: make Bubble Wash feel like a command center for clean laundry, not a generic SaaS landing page. Above the fold should answer three questions fast: Can they pick up here? What will it cost? Can I track the job?
+- User goal and attention model: make Bubble Wash feel like a practical laundry operations service. Above the fold should answer three questions fast: Can they pick up here? What will it cost? Can I track the job?
 - Gestalt/Fitts/cognitive load: use a strong dark operations shell, bright high-contrast CTAs, grouped ticket/card modules, and large touch targets. Repeat the same action pattern: check, estimate, book, track.
 - Typography tokens: use a sharper display face for headings and a calmer UI face for forms/body. Headings should feel engineered and local-operator serious; body copy must stay readable on phones.
 - Spacing/radii/shadows: keep compact command-card spacing, slightly squared radii, stronger borders, and fewer soft template bubbles. Cards should feel like dispatch tickets rather than generic marketing cards.
@@ -89,6 +89,48 @@
 - Operational exceptions: manual inputs are only for new facts that were not in the initial order, such as vendor exceptions, bag-count mismatch, delay reason, payment reference, stain/damage notes, or customer escalation outcome.
 - Timers: show elapsed time in the current stage plus SLA state. Internal staff see due/overdue labels; customer tracking keeps it simpler with delivery windows and next step.
 - Maps: current production stage uses privacy-safe Google Maps URL search/directions. Live GPS is a later level that needs driver consent, retention policy, HTTPS geolocation, location pings, and restricted Maps keys.
+
+## 2026-07-09 public homepage correction — prototype-first, no speed-run
+
+### User goal and attention model
+
+- Primary goal: a customer should decide quickly whether Bubble Wash can pick up, roughly what it costs, and how to book/track without reading a long SaaS-style sales page.
+- Attention order: 1) coverage + book, 2) order-trail proof, 3) three-handoff service explanation, 4) compact pickup desk for price/route/track, 5) booking form.
+- Staff and operational detail remain behind `/staff`, `/admin`, `/vendors`, `/drivers`, and `/support`; the public home should not feel like a staff dashboard.
+
+### Design principles
+
+- Gestalt: match the uploaded static prototype — topbar, large two-column hero, paper order sheet, stats strip, then a compact service flow.
+- Fitts: keep `Book pickup`, `Check coverage`, and `Run estimate` close to their related inputs with full-width mobile buttons.
+- Cognitive load: remove the old giant menu-desk/pricing slab from visible homepage flow; keep pricing/coverage/tracking as compact checks.
+- Feedback loops: preserve real route preview, quote, tracking, and booking form status messages with `aria-live`.
+
+### Visual system tokens
+
+- Type scale: large compressed hero heading, compact uppercase labels, readable form text at 16px minimum.
+- Spacing: prototype-width shell around 1180px, generous hero whitespace, thinner row dividers, tighter post-hero sections.
+- Geometry: rectangular buttons/cards, minimal radius, no pill-cloud rows, no decorative card wall.
+- Shadows/colors: navy/teal/warm paper, restrained shadows only for order sheet depth, no generic gradient SaaS dashboard look.
+
+### Interaction and motion
+
+- Keep anchor navigation simple: pricing/coverage/track now land on the compact public pickup desk, not the hidden legacy menu slab.
+- Reduced-motion fallback remains required; decoration must not block forms or become the design.
+- Controls must do real work: coverage hits route preview, estimate hits quote API, tracking hits track API, booking submits pickup.
+
+### Component map and data shape
+
+- `src/app/page.tsx`: public home, coverage, quote, track, booking.
+- `src/app/globals.css`: prototype-aligned public shell and compact pickup desk styles.
+- Keep existing APIs: `/api/route-preview`, `/api/quote`, `/api/track`, `/api/submit`.
+
+### Critique checklist for this pass
+
+- If a full-page screenshot still resembles the old long pricing/calculator homepage, the pass failed.
+- If the first visible scroll after the hero is a giant old menu desk, the pass failed.
+- If controls are decorative or disabled without explanation, the pass failed.
+- If forbidden hotel/Lagos/AI-dashboard terms appear in source or data, the pass failed.
+- If protected staff interiors are not verified after auth, the pass is incomplete.
 
 ## Critique checklist
 

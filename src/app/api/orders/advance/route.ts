@@ -43,7 +43,6 @@ export async function POST(request: NextRequest) {
     const assignment = actionKey === "admin-assign-vendor" ? assignOrderFromAvailability({
       orderId: order.orderId,
       area: order.area,
-      serviceType: order.lastEventType,
       vendor: order.vendor,
       driver: order.driver,
     }) : null;

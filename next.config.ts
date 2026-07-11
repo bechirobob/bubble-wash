@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 import { securityHeaders } from "./src/lib/security";
 
+const appHtmlHeaders = [
+  ...securityHeaders(),
+  { key: "Cache-Control", value: "private, no-cache, no-store, max-age=0, must-revalidate" },
+];
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   allowedDevOrigins: [
@@ -15,6 +20,34 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
+      {
+        source: "/",
+        headers: appHtmlHeaders,
+      },
+      {
+        source: "/login",
+        headers: appHtmlHeaders,
+      },
+      {
+        source: "/staff",
+        headers: appHtmlHeaders,
+      },
+      {
+        source: "/admin",
+        headers: appHtmlHeaders,
+      },
+      {
+        source: "/vendors",
+        headers: appHtmlHeaders,
+      },
+      {
+        source: "/drivers",
+        headers: appHtmlHeaders,
+      },
+      {
+        source: "/support",
+        headers: appHtmlHeaders,
+      },
       {
         source: "/(.*)",
         headers: securityHeaders(),

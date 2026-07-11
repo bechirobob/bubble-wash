@@ -56,19 +56,29 @@ const roleVisibleTypes: Record<StaffRole, Set<string> | null> = {
   support: new Set(["support-ticket", "support-ticket-action"]),
 };
 
+const workflowSeedTypes = new Set(["pickup-booking", "checkout-request"]);
+
 export function visibleSubmissionRecords(records: SubmissionRecord[], role: StaffRole) {
   const visibleTypes = roleVisibleTypes[role];
   if (!visibleTypes) return records;
   return records.filter((record) => visibleTypes.has(text(record.data.submissionType)));
 }
 
+function workflowOrderIds(records: SubmissionRecord[]) {
+  return new Set(records.filter((record) => workflowSeedTypes.has(text(record.data.submissionType))).map(canonicalOrderId));
+}
+
 export function orderBoardRecords(records: SubmissionRecord[], role: StaffRole) {
-  if (role === "admin") return records;
+  const seededOrderIds = workflowOrderIds(records);
+  if (role === "admin") {
+    return records.filter((record) => seededOrderIds.has(canonicalOrderId(record)));
+  }
 
   const accessibleOrderIds = new Set<string>();
   for (const record of records) {
     const type = text(record.data.submissionType);
     const orderId = canonicalOrderId(record);
+    if (!seededOrderIds.has(orderId)) continue;
     if (role === "vendor" && (type.startsWith("vendor") || type === "qr-bag-intake" || text(record.data.vendorName) || text(record.data.vendor))) {
       accessibleOrderIds.add(orderId);
     }
@@ -123,7 +133,7 @@ function recordStatus(record: SubmissionRecord) {
   if (type.includes("qr-bag")) return "Vendor intake checked";
   if (type.includes("driver-route")) return "Driver route update received";
   if (type.includes("driver-onboarding")) return text(record.data.driverStatus) || "Driver onboarded";
-  if (type.includes("linen-inventory")) return "Inventory count logged";
+  if (type.includes("laundry-inventory")) return "Laundry inventory count logged";
   if (type.includes("support")) return "Support ticket open";
   if (type.includes("admin")) return "Admin action logged";
   return "Request received";
