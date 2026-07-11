@@ -316,7 +316,7 @@ export default function Home() {
             <dl className="miniFacts"><div><dt>Coordination fee</dt><dd>{selectedPlan.name === "Enterprise" ? "From " : ""}{formatMoney(selectedPlan.subscription)} / month</dd></div><div><dt>Pickups</dt><dd>{selectedPlan.monthlyPickups} / month</dd></div><div><dt>Rate starts</dt><dd>{selectedStartingBand ? `${formatMoney(selectedStartingBand.rate)} / kg from ${selectedStartingBand.min}kg` : "Custom"}</dd></div></dl>
             <form className="serviceForm" method="post" onSubmit={calculate}>
               <label>Plan<select value={quotePlan} onChange={(event) => setQuotePlan(event.target.value as PlanName)}>{plans.map((plan) => <option key={plan.name}>{plan.name}</option>)}</select></label>
-              <label>Estimated kg<input type="number" min={1} max={10000} step={1} inputMode="numeric" value={kg} onChange={(event) => setKg(Number(event.target.value))} /></label>
+              <label>Estimated kg<input aria-label="Estimated laundry weight in kilograms" type="number" min={1} max={10000} step={1} inputMode="numeric" value={kg} onChange={(event) => setKg(Number(event.target.value))} /></label>
               <button className="button primary" type="submit" disabled={pendingAction === "quote"}>{pendingAction === "quote" ? "Calculating..." : "Run estimate"}</button>
               <p className={statusTone(quoteStatus)} role="status" aria-live="polite">{quote ? `${formatMoney(quote.estimatedMonthlyTotal)} estimated monthly total` : quoteStatus}</p>
             </form>

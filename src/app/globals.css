@@ -158,10 +158,11 @@ small { display: block; color: var(--soft); line-height: 1.35; }
 }
 
 .redesignLoginForm, .redesignRoleList {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  padding: 24px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  padding: 22px 0 0;
   box-shadow: none;
 }
 .servicePanel h2 { font-size: 1.45rem; letter-spacing: -.02em; }
@@ -353,10 +354,11 @@ summary { cursor: pointer; color: var(--brand); font-weight: 700; }
 .timelineList p { margin: 4px 0 0; }
 
 .panel, form.panel, .opsForm, .supportForm, .onboardingForm, .activityDetailPanel, .activityDetailCard, .activityDetailSection {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  padding: 18px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  padding: 18px 0 0;
   box-shadow: none;
 }
 .activityGroup { background: transparent; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 18px 0 0; box-shadow: none; }
@@ -397,7 +399,7 @@ summary { cursor: pointer; color: var(--brand); font-weight: 700; }
   padding: 16px 0 0;
 }
 
-.supportLaneGrid { margin: 0; min-width: 360px; }
+.supportLaneGrid { margin: 0; min-width: 0; }
 .supportOpsHero { align-items: start; }
 .supportOpsCopy { max-width: 620px; }
 
@@ -409,6 +411,7 @@ summary { cursor: pointer; color: var(--brand); font-weight: 700; }
   .queueMetricGrid article:nth-child(2), .queue-summary article:nth-child(2), .supportLaneGrid article:nth-child(2) { border-right: 0; }
   .queueMetricGrid article, .queue-summary article, .supportLaneGrid article { border-bottom: 1px solid var(--line); }
   .siteHeader, .nav, .portalNav, .redesignTopbar { flex-wrap: wrap; }
+  .supportOpsHero { flex-direction: column; align-items: stretch; }
 }
 
 @media (max-width: 780px) {
@@ -432,7 +435,7 @@ summary { cursor: pointer; color: var(--brand); font-weight: 700; }
   .serviceFacts { grid-template-columns: 1fr; }
   .serviceFacts div { border-right: 0; border-bottom: 1px solid var(--line); padding-left: 0; }
   .serviceSection { padding-block: 38px; }
-  .servicePanel, .serviceRecordBlock, .bookingForm, .redesignLoginForm, .redesignRoleList, .panel, form.panel, .opsForm, .supportForm, .onboardingForm, .activityDetailPanel { padding: 16px; }
+  .servicePanel, .serviceRecordBlock, .bookingForm, .redesignLoginForm, .redesignRoleList, .panel, form.panel, .opsForm, .supportForm, .onboardingForm, .activityDetailPanel { padding: 16px 0 0; }
   .workflowList li { grid-template-columns: 42px minmax(0, 1fr); }
   .staffPageHeader { padding: 32px 0 20px; }
   .staffSessionLine { border: 0; padding: 0; }

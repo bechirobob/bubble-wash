@@ -91,16 +91,16 @@ function queueStats(orders: OrderSummary[], role: StaffRole, userName: string, a
 
 function StaffNavIcon({ type }: { type: PortalLink["icon"] | "exit" }) {
   if (type === "admin") {
-    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 11.5 12 5l8 6.5" /><path d="M6.5 10.5v8h11v-8" /><path d="M10 18.5v-5h4v5" /></svg>;
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="16" rx="2.5" /><circle cx="12" cy="13" r="4" /><path d="M8 7h3" /><path d="M15.5 7h.1" /></svg>;
   }
   if (type === "vendor") {
-    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3.5 8.5h6l1.6 2h9.4v7.5h-17z" /><path d="M3.5 8.5v-2h6.5l1.5 2" /></svg>;
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="7" rx="3.5" /><path d="M8 13.5h7" /><circle cx="8" cy="7" r="1.2" /><circle cx="12" cy="5" r="1" /><circle cx="16" cy="7.2" r="1.1" /></svg>;
   }
   if (type === "routes") {
-    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 19V9" /><path d="M10 19V5" /><path d="M15 19v-7" /><path d="M20 19V8" /></svg>;
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="7" cy="17" r="2" /><circle cx="17" cy="17" r="2" /><path d="M7 17h4l2.5-5H17l-2-4h-3" /><path d="M10 12H7.5" /><path d="M14 8h3" /><path d="M5 14.5h2" /></svg>;
   }
   if (type === "support") {
-    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 7.5h14" /><path d="M5 12h10" /><path d="M5 16.5h7" /><path d="M18 15.5v3l-2.5-2" /></svg>;
+    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 14 0" /><path d="M5 12v3a2 2 0 0 0 2 2h1v-5H5Z" /><path d="M19 12v3a2 2 0 0 1-2 2h-1v-5h3Z" /><path d="M9 19h4" /></svg>;
   }
   return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5H5v14h4" /><path d="M12 12h8" /><path d="m17 8 4 4-4 4" /></svg>;
 }
