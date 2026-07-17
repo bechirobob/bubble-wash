@@ -1,35 +1,9 @@
 import { NextResponse } from "next/server.js";
 import type { OrderSummary } from "@/lib/submissions";
+import { securityHeaders } from "./security-headers.js";
 
-export type SecurityHeader = { key: string; value: string };
-
-const cspDirectives = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-  "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "img-src 'self' data: blob: https://images.unsplash.com",
-  "font-src 'self' data: https://fonts.gstatic.com",
-  "connect-src 'self' https://api.paystack.co",
-  "frame-src https://checkout.paystack.com",
-  "upgrade-insecure-requests",
-];
-
-export function securityHeaders(): SecurityHeader[] {
-  return [
-    { key: "Content-Security-Policy", value: cspDirectives.join("; ") },
-    { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains; preload" },
-    { key: "X-Frame-Options", value: "DENY" },
-    { key: "X-Content-Type-Options", value: "nosniff" },
-    { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-    { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(self), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), fullscreen=(self)" },
-    { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-    { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
-  ];
-}
+export { securityHeaders };
+export type SecurityHeader = ReturnType<typeof securityHeaders>[number];
 
 export function clientScopeKey(headers: Headers, scope: string) {
   const trustEdgeHeaders = process.env.BUBBLEWASH_TRUST_EDGE_HEADERS === "true";
@@ -54,15 +28,23 @@ export function sameOriginAllowed(headers: Headers) {
   }
 }
 
-export function staffWriteGuard(headers: Headers) {
+export function sameOriginJsonGuard(headers: Headers, actionLabel = "request") {
   const contentType = headers.get("content-type") ?? "";
+  const contentLength = Number(headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > 64 * 1024) {
+    return NextResponse.json({ ok: false, error: `The ${actionLabel} is too large.` }, { status: 413 });
+  }
   if (!contentType.toLowerCase().includes("application/json")) {
-    return NextResponse.json({ ok: false, error: "Use application/json for this staff action." }, { status: 415 });
+    return NextResponse.json({ ok: false, error: `Use application/json for this ${actionLabel}.` }, { status: 415 });
   }
   if (!sameOriginAllowed(headers)) {
-    return NextResponse.json({ ok: false, error: "Same-origin staff action required." }, { status: 403 });
+    return NextResponse.json({ ok: false, error: `Same-origin ${actionLabel} required.` }, { status: 403 });
   }
   return null;
+}
+
+export function staffWriteGuard(headers: Headers) {
+  return sameOriginJsonGuard(headers, "staff action");
 }
 
 export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env) {
@@ -77,11 +59,38 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
   if (!env.BUBBLEWASH_SESSION_SECRET || env.BUBBLEWASH_SESSION_SECRET.length < 32) {
     errors.push("Set BUBBLEWASH_SESSION_SECRET to a strong 32+ character value in production.");
   }
+  if (!env.BUBBLEWASH_DATABASE_PATH || !env.BUBBLEWASH_DATABASE_PATH.startsWith("/")) {
+    errors.push("Set BUBBLEWASH_DATABASE_PATH to an absolute path on the mounted persistent volume.");
+  }
+  try {
+    const publicUrl = new URL(env.BUBBLEWASH_PUBLIC_URL ?? "");
+    if (publicUrl.protocol !== "https:" || publicUrl.pathname !== "/" || publicUrl.search || publicUrl.hash) {
+      errors.push("Set BUBBLEWASH_PUBLIC_URL to the HTTPS site origin without a path, query, or fragment.");
+    }
+  } catch {
+    errors.push("Set BUBBLEWASH_PUBLIC_URL to the public HTTPS site origin.");
+  }
   for (const role of ["ADMIN", "VENDOR", "DRIVER", "SUPPORT"]) {
     if (!env[`BUBBLEWASH_${role}_EMAIL`]) errors.push(`Set BUBBLEWASH_${role}_EMAIL in production.`);
     if (!env[`BUBBLEWASH_${role}_PASSWORD_HASH`]) errors.push(`Set BUBBLEWASH_${role}_PASSWORD_HASH in production.`);
   }
   return errors;
+}
+
+export function productionReadinessWarnings(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env) {
+  if (env.NODE_ENV !== "production") return [];
+  const warnings: string[] = [];
+  if (!env.PAYSTACK_SECRET_KEY) warnings.push("Online Paystack checkout is unavailable.");
+  if (!env.RESEND_API_KEY || !env.BUBBLEWASH_EMAIL_FROM || !env.BUBBLEWASH_OPERATIONS_EMAIL) {
+    warnings.push("Transactional email is not fully configured.");
+  }
+  if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID || !env.BUBBLEWASH_OPERATIONS_WHATSAPP) {
+    warnings.push("WhatsApp notifications are not fully configured.");
+  }
+  if (env.BUBBLEWASH_TRUST_EDGE_HEADERS !== "true" && env.BUBBLEWASH_TRUST_PROXY_HEADERS !== "true") {
+    warnings.push("Per-client rate limits are using the shared local fallback; configure the trusted proxy mode for the deployment edge.");
+  }
+  return warnings;
 }
 
 function publicCustomerLabel(value: string) {
