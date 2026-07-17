@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clientScopeKey, securityHeaders, staffWriteGuard, productionReadinessErrors, publicTrackingView } from "../src/lib/security.ts";
+import { clientScopeKey, securityHeaders, staffWriteGuard, productionReadinessErrors, productionReadinessWarnings, publicTrackingView } from "../src/lib/security.ts";
 
 function headers(input = {}) {
   return new Headers(input);
@@ -47,8 +47,14 @@ test("productionReadinessErrors fails closed when production demo credentials wo
   assert.ok(errors.some((item) => item.includes("BUBBLEWASH_DISABLE_DEMO_LOGIN=true")));
   assert.ok(errors.some((item) => item.includes("demo login cannot be enabled")));
   assert.ok(errors.some((item) => item.includes("BUBBLEWASH_SESSION_SECRET")));
-  assert.ok(errors.some((item) => item.includes("NEXT_PUBLIC_BUBBLEWASH_WHATSAPP")));
-  assert.ok(errors.some((item) => item.includes("NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL")));
+  assert.equal(errors.some((item) => item.includes("NEXT_PUBLIC_BUBBLEWASH_WHATSAPP")), false);
+  assert.equal(errors.some((item) => item.includes("NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL")), false);
+});
+
+test("review deployments may hide public contacts while readiness reports warnings", () => {
+  const warnings = productionReadinessWarnings({ NODE_ENV: "production" });
+  assert.ok(warnings.some((item) => item.includes("customer WhatsApp link is hidden")));
+  assert.ok(warnings.some((item) => item.includes("customer email link is hidden")));
 });
 
 test("publicTrackingView redacts internal vendor, driver, payment, and contact details", () => {
