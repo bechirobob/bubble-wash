@@ -1,4 +1,4 @@
-export type PlanName = "Essentials" | "Growth" | "Scale" | "Enterprise";
+export type PlanName = "Weekly" | "Twice weekly" | "Three times weekly" | "Contract";
 export type ZoneKey = "core" | "near" | "outer" | "custom";
 export type DiscountKey = "none" | "newPilot" | "prepaidQuarter" | "vendorReferral";
 
@@ -16,12 +16,12 @@ export type Plan = {
 
 export const plans: Plan[] = [
   {
-    name: "Essentials",
-    description: "A steady weekly run for small teams that need clean laundry without daily follow-up.",
+    name: "Weekly",
+    description: "One dependable collection each week for smaller commercial accounts.",
     subscription: 1250,
     pickups: "1 pickup / week",
     monthlyPickups: 4,
-    audience: "Small restaurants, clinics, and serviced units",
+    audience: "Small restaurants, clinics, offices, and serviced units",
     bands: [
       { min: 20, max: 39, rate: 18 },
       { min: 40, max: 59, rate: 16.5 },
@@ -30,12 +30,11 @@ export const plans: Plan[] = [
     features: ["4 scheduled pickups / month", "Basic order updates", "One invoice trail", "Support by WhatsApp", "Assigned laundry partner"],
   },
   {
-    name: "Growth",
-    description: "The practical operating plan for businesses with real weekly volume and repeat pickups.",
+    name: "Twice weekly",
+    description: "Two scheduled collections each week for businesses with regular laundry volume.",
     subscription: 2250,
     pickups: "2 pickups / week",
     monthlyPickups: 8,
-    badge: "Most chosen",
     audience: "Apartments, clinics, restaurants, and busy teams",
     bands: [
       { min: 30, max: 59, rate: 17 },
@@ -45,8 +44,8 @@ export const plans: Plan[] = [
     features: ["8 scheduled pickups / month", "Priority route planning", "Issue escalation", "Packaging notes", "Monthly service summary"],
   },
   {
-    name: "Scale",
-    description: "Built for larger teams with heavier laundry cycles and tighter operating windows.",
+    name: "Three times weekly",
+    description: "Three collections each week for larger sites and tighter operating schedules.",
     subscription: 3250,
     pickups: "3 pickups / week",
     monthlyPickups: 12,
@@ -59,8 +58,8 @@ export const plans: Plan[] = [
     features: ["12 scheduled pickups / month", "Multi-order visibility", "Preferred vendor routing", "Manager support workflow", "Operational reporting"],
   },
   {
-    name: "Enterprise",
-    description: "Contracted laundry operations for high-volume customers, medical groups, and special requirements.",
+    name: "Contract",
+    description: "A contracted service for high-volume sites, medical groups, and special requirements.",
     subscription: 4750,
     pickups: "5–6 pickups / week",
     monthlyPickups: 22,
