@@ -16,7 +16,7 @@ type PaystackVerifyResponse = {
   status: boolean;
   message: string;
   data?: {
-    id?: number;
+    id?: number | string;
     status?: string;
     reference?: string;
     amount?: number;
@@ -107,6 +107,8 @@ export async function initializePaystackCheckout(input: CheckoutInput) {
     authorizationUrl: data.data.authorization_url,
     accessCode: data.data.access_code ?? "",
     amountGhs: input.amountGhs,
+    amountMinor: amount,
+    currency: "GHS" as const,
   };
 }
 
