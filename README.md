@@ -15,6 +15,8 @@ Open `http://localhost:3000`.
 
 Use `.env.production.example` as the deployment template. Do not commit real secrets.
 
+The pilot deployment requires one Node.js 22 application instance and a mounted persistent volume for `BUBBLEWASH_DATABASE_PATH`. Do not run multiple application replicas against the SQLite file. See `docs/PILOT_RUNBOOK.md` for the release gate, smoke test, backups, and rollback.
+
 Required for staff auth hardening:
 
 ```bash
@@ -36,5 +38,16 @@ Payment and notification integrations:
 - `/api/availability` exposes staff-authenticated vendor/driver capacity tables and recent vendor declines.
 - Admin auto-assignment uses SQLite-backed vendor capacity rows and admin-only driver availability rows, decrementing capacity as orders are assigned.
 - Vendors can accept or decline assigned jobs from the shared order board; declines are recorded with reason metadata, release vendor capacity, and move the order into review instead of losing context.
+- `/api/health` is the liveness endpoint. `/api/ready` validates production configuration and database integrity and returns HTTP 503 when the instance must not receive pilot traffic.
+- Payment verification reconciles the provider reference, GHS currency, and amount against the stored checkout, attaches the result to that order, and records each reference/status once.
+
+## Release checks
+
+```bash
+npm ci
+npm run check
+```
+
+The GitHub `Pilot CI` workflow runs the same lint, test, and Webpack production-build gate on pushes and pull requests. Next.js development still uses Turbopack; the release build uses the supported `--webpack` path for deterministic compatibility with the current native SQLite dependency.
 
 Missing provider credentials are reported safely in JSON responses; the app does not fake live sends.
