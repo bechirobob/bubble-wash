@@ -22,7 +22,9 @@ export type OrderSummary = {
   phone: string;
   area: string;
   vendor: string;
+  vendorId: string;
   driver: string;
+  driverId: string;
   routeWindow: string;
   locationNote: string;
   status: string;
@@ -128,6 +130,7 @@ function recordStatus(record: SubmissionRecord) {
   const type = text(record.data.submissionType);
   if (type.includes("booking")) return "Received — dispatch confirmation pending";
   if (type.includes("checkout")) return "Checkout request received — payment confirmation pending";
+  if (type.includes("payment")) return text(record.data.paymentStatus) || "Payment update received";
   if (type.includes("vendor-application")) return "Vendor capacity updated";
   if (type.includes("vendor-job")) return "Vendor update received";
   if (type.includes("qr-bag")) return "Vendor intake checked";
@@ -202,12 +205,14 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
       phone: findLatest("phone") || "",
       area,
       vendor: vendor || "Unassigned",
+      vendorId: findLatest("vendorId"),
       driver,
+      driverId: findLatest("driverId"),
       routeWindow,
       locationNote,
       status,
       workflowStage,
-      payment: findLatest("paymentPreference", "paymentMethod") || "Payment not confirmed",
+      payment: findLatest("paymentStatus", "paymentPreference", "paymentMethod") || "Payment not confirmed",
       priority: findLatest("priority") || "Normal",
       nextStep: "",
       eventCount: chronological.length,
