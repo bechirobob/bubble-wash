@@ -57,7 +57,7 @@ function LoginForm() {
     <main className="loginPage redesignLoginPage">
       <header className="redesignTopbar">
         <Link className="brand" href="/" aria-label="Bubble Wash home">
-          <Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={42} height={42} priority />
+          <span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={42} height={42} priority /></span>
           <span>Bubble Wash Staff</span>
         </Link>
         <nav className="redesignTextNav" aria-label="Staff login links"><Link href="/">Back to site</Link><Link href="/staff">Roles</Link></nav>
