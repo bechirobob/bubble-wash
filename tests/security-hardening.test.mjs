@@ -51,10 +51,18 @@ test("productionReadinessErrors fails closed when production demo credentials wo
   assert.equal(errors.some((item) => item.includes("NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL")), false);
 });
 
-test("review deployments may hide public contacts while readiness reports warnings", () => {
+test("pilot operations may hide optional public contacts while readiness reports warnings", () => {
   const warnings = productionReadinessWarnings({ NODE_ENV: "production" });
-  assert.ok(warnings.some((item) => item.includes("customer WhatsApp link is hidden")));
-  assert.ok(warnings.some((item) => item.includes("customer email link is hidden")));
+  assert.ok(warnings.some((item) => item.includes("public WhatsApp contact link")));
+  assert.ok(warnings.some((item) => item.includes("public email contact link")));
+});
+
+test("production readiness blocks missing operational providers and trusted edge configuration", () => {
+  const errors = productionReadinessErrors({ NODE_ENV: "production", BUBBLEWASH_DISABLE_DEMO_LOGIN: "true" });
+  assert.ok(errors.some((item) => item.includes("PAYSTACK_SECRET_KEY")));
+  assert.ok(errors.some((item) => item.includes("RESEND_API_KEY")));
+  assert.ok(errors.some((item) => item.includes("WHATSAPP_ACCESS_TOKEN")));
+  assert.ok(errors.some((item) => item.includes("trusted client-IP mode")));
 });
 
 test("publicTrackingView redacts internal vendor, driver, payment, and contact details", () => {
