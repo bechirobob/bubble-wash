@@ -26,12 +26,13 @@ npm run hash-password -- "your-strong-password"
 Payment and notification integrations:
 
 - Paystack checkout: `PAYSTACK_SECRET_KEY`, `BUBBLEWASH_PUBLIC_URL`
+- Customer contact links: `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP`, `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL`
 - Email alerts: `RESEND_API_KEY`, `BUBBLEWASH_EMAIL_FROM`, `BUBBLEWASH_OPERATIONS_EMAIL`
 - WhatsApp alerts: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_API_VERSION`, `BUBBLEWASH_OPERATIONS_WHATSAPP`
 
 ## Integration behavior
 
-- `/api/payments/initialize` creates a Paystack checkout in GHS and returns the secure authorization URL.
+- `/api/payments/initialize` accepts a saved booking reference, recalculates that booking on the server, creates a Paystack checkout in GHS, and returns the secure authorization URL. It does not trust a browser-supplied amount.
 - `/api/payments/verify?reference=...` verifies Paystack payment status and appends a payment event to the order timeline.
 - `/api/submit` stores bookings/onboarding/support events and attempts email/WhatsApp notifications when provider credentials are configured.
 - `/api/orders/advance` appends role-scoped workflow events and attempts timeline notifications.
