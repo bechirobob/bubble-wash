@@ -47,6 +47,8 @@ test("productionReadinessErrors fails closed when production demo credentials wo
   assert.ok(errors.some((item) => item.includes("BUBBLEWASH_DISABLE_DEMO_LOGIN=true")));
   assert.ok(errors.some((item) => item.includes("demo login cannot be enabled")));
   assert.ok(errors.some((item) => item.includes("BUBBLEWASH_SESSION_SECRET")));
+  assert.ok(errors.some((item) => item.includes("NEXT_PUBLIC_BUBBLEWASH_WHATSAPP")));
+  assert.ok(errors.some((item) => item.includes("NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL")));
 });
 
 test("publicTrackingView redacts internal vendor, driver, payment, and contact details", () => {
