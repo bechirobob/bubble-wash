@@ -1,0 +1,45 @@
+name: Temporary source export
+
+on:
+  push:
+    branches:
+      - agent/pilot-readiness-2026-07-22
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build private source export
+        run: |
+          python - <<'PY'
+          import base64, json
+          from pathlib import Path
+
+          root = Path(".")
+          ignored = {".git", ".next", "node_modules", "data"}
+          files = {}
+          for path in sorted(root.rglob("*")):
+              if not path.is_file() or any(part in ignored for part in path.parts):
+                  continue
+              if path.as_posix() == "codex-source-export.json":
+                  continue
+              content = path.read_bytes()
+              files[path.as_posix()] = base64.b64encode(content).decode("ascii")
+          Path("codex-source-export.json").write_text(
+              json.dumps({"format": 1, "files": files}, separators=(",", ":")),
+              encoding="utf-8",
+          )
+          PY
+      - name: Commit export to audit branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add codex-source-export.json
+          git commit -m "chore: prepare temporary audit source" || exit 0
+          git push
