@@ -1,6 +1,6 @@
 # Bubble Wash pilot runbook
 
-Target launch: Wednesday, 22 July 2026. This runbook is the go/no-go standard for the controlled Accra pilot. It deliberately keeps the current customer and staff interface unchanged.
+Target launch: Wednesday, 22 July 2026. This runbook is the go/no-go standard for the controlled commercial-laundry pilot in Accra. The customer and staff interfaces use the approved restrained, role-focused design direction.
 
 ## Pilot operating boundary
 
@@ -16,10 +16,11 @@ Use `.env.production.example` as the inventory. Before launch:
 1. Set `BUBBLEWASH_DATABASE_PATH` to the mounted volume, for example `/var/lib/bubblewash/bubblewash.sqlite`.
 2. Generate a unique 32+ character session secret and unique password hashes for all four roles. Set `BUBBLEWASH_DISABLE_DEMO_LOGIN=true`.
 3. Set `BUBBLEWASH_PUBLIC_URL=https://bubblewash.co`.
-4. Configure Paystack with a live Ghana-enabled key. Confirm the merchant account can accept GHS card and mobile-money transactions.
-5. Configure Resend and WhatsApp credentials, sender identity, operations destinations, and approved WhatsApp templates or session-message policy.
-6. Enable exactly one trusted IP-header mode appropriate to the deployment edge. Use `BUBBLEWASH_TRUST_EDGE_HEADERS=true` for a controlled Cloudflare/Fly-style edge header, or `BUBBLEWASH_TRUST_PROXY_HEADERS=true` only when the reverse proxy strips public forwarding headers and writes its own.
-7. Restrict the database directory and environment values to the application service account. Do not place secrets in the repository or client-visible `NEXT_PUBLIC_` variables.
+4. Set the real customer-facing `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP` and `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL` values before the production build. Only these public contact values belong in `NEXT_PUBLIC_` variables.
+5. Configure Paystack with a live Ghana-enabled key. Confirm the merchant account can accept GHS card and mobile-money transactions.
+6. Configure Resend and WhatsApp credentials, sender identity, operations destinations, and approved WhatsApp templates or session-message policy.
+7. Enable exactly one trusted IP-header mode appropriate to the deployment edge. Use `BUBBLEWASH_TRUST_EDGE_HEADERS=true` for a controlled Cloudflare/Fly-style edge header, or `BUBBLEWASH_TRUST_PROXY_HEADERS=true` only when the reverse proxy strips public forwarding headers and writes its own.
+8. Restrict the database directory and secret environment values to the application service account. Do not place credentials or provider keys in the repository or client-visible variables.
 
 ## Release gate
 
@@ -43,7 +44,7 @@ curl --fail --silent --show-error https://bubblewash.co/api/ready
 
 Use a fresh test customer and a low-value live transaction approved by the business owner.
 
-1. Open the homepage on a phone and laptop. Confirm navigation, coverage, quote, booking, tracking, and staff login retain the approved design.
+1. Open the homepage on a phone and laptop. Confirm navigation, coverage, visible add-ons, quote, booking, tracking, payment callback, and staff login retain the approved design.
 2. Submit one pickup booking. Record the Bubble Wash reference and confirm only one order appears in admin.
 3. Confirm customer and operations email/WhatsApp delivery. Provider failures must be visible in server logs and provider dashboards, not exposed to the customer response.
 4. On admin, schedule the pickup and auto-assign the vendor/driver. Double-click once intentionally; the second request must return an already-processed response and must not consume capacity twice.
