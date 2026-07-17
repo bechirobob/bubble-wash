@@ -26,7 +26,7 @@ npm run hash-password -- "your-strong-password"
 Payment and notification integrations:
 
 - Paystack checkout: `PAYSTACK_SECRET_KEY`, `BUBBLEWASH_PUBLIC_URL`
-- Optional review-stage customer contact links: `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP`, `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL`. When unset, the public links are hidden and `/api/ready` reports warnings rather than blocking the review deployment.
+- Optional public customer contact links: `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP`, `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL`. When unset, the links remain hidden without blocking pilot operations. Customer updates still use the contact information submitted with each booking.
 - Email alerts: `RESEND_API_KEY`, `BUBBLEWASH_EMAIL_FROM`, `BUBBLEWASH_OPERATIONS_EMAIL`
 - WhatsApp alerts: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_API_VERSION`, `BUBBLEWASH_OPERATIONS_WHATSAPP`
 
@@ -51,4 +51,4 @@ npm run check
 
 The GitHub `Pilot CI` workflow runs the same lint, test, and Webpack production-build gate on pushes and pull requests. Next.js development still uses Turbopack; the release build uses the supported `--webpack` path for deterministic compatibility with the current native SQLite dependency.
 
-Missing provider credentials are reported safely in JSON responses; the app does not fake live sends.
+Missing payment, notification, staff-authentication, persistent-storage, or trusted-edge configuration blocks `/api/ready`; the app does not fake operational readiness or live sends.
