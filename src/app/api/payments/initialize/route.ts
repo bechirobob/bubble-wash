@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { appendSubmissionRecord } from "@/lib/data-store";
-import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
+import { dispatchSubmissionNotifications } from "@/lib/notifications";
 import { initializePaystackCheckout, parseGhsAmount, validateCheckoutInput } from "@/lib/payments";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
+import { sameOriginJsonGuard } from "@/lib/security";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim().slice(0, 1200) : "";
@@ -22,6 +23,8 @@ async function readCheckoutPayload(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const requestGuardError = sameOriginJsonGuard(request.headers, "checkout request");
+  if (requestGuardError) return requestGuardError;
   if (isRateLimited(clientKey(request.headers, "payments-initialize"), 12, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many checkout attempts. Try again shortly." }, { status: 429 });
   }
@@ -59,23 +62,25 @@ export async function POST(request: NextRequest) {
         paymentMethod: input.paymentMethod,
         paymentProvider: "Paystack",
         paymentReference: checkout.reference,
+        paymentAmountMinor: checkout.amountMinor,
+        paymentCurrency: checkout.currency,
         paymentStatus: "Checkout initialized",
         message: input.message,
       },
     };
 
     appendSubmissionRecord(record);
-    const notifications = await dispatchSubmissionNotifications(record);
+    await dispatchSubmissionNotifications(record);
     return NextResponse.json({
       ok: true,
-      message: `Secure checkout created. ${notificationSummary(notifications)}`,
+      message: "Secure checkout created. Complete payment on the protected Paystack page.",
       id: record.id,
       payment: checkout,
-      notifications,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to initialize checkout.";
+    console.error("Bubble Wash checkout initialization failed", { message });
     const status = message.includes("PAYSTACK_SECRET_KEY") ? 503 : 502;
-    return NextResponse.json({ ok: false, error: message }, { status });
+    return NextResponse.json({ ok: false, error: status === 503 ? "Online checkout is temporarily unavailable." : "Unable to initialize checkout." }, { status });
   }
 }
