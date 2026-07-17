@@ -123,6 +123,19 @@ export function readSubmissionRecords(limit = 200): SubmissionRecord[] {
   }));
 }
 
+export function findSubmissionRecordById(id: string): SubmissionRecord | null {
+  const row = getDatabase()
+    .prepare("SELECT id, created_at, source, data FROM submissions WHERE id = ? LIMIT 1")
+    .get(id) as StoredSubmissionRow | undefined;
+  if (!row) return null;
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    source: row.source ?? undefined,
+    data: JSON.parse(row.data) as Record<string, unknown>,
+  };
+}
+
 export function findCheckoutByPaymentReference(reference: string): SubmissionRecord | null {
   const row = getDatabase()
     .prepare(`
