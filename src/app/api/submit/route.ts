@@ -6,7 +6,7 @@ import { appendSubmissionRecord } from "@/lib/data-store";
 import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
 import { plans, zones } from "@/lib/pricing";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
-import { staffWriteGuard } from "@/lib/security";
+import { sameOriginJsonGuard, staffWriteGuard } from "@/lib/security";
 
 const emailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const maxFieldLength = 1200;
@@ -205,6 +205,8 @@ async function authorizeSubmission(submissionType: string) {
 }
 
 export async function POST(request: NextRequest) {
+  const requestGuardError = sameOriginJsonGuard(request.headers, "submission");
+  if (requestGuardError) return requestGuardError;
   if (isRateLimited(clientKey(request.headers, "submit"), 30, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many requests. Try again shortly." }, { status: 429 });
   }
@@ -259,8 +261,18 @@ export async function POST(request: NextRequest) {
     appendSubmissionRecord(record);
     syncAvailabilityTables(body, submissionType, text(body.name) || text(body.company) || "Bubble Wash team");
     const notifications = await dispatchSubmissionNotifications(record);
+    if (publicSubmissionTypes.has(submissionType)) {
+      return NextResponse.json({
+        ok: true,
+        message: "Thanks — your request was received. Keep this reference for tracking.",
+        id: record.id,
+      });
+    }
     return NextResponse.json({ ok: true, message: `Thanks — your request was received. ${notificationSummary(notifications)}`, id: record.id, notifications });
-  } catch {
+  } catch (error) {
+    console.error("Bubble Wash submission failed", {
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
     return NextResponse.json({ ok: false, error: "Unable to save submission." }, { status: 500 });
   }
 }
