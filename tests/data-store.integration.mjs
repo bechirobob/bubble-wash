@@ -35,6 +35,8 @@ const checkout = {
 };
 store.appendSubmissionRecord(checkout);
 assert.equal(store.findCheckoutByPaymentReference("BW-PAY-TEST")?.id, checkout.id);
+assert.equal(store.findSubmissionRecordById(checkout.id)?.data.paymentReference, "BW-PAY-TEST");
+assert.equal(store.findSubmissionRecordById("BW-MISSING"), null);
 
 const verification = {
   id: "BW-VERIFY-TEST",
@@ -55,4 +57,4 @@ assert.equal(store.appendPaymentVerificationOnce({ ...verificationInput, record:
 assert.equal(store.readSubmissionRecords(10).length, 2);
 assert.equal(store.databaseReadiness(), true);
 
-console.log(JSON.stringify({ ok: true, checks: 13 }));
+console.log(JSON.stringify({ ok: true, checks: 15 }));
