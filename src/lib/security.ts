@@ -75,11 +75,12 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
     if (!env[`BUBBLEWASH_${role}_PASSWORD_HASH`]) errors.push(`Set BUBBLEWASH_${role}_PASSWORD_HASH in production.`);
   }
   const publicWhatsApp = (env.NEXT_PUBLIC_BUBBLEWASH_WHATSAPP ?? "").replace(/\D/g, "");
-  if (publicWhatsApp.length < 8 || publicWhatsApp.length > 15 || /000000/.test(publicWhatsApp)) {
-    errors.push("Set NEXT_PUBLIC_BUBBLEWASH_WHATSAPP to the real international-format customer WhatsApp number.");
+  if (publicWhatsApp && (publicWhatsApp.length < 8 || publicWhatsApp.length > 15 || /000000/.test(publicWhatsApp))) {
+    errors.push("NEXT_PUBLIC_BUBBLEWASH_WHATSAPP must be a real international-format customer WhatsApp number or remain unset.");
   }
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(env.NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL ?? "")) {
-    errors.push("Set NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL to the monitored customer contact email.");
+  const publicEmail = env.NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL ?? "";
+  if (publicEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(publicEmail)) {
+    errors.push("NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL must be a valid customer contact email or remain unset.");
   }
   return errors;
 }
@@ -93,6 +94,12 @@ export function productionReadinessWarnings(env: NodeJS.ProcessEnv | Record<stri
   }
   if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID || !env.BUBBLEWASH_OPERATIONS_WHATSAPP) {
     warnings.push("WhatsApp notifications are not fully configured.");
+  }
+  if (!env.NEXT_PUBLIC_BUBBLEWASH_WHATSAPP) {
+    warnings.push("The customer WhatsApp link is hidden until NEXT_PUBLIC_BUBBLEWASH_WHATSAPP is set before the production build.");
+  }
+  if (!env.NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL) {
+    warnings.push("The customer email link is hidden until NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL is set before the production build.");
   }
   if (env.BUBBLEWASH_TRUST_EDGE_HEADERS !== "true" && env.BUBBLEWASH_TRUST_PROXY_HEADERS !== "true") {
     warnings.push("Per-client rate limits are using the shared local fallback; configure the trusted proxy mode for the deployment edge.");
