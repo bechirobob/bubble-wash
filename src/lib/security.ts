@@ -82,27 +82,29 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
   if (publicEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(publicEmail)) {
     errors.push("NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL must be a valid customer contact email or remain unset.");
   }
+  if (!env.PAYSTACK_SECRET_KEY) errors.push("Set PAYSTACK_SECRET_KEY before pilot operations.");
+  if (!env.RESEND_API_KEY) errors.push("Set RESEND_API_KEY before pilot operations.");
+  if (!env.BUBBLEWASH_EMAIL_FROM) errors.push("Set BUBBLEWASH_EMAIL_FROM before pilot operations.");
+  if (!env.BUBBLEWASH_OPERATIONS_EMAIL) errors.push("Set BUBBLEWASH_OPERATIONS_EMAIL before pilot operations.");
+  if (!env.WHATSAPP_ACCESS_TOKEN) errors.push("Set WHATSAPP_ACCESS_TOKEN before pilot operations.");
+  if (!env.WHATSAPP_PHONE_NUMBER_ID) errors.push("Set WHATSAPP_PHONE_NUMBER_ID before pilot operations.");
+  if (!env.BUBBLEWASH_OPERATIONS_WHATSAPP) errors.push("Set BUBBLEWASH_OPERATIONS_WHATSAPP before pilot operations.");
+  const trustEdgeHeaders = env.BUBBLEWASH_TRUST_EDGE_HEADERS === "true";
+  const trustProxyHeaders = env.BUBBLEWASH_TRUST_PROXY_HEADERS === "true";
+  if (trustEdgeHeaders === trustProxyHeaders) {
+    errors.push("Enable exactly one trusted client-IP mode for the deployment edge.");
+  }
   return errors;
 }
 
 export function productionReadinessWarnings(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env) {
   if (env.NODE_ENV !== "production") return [];
   const warnings: string[] = [];
-  if (!env.PAYSTACK_SECRET_KEY) warnings.push("Online Paystack checkout is unavailable.");
-  if (!env.RESEND_API_KEY || !env.BUBBLEWASH_EMAIL_FROM || !env.BUBBLEWASH_OPERATIONS_EMAIL) {
-    warnings.push("Transactional email is not fully configured.");
-  }
-  if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID || !env.BUBBLEWASH_OPERATIONS_WHATSAPP) {
-    warnings.push("WhatsApp notifications are not fully configured.");
-  }
   if (!env.NEXT_PUBLIC_BUBBLEWASH_WHATSAPP) {
-    warnings.push("The customer WhatsApp link is hidden until NEXT_PUBLIC_BUBBLEWASH_WHATSAPP is set before the production build.");
+    warnings.push("The optional public WhatsApp contact link is intentionally hidden.");
   }
   if (!env.NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL) {
-    warnings.push("The customer email link is hidden until NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL is set before the production build.");
-  }
-  if (env.BUBBLEWASH_TRUST_EDGE_HEADERS !== "true" && env.BUBBLEWASH_TRUST_PROXY_HEADERS !== "true") {
-    warnings.push("Per-client rate limits are using the shared local fallback; configure the trusted proxy mode for the deployment edge.");
+    warnings.push("The optional public email contact link is intentionally hidden.");
   }
   return warnings;
 }
