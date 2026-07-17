@@ -12,5 +12,5 @@ export async function GET() {
     time: new Date().toISOString(),
     readiness: ok ? "ready" : "blocked",
     checks: ok ? [] : readinessErrors,
-  }, { status: 200 });
+  }, { status: 200, headers: { "Cache-Control": "no-store" } });
 }
