@@ -50,10 +50,34 @@ test("vendor decline records reason, releases vendor capacity, and keeps order a
   store.upsertVendorAvailability({ vendorId: "vendor-osu", vendorName: "Osu Vendor", serviceZones: ["Osu"], serviceTypes: ["wash-fold"], capacityRemaining: 0, availabilityStatus: "available", updatedBy: "Admin" });
 
   const decline = store.recordVendorDecline({ orderId: "BW-ORDER-3", vendorId: "vendor-osu", vendorName: "Osu Vendor", reason: "Washer outage", declinedBy: "Vendor Partner" });
+  const duplicate = store.recordVendorDecline({ orderId: "BW-ORDER-3", vendorId: "vendor-osu", vendorName: "Osu Vendor", reason: "Repeated click", declinedBy: "Vendor Partner" });
 
   assert.equal(decline.reason, "Washer outage");
+  assert.equal(duplicate.id, decline.id);
   assert.equal(store.listVendorDeclines("BW-ORDER-3").length, 1);
   assert.equal(store.listVendorAvailability()[0].capacityRemaining, 1);
+});
+
+test("paired capacity reservation rolls back the vendor decrement when the driver is unavailable", () => {
+  store.resetDataStoreForTests();
+  store.upsertVendorAvailability({ vendorId: "vendor-atomic", vendorName: "Atomic Vendor", serviceZones: ["Osu"], serviceTypes: ["wash-fold"], capacityRemaining: 1, availabilityStatus: "available", updatedBy: "Admin" });
+
+  assert.throws(
+    () => store.reserveAssignmentCapacity("vendor-atomic", "missing-driver"),
+    /Driver capacity is no longer available/,
+  );
+  assert.equal(store.listVendorAvailability()[0].capacityRemaining, 1);
+});
+
+test("reassignment excludes a vendor that already declined the order", () => {
+  store.resetDataStoreForTests();
+  store.upsertVendorAvailability({ vendorId: "vendor-declined", vendorName: "Declined Vendor", serviceZones: ["Osu"], serviceTypes: ["wash-fold"], capacityRemaining: 2, availabilityStatus: "available", updatedBy: "Admin" });
+  store.upsertVendorAvailability({ vendorId: "vendor-backup", vendorName: "Backup Vendor", serviceZones: ["Osu"], serviceTypes: ["wash-fold"], capacityRemaining: 1, availabilityStatus: "available", updatedBy: "Admin" });
+  store.recordVendorDecline({ orderId: "BW-REASSIGN-1", vendorId: "vendor-declined", vendorName: "Declined Vendor", reason: "No capacity", declinedBy: "Vendor" });
+
+  const result = assignment.assignOrderFromAvailability({ orderId: "BW-REASSIGN-1", area: "Osu", serviceType: "wash-fold", vendor: "Unassigned", driver: "Unassigned" });
+  assert.equal(result.vendorName, "Backup Vendor");
+  assert.equal(result.vendorId, "vendor-backup");
 });
 
 test("paused vendors and inactive drivers are excluded from assignment", () => {
