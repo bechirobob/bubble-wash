@@ -16,7 +16,7 @@ Use `.env.production.example` as the inventory. Before launch:
 1. Set `BUBBLEWASH_DATABASE_PATH` to the mounted volume, for example `/var/lib/bubblewash/bubblewash.sqlite`.
 2. Generate a unique 32+ character session secret and unique password hashes for all four roles. Set `BUBBLEWASH_DISABLE_DEMO_LOGIN=true`.
 3. Set `BUBBLEWASH_PUBLIC_URL=https://bubblewash.co`.
-4. Set the real customer-facing `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP` and `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL` values before the production build. Only these public contact values belong in `NEXT_PUBLIC_` variables.
+4. For the private review deployment, leave `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP` and `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL` unset; the corresponding links remain hidden and readiness reports warnings. Set both real values before the public pilot production build. Only these public contact values belong in `NEXT_PUBLIC_` variables.
 5. Configure Paystack with a live Ghana-enabled key. Confirm the merchant account can accept GHS card and mobile-money transactions.
 6. Configure Resend and WhatsApp credentials, sender identity, operations destinations, and approved WhatsApp templates or session-message policy.
 7. Enable exactly one trusted IP-header mode appropriate to the deployment edge. Use `BUBBLEWASH_TRUST_EDGE_HEADERS=true` for a controlled Cloudflare/Fly-style edge header, or `BUBBLEWASH_TRUST_PROXY_HEADERS=true` only when the reverse proxy strips public forwarding headers and writes its own.
