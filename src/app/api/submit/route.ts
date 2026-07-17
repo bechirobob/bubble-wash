@@ -238,16 +238,22 @@ export async function POST(request: NextRequest) {
     }
     const authError = await authorizeSubmission(submissionType);
     if (authError) return authError;
+    const staffUser = publicSubmissionTypes.has(submissionType) ? null : await getCurrentStaffUser();
+    if (staffUser) {
+      body.name = staffUser.name;
+      body.email = staffUser.email;
+      body.company = text(body.company) || (staffUser.role === "vendor" ? "Vendor partner" : staffUser.role === "driver" ? "Bubble Wash Route Team" : staffUser.role === "support" ? "Bubble Wash Support" : "Bubble Wash Operations");
+    }
     const validationError = validatePublicPayload(body, submissionType);
     if (validationError) return validationError;
 
-    const required = ["submissionType", "name", "email", "phone", "company"];
+    const required = publicSubmissionTypes.has(submissionType) ? ["submissionType", "name", "email", "phone", "company"] : ["submissionType"];
     for (const field of required) {
       if (!text(body[field])) {
         return NextResponse.json({ ok: false, error: `Missing required field: ${field}` }, { status: 400 });
       }
     }
-    if (!emailPattern.test(text(body.email))) {
+    if (text(body.email) && !emailPattern.test(text(body.email))) {
       return NextResponse.json({ ok: false, error: "Enter a valid email address." }, { status: 400 });
     }
 
