@@ -26,7 +26,7 @@ npm run hash-password -- "your-strong-password"
 Payment and notification integrations:
 
 - Paystack checkout: `PAYSTACK_SECRET_KEY`, `BUBBLEWASH_PUBLIC_URL`
-- Customer contact links: `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP`, `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL`
+- Optional review-stage customer contact links: `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP`, `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL`. When unset, the public links are hidden and `/api/ready` reports warnings rather than blocking the review deployment.
 - Email alerts: `RESEND_API_KEY`, `BUBBLEWASH_EMAIL_FROM`, `BUBBLEWASH_OPERATIONS_EMAIL`
 - WhatsApp alerts: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_API_VERSION`, `BUBBLEWASH_OPERATIONS_WHATSAPP`
 
