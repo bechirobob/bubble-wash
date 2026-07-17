@@ -74,6 +74,13 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
     if (!env[`BUBBLEWASH_${role}_EMAIL`]) errors.push(`Set BUBBLEWASH_${role}_EMAIL in production.`);
     if (!env[`BUBBLEWASH_${role}_PASSWORD_HASH`]) errors.push(`Set BUBBLEWASH_${role}_PASSWORD_HASH in production.`);
   }
+  const publicWhatsApp = (env.NEXT_PUBLIC_BUBBLEWASH_WHATSAPP ?? "").replace(/\D/g, "");
+  if (publicWhatsApp.length < 8 || publicWhatsApp.length > 15 || /000000/.test(publicWhatsApp)) {
+    errors.push("Set NEXT_PUBLIC_BUBBLEWASH_WHATSAPP to the real international-format customer WhatsApp number.");
+  }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(env.NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL ?? "")) {
+    errors.push("Set NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL to the monitored customer contact email.");
+  }
   return errors;
 }
 
