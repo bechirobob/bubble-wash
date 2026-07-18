@@ -38,6 +38,7 @@ type OrderSummary = {
   serviceType: string;
   vendor: string;
   driver: string;
+  driverId?: string;
   routeWindow: string;
   locationNote: string;
   status: string;
@@ -71,6 +72,19 @@ type OrderSummary = {
   };
   stageTimer: { label: string; tone: "ok" | "due" | "breached" | "paused"; elapsedMinutes: number; targetMinutes: number };
   timeline: Array<{ id: string; createdAt: string; type: string; status: string; actor: string; note: string }>;
+};
+
+type DispatchLiveLocation = {
+  driverId: string;
+  driverName: string;
+  orderId: string;
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  capturedAt: string;
+  receivedAt: string;
+  state: "live" | "recent" | "offline";
+  live: boolean;
 };
 
 type SubmitHandler = (event: FormEvent<HTMLFormElement>, type: string) => Promise<void>;
@@ -112,7 +126,7 @@ function rolePromise(role: StaffRole, view: string) {
   const copy: Record<StaffRole, Record<string, { eyebrow: string; title: string; subtitle: string }>> = {
     admin: {
       overview: { eyebrow: "Operations", title: "Today at Bubble Wash", subtitle: "A read-only view of orders, partners, routes, support, and payment follow-up." },
-      dispatch: { eyebrow: "Dispatch", title: "Rider routes and ETAs", subtitle: "Monitor assigned route work, recorded windows, and area-level drive estimates from one calm view." },
+      dispatch: { eyebrow: "Dispatch", title: "Rider routes and ETAs", subtitle: "Monitor assigned route work, recent foreground locations, recorded windows, and drive estimates from one calm view." },
       orders: { eyebrow: "Orders", title: "Order operations", subtitle: "Review one queue, then open an order for its next verified action and full history." },
       people: { eyebrow: "People & onboarding", title: "Partners and staff", subtitle: "Manage vendor capacity, rider coverage, and the operating roster in one clear place." },
       cases: { eyebrow: "Support oversight", title: "Customer cases", subtitle: "Review open cases and follow-up without entering the support team workspace." },
@@ -124,7 +138,7 @@ function rolePromise(role: StaffRole, view: string) {
       activity: { eyebrow: "Vendor history", title: "Saved updates", subtitle: "Review the production updates recorded by this workspace." },
     },
     driver: {
-      route: { eyebrow: "Driver workspace", title: "Today’s assigned stops", subtitle: "Open the next stop for directions, handoff evidence, delivery, or a delay report." },
+      route: { eyebrow: "Driver workspace", title: "Today’s assigned stops", subtitle: "Open the next stop for directions, optional live sharing, handoff evidence, delivery, or a delay report." },
       activity: { eyebrow: "Route history", title: "Saved route updates", subtitle: "Review handoffs and route evidence already recorded." },
     },
     support: {
@@ -803,7 +817,7 @@ function AutomatedOrderActions({ order, role, userName, onSaved }: { order: Orde
       {structuredAction === "driver-mark-picked-up" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Collected bag/item count<input name="pickupBagCount" type="number" min="1" max="10000" step="1" required /></label><label>Customer handoff note<textarea name="operatorNote" placeholder="Who released the order, collection point, and any count or access exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm pickup</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "driver-drop-at-vendor" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Vendor recipient<input name="vendorRecipient" maxLength={160} required /></label><label>Handed-over bag/item count<input name="handoffBagCount" type="number" min="1" max="10000" step="1" required /></label></div><label>Vendor handoff note<textarea name="operatorNote" placeholder="Handoff point, time, recipient confirmation, or discrepancy" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm vendor handoff</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "driver-mark-delivered" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Recipient name<input name="recipientName" maxLength={160} required /></label><label>Returned bag/item count<input name="bagCount" type="number" min="1" max="10000" step="1" required /></label></div><label>Handoff note<textarea name="operatorNote" placeholder="Where and to whom the order was handed over; note any exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm delivery</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
-      {structuredAction === "driver-update-eta" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Estimated arrival time<input name="driverEtaAt" type="time" required /></label><label>Current checkpoint<input name="routeCheckpoint" placeholder="Street, junction, or visible landmark" maxLength={240} required /></label></div><label>Route note (optional)<textarea name="operatorNote" placeholder="Traffic or access detail that dispatch should know" maxLength={240} /></label><p className="formHint">This saves a rider-reported estimate and checkpoint. It does not enable live tracking.</p><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Update ETA &amp; checkpoint</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "driver-update-eta" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Estimated arrival time<input name="driverEtaAt" type="time" required /></label><label>Current checkpoint<input name="routeCheckpoint" placeholder="Street, junction, or visible landmark" maxLength={240} required /></label></div><label>Route note (optional)<textarea name="operatorNote" placeholder="Traffic or access detail that dispatch should know" maxLength={240} /></label><p className="formHint">This saves a manual ETA and checkpoint. Use the separate live location control while travelling.</p><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Update ETA &amp; checkpoint</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "driver-report-delay" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Revised ETA<input name="revisedEta" placeholder="25 minutes or 15:20" maxLength={80} required /></label><label>Current checkpoint<input name="routeCheckpoint" placeholder="Street, junction, or vendor" maxLength={240} required /></label></div><label>Delay reason<textarea name="operatorNote" placeholder="Traffic, customer unavailable, vehicle issue, or handoff delay" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save delay report</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {status && <p className={`status ${failed ? "error" : "success"}`} role="status" aria-live="polite">{status}</p>}
     </div>
@@ -836,6 +850,53 @@ function driverStopGroup(order: OrderSummary) {
 }
 
 const dispatchStages = new Set(["vendor-accepted", "driver-en-route", "picked-up", "ready", "out-for-delivery"]);
+const liveLocationStages = new Set(["driver-en-route", "picked-up", "out-for-delivery"]);
+const liveLocationCadenceMs = 12_000;
+const liveLocationMaximumAgeMs = 2 * 60_000;
+
+function normalizeLiveLocation(value: unknown): DispatchLiveLocation | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const latitude = Number(row.latitude ?? row.lat);
+  const longitude = Number(row.longitude ?? row.lng);
+  const accuracyMeters = Number(row.accuracyMeters ?? row.accuracy ?? 0);
+  const stateValue = String(row.state ?? row.status ?? "").toLowerCase();
+  const explicitLive = row.live === true || row.isLive === true;
+  const state = stateValue === "live" || stateValue === "recent" ? stateValue : explicitLive ? "live" : "offline";
+  const capturedAt = String(row.capturedAt ?? row.recordedAt ?? row.updatedAt ?? "");
+  const receivedAt = String(row.receivedAt ?? row.updatedAt ?? capturedAt);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  return {
+    driverId: String(row.driverId ?? row.riderId ?? row.entityId ?? ""),
+    driverName: String(row.driverName ?? row.riderName ?? ""),
+    orderId: String(row.orderId ?? ""),
+    latitude,
+    longitude,
+    accuracyMeters: Number.isFinite(accuracyMeters) && accuracyMeters >= 0 ? accuracyMeters : 0,
+    capturedAt,
+    receivedAt,
+    state,
+    live: explicitLive || state === "live",
+  };
+}
+
+function normalizeLiveLocations(payload: unknown) {
+  if (!payload || typeof payload !== "object") return [];
+  const data = payload as Record<string, unknown>;
+  const rows = Array.isArray(data.locations) ? data.locations : data.location ? [data.location] : [];
+  return rows.map(normalizeLiveLocation).filter((location): location is DispatchLiveLocation => Boolean(location));
+}
+
+function locationIsRecent(location: DispatchLiveLocation) {
+  if (location.state !== "live" && location.state !== "recent") return false;
+  const timestamp = new Date(location.receivedAt || location.capturedAt).getTime();
+  return Number.isFinite(timestamp) && Date.now() - timestamp <= liveLocationMaximumAgeMs;
+}
+
+function liveLocationForOrder(order: OrderSummary, locations: DispatchLiveLocation[]) {
+  if (!order.driverId) return undefined;
+  return locations.find((location) => location.orderId === order.orderId && location.driverId === order.driverId && locationIsRecent(location));
+}
 
 function routeLegLabel(order: OrderSummary) {
   if (["vendor-accepted", "driver-en-route"].includes(order.workflowStage.key)) return "Customer pickup";
@@ -885,16 +946,18 @@ function dispatchPointPosition(point: { lat: number; lng: number } | undefined, 
   if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return fallback;
   const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
   return {
-    x: clamp(((point.lng + 0.24) / 0.3) * 100, 8, 92),
-    y: clamp(((5.72 - point.lat) / 0.2) * 100, 10, 90),
+    x: clamp(((point.lng + 0.45) / 0.65) * 100, 8, 92),
+    y: clamp(((5.95 - point.lat) / 0.5) * 100, 10, 90),
   };
 }
 
-function DispatchMap({ order, detail = false }: { order: OrderSummary; detail?: boolean }) {
+function DispatchMap({ order, detail = false, liveLocation }: { order: OrderSummary; detail?: boolean; liveLocation?: DispatchLiveLocation }) {
   const hub = dispatchPointPosition(order.route?.hub, { x: 20, y: 78 });
   const pickup = dispatchPointPosition(order.route?.pickup, { x: 74, y: 28 });
+  const rider = liveLocation ? dispatchPointPosition({ lat: liveLocation.latitude, lng: liveLocation.longitude }, { x: 50, y: 50 }) : null;
   const controlY = Math.min(88, Math.max(12, (hub.y + pickup.y) / 2));
-  const eta = dispatchEta(order);
+  const showCustomerRoute = hasCustomerRoutePreview(order);
+  const eta = showCustomerRoute ? dispatchEta(order) : dispatchEtaForLeg(order);
   const checkpoint = order.dispatch?.checkpoint || order.locationNote;
   const distanceText = eta.distance > 0 ? `${eta.distance} km planning distance` : "Distance pending";
   const etaBasis = eta.source === "rider-reported" ? `Reported ${eta.updatedAt ? dispatchFreshness(eta.updatedAt) : "by rider; time unavailable"}` : eta.source === "area-estimate" ? "Based on the service-area planning estimate" : eta.source === "scheduled-window" ? "Scheduled by operations" : "No ETA source recorded";
@@ -904,17 +967,18 @@ function DispatchMap({ order, detail = false }: { order: OrderSummary; detail?: 
       <span className="dispatchStreet dispatchStreetOne" />
       <span className="dispatchStreet dispatchStreetTwo" />
       <span className="dispatchStreet dispatchStreetThree" />
-      <svg className="dispatchRouteLine" viewBox="0 0 100 100" preserveAspectRatio="none" focusable="false">
+      {showCustomerRoute ? <svg className="dispatchRouteLine" viewBox="0 0 100 100" preserveAspectRatio="none" focusable="false">
         <path d={`M ${hub.x} ${hub.y} C ${hub.x} ${controlY}, ${pickup.x} ${controlY}, ${pickup.x} ${pickup.y}`} />
-      </svg>
-      <span className="dispatchMarker dispatchMarkerHub" style={{ left: `${hub.x}%`, top: `${hub.y}%` }}><i>H</i><b>Dispatch hub</b></span>
-      <span className="dispatchMarker dispatchMarkerStop" style={{ left: `${pickup.x}%`, top: `${pickup.y}%` }}><i aria-hidden="true" /><b>{order.area}</b></span>
-      <span className="dispatchMapLabel">Area-level route preview</span>
+      </svg> : null}
+      {showCustomerRoute ? <><span className="dispatchMarker dispatchMarkerHub" style={{ left: `${hub.x}%`, top: `${hub.y}%` }}><i>H</i><b>Dispatch hub</b></span><span className="dispatchMarker dispatchMarkerStop" style={{ left: `${pickup.x}%`, top: `${pickup.y}%` }}><i aria-hidden="true" /><b>{order.area}</b></span></> : null}
+      {rider ? <span className={`dispatchMarker dispatchMarkerRider is-${liveLocation?.state}`} style={{ left: `${rider.x}%`, top: `${rider.y}%` }}><i>R</i><b>{liveLocation?.state === "live" ? "Rider sharing live" : "Recent rider position"}</b></span> : null}
+      <span className="dispatchMapLabel">{rider ? "Rider location" : "Area-level route preview"}</span>
     </div>
     <figcaption id={`dispatch-caption-${order.orderId}`}>
       <div className="dispatchEta"><span>{eta.label}</span><strong>{eta.text}</strong><small>{etaBasis} · {distanceText}</small></div>
       <div><span className="staffFieldLabel">Last reported checkpoint</span><strong>{checkpoint || "No rider checkpoint yet"}</strong><small>{order.dispatch?.checkpointUpdatedAt ? `Reported ${dispatchFreshness(order.dispatch.checkpointUpdatedAt)}` : order.routeWindow && order.routeWindow !== "ETA pending" ? `No rider report · recorded window: ${order.routeWindow}` : "No checkpoint time recorded"}</small></div>
-      <p>Planning view only. It does not show live rider GPS or live traffic.</p>
+      {liveLocation ? <div className="dispatchLiveReading"><span>{liveLocation.state === "live" ? "Live GPS" : "Recent GPS"}</span><strong>{liveLocation.driverName || order.driver}</strong><small>Received {dispatchFreshness(liveLocation.receivedAt || liveLocation.capturedAt)}{liveLocation.accuracyMeters ? ` · ±${Math.round(liveLocation.accuracyMeters)} m accuracy` : ""}</small><a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${liveLocation.latitude},${liveLocation.longitude}`)}`} target="_blank" rel="noopener noreferrer">Open live position</a></div> : null}
+      <p>{liveLocation ? "The rider marker is based on their latest foreground location share. Traffic is not live." : "No live rider location is available. Route and ETA information remains a planning view."}</p>
     </figcaption>
   </figure>;
 }
@@ -929,7 +993,172 @@ function DispatchDestinationUnavailable({ order, detail = false }: { order: Orde
   </div>;
 }
 
-function DispatchBoard({ orders, role, basePath, hasLoaded, lastSyncedAt = "", embedded = false, error = "" }: { orders: OrderSummary[]; role: "admin" | "driver"; basePath: string; hasLoaded: boolean; lastSyncedAt?: string; embedded?: boolean; error?: string }) {
+function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
+  const [isWatching, setIsWatching] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const [message, setMessage] = useState("Live location is off.");
+  const [lastSentAt, setLastSentAt] = useState("");
+  const [accuracyMeters, setAccuracyMeters] = useState(0);
+  const watchIdRef = useRef<number | null>(null);
+  const lastSentMsRef = useRef(0);
+  const pendingUpdateRef = useRef<Promise<void> | null>(null);
+  const sharingRef = useRef(false);
+  const eligible = liveLocationStages.has(order.workflowStage.key);
+
+  async function tellServerSharingStopped(keepalive = false) {
+    const response = await fetch("/api/dispatch/location", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      cache: "no-store",
+      keepalive,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new Error(data.error ?? "Dispatch could not confirm the stop.");
+  }
+
+  function clearLocationWatch() {
+    if (watchIdRef.current !== null && typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+    }
+    watchIdRef.current = null;
+    sharingRef.current = false;
+    setIsWatching(false);
+  }
+
+  useEffect(() => () => {
+    if (watchIdRef.current !== null && navigator.geolocation) navigator.geolocation.clearWatch(watchIdRef.current);
+    const pendingUpdate = pendingUpdateRef.current;
+    if (sharingRef.current || pendingUpdate) {
+      const clearServerLocation = () => fetch("/api/dispatch/location", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+        cache: "no-store",
+        keepalive: true,
+      }).catch(() => undefined);
+      if (pendingUpdate) void pendingUpdate.finally(clearServerLocation);
+      else void clearServerLocation();
+    }
+    watchIdRef.current = null;
+    sharingRef.current = false;
+  }, [order.orderId]);
+
+  useEffect(() => {
+    if (eligible || watchIdRef.current === null) return;
+    const pendingUpdate = pendingUpdateRef.current;
+    navigator.geolocation.clearWatch(watchIdRef.current);
+    watchIdRef.current = null;
+    sharingRef.current = false;
+    setIsWatching(false);
+    setLastSentAt("");
+    setAccuracyMeters(0);
+    setMessage("Live location stopped because this route leg is no longer moving.");
+    const clearServerLocation = () => fetch("/api/dispatch/location", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      cache: "no-store",
+      keepalive: true,
+    }).catch(() => undefined);
+    if (pendingUpdate) void pendingUpdate.finally(clearServerLocation);
+    else void clearServerLocation();
+  }, [eligible]);
+
+  function startSharing() {
+    if (!eligible || isWatching) return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setMessage("This browser does not support location sharing. Use a current mobile browser or report your checkpoint manually.");
+      return;
+    }
+    setMessage("Waiting for location permission and the first GPS reading…");
+    lastSentMsRef.current = 0;
+    const watchId = navigator.geolocation.watchPosition((position) => {
+      const now = Date.now();
+      if (pendingUpdateRef.current || (lastSentMsRef.current && now - lastSentMsRef.current < liveLocationCadenceMs)) return;
+      const latitude = Number(position.coords.latitude);
+      const longitude = Number(position.coords.longitude);
+      const accuracy = Number(position.coords.accuracy);
+      if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+        setMessage("The browser returned an invalid location. Keep this page open and try again.");
+        return;
+      }
+      const update = (async () => {
+        try {
+          const response = await fetch("/api/dispatch/location", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              orderId: order.orderId,
+              latitude,
+              longitude,
+              accuracyMeters: Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : 0,
+              capturedAt: new Date(position.timestamp || now).toISOString(),
+            }),
+            cache: "no-store",
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok || !data.ok) throw new Error(data.error ?? "Dispatch could not receive this location.");
+          if (watchIdRef.current !== watchId) return;
+          lastSentMsRef.current = now;
+          sharingRef.current = true;
+          setLastSentAt(new Date().toISOString());
+          setAccuracyMeters(Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : 0);
+          setMessage("Live location is being shared with dispatch.");
+        } catch (error) {
+          if (watchIdRef.current === watchId) setMessage(error instanceof Error ? `${error.message} The browser will retry while this page stays open.` : "Location could not be sent. The browser will retry while this page stays open.");
+        } finally {
+          pendingUpdateRef.current = null;
+        }
+      })();
+      pendingUpdateRef.current = update;
+    }, (error) => {
+      const pendingUpdate = pendingUpdateRef.current;
+      const hadShared = sharingRef.current;
+      clearLocationWatch();
+      if (pendingUpdate || hadShared) {
+        const clearServerLocation = () => tellServerSharingStopped(true).catch(() => undefined);
+        if (pendingUpdate) void pendingUpdate.finally(clearServerLocation);
+        else void clearServerLocation();
+      }
+      const reason = error.code === 1
+        ? "Location permission was denied. Allow location access for this site in browser settings, then try again."
+        : error.code === 2
+          ? "Your location is currently unavailable. Move somewhere with a clearer signal, then try again."
+          : error.code === 3
+            ? "The location request timed out. Check GPS and mobile data, then try again."
+            : "Live location could not start. Check browser location settings, then try again.";
+      setMessage(reason);
+    }, { enableHighAccuracy: true, maximumAge: 5_000, timeout: 20_000 });
+    watchIdRef.current = watchId;
+    setIsWatching(true);
+  }
+
+  async function stopSharing() {
+    setIsStopping(true);
+    const pendingUpdate = pendingUpdateRef.current;
+    clearLocationWatch();
+    try {
+      if (pendingUpdate) await pendingUpdate.catch(() => undefined);
+      await tellServerSharingStopped();
+      setMessage("Live location is off and the dispatch marker was cleared.");
+    } catch (error) {
+      setMessage(error instanceof Error ? `${error.message} Sharing has stopped on this device and the last position will expire.` : "Sharing has stopped on this device and the last position will expire.");
+    } finally {
+      setIsStopping(false);
+      setLastSentAt("");
+      setAccuracyMeters(0);
+    }
+  }
+
+  return <section className="driverLiveShare" aria-labelledby={`live-share-${order.orderId}`}>
+    <div className="driverLiveShareCopy"><span className="staffFieldLabel">Foreground GPS · {order.orderId}</span><h3 id={`live-share-${order.orderId}`}>Live location sharing</h3><p>{eligible ? "Share your position with Bubble Wash dispatch while traveling on this route leg." : "Live sharing becomes available after this route leg begins moving."}</p></div>
+    <div className="driverLiveShareStatus"><span className={`liveShareIndicator${lastSentAt ? " is-on" : ""}`} aria-hidden="true" /><div><strong>{isWatching ? lastSentAt ? "Sharing on" : "Starting…" : "Sharing off"}</strong><p role="status" aria-live="polite">{message}{lastSentAt ? ` Last sent ${dispatchFreshness(lastSentAt)}${accuracyMeters ? ` with about ±${Math.round(accuracyMeters)} m accuracy` : ""}.` : ""}</p></div></div>
+    <div className="driverLiveShareActions">{isWatching ? <button className="button secondary" type="button" disabled={isStopping} onClick={() => void stopSharing()}>{isStopping ? "Stopping…" : "Stop sharing"}</button> : <button className="button primary" type="button" disabled={!eligible || isStopping} onClick={startSharing}>Start live sharing</button>}<p>Location permission is requested only after you start. Keep this page open during the trip; locking the phone, closing the page, or losing data can pause updates.</p></div>
+  </section>;
+}
+
+function DispatchBoard({ orders, role, basePath, hasLoaded, lastSyncedAt = "", embedded = false, error = "", liveLocations = [], locationError = "" }: { orders: OrderSummary[]; role: "admin" | "driver"; basePath: string; hasLoaded: boolean; lastSyncedAt?: string; embedded?: boolean; error?: string; liveLocations?: DispatchLiveLocation[]; locationError?: string }) {
   const routeOrders = useMemo(() => orders
     .filter((order) => !isClosedOrder(order) && dispatchStages.has(order.workflowStage.key))
     .sort((left, right) => {
@@ -942,29 +1171,35 @@ function DispatchBoard({ orders, role, basePath, hasLoaded, lastSyncedAt = "", e
   const assignedOrders = routeOrders.filter((order) => order.driver !== "Unassigned");
   const activeRiders = new Set(assignedOrders.map((order) => order.driver.trim().toLowerCase()).filter(Boolean));
   const needsRider = routeOrders.length - assignedOrders.length;
+  const selectedLiveLocation = role === "admin" && selectedOrder ? liveLocationForOrder(selectedOrder, liveLocations) : undefined;
+  const liveRiderCount = role === "admin" ? new Set(routeOrders.map((order) => liveLocationForOrder(order, liveLocations)?.driverId || "").filter(Boolean)).size : 0;
   const detailHref = selectedOrder ? `${basePath}${basePath.includes("?") ? "&" : "?"}order=${encodeURIComponent(selectedOrder.orderId)}` : basePath;
 
   return <section className={embedded ? "dispatchEmbedded" : "staffContentSection dispatchSection"} aria-labelledby={`${role}-dispatch-heading`}>
-    <div className="staffSectionHeader dispatchHeader"><div><h2 id={`${role}-dispatch-heading`}>{role === "admin" ? "Current dispatch board" : "Today’s route map"}</h2><p>{role === "admin" ? "Assigned route work and recorded ETAs across the pilot." : "Open a stop to see its route estimate, window, and directions."}</p></div>{lastSyncedAt ? <span className="dispatchSync">Board refreshed {formatMetricTime(lastSyncedAt)}</span> : null}</div>
+    <div className="staffSectionHeader dispatchHeader"><div><h2 id={`${role}-dispatch-heading`}>{role === "admin" ? "Current dispatch board" : "Today’s route map"}</h2><p>{role === "admin" ? "Assigned route work, recorded ETAs, and rider-authorized foreground locations across the pilot." : "Open a stop to see its route estimate, window, directions, and live sharing control."}</p></div>{lastSyncedAt ? <span className="dispatchSync">Board refreshed {formatMetricTime(lastSyncedAt)}</span> : null}</div>
     {!hasLoaded ? <div className="staffEmptyState" role="status"><h3>Loading dispatch…</h3><p>Checking assigned route work and planning estimates.</p></div> : error && !orders.length ? <div className="staffEmptyState" role="alert"><h3>Dispatch unavailable</h3><p>{error} The board will retry automatically.</p></div> : selectedOrder ? <>
-      <div className="dispatchSummaryLine" aria-label="Dispatch summary"><span><strong>{assignedOrders.length}</strong> assigned moves</span><span><strong>{activeRiders.size}</strong> {activeRiders.size === 1 ? "rider" : "riders"} assigned</span><span><strong>{needsRider}</strong> awaiting rider</span></div>
+      {role === "driver" ? <DriverLiveLocationSharing key={selectedOrder.orderId} order={selectedOrder} /> : null}
+      <div className="dispatchSummaryLine" aria-label="Dispatch summary"><span><strong>{assignedOrders.length}</strong> assigned moves</span><span><strong>{activeRiders.size}</strong> {activeRiders.size === 1 ? "rider" : "riders"} assigned</span><span><strong>{needsRider}</strong> awaiting rider</span>{role === "admin" ? <span><strong>{liveRiderCount}</strong> sharing live</span> : null}</div>
       <div className="dispatchBoard">
-        {hasCustomerRoutePreview(selectedOrder) ? <DispatchMap order={selectedOrder} /> : <DispatchDestinationUnavailable order={selectedOrder} />}
+        {hasCustomerRoutePreview(selectedOrder) || selectedLiveLocation ? <DispatchMap order={selectedOrder} liveLocation={selectedLiveLocation} /> : <DispatchDestinationUnavailable order={selectedOrder} />}
         <div className="dispatchStopPanel"><div className="dispatchStopPanelHeader"><h3>Route work</h3><span>Operational order, not an optimized stop sequence</span></div><div className="dispatchStopList" role="list">
           {routeOrders.slice(0, 10).map((order) => { const eta = dispatchEtaForLeg(order); return <div key={order.orderId} role="listitem"><button aria-pressed={order.orderId === selectedOrder.orderId} className="dispatchStopRow" onClick={() => setSelectedId(order.orderId)} type="button"><span><strong>{order.driver === "Unassigned" ? "Rider needed" : order.driver}</strong><small>{order.orderId} · {routeLegLabel(order)}</small></span><span><strong>{eta.text}</strong><small>{eta.label} · {order.area}</small></span></button></div>; })}
         </div>{routeOrders.length > 10 ? <p className="dispatchMore">Showing 10 of {routeOrders.length} route moves.</p> : null}<div className="dispatchStopActions"><Link className="button primary" href={detailHref}>{role === "admin" ? "Open order" : "Open stop"}</Link>{hasHubToCustomerDirections(selectedOrder) && selectedOrder.route.directionsUrl ? <a className="button secondary" href={selectedOrder.route.directionsUrl} target="_blank" rel="noopener noreferrer">Open pickup directions</a> : selectedOrder.workflowStage.key === "out-for-delivery" && selectedOrder.route.googleMapsUrl ? <a className="button secondary" href={selectedOrder.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Open destination area</a> : null}</div></div>
       </div>
-      <p className="dispatchDisclosure">ETAs are rider-reported, scheduled, or calculated from the dispatch hub to a representative service area. This pilot view does not track live location or traffic.</p>
+      <p className="dispatchDisclosure">{role === "admin" ? "A rider marker appears only while that assigned rider is actively sharing a recent foreground GPS position for the selected order. ETAs and traffic are not live." : "ETAs are rider-reported, scheduled, or calculated from the dispatch hub to a representative service area."}</p>
     </> : <div className="staffEmptyState"><h3>No active route work</h3><p>Assigned customer pickups, vendor handoffs, and return deliveries will appear here.</p></div>}
     {error && orders.length ? <p className="status error" role="alert">{error} Showing the last available dispatch view.</p> : null}
+    {role === "admin" && locationError ? <p className="status error" role="alert">{locationError} Live rider markers are hidden until tracking reconnects.</p> : null}
   </section>;
 }
 
 function AdminDispatchWorkspace() {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const [liveLocations, setLiveLocations] = useState<DispatchLiveLocation[]>([]);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState("");
   const [loadError, setLoadError] = useState("");
+  const [locationError, setLocationError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -987,11 +1222,35 @@ function AdminDispatchWorkspace() {
     const interval = window.setInterval(() => void refresh(), 30_000);
     return () => { active = false; window.clearInterval(interval); };
   }, []);
-  return <DispatchBoard orders={orders} role="admin" basePath="/admin?view=orders" hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={loadError} />;
+
+  useEffect(() => {
+    let active = true;
+    async function refreshLocations() {
+      try {
+        const response = await fetch("/api/dispatch/location", { cache: "no-store" });
+        const data = await response.json().catch(() => ({}));
+        if (!active) return;
+        if (!response.ok || !data.ok) throw new Error(data.error ?? "Live rider locations are unavailable.");
+        setLiveLocations(normalizeLiveLocations(data));
+        setLocationError("");
+      } catch (error) {
+        if (!active) return;
+        setLiveLocations([]);
+        setLocationError(error instanceof Error ? error.message : "Live rider locations are unavailable.");
+      }
+    }
+    void refreshLocations();
+    const interval = window.setInterval(() => void refreshLocations(), liveLocationCadenceMs);
+    return () => { active = false; window.clearInterval(interval); };
+  }, []);
+
+  return <DispatchBoard orders={orders} role="admin" basePath="/admin?view=orders" hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={loadError} liveLocations={liveLocations} locationError={locationError} />;
 }
 
 function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { role: StaffRole; userName: string; selectedOrderId?: string; basePath: string }) {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const [liveLocations, setLiveLocations] = useState<DispatchLiveLocation[]>([]);
+  const [locationError, setLocationError] = useState("");
   const [status, setStatus] = useState("Loading shared order board…");
   const [lastSyncedAt, setLastSyncedAt] = useState("");
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -1051,6 +1310,28 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
     };
   }, []);
 
+  useEffect(() => {
+    if (role !== "admin" || !selectedOrderId) return;
+    let active = true;
+    async function refreshLocation() {
+      try {
+        const response = await fetch("/api/dispatch/location", { cache: "no-store" });
+        const data = await response.json().catch(() => ({}));
+        if (!active) return;
+        if (!response.ok || !data.ok) throw new Error(data.error ?? "Live rider location is unavailable.");
+        setLiveLocations(normalizeLiveLocations(data));
+        setLocationError("");
+      } catch (error) {
+        if (!active) return;
+        setLiveLocations([]);
+        setLocationError(error instanceof Error ? error.message : "Live rider location is unavailable.");
+      }
+    }
+    void refreshLocation();
+    const interval = window.setInterval(() => void refreshLocation(), liveLocationCadenceMs);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [role, selectedOrderId]);
+
   const activeOrders = orders.filter((order) => !isClosedOrder(order));
   const focusOrders = activeOrders.filter((order) => orderMatchesRoleFocus(order, role, userName));
   const sourceOrders = queueView === "action" ? focusOrders : queueView === "active" ? activeOrders : orders;
@@ -1060,6 +1341,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
   const stats = queueStats(activeOrders, role, userName);
   const queueHeading = !hasLoaded ? "Loading order queue…" : queueView === "action" ? (stats.focusCount ? `${stats.focusCount} ${stats.focusLabel}` : "No work needs this role right now") : queueView === "active" ? `${activeOrders.length} active orders` : `${orders.length} total orders`;
   const selectedOrder = selectedOrderId ? orders.find((order) => order.orderId.toLowerCase() === selectedOrderId.toLowerCase()) : null;
+  const selectedLiveLocation = role === "admin" && selectedOrder ? liveLocationForOrder(selectedOrder, liveLocations) : undefined;
   const selectedDispatchEta = selectedOrder && dispatchStages.has(selectedOrder.workflowStage.key) ? dispatchEtaForLeg(selectedOrder) : null;
   const canSeePayment = role === "admin" || role === "support";
   const canSeeCollection = role !== "vendor";
@@ -1088,9 +1370,11 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
           </dl>{canSeeCollection ? <CustomerContactActions order={selectedOrder} role={role} /> : null}</section>
 
           <section className="staffDetailSection"><h3>Assignment and route</h3><dl className="staffDefinitionList"><div><dt>Vendor</dt><dd>{selectedOrder.vendor}</dd></div><div><dt>Rider</dt><dd>{selectedOrder.driver}</dd></div><div><dt>Last reported checkpoint</dt><dd>{selectedOrder.dispatch?.checkpoint || selectedOrder.locationNote}</dd></div>{role !== "vendor" && selectedDispatchEta ? <><div><dt>{selectedDispatchEta.label}</dt><dd>{selectedDispatchEta.text}{selectedDispatchEta.source === "rider-reported" && selectedDispatchEta.updatedAt ? ` · reported ${dispatchFreshness(selectedDispatchEta.updatedAt)}` : ""}</dd></div><div><dt>Planning distance</dt><dd>{selectedDispatchEta.distance > 0 ? `${selectedDispatchEta.distance} km from dispatch hub to service area` : "Not available"}</dd></div></> : null}<div><dt>Priority</dt><dd>{selectedOrder.priority}</dd></div></dl>
-            {(role === "admin" || role === "driver") ? hasCustomerRoutePreview(selectedOrder) ? <DispatchMap order={selectedOrder} detail /> : <DispatchDestinationUnavailable order={selectedOrder} detail /> : null}
+            {role === "driver" ? <DriverLiveLocationSharing key={selectedOrder.orderId} order={selectedOrder} /> : null}
+            {(role === "admin" || role === "driver") ? hasCustomerRoutePreview(selectedOrder) || selectedLiveLocation ? <DispatchMap order={selectedOrder} detail liveLocation={selectedLiveLocation} /> : <DispatchDestinationUnavailable order={selectedOrder} detail /> : null}
+            {role === "admin" && locationError ? <p className="status error" role="alert">{locationError} Live rider markers are hidden until tracking reconnects.</p> : null}
             {canSeeCollection && hasCustomerRoutePreview(selectedOrder) && (selectedOrder.route.directionsUrl || selectedOrder.route.googleMapsUrl) ? <div className="staffDetailActions">{hasHubToCustomerDirections(selectedOrder) && selectedOrder.route.directionsUrl ? <a className="button secondary" href={selectedOrder.route.directionsUrl} target="_blank" rel="noopener noreferrer">Open pickup directions</a> : null}{selectedOrder.route.googleMapsUrl ? <a className="button secondary" href={selectedOrder.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Open {selectedOrder.workflowStage.key === "out-for-delivery" ? "destination area" : "service area"}</a> : null}</div> : null}
-            {role === "support" ? <p className="dispatchDetailDisclosure">{hasCustomerRoutePreview(selectedOrder) ? "Planning information only; Bubble Wash does not receive live rider GPS or live traffic in this pilot." : "Vendor location not recorded; route directions are unavailable for this leg. Bubble Wash does not receive live rider GPS in this pilot."}</p> : null}
+            {role === "support" ? <p className="dispatchDetailDisclosure">{hasCustomerRoutePreview(selectedOrder) ? "Planning information only. Support cannot access live rider GPS, and live traffic is not available." : "Vendor location not recorded; route directions are unavailable for this leg. Support cannot access live rider GPS."}</p> : null}
           </section>
 
           {canSeePayment ? <section className="staffDetailSection"><h3>Payment</h3><dl className="staffDefinitionList"><div><dt>Status</dt><dd>{selectedOrder.payment}</dd></div><div><dt>Customer email</dt><dd>{selectedOrder.email || "Not recorded"}</dd></div></dl></section> : null}

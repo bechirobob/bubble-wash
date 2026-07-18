@@ -3,6 +3,7 @@ import "server-only";
 import Database from "better-sqlite3";
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import path from "node:path";
+import { LIVE_LOCATION_EXPIRES_AFTER_MS, type StoredDriverLocation } from "./dispatch-location.ts";
 import type { SubmissionRecord } from "@/lib/submissions";
 
 const dataDir = path.join(process.cwd(), "data");
@@ -32,11 +33,32 @@ type StoredPaymentRow = {
   verified_at: string;
 };
 
+type StoredDriverLocationRow = {
+  driver_id: string;
+  order_id: string;
+  latitude: number;
+  longitude: number;
+  accuracy_meters: number;
+  captured_at: string;
+  received_at: string;
+};
+
 let database: Database.Database | null = null;
 let migratedLegacyJsonl = false;
+let lastLocationCleanupAt = 0;
+
+function purgeExpiredDriverLocations(db: Database.Database, now = Date.now()) {
+  if (now - lastLocationCleanupAt < 60_000) return;
+  db.prepare("DELETE FROM driver_live_locations WHERE captured_at < ?")
+    .run(new Date(now - LIVE_LOCATION_EXPIRES_AFTER_MS).toISOString());
+  lastLocationCleanupAt = now;
+}
 
 function getDatabase() {
-  if (database) return database;
+  if (database) {
+    purgeExpiredDriverLocations(database);
+    return database;
+  }
   mkdirSync(path.dirname(databasePath), { recursive: true });
   const db = new Database(databasePath);
   db.pragma("journal_mode = WAL");
@@ -79,8 +101,21 @@ function getDatabase() {
       PRIMARY KEY (reference, status)
     );
     CREATE INDEX IF NOT EXISTS idx_payment_verifications_verified_at ON payment_verifications(verified_at DESC);
+
+    CREATE TABLE IF NOT EXISTS driver_live_locations (
+      driver_id TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL,
+      latitude REAL NOT NULL CHECK (latitude >= 5.45 AND latitude <= 5.95),
+      longitude REAL NOT NULL CHECK (longitude >= -0.45 AND longitude <= 0.2),
+      accuracy_meters REAL NOT NULL CHECK (accuracy_meters > 0 AND accuracy_meters <= 1000),
+      captured_at TEXT NOT NULL,
+      received_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_driver_live_locations_order_id ON driver_live_locations(order_id COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_driver_live_locations_captured_at ON driver_live_locations(captured_at);
   `);
   database = db;
+  purgeExpiredDriverLocations(db);
   migrateLegacySubmissions(db);
   return db;
 }
@@ -262,10 +297,69 @@ export function consumeRateLimit(key: string, limit: number, windowMs: number) {
   };
 }
 
+function driverLocationFromRow(row: StoredDriverLocationRow): StoredDriverLocation {
+  return {
+    driverId: row.driver_id,
+    orderId: row.order_id,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    accuracyMeters: row.accuracy_meters,
+    capturedAt: row.captured_at,
+    receivedAt: row.received_at,
+  };
+}
+
+export function upsertDriverLiveLocation(location: StoredDriverLocation) {
+  const result = getDatabase().prepare(`
+    INSERT INTO driver_live_locations
+      (driver_id, order_id, latitude, longitude, accuracy_meters, captured_at, received_at)
+    VALUES
+      (@driverId, @orderId, @latitude, @longitude, @accuracyMeters, @capturedAt, @receivedAt)
+    ON CONFLICT(driver_id) DO UPDATE SET
+      order_id = excluded.order_id,
+      latitude = excluded.latitude,
+      longitude = excluded.longitude,
+      accuracy_meters = excluded.accuracy_meters,
+      captured_at = excluded.captured_at,
+      received_at = excluded.received_at
+    WHERE driver_live_locations.captured_at < excluded.captured_at
+  `).run(location);
+  return result.changes === 1;
+}
+
+export function readDriverLiveLocation(driverId: string): StoredDriverLocation | null {
+  const row = getDatabase().prepare(`
+    SELECT driver_id, order_id, latitude, longitude, accuracy_meters, captured_at, received_at
+    FROM driver_live_locations
+    WHERE driver_id = ? COLLATE NOCASE
+    LIMIT 1
+  `).get(driverId.trim()) as StoredDriverLocationRow | undefined;
+  return row ? driverLocationFromRow(row) : null;
+}
+
+export function readDriverLiveLocations(): StoredDriverLocation[] {
+  const rows = getDatabase().prepare(`
+    SELECT driver_id, order_id, latitude, longitude, accuracy_meters, captured_at, received_at
+    FROM driver_live_locations
+    ORDER BY captured_at DESC
+  `).all() as StoredDriverLocationRow[];
+  return rows.map(driverLocationFromRow);
+}
+
+export function deleteDriverLiveLocation(driverId: string) {
+  return getDatabase().prepare("DELETE FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE").run(driverId.trim()).changes === 1;
+}
+
+export function deleteExpiredDriverLiveLocations(capturedBefore: string) {
+  return getDatabase().prepare("DELETE FROM driver_live_locations WHERE captured_at < ?").run(capturedBefore).changes;
+}
+
 export function resetDataStoreForTests() {
   if (!database) return;
   database.prepare("DELETE FROM submissions").run();
   database.prepare("DELETE FROM rate_limits").run();
   database.prepare("DELETE FROM workflow_action_claims").run();
   database.prepare("DELETE FROM payment_verifications").run();
+  database.prepare("DELETE FROM driver_live_locations").run();
+  lastLocationCleanupAt = 0;
 }

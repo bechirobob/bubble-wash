@@ -603,6 +603,17 @@ dd { margin: 4px 0 0; color: var(--muted); }
   line-height: 1;
 }
 .dispatchMarkerHub i { width: 26px; height: 26px; border-radius: 4px; }
+.dispatchMarkerRider { z-index: 4; }
+.dispatchMarkerRider i {
+  width: 30px;
+  height: 30px;
+  border-width: 3px;
+  background: var(--brand);
+  box-shadow: 0 0 0 3px rgba(13, 111, 87, .18), 0 0 0 1px rgba(12, 43, 38, .26);
+  font-size: .72rem;
+  font-weight: 800;
+}
+.dispatchMarkerRider.is-recent i { background: #4f6760; box-shadow: 0 0 0 3px rgba(79, 103, 96, .14), 0 0 0 1px rgba(12, 43, 38, .2); }
 .dispatchMarker b {
   max-width: 150px;
   padding: 4px 7px;
@@ -644,6 +655,31 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .dispatchMap figcaption strong { margin: 2px 0; overflow-wrap: anywhere; }
 .dispatchMap figcaption p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: .79rem; }
 .dispatchEta strong { color: var(--brand-dark); font-size: 1.3rem; line-height: 1.2; }
+.dispatchLiveReading {
+  grid-column: 1 / -1;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.dispatchLiveReading strong { color: var(--brand-dark); }
+.dispatchLiveReading a { width: fit-content; margin-top: 7px; display: inline-block; font-size: .8rem; font-weight: 700; }
+.driverLiveShare {
+  margin: 0 0 22px;
+  padding: 20px 0;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  display: grid;
+  grid-template-columns: minmax(180px, .8fr) minmax(250px, 1.15fr) minmax(220px, .9fr);
+  align-items: center;
+  gap: 24px;
+}
+.driverLiveShare h3 { margin: 3px 0 5px; }
+.driverLiveShare p { margin: 0; color: var(--muted); font-size: .84rem !important; }
+.driverLiveShareStatus { min-width: 0; display: grid; grid-template-columns: 12px minmax(0, 1fr); align-items: start; gap: 10px; }
+.driverLiveShareStatus strong { display: block; margin-bottom: 3px; }
+.liveShareIndicator { width: 10px; height: 10px; margin-top: 5px; border: 1px solid #81908c; border-radius: 50%; background: var(--surface); }
+.liveShareIndicator.is-on { border-color: var(--brand); background: var(--brand); }
+.driverLiveShareActions { display: grid; justify-items: start; gap: 8px; }
+.driverLiveShareActions .button { min-width: 154px; }
 .dispatchStopPanel {
   min-width: 0;
   border-left: 1px solid var(--line-strong);
@@ -1032,6 +1068,9 @@ dd { margin: 4px 0 0; color: var(--muted); }
   .dispatchDestinationUnavailable { min-height: 290px; padding: 28px 20px; }
   .dispatchDestinationUnavailable dl div { grid-template-columns: 1fr; gap: 3px; }
   .dispatchDestinationUnavailableDetail { min-height: 0; }
+  .driverLiveShare { grid-template-columns: 1fr; gap: 16px; }
+  .driverLiveShareActions { justify-items: stretch; }
+  .driverLiveShareActions .button { width: 100%; }
 
   .staffOrderListHeader,
   .staffCaseListHeader { display: none; }

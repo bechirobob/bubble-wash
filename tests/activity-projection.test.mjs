@@ -33,6 +33,12 @@ const source = {
     paymentAmount: "GHS 250.00",
     googleMapsUrl: "https://maps.example/customer",
     directionsUrl: "https://maps.example/directions",
+    latitude: 5.55602,
+    longitude: -0.18291,
+    accuracyMeters: 9,
+    capturedAt: "2026-07-18T12:30:00.000Z",
+    receivedAt: "2026-07-18T12:30:01.000Z",
+    liveLocation: { latitude: 5.55602, longitude: -0.18291 },
     message: "Customer ama@example.com on 0550000000 paid by Bank transfer at 14 Oxford Street, Osu.",
     unknownInternalField: "must not cross the API boundary",
     serviceZones: ["Osu", "Labone"],
@@ -49,6 +55,12 @@ const forbiddenKeys = [
   "paymentAmount",
   "googleMapsUrl",
   "directionsUrl",
+  "latitude",
+  "longitude",
+  "accuracyMeters",
+  "capturedAt",
+  "receivedAt",
+  "liveLocation",
   "unknownInternalField",
 ];
 
@@ -112,6 +124,10 @@ test("support retains support contact and case context but drops unrelated field
   assert.equal(projected.data.message, source.data.message);
   assert.equal(Object.hasOwn(projected.data, "pickupAddress"), false);
   assert.equal(Object.hasOwn(projected.data, "googleMapsUrl"), false);
+  assert.equal(Object.hasOwn(projected.data, "latitude"), false);
+  assert.equal(Object.hasOwn(projected.data, "longitude"), false);
+  assert.equal(Object.hasOwn(projected.data, "accuracyMeters"), false);
+  assert.equal(Object.hasOwn(projected.data, "liveLocation"), false);
   assert.equal(Object.hasOwn(projected.data, "unknownInternalField"), false);
 });
 

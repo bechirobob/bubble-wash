@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server.js";
 import type { OrderSummary } from "@/lib/submissions";
-import { securityHeaders } from "./security-headers.js";
+import { privateNoStoreHeaders, securityHeaders } from "./security-headers.js";
 
-export { securityHeaders };
+export { privateNoStoreHeaders, securityHeaders };
 export type SecurityHeader = ReturnType<typeof securityHeaders>[number];
 
 export function clientScopeKey(headers: Headers, scope: string) {

@@ -10,7 +10,7 @@
     "lint": "eslint",
     "test": "npm run test:unit && npm run test:data",
     "test:unit": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/*.test.mjs",
-    "test:data": "node --conditions=react-server --experimental-strip-types tests/data-store.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/submissions.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth.integration.mjs",
+    "test:data": "node --conditions=react-server --experimental-strip-types tests/data-store.integration.mjs && node --conditions=react-server --experimental-strip-types tests/dispatch-location-store.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/submissions.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth.integration.mjs",
     "check": "npm run lint && npm test && npm run build",
     "hash-password": "node scripts/hash-password.mjs",
     "db:backup": "node scripts/backup-database.mjs"

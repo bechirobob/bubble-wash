@@ -1,4 +1,4 @@
-import { securityHeaders } from "./src/lib/security-headers.js";
+import { privateNoStoreHeaders, securityHeaders } from "./src/lib/security-headers.js";
 
 const appHtmlHeaders = [
   ...securityHeaders(),
@@ -46,6 +46,10 @@ const nextConfig = {
       {
         source: "/support",
         headers: appHtmlHeaders,
+      },
+      {
+        source: "/api/dispatch/location",
+        headers: privateNoStoreHeaders(),
       },
       {
         source: "/(.*)",

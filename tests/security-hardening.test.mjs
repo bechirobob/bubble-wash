@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clientScopeKey, securityHeaders, staffWriteGuard, productionReadinessErrors, productionReadinessWarnings, publicTrackingView } from "../src/lib/security.ts";
+import nextConfig from "../next.config.mjs";
+import { clientScopeKey, privateNoStoreHeaders, securityHeaders, staffWriteGuard, productionReadinessErrors, productionReadinessWarnings, publicTrackingView } from "../src/lib/security.ts";
 
 function headers(input = {}) {
   return new Headers(input);
@@ -16,8 +17,28 @@ test("securityHeaders includes OWASP baseline browser protections without powere
   assert.match(map.get("strict-transport-security") ?? "", /max-age=31536000/);
   assert.equal(map.get("x-content-type-options"), "nosniff");
   assert.equal(map.get("referrer-policy"), "strict-origin-when-cross-origin");
-  assert.ok(map.has("permissions-policy"));
+  assert.match(map.get("permissions-policy") ?? "", /(?:^|,\s*)geolocation=\(self\)(?:,|$)/);
+  assert.doesNotMatch(map.get("permissions-policy") ?? "", /geolocation=\(\*\)/);
   assert.equal(map.has("x-powered-by"), false);
+});
+
+test("live dispatch location responses are explicitly private and non-cacheable", () => {
+  const map = new Map(privateNoStoreHeaders().map((item) => [item.key.toLowerCase(), item.value]));
+  const cacheControl = map.get("cache-control") ?? "";
+  assert.match(cacheControl, /(?:^|,\s*)private(?:,|$)/);
+  assert.match(cacheControl, /(?:^|,\s*)no-store(?:,|$)/);
+  assert.match(cacheControl, /(?:^|,\s*)max-age=0(?:,|$)/);
+  assert.equal(map.get("pragma"), "no-cache");
+});
+
+test("live location cache protection is scoped to the dispatch location endpoint", async () => {
+  const rules = await nextConfig.headers();
+  const liveLocationRule = rules.find((rule) => rule.source === "/api/dispatch/location");
+  assert.ok(liveLocationRule, "dispatch location must have an explicit response-header rule");
+  const map = new Map(liveLocationRule.headers.map((item) => [item.key.toLowerCase(), item.value]));
+  assert.match(map.get("cache-control") ?? "", /(?:^|,\s*)private(?:,|$)/);
+  assert.match(map.get("cache-control") ?? "", /(?:^|,\s*)no-store(?:,|$)/);
+  assert.equal(rules.some((rule) => rule.source === "/api/:path*" && rule.headers.some((item) => item.key.toLowerCase() === "cache-control")), false);
 });
 
 test("clientKey does not trust spoofable forwarding headers unless Cloudflare/Render supplies a controlled IP header", () => {
@@ -128,6 +149,12 @@ test("publicTrackingView redacts internal vendor, driver, payment, and contact d
     driver: "Kofi",
     routeWindow: "2 PM - 4 PM",
     locationNote: "Door code 1234",
+    latitude: 5.55602,
+    longitude: -0.18291,
+    accuracyMeters: 9,
+    capturedAt: "2026-07-18T12:30:00.000Z",
+    receivedAt: "2026-07-18T12:30:01.000Z",
+    live: true,
     eventCount: 3,
     route: { googleMapsUrl: "https://maps.example", directionsUrl: "https://maps.example/dir", zoneLabel: "Core", zoneNote: "Core route" },
   });
@@ -138,5 +165,11 @@ test("publicTrackingView redacts internal vendor, driver, payment, and contact d
   assert.equal("vendor" in view, false);
   assert.equal("driver" in view, false);
   assert.equal("locationNote" in view, false);
+  assert.equal("latitude" in view, false);
+  assert.equal("longitude" in view, false);
+  assert.equal("accuracyMeters" in view, false);
+  assert.equal("capturedAt" in view, false);
+  assert.equal("receivedAt" in view, false);
+  assert.equal("live" in view, false);
   assert.equal(view.route?.googleMapsUrl, undefined);
 });
