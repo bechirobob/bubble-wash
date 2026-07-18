@@ -26,10 +26,13 @@ type SubmissionRecord = {
 type OrderSummary = {
   orderId: string;
   updatedAt: string;
+  activityUpdatedAt: string;
   customer: string;
   email: string;
   phone: string;
   area: string;
+  pickupAddress: string;
+  landmark: string;
   vendor: string;
   driver: string;
   routeWindow: string;
@@ -56,6 +59,20 @@ type AutomationAction = ReturnType<typeof automationActionsForOrder>[number];
 
 type QueueStats = { focusLabel: string; focusCount: number; automationCount: number; riskCount: number; capacityLabel: string };
 type PortalLink = { href: string; label: string; icon: "admin" | "vendor" | "routes" | "support" };
+type QueueView = "action" | "active" | "all";
+type SupportCase = {
+  ticketId: string;
+  orderId: string;
+  root: SubmissionRecord;
+  latest: SubmissionRecord;
+  events: SubmissionRecord[];
+  status: string;
+  priority: string;
+};
+
+function noticeClass(message: string) {
+  return `status ${/(unable|failed|invalid|missing|required|not allowed|not available|too many)/i.test(message) ? "error" : "success"}`;
+}
 
 function rolePromise(role: StaffRole) {
   if (role === "admin") return { eyebrow: "Operations desk", title: "Admin queue", subtitle: "Review active jobs, reassign work, and resolve exceptions before the customer has to chase." };
@@ -66,6 +83,39 @@ function rolePromise(role: StaffRole) {
 
 function isRiskOrder(order: OrderSummary) {
   return order.workflowStage.key === "exception" || order.stageTimer.tone === "breached" || order.priority === "Urgent";
+}
+
+function isClosedOrder(order: OrderSummary) {
+  return order.workflowStage.key === "closed";
+}
+
+function supportCases(records: SubmissionRecord[]) {
+  const roots = records.filter((record) => activityType(record) === "support-ticket");
+  const actions = records.filter((record) => activityType(record) === "support-ticket-action");
+  return roots.map((root): SupportCase => {
+    const ticketId = activityValue(root, "ticketId") || root.id;
+    const orderId = activityValue(root, "orderId");
+    const related = actions.filter((record) => {
+      const actionTicketId = activityValue(record, "ticketId");
+      return actionTicketId === ticketId || (!actionTicketId && activityValue(record, "orderId") === root.id);
+    });
+    const events = [root, ...related].sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
+    const latest = events[events.length - 1];
+    return {
+      ticketId,
+      orderId,
+      root,
+      latest,
+      events,
+      status: activityValue(latest, "ticketStatus") || activityValue(root, "ticketStatus") || "Open",
+      priority: activityValue(latest, "priority") || activityValue(root, "priority") || "Normal",
+    };
+  }).sort((left, right) => {
+    const leftClosed = /closed|resolved/i.test(left.status);
+    const rightClosed = /closed|resolved/i.test(right.status);
+    if (leftClosed !== rightClosed) return leftClosed ? 1 : -1;
+    return new Date(right.latest.createdAt).getTime() - new Date(left.latest.createdAt).getTime();
+  });
 }
 
 function orderMatchesRoleFocus(order: OrderSummary, role: StaffRole, userName: string) {
@@ -303,7 +353,7 @@ function StageCountdown({ order }: { order: OrderSummary }) {
   }, []);
 
   if (!order.stageTimer.targetMinutes) {
-    return <div className="slaPill timer-paused" aria-label="Phase timer complete"><span>Phase timer</span><b>Complete</b><small>{workflowPhaseLabel(order.workflowStage.key)} · {order.priority}</small></div>;
+    return <div className="stageClock timer-paused" aria-label="Phase timer complete"><span>Phase timer</span><b>Complete</b><small>{workflowPhaseLabel(order.workflowStage.key)} · {order.priority}</small></div>;
   }
 
   const startedAt = new Date(order.updatedAt).getTime();
@@ -316,7 +366,7 @@ function StageCountdown({ order }: { order: OrderSummary }) {
   const duration = formatDuration(Math.abs(remainingSeconds));
 
   return (
-    <div className={`slaPill countdown timer-${tone}`} aria-label={`${label} ${duration}`}>
+    <div className={`stageClock countdown timer-${tone}`} aria-label={`${label} ${duration}`}>
       <span>{label === "SLA" ? "Phase timer" : label}</span>
       <b>{duration}</b>
       <small>{workflowPhaseLabel(order.workflowStage.key)} · {order.priority}</small>
@@ -629,8 +679,8 @@ function RecentActivity({ filter }: { filter?: string }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleRecords.length ? visibleRecords.map((record) => <tr className={`${selectedId === record.id ? "is-selected" : ""} ${freshIds.includes(record.id) ? "is-new" : ""}`} key={record.id} onClick={() => setSelectedId(record.id)}>
-                    <td data-label="Reference"><strong>{record.id}</strong></td>
+                  {visibleRecords.length ? visibleRecords.map((record) => <tr className={`${selectedId === record.id ? "is-selected" : ""} ${freshIds.includes(record.id) ? "is-new" : ""}`} key={record.id}>
+                    <td data-label="Reference"><button className="activityRowButton" type="button" aria-pressed={selectedId === record.id} onClick={() => setSelectedId(record.id)}><strong>{record.id}</strong><span>View details</span></button></td>
                     <td data-label="Type">{activityTypeLabel(activityType(record))}</td>
                     <td data-label="Subject">{activitySubject(record)}</td>
                     <td data-label="What changed">{changeSummaries.get(record.id)}</td>
@@ -683,49 +733,82 @@ function RecentActivity({ filter }: { filter?: string }) {
 function AutomatedOrderActions({ order, role, userName, onSaved }: { order: OrderSummary; role: StaffRole; userName: string; onSaved: () => Promise<void> }) {
   const [status, setStatus] = useState("");
   const [pendingLabel, setPendingLabel] = useState("");
+  const [failed, setFailed] = useState(false);
+  const [declineOpen, setDeclineOpen] = useState(false);
+  const [declineReason, setDeclineReason] = useState("");
+  const [structuredAction, setStructuredAction] = useState("");
   const actions = automationActionsForOrder(order, role, userName);
 
-  async function run(action: AutomationAction) {
+  async function run(action: AutomationAction, overrides: Record<string, string> = {}) {
+    if (action.key === "admin-close-order") {
+      const confirmed = window.confirm(`${action.label} for ${order.orderId}? This will be written to the permanent order timeline.`);
+      if (!confirmed) return;
+    }
     setPendingLabel(action.label);
     setStatus(`${action.label}…`);
-    const payload: Record<string, string> = { orderId: order.orderId, actionKey: action.key };
-    if (action.key === "vendor-decline-job") {
-      const reason = window.prompt("Why is this job being declined? Admin needs the reason for reassignment.");
-      if (!reason?.trim()) {
-        setStatus("Decline cancelled — reason required for reassignment.");
-        setPendingLabel("");
-        return;
-      }
-      payload.reason = reason.trim();
-    }
+    setFailed(false);
+    const payload: Record<string, string> = { orderId: order.orderId, actionKey: action.key, ...overrides };
     try {
       const data = await postJSON<{ ok: boolean; message: string; id: string; nextStatus: string }>("/api/orders/advance", payload);
       setStatus(`Saved ${data.id} → ${data.nextStatus}`);
+      setDeclineOpen(false);
+      setDeclineReason("");
+      setStructuredAction("");
       await onSaved();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Unable to run automation.");
+      setFailed(true);
+      setStatus(error instanceof Error ? error.message : "Unable to complete workflow action.");
     } finally {
       setPendingLabel("");
     }
   }
 
+  function submitStructured(event: FormEvent<HTMLFormElement>, actionKey: string) {
+    event.preventDefault();
+    const action = actions.find((item) => item.key === actionKey);
+    if (!action) return;
+    const overrides = Object.fromEntries(Array.from(new FormData(event.currentTarget).entries()).map(([key, value]) => [key, String(value)]));
+    void run(action, overrides);
+  }
+
   return (
     <div className="automationPanel">
       <div className="automationSummary">
-        <b>{actions.length ? "Action rail" : "No action"}</b>
+        <b>{actions.length ? "Available actions" : "No action"}</b>
         <span>{actions.length ? `${actions.length} available` : "Waiting"}</span>
       </div>
       <div className="automationActions">
-        {actions.length ? actions.map((action, index) => <button className={`button ${index === 0 ? "primary" : "secondary"}`} disabled={Boolean(pendingLabel)} key={action.label} onClick={() => run(action)} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>) : <span className="status">Waiting</span>}
+        {actions.length ? actions.map((action, index) => <button className={`button ${index === 0 ? "primary" : "secondary"}`} disabled={Boolean(pendingLabel)} key={action.label} onClick={() => action.key === "vendor-decline-job" ? setDeclineOpen(true) : ["admin-schedule-pickup", "support-log-customer-contact", "admin-confirm-bank-transfer", "admin-approve-invoice", "vendor-log-intake", "vendor-mark-ready", "driver-mark-picked-up", "driver-drop-at-vendor", "driver-mark-delivered", "driver-report-delay"].includes(action.key) ? setStructuredAction(action.key) : void run(action)} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>) : <span className="status">Waiting</span>}
       </div>
-      {status && <p className="status success" role="status" aria-live="polite">{status}</p>}
+      {declineOpen ? <form className="declineReasonForm" onSubmit={(event) => { event.preventDefault(); const decline = actions.find((action) => action.key === "vendor-decline-job"); if (decline && declineReason.trim()) void run(decline, { reason: declineReason.trim() }); }}><label>Reason for admin reassignment<textarea value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} maxLength={300} placeholder="Capacity, machine issue, service mismatch, or timing conflict" required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={!declineReason.trim() || Boolean(pendingLabel)}>Confirm decline</button><button className="button secondary" type="button" onClick={() => { setDeclineOpen(false); setDeclineReason(""); }}>Cancel</button></div></form> : null}
+      {structuredAction === "admin-schedule-pickup" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Confirmed pickup window<input name="confirmedPickupWindow" placeholder="Tuesday, 10:00–12:00" maxLength={120} required /></label><label>Scheduling note<textarea name="operatorNote" placeholder="Who confirmed the window and any access or collection instructions" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save pickup window</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "support-log-customer-contact" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Contact channel<select name="contactChannel" required><option>Phone call</option><option>Email</option></select></label><label>Outcome<select name="contactOutcome" required><option>Reached customer</option><option>No answer</option><option>Message left</option><option>Email sent</option><option>Follow-up required</option></select></label></div><label>Next follow-up<input name="nextFollowUpAt" type="datetime-local" required /></label><label>Operator note<textarea name="operatorNote" placeholder="What was discussed, promised, or left unresolved" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save contact log</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {["admin-confirm-bank-transfer", "admin-approve-invoice"].includes(structuredAction) ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>{structuredAction === "admin-approve-invoice" ? "Invoice number" : "Transfer reference"}<input name="paymentReference" maxLength={120} required /></label><label>Amount (GHS)<input name="paymentAmount" type="number" min="0.01" max="250000" step="0.01" inputMode="decimal" required /></label></div><label>{structuredAction === "admin-approve-invoice" ? "Approval date" : "Received date"}<input name="paymentReceivedAt" type="date" required /></label><label>Reconciliation note<textarea name="operatorNote" placeholder="Account checked, approver, payer name, or exception reviewed" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>{structuredAction === "admin-approve-invoice" ? "Save invoice approval" : "Confirm bank transfer"}</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "vendor-log-intake" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Bag tag<input name="bagTag" defaultValue={`${order.orderId}-BAG`} maxLength={120} required /></label><label>Bag/item count<input name="intakeBagCount" inputMode="numeric" maxLength={40} required /></label></div><div className="two"><label>Received weight (kg, optional)<input name="receivedWeightKg" type="number" min="0.01" max="10000" step="0.01" inputMode="decimal" /></label><label>Intake condition<select name="intakeCondition" required><option>Count and condition matched</option><option>Stain or special care flagged</option><option>Count mismatch</option><option>Damage risk flagged</option></select></label></div><label>Intake note<textarea name="operatorNote" placeholder="Count check, visible condition, special care, or discrepancy" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm intake</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "vendor-mark-ready" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Ready bag/item count<input name="readyBagCount" inputMode="numeric" maxLength={40} required /></label><label>Quality check<select name="qualityCheck" required><option>Count, finish, and packaging checked</option><option>Ready with noted exception</option></select></label></div><label>Dispatch note<textarea name="operatorNote" placeholder="Packaging, storage point, collection instructions, or exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Mark ready</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "driver-mark-picked-up" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Collected bag/item count<input name="pickupBagCount" inputMode="numeric" maxLength={40} required /></label><label>Customer handoff note<textarea name="operatorNote" placeholder="Who released the order, collection point, and any count or access exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm pickup</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "driver-drop-at-vendor" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Vendor recipient<input name="vendorRecipient" maxLength={160} required /></label><label>Handed-over bag/item count<input name="handoffBagCount" inputMode="numeric" maxLength={40} required /></label></div><label>Vendor handoff note<textarea name="operatorNote" placeholder="Handoff point, time, recipient confirmation, or discrepancy" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm vendor handoff</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "driver-mark-delivered" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Recipient name<input name="recipientName" maxLength={160} required /></label><label>Returned bag/item count<input name="bagCount" maxLength={40} inputMode="numeric" required /></label></div><label>Handoff note<textarea name="operatorNote" placeholder="Where and to whom the order was handed over; note any exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm delivery</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "driver-report-delay" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Revised ETA<input name="revisedEta" placeholder="25 minutes or 15:20" maxLength={80} required /></label><label>Current checkpoint<input name="routeCheckpoint" placeholder="Street, junction, or vendor" maxLength={240} required /></label></div><label>Delay reason<textarea name="operatorNote" placeholder="Traffic, customer unavailable, vehicle issue, or handoff delay" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save delay report</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {status && <p className={`status ${failed ? "error" : "success"}`} role="status" aria-live="polite">{status}</p>}
     </div>
   );
+}
+
+function CustomerContactActions({ order, role }: { order: OrderSummary; role: StaffRole }) {
+  if (role === "vendor") return null;
+  const phone = order.phone.replace(/[^\d+]/g, "");
+  const canEmail = (role === "admin" || role === "support") && order.email;
+  if (!phone && !canEmail) return null;
+  return <div className="customerContactActions" aria-label={`Contact ${order.customer}`}>{phone ? <a href={`tel:${phone}`}>Call customer</a> : null}{canEmail ? <a href={`mailto:${order.email}?subject=${encodeURIComponent(`Bubble Wash order ${order.orderId}`)}`}>Email customer</a> : null}</div>;
 }
 
 function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: string }) {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [status, setStatus] = useState("Loading shared order board…");
+  const [lastSyncedAt, setLastSyncedAt] = useState("");
+  const [queueView, setQueueView] = useState<QueueView>("action");
+  const [query, setQuery] = useState("");
 
   async function loadOrders(showLoading = true) {
     if (showLoading) setStatus("Loading shared order board…");
@@ -735,7 +818,8 @@ function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: strin
       setStatus(data.error ?? "Unable to load shared orders.");
       return;
     }
-    setOrders(data.orders.slice(0, 10));
+    setOrders(data.orders);
+    setLastSyncedAt(new Date().toISOString());
     setStatus(data.orders.length ? "Updated." : "No shared orders yet.");
   }
 
@@ -752,7 +836,8 @@ function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: strin
           setStatus(data.error ?? "Unable to load shared orders.");
           return;
         }
-        setOrders(data.orders.slice(0, 10));
+        setOrders(data.orders);
+        setLastSyncedAt(new Date().toISOString());
         setStatus(data.orders.length ? "Updated." : "No shared orders yet.");
       } catch {
         if (active) setStatus("Unable to load shared orders.");
@@ -766,17 +851,24 @@ function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: strin
     };
   }, []);
 
-  const focusOrders = orders.filter((order) => orderMatchesRoleFocus(order, role, userName));
-  const visibleOrders = (focusOrders.length ? focusOrders : orders).slice(0, 6);
-  const stats = queueStats(orders, role, userName);
+  const activeOrders = orders.filter((order) => !isClosedOrder(order));
+  const focusOrders = activeOrders.filter((order) => orderMatchesRoleFocus(order, role, userName));
+  const sourceOrders = queueView === "action" ? focusOrders : queueView === "active" ? activeOrders : orders;
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchingOrders = normalizedQuery ? sourceOrders.filter((order) => [order.orderId, order.customer, order.phone, order.email, order.area, order.vendor, order.driver, order.status, order.payment].join(" ").toLowerCase().includes(normalizedQuery)) : sourceOrders;
+  const visibleOrders = matchingOrders.slice(0, 12);
+  const stats = queueStats(activeOrders, role, userName);
+  const showPayment = role === "admin" || role === "support";
+  const columnCount = showPayment ? 6 : 5;
+  const queueHeading = queueView === "action" ? (stats.focusCount ? `${stats.focusCount} ${stats.focusLabel}` : "No work needs this role right now") : queueView === "active" ? `${activeOrders.length} active orders` : `${orders.length} total orders`;
 
   return (
     <section className="section sharedBoardSection">
       <div className="staffQueueHeader">
         <div>
           <p className="eyebrow">Live queue</p>
-          <h2>{stats.focusCount ? `${stats.focusCount} ${stats.focusLabel}` : "No urgent follow-up right now"}</h2>
-          <p className="formHint">{role === "admin" ? "Assignment, reassignment, and escalations should appear here before any manual office work." : role === "vendor" ? "Open the jobs that need a production action before touching secondary partner tools." : role === "driver" ? "Use this queue to work the next stop, handoff, or delay before opening manual route tools." : "Start with at-risk orders and follow-up work before creating manual tickets."}</p>
+          <h2>{queueHeading}</h2>
+          <p className="formHint">{role === "admin" ? "Use this queue for assignment, payment checks, closeout, and exceptions." : role === "vendor" ? "Use each order row to accept, receive, wash, or mark work ready." : role === "driver" ? "Use each order row for the next stop, handoff, delay, or delivery proof." : "Start with at-risk orders and customer follow-up before opening a new case."}</p>
         </div>
         <button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh queue</button>
       </div>
@@ -786,25 +878,29 @@ function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: strin
         <article><span>at risk</span><strong>{stats.riskCount}</strong></article>
         <article><span>latest update</span><strong>{orders[0] ? formatMetricTime(orders[0].updatedAt) : "—"}</strong></article>
       </div>
+      <div className="queueTools">
+        <div className="queueViewLinks" aria-label="Order queue view">{([['action', 'Needs action'], ['active', 'All active'], ['all', 'Recent history']] as Array<[QueueView, string]>).map(([key, label]) => <button className={queueView === key ? "active" : ""} key={key} type="button" onClick={() => setQueueView(key)}>{label}</button>)}</div>
+        <label className="queueSearch"><span>Find an order</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Reference, customer, area, vendor…" /></label>
+      </div>
       <div className="opsTableWrap queueTableWrap">
         <table className="opsTable queueTable">
           <thead>
-            <tr><th scope="col">Order</th><th scope="col">Stage</th><th scope="col">Route</th><th scope="col">Assignment</th><th scope="col">Payment</th><th scope="col">Next action</th></tr>
+            <tr><th scope="col">Order</th><th scope="col">Stage</th><th scope="col">Route</th><th scope="col">Assignment</th>{showPayment ? <th scope="col">Payment</th> : null}<th scope="col">Next action</th></tr>
           </thead>
           <tbody>
             {visibleOrders.map((order) => <tr className={`timer-${order.stageTimer.tone}`} key={order.orderId}>
-              <td data-label="Order"><strong>{order.orderId}</strong><small>{order.customer}</small><small>{order.phone || "No phone"}</small></td>
+              <td data-label="Order"><strong>{order.orderId}</strong><small>{order.customer}</small>{role !== "vendor" ? <small>{order.phone || "No phone"}</small> : null}<CustomerContactActions order={order} role={role} /></td>
               <td data-label="Stage"><span className="textFlag">{order.workflowStage.label}</span><small>{workflowPhaseLabel(order.workflowStage.key)} · {isRiskOrder(order) ? "Needs intervention" : order.priority}</small><StageCountdown order={order} /></td>
-              <td data-label="Route">{order.area}<small>{order.routeWindow}</small><div className="tableActionRow"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noopener noreferrer">Directions</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Zone</a></div></td>
+              <td data-label="Route">{role === "vendor" ? order.area : order.pickupAddress || order.area}<small>{role !== "vendor" && order.landmark ? `${order.landmark} · ${order.routeWindow}` : order.routeWindow}</small><div className="tableActionRow"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noopener noreferrer">Directions</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Area map</a></div></td>
               <td data-label="Assignment">{order.vendor !== "Unassigned" ? order.vendor : "Vendor pending"}<small>{order.driver !== "Unassigned" ? order.driver : "Driver pending"}</small></td>
-              <td data-label="Payment">{order.payment}<small>{order.email || "No email"}</small></td>
+              {showPayment ? <td data-label="Payment">{order.payment}<small>{order.email || "No email"}</small></td> : null}
               <td data-label="Next action"><p className="nextActionLine"><strong>Next:</strong> {order.nextStep}</p><AutomatedOrderActions order={order} role={role} userName={userName} onSaved={() => loadOrders(false)} /><details className="quietDetails"><summary>Timeline · {compactTimelineLabel(order.eventCount)}</summary><div className="timelineList">{order.timeline.slice(0, 4).map((event) => <div key={`${order.orderId}-${event.id}-${event.createdAt}`}><b>{event.status}</b><span>{event.type} · {event.actor} · {formatShortTime(event.createdAt)}</span><p>{event.note}</p></div>)}</div></details></td>
             </tr>)}
-            {!visibleOrders.length ? <tr><td colSpan={6}>No live order rows for this desk yet.</td></tr> : null}
+            {!visibleOrders.length ? <tr><td colSpan={columnCount}>{normalizedQuery ? "No orders match this search." : queueView === "action" ? "No orders currently need action from this role." : "No order rows in this view yet."}</td></tr> : null}
           </tbody>
         </table>
       </div>
-      <p className="status">{status}</p>
+      <p className="status">{status}{lastSyncedAt ? ` Last synced ${formatMetricTime(lastSyncedAt)}. Showing ${visibleOrders.length} of ${matchingOrders.length}.` : ""}</p>
     </section>
   );
 }
@@ -818,8 +914,7 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
 
 function PortalShell({ title, role, pageRole = role, userName, children }: PortalShellProps) {
   const pageHome = pageRole === "admin" ? "/admin" : pageRole === "vendor" ? "/vendors" : pageRole === "driver" ? "/drivers" : "/support";
-  const portalLinks = role === "admin"
-    ? [{ href: "/admin", label: "Admin", icon: "admin" }, { href: "/vendors", label: "Vendor", icon: "vendor" }, { href: "/drivers", label: "Routes", icon: "routes" }, { href: "/support", label: "Support", icon: "support" }] satisfies PortalLink[]
+  const portalLinks = pageRole === "admin" ? [{ href: "/admin", label: "Admin", icon: "admin" }] satisfies PortalLink[]
     : pageRole === "vendor" ? [{ href: "/vendors", label: "Vendor", icon: "vendor" }] satisfies PortalLink[]
     : pageRole === "driver" ? [{ href: "/drivers", label: "Routes", icon: "routes" }] satisfies PortalLink[]
     : [{ href: "/support", label: "Support", icon: "support" }] satisfies PortalLink[];
@@ -839,7 +934,7 @@ function PortalShell({ title, role, pageRole = role, userName, children }: Porta
         <Link className="brand" href="/" aria-label="Bubble Wash home"><span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={58} height={58} /></span><span>Bubble Wash</span></Link>
         <nav className="portalLinks">
           {portalLinks.map(({ href, label, icon }) => <Link className="portalNavItem" key={href} href={href} aria-current={href === pageHome ? "page" : undefined}><StaffNavIcon type={icon} /><span>{label}</span></Link>)}
-          <button className="portalNavItem logoutButton" type="button" onClick={logoutStaff}><StaffNavIcon type="exit" /><span>Exit</span></button>
+          <button className="portalNavItem logoutButton" type="button" onClick={logoutStaff}><StaffNavIcon type="exit" /><span>Sign out</span></button>
         </nav>
       </header>
       <section className="staffPageHeader">
@@ -865,7 +960,7 @@ function SupportTicketForm({ onSubmit, status }: { userName: string; role: Staff
       <div className="two"><label>Priority<select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select></label><label>Current status<select name="ticketStatus"><option>Open</option><option>Waiting on Customer</option><option>Waiting on Vendor</option><option>Waiting on Driver</option></select></label></div>
       <label>Case note<textarea name="message" placeholder="Customer impact, delay reason, payment reference, or item issue" required /></label>
       <button className="button primary full" type="submit">Raise Support Ticket</button>
-      {status && <p className="status success">{status}</p>}
+      {status && <p className={noticeClass(status)} role="status">{status}</p>}
     </form>
   );
 }
@@ -879,7 +974,7 @@ function AdminOnboardingCenter({ userName, onSubmit, status }: { userName: strin
           <h2 id="admin-onboarding-title">Vendor and rider access</h2>
           <p>Use these forms only when roster access, capacity ownership, or route coverage actually needs a manual update.</p>
         </div>
-        <div className="onboardingBadges" aria-label="Onboarding automation summary">
+        <div className="onboardingBadges" aria-label="Roster workflow summary">
           <span>Vendor capacity → assignment</span>
           <span>Rider slots → dispatch</span>
           <span>Paused rows excluded</span>
@@ -888,40 +983,40 @@ function AdminOnboardingCenter({ userName, onSubmit, status }: { userName: strin
       <div className="onboardingGrid">
         <form className="panel opsForm onboardingForm" onSubmit={(event) => onSubmit(event, "vendor-application")}>
           <div className="formTitleRow"><h3>Onboard vendor</h3><span>Admin owned</span></div>
-          <div className="two"><input name="name" placeholder="Admin contact" defaultValue={userName} required /><input name="email" type="email" placeholder="Admin email" defaultValue="admin@bubblewash.local" required /></div>
-          <div className="two"><input name="phone" placeholder="Vendor phone / WhatsApp" required /><input name="company" placeholder="Vendor / laundromat name" required /></div>
-          <div className="two"><input name="area" placeholder="Approved zones e.g. Osu, Labone" required /><input name="capacity" inputMode="numeric" placeholder="Order slots today e.g. 8" required /></div>
-          <div className="two"><select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited capacity</option><option>Paused today</option></select><select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></div>
-          <textarea name="message" placeholder="KYC checks, machine capacity, turnaround promise, pickup limits, service restrictions..." required />
+          <div className="two"><label>Admin contact<input name="name" defaultValue={userName} required /></label><label>Admin email<input name="email" type="email" defaultValue="admin@bubblewash.local" required /></label></div>
+          <div className="two"><label>Vendor phone<input name="phone" placeholder="Phone or WhatsApp" required /></label><label>Laundry business<input name="company" required /></label></div>
+          <div className="two"><label>Approved zones<input name="area" placeholder="Osu, Labone" required /></label><label>Order slots today<input name="capacity" type="number" min="0" inputMode="numeric" placeholder="8" required /></label></div>
+          <div className="two"><label>Availability<select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited capacity</option><option>Paused today</option></select></label><label>Approved service<select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></label></div>
+          <label>Roster note<textarea name="message" placeholder="KYC checks, machine capacity, turnaround promise, pickup limits, or restrictions" required /></label>
           <button className="button primary full" type="submit">Save Vendor Roster</button>
-          {status["vendor-application"] && <p className="status success">{status["vendor-application"]}</p>}
+          {status["vendor-application"] && <p className={noticeClass(status["vendor-application"])} role="status">{status["vendor-application"]}</p>}
         </form>
         <form className="panel opsForm onboardingForm" onSubmit={(event) => onSubmit(event, "driver-onboarding")}>
           <div className="formTitleRow"><h3>Onboard rider</h3><span>Dispatch source</span></div>
-          <div className="two"><input name="name" placeholder="Rider full name" required /><input name="email" type="email" placeholder="Rider email" required /></div>
-          <div className="two"><input name="phone" placeholder="Rider phone / WhatsApp" required /><input name="company" placeholder="Route team / contractor" defaultValue="Bubble Wash Route Team" required /></div>
-          <div className="two"><input name="area" placeholder="Approved route zones e.g. Osu, Labone" required /><input name="vehicle" placeholder="Bike / vehicle ID" required /></div>
-          <div className="two"><input name="routeCapacity" inputMode="numeric" placeholder="Route slots today e.g. 4" defaultValue="4" /><select name="driverStatus"><option>Active</option><option>Training</option><option>Inactive</option><option>Suspended</option></select></div>
-          <div className="two"><select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited route capacity</option><option>Paused today</option></select><input name="serviceZones" placeholder="Backup zones e.g. Airport, Cantonments" /></div>
-          <textarea name="message" placeholder="ID/license check, route restrictions, emergency contact, bag handoff rules..." required />
+          <div className="two"><label>Rider full name<input name="name" required /></label><label>Rider email<input name="email" type="email" required /></label></div>
+          <div className="two"><label>Rider phone<input name="phone" placeholder="Phone or WhatsApp" required /></label><label>Route team<input name="company" defaultValue="Bubble Wash Route Team" required /></label></div>
+          <div className="two"><label>Approved route zones<input name="area" placeholder="Osu, Labone" required /></label><label>Bike or vehicle ID<input name="vehicle" required /></label></div>
+          <div className="two"><label>Route slots today<input name="routeCapacity" type="number" min="0" inputMode="numeric" defaultValue="4" /></label><label>Rider status<select name="driverStatus"><option>Active</option><option>Training</option><option>Inactive</option><option>Suspended</option></select></label></div>
+          <div className="two"><label>Availability<select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited route capacity</option><option>Paused today</option></select></label><label>Backup zones<input name="serviceZones" placeholder="Airport, Cantonments" /></label></div>
+          <label>Roster note<textarea name="message" placeholder="ID or licence check, route restrictions, emergency contact, or bag handoff rules" required /></label>
           <button className="button primary full" type="submit">Save Rider Roster</button>
-          {status["driver-onboarding"] && <p className="status success">{status["driver-onboarding"]}</p>}
+          {status["driver-onboarding"] && <p className={noticeClass(status["driver-onboarding"])} role="status">{status["driver-onboarding"]}</p>}
         </form>
       </div>
     </section>
   );
 }
 
-function SupportOpsOverview({ records, orders }: { records: SubmissionRecord[]; orders: OrderSummary[] }) {
-  const openTickets = records.filter((record) => !/closed|resolved/i.test(String(record.data.ticketStatus ?? "")));
-  const urgentTickets = records.filter((record) => /urgent|high/i.test(String(record.data.priority ?? "")));
-  const waitingTickets = records.filter((record) => /waiting/i.test(String(record.data.ticketStatus ?? "")));
+function SupportOpsOverview({ cases, orders }: { cases: SupportCase[]; orders: OrderSummary[] }) {
+  const openTickets = cases.filter((item) => !/closed|resolved/i.test(item.status));
+  const urgentTickets = cases.filter((item) => /urgent|high/i.test(item.priority));
+  const waitingTickets = cases.filter((item) => /waiting/i.test(item.status));
   const breachedOrders = orders.filter((order) => isRiskOrder(order));
   const lanes = [
     { label: "Triage", value: openTickets.length, note: "New or unresolved tickets" },
     { label: "Escalate", value: urgentTickets.length + breachedOrders.length, note: "Urgent tickets + SLA risk" },
     { label: "Waiting", value: waitingTickets.length, note: "Customer/vendor/driver response" },
-    { label: "Resolve", value: records.filter((record) => /resolved|closed/i.test(String(record.data.ticketStatus ?? ""))).length, note: "Closed support loops" },
+    { label: "Resolve", value: cases.filter((item) => /resolved|closed/i.test(item.status)).length, note: "Closed support loops" },
   ];
   return (
     <section className="section supportOpsHero" aria-label="Support queue overview">
@@ -968,49 +1063,53 @@ function SupportTicketDesk({ userName }: { userName: string }) {
       return;
     }
     const tickets = data.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes("support-ticket"));
-    setRecords(tickets.slice(0, 16));
+    setRecords(tickets.slice(0, 200));
     setStatus(tickets.length ? "Support ticket desk loaded." : "No support tickets yet.");
   }
 
-  async function action(event: FormEvent<HTMLFormElement>, record: SubmissionRecord) {
+  async function action(event: FormEvent<HTMLFormElement>, supportCase: SupportCase) {
     event.preventDefault();
     const form = event.currentTarget;
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.submissionType = "support-ticket-action";
-    payload.orderId = String(record.data.orderId || record.id);
-    payload.company = String(record.data.company || "Bubble Wash Support");
-    payload.email = "support@bubblewash.local";
-    payload.phone = String(record.data.phone || "support-desk");
+    payload.ticketId = supportCase.ticketId;
+    payload.orderId = supportCase.orderId || supportCase.root.id;
+    payload.company = String(supportCase.root.data.company || "Bubble Wash Support");
+    payload.phone = String(supportCase.root.data.phone || "support-desk");
     payload.name = userName;
     try {
       const data = await postJSON<{ ok: boolean; message: string; id: string }>("/api/submit", payload);
-      setFormStatus((current) => ({ ...current, [record.id]: `${data.message} Action: ${data.id}` }));
+      setFormStatus((current) => ({ ...current, [supportCase.ticketId]: `${data.message} Action: ${data.id}` }));
       form.reset();
       await loadTickets(false);
     } catch (error) {
-      setFormStatus((current) => ({ ...current, [record.id]: error instanceof Error ? error.message : "Unable to save ticket action." }));
+      setFormStatus((current) => ({ ...current, [supportCase.ticketId]: error instanceof Error ? error.message : "Unable to save ticket action." }));
     }
   }
 
   useEffect(() => { loadTickets(); }, []);
 
+  const cases = supportCases(records);
+
   return (
     <section className="section supportDeskSection">
-      <div className="activityHeader"><div><p className="eyebrow">Case queue</p><h2>Open tickets</h2></div><button className="button secondary" type="button" onClick={() => loadTickets()}>Refresh</button></div>
+      <div className="activityHeader"><div><p className="eyebrow">Case queue</p><h2>Customer cases</h2><p className="formHint">Each case appears once; actions remain attached to its history.</p></div><button className="button secondary" type="button" onClick={() => loadTickets()}>Refresh</button></div>
       <div className="supportTicketList">
-        {records.map((record) => <article className="orderBoardCard supportTicketCard" key={record.id}>
-          <div className="orderBoardTop"><strong>{record.data.orderId || record.id}</strong><span>{record.data.ticketStatus || record.data.issueType || "Open"}</span></div>
-          <h3>{record.data.issueType || "Support ticket"}</h3>
-          <div className="orderMeta"><span>Raised by: {record.data.name || "Team member"}</span><span>Team/customer: {record.data.company || "Bubble Wash"}</span><span>Priority: {record.data.priority || "Normal"}</span><span>Created: {new Date(record.createdAt).toLocaleString()}</span></div>
-          <p>{record.data.message || "No ticket note supplied."}</p>
-          <form className="ticketActionForm" onSubmit={(event) => action(event, record)}>
-            <div className="two"><select name="ticketStatus"><option>In Review</option><option>Assigned</option><option>Waiting on Customer</option><option>Waiting on Vendor</option><option>Waiting on Driver</option><option>Escalated</option><option>Resolved</option><option>Closed</option><option>Reopened</option></select><select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select></div>
-            <div className="two"><select name="assignedRole"><option>Support</option><option>Admin</option><option>Vendor</option><option>Driver</option></select><select name="escalationLevel"><option>Level 0</option><option>Level 1</option><option>Level 2</option><option>Level 3</option></select></div>
-            <textarea name="message" placeholder="Action note, escalation reason, de-escalation reason, or resolution summary..." required />
+        {cases.map((supportCase) => <article className="orderBoardCard supportTicketCard" key={supportCase.ticketId}>
+          <div className="orderBoardTop"><strong>{supportCase.orderId || "Unlinked case"}</strong><span>{supportCase.status}</span></div>
+          <h3>{supportCase.root.data.issueType || "Support ticket"}</h3>
+          <div className="orderMeta"><span>Case: {supportCase.ticketId}</span><span>Raised by: {supportCase.root.data.name || "Team member"}</span><span>Team/customer: {supportCase.root.data.company || "Bubble Wash"}</span><span>Priority: {supportCase.priority}</span><span>Updated: {formatActivityTime(supportCase.latest.createdAt)}</span></div>
+          <p>{supportCase.latest.data.message || supportCase.root.data.message || "No ticket note supplied."}</p>
+          <details className="quietDetails"><summary>Case history · {compactTimelineLabel(supportCase.events.length)}</summary><div className="timelineList">{[...supportCase.events].reverse().map((event) => <div key={event.id}><b>{event.data.ticketStatus || event.data.issueType || "Open"}</b><span>{formatActivityTime(event.createdAt)} · {event.data.name || "Staff"}</span><p>{event.data.message || "No note supplied."}</p></div>)}</div></details>
+          <form className="ticketActionForm" onSubmit={(event) => action(event, supportCase)}>
+            <div className="two"><label>Case status<select name="ticketStatus" defaultValue={supportCase.status}><option>Open</option><option>In Review</option><option>Assigned</option><option>Waiting on Customer</option><option>Waiting on Vendor</option><option>Waiting on Driver</option><option>Escalated</option><option>Resolved</option><option>Closed</option><option>Reopened</option></select></label><label>Priority<select name="priority" defaultValue={supportCase.priority}><option>Normal</option><option>High</option><option>Urgent</option></select></label></div>
+            <div className="two"><label>Assigned desk<select name="assignedRole"><option>Support</option><option>Admin</option><option>Vendor</option><option>Driver</option></select></label><label>Escalation level<select name="escalationLevel"><option>Level 0</option><option>Level 1</option><option>Level 2</option><option>Level 3</option></select></label></div>
+            <label>Case note<textarea name="message" placeholder="Action, escalation reason, customer impact, or resolution summary" required /></label>
             <button className="button primary full" type="submit">Save Ticket Action</button>
-            {formStatus[record.id] && <p className="status success">{formStatus[record.id]}</p>}
+            {formStatus[supportCase.ticketId] && <p className={noticeClass(formStatus[supportCase.ticketId])} role="status">{formStatus[supportCase.ticketId]}</p>}
           </form>
         </article>)}
+        {!cases.length ? <p className="status">No customer cases yet.</p> : null}
       </div>
       <p className="status">{status}</p>
     </section>
@@ -1040,31 +1139,13 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
       <AvailabilityBoard role={role} />
       <section className="section portalSection manualSection">
         <details className="manualToolbox">
-          <summary><div><span>Roster updates</span><small>Only when vendor or rider access changes</small></div><em>Secondary tools</em></summary>
+          <summary><div><span>Roster and capacity</span><small>Only when vendor or rider access changes</small></div><em>Open when needed</em></summary>
           <AdminOnboardingCenter userName={userName} onSubmit={submitLead} status={formStatus} />
-        </details>
-      </section>
-      <section className="section opsSection portalSection manualSection">
-        <details className="manualToolbox">
-          <summary><div><span>Manual Actions</span><small>Use only when the queue cannot advance the order</small></div><em>Secondary tools</em></summary>
-          <div className="opsGrid compactManualGrid">
-          <form className="panel opsForm" onSubmit={(event) => submitLead(event, "admin-operation")}> 
-            <h3>Log admin action</h3>
-            <p className="formHint">Your operator identity is attached automatically.</p>
-            <div className="two"><label>Order reference<input name="orderId" placeholder="BW-…" required /></label><label>Assigned vendor<input name="vendorName" /></label></div>
-            <div className="two"><label>Assigned driver<input name="driverName" /></label><label>Confirmed time window<input name="routeWindow" placeholder="14:30–15:00" /></label></div>
-            <div className="two"><label>Action<select name="actionType"><option>New order intake</option><option>Assign vendor</option><option>Update order status</option><option>Payment follow-up</option><option>Quality issue</option><option>Customer escalation</option></select></label><label>Order status<select name="orderStatus"><option>Received</option><option>Pickup scheduled</option><option>Vendor assigned</option><option>In washing</option><option>Ready for delivery</option><option>Delivered</option><option>Needs attention</option></select></label></div>
-            <div className="two"><label>Priority<select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select></label><label>Payment<select name="paymentPreference"><option>Payment not confirmed</option><option>Bank transfer pending</option><option>Bank transfer confirmed</option><option>Invoice pending approval</option><option>Invoice approved</option></select></label></div>
-            <label>Action note<textarea name="message" placeholder="Customer impact, promised time, payment status, or quality issue" required /></label>
-            <button className="button primary full" type="submit">Save Admin Action</button>
-            {formStatus["admin-operation"] && <p className="status success">{formStatus["admin-operation"]}</p>}
-          </form>
-          </div>
         </details>
       </section>
       <section className="section portalSection supportCreateSection manualSection">
         <details className="manualToolbox">
-          <summary><div><span>Case Actions</span><small>Open a manual ticket only when automation is not enough</small></div><em>Secondary tools</em></summary>
+          <summary><div><span>Open a case</span><small>Use for an exception that the order queue does not cover</small></div><em>Open when needed</em></summary>
           <SupportTicketForm userName={userName} role="admin" onSubmit={submitLead} status={formStatus["support-ticket"]} />
         </details>
       </section>
@@ -1096,7 +1177,7 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
       <AvailabilityBoard role="vendor" />
       <section className="section vendorSection portalSection manualSection">
         <details className="manualToolbox">
-          <summary><div><span>Partner Actions</span><small>Use these only for manual partner-side updates</small></div><em>Secondary tools</em></summary>
+          <summary><div><span>Today&apos;s capacity</span><small>Update the slots and services the partner can accept</small></div><em>Open when needed</em></summary>
           <div className="vendorGrid">
           <form className="panel vendorForm" onSubmit={(event) => submitLead(event, "vendor-application")}>
             <h3>Update today&apos;s capacity</h3>
@@ -1106,29 +1187,14 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
             <label>Available service<select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></label>
             <label>Capacity note<textarea name="message" placeholder="Turnaround, machine, or service restrictions" /></label>
             <button className="button primary full" type="submit">Update Capacity</button>
-            {formStatus["vendor-application"] && <p className="status success">{formStatus["vendor-application"]}</p>}
-          </form>
-          <form className="panel vendorForm" onSubmit={(event) => submitLead(event, "vendor-job-update")}>
-            <h3>Accept or update a job</h3>
-            <div className="two"><label>Order reference<input name="orderId" placeholder="BW-…" required /></label><label>New status<select name="jobStatus"><option>Accepted</option><option>Picked up by vendor</option><option>Washing started</option><option>Ironing / finishing</option><option>Ready for driver</option><option>Issue found</option></select></label></div>
-            <label>Production note<textarea name="message" placeholder="Verified weight, bag count, completion time, or issue" required /></label>
-            <button className="button secondary full" type="submit">Submit Job Update</button>
-            {formStatus["vendor-job-update"] && <p className="status success">{formStatus["vendor-job-update"]}</p>}
-          </form>
-          <form className="panel vendorForm" onSubmit={(event) => submitLead(event, "qr-bag-intake")}> 
-            <h3>QR / bag intake check</h3>
-            <div className="two"><label>Order reference<input name="orderId" placeholder="BW-…" required /></label><label>Bag tag<input name="qrTag" placeholder="BW-BAG-04" /></label></div>
-            <div className="two"><label>Bag count or received kg<input name="bagCount" /></label><label>Intake condition<select name="itemCondition"><option>All items accepted</option><option>Stain issue found</option><option>Delicate item flagged</option><option>Missing count mismatch</option><option>Damage risk flagged</option></select></label></div>
-            <label>Intake note<textarea name="message" placeholder="Item count, stains, special care, or damage risk" required /></label>
-            <button className="button primary full" type="submit">Save QR Intake</button>
-            {formStatus["qr-bag-intake"] && <p className="status success">{formStatus["qr-bag-intake"]}</p>}
+            {formStatus["vendor-application"] && <p className={noticeClass(formStatus["vendor-application"])} role="status">{formStatus["vendor-application"]}</p>}
           </form>
           </div>
         </details>
       </section>
       <section className="section portalSection supportCreateSection manualSection">
         <details className="manualToolbox">
-          <summary><div><span>Case Actions</span><small>Open a manual ticket only if the queue cannot resolve it</small></div><em>Secondary tools</em></summary>
+          <summary><div><span>Open a case</span><small>Use for a production exception that the order queue does not cover</small></div><em>Open when needed</em></summary>
           <SupportTicketForm userName={userName} role="vendor" onSubmit={submitLead} status={formStatus["support-ticket"]} />
         </details>
       </section>
@@ -1158,32 +1224,9 @@ export function DriverWorkspace({ userName, role }: { userName: string; role: St
     <PortalShell role={role} pageRole="driver" userName={userName} title="Driver route board">
       <SharedOrderBoard role="driver" userName={userName} />
       <AvailabilityBoard role="driver" />
-      <section className="section driverSection portalSection manualSection">
-        <details className="manualToolbox">
-          <summary><div><span>Route Actions</span><small>Use these only for manual route updates or exceptions</small></div><em>Secondary tools</em></summary>
-          <div className="driverGrid">
-          <div className="driverChecklist operatorChips">
-            <article><strong>Assignment</strong></article>
-            <article><strong>ETA</strong></article>
-            <article><strong>Handoff</strong></article>
-            <article><strong>Delay</strong></article>
-          </div>
-          <form className="panel driverForm" onSubmit={(event) => submitLead(event, "driver-route-log")}>
-            <h3>Update route status</h3>
-            <p className="formHint">The signed-in driver is recorded automatically.</p>
-            <div className="two"><label>Order reference<input name="orderId" placeholder="BW-…" required /></label><label>New status<select name="orderStatus"><option>Driver en route</option><option>Pickup scheduled</option><option>Picked up</option><option>Dropped at vendor</option><option>Collected from vendor</option><option>Out for delivery</option><option>Delivered</option><option>Delayed</option></select></label></div>
-            <div className="two"><label>Route area<input name="area" /></label><label>Estimated arrival<input name="driverEta" placeholder="25 min or 15:20" /></label></div>
-            <div className="two"><label>Current checkpoint<input name="locationNote" placeholder="Spintex Road near Palace" /></label><label>Bag count or kg<input name="bagCount" /></label></div>
-            <label>Handoff or delay note<textarea name="message" placeholder="Pickup, vendor handoff, delay reason, or delivery confirmation" required /></label>
-            <button className="button primary full" type="submit">Save Driver Route Update</button>
-            {formStatus["driver-route-log"] && <p className="status success">{formStatus["driver-route-log"]}</p>}
-          </form>
-          </div>
-        </details>
-      </section>
       <section className="section portalSection supportCreateSection manualSection">
         <details className="manualToolbox">
-          <summary><div><span>Case Actions</span><small>Open a manual ticket only if the route queue cannot resolve it</small></div><em>Secondary tools</em></summary>
+          <summary><div><span>Open a route case</span><small>Use for an exception that the order queue does not cover</small></div><em>Open when needed</em></summary>
           <SupportTicketForm userName={userName} role="driver" onSubmit={submitLead} status={formStatus["support-ticket"]} />
         </details>
       </section>
@@ -1240,13 +1283,13 @@ export function SupportWorkspace({ userName, role }: { userName: string; role: S
 
   return (
     <PortalShell role={role} pageRole="support" userName={userName} title="Support workspace">
-      <SupportOpsOverview records={records} orders={orders} />
+      <SupportOpsOverview cases={supportCases(records)} orders={orders} />
       <SupportOrderWatchlist orders={orders} />
       <SupportTicketDesk userName={userName} />
       <SharedOrderBoard role="support" userName={userName} />
       <section className="section portalSection supportCreateSection manualSection">
         <details className="manualToolbox">
-          <summary><div><span>Case Actions</span><small>Open a manual ticket only when existing orders do not cover the case</small></div><em>Secondary tools</em></summary>
+          <summary><div><span>Open a case</span><small>Use when an existing order or case does not cover the issue</small></div><em>Open when needed</em></summary>
           <SupportTicketForm userName={userName} role="support" onSubmit={submitLead} status={formStatus["support-ticket"]} />
         </details>
       </section>

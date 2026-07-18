@@ -73,6 +73,7 @@ test("reassignment excludes a vendor that already declined the order", () => {
   store.resetDataStoreForTests();
   store.upsertVendorAvailability({ vendorId: "vendor-declined", vendorName: "Declined Vendor", serviceZones: ["Osu"], serviceTypes: ["wash-fold"], capacityRemaining: 2, availabilityStatus: "available", updatedBy: "Admin" });
   store.upsertVendorAvailability({ vendorId: "vendor-backup", vendorName: "Backup Vendor", serviceZones: ["Osu"], serviceTypes: ["wash-fold"], capacityRemaining: 1, availabilityStatus: "available", updatedBy: "Admin" });
+  store.upsertDriverAvailability({ driverId: "driver-osu", driverName: "Osu Rider", serviceZones: ["Osu"], capacityRemaining: 2, availabilityStatus: "active", updatedBy: "Admin" });
   store.recordVendorDecline({ orderId: "BW-REASSIGN-1", vendorId: "vendor-declined", vendorName: "Declined Vendor", reason: "No capacity", declinedBy: "Vendor" });
 
   const result = assignment.assignOrderFromAvailability({ orderId: "BW-REASSIGN-1", area: "Osu", serviceType: "wash-fold", vendor: "Unassigned", driver: "Unassigned" });
@@ -85,8 +86,22 @@ test("paused vendors and inactive drivers are excluded from assignment", () => {
   store.upsertVendorAvailability({ vendorId: "vendor-paused", vendorName: "Paused Vendor", serviceZones: ["Osu"], serviceTypes: ["wash-fold"], capacityRemaining: 5, availabilityStatus: "paused", updatedBy: "Admin" });
   store.upsertDriverAvailability({ driverId: "driver-inactive", driverName: "Inactive Driver", serviceZones: ["Osu"], availabilityStatus: "inactive", capacityRemaining: 5, updatedBy: "Admin" });
 
-  const result = assignment.assignOrderFromAvailability({ orderId: "BW-ORDER-4", area: "Osu", serviceType: "wash-fold", vendor: "Unassigned", driver: "Unassigned" });
+  assert.throws(
+    () => assignment.assignOrderFromAvailability({ orderId: "BW-ORDER-4", area: "Osu", serviceType: "wash-fold", vendor: "Unassigned", driver: "Unassigned" }),
+    /No eligible vendor or driver matches Osu/,
+  );
+});
 
-  assert.equal(result.vendorName, "Needs admin review");
-  assert.equal(result.driverName, "Needs admin onboarding");
+test("assignment fails closed for out-of-zone, tomorrow-only, and training capacity", () => {
+  store.resetDataStoreForTests();
+  store.upsertVendorAvailability({ vendorId: "vendor-tema", vendorName: "Tema Vendor", serviceZones: ["Tema"], serviceTypes: ["wash-fold"], capacityRemaining: 3, availabilityStatus: "available", updatedBy: "Admin" });
+  store.upsertVendorAvailability({ vendorId: "vendor-tomorrow", vendorName: "Tomorrow Vendor", serviceZones: ["Osu"], serviceTypes: ["wash-fold"], capacityRemaining: 3, availabilityStatus: "available-tomorrow", updatedBy: "Admin" });
+  store.upsertDriverAvailability({ driverId: "driver-training", driverName: "Training Rider", serviceZones: ["Osu"], capacityRemaining: 3, availabilityStatus: "training", updatedBy: "Admin" });
+
+  assert.throws(
+    () => assignment.assignOrderFromAvailability({ orderId: "BW-ORDER-5", area: "Osu", serviceType: "wash-fold", vendor: "Unassigned", driver: "Unassigned" }),
+    /No eligible vendor or driver matches Osu/,
+  );
+  assert.equal(store.listVendorAvailability().find((vendor) => vendor.vendorId === "vendor-tomorrow").capacityRemaining, 3);
+  assert.equal(store.listDriverAvailability()[0].capacityRemaining, 3);
 });

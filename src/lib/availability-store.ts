@@ -329,7 +329,7 @@ export function reserveAssignmentCapacity(vendorId?: string, driverId?: string) 
 
     if (vendorId) {
       const row = db.prepare("SELECT * FROM vendor_availability WHERE vendor_id = ?").get(vendorId) as VendorRow | undefined;
-      if (!row || row.capacity_remaining <= 0 || /(paused|closed|unavailable|inactive|suspended)/.test(row.availability_status.toLowerCase())) {
+      if (!row || row.capacity_remaining <= 0 || /(paused|closed|unavailable|inactive|suspended|tomorrow)/.test(row.availability_status.toLowerCase())) {
         throw new Error("Vendor capacity is no longer available.");
       }
       const updated = db.prepare("UPDATE vendor_availability SET capacity_remaining = capacity_remaining - 1, updated_at = ? WHERE vendor_id = ? AND capacity_remaining > 0")
@@ -340,7 +340,7 @@ export function reserveAssignmentCapacity(vendorId?: string, driverId?: string) 
 
     if (driverId) {
       const row = db.prepare("SELECT * FROM driver_availability WHERE driver_id = ?").get(driverId) as DriverRow | undefined;
-      if (!row || row.capacity_remaining <= 0 || /(inactive|suspended|offboarded|paused)/.test(row.availability_status.toLowerCase())) {
+      if (!row || row.capacity_remaining <= 0 || /(inactive|suspended|offboarded|paused|training|tomorrow)/.test(row.availability_status.toLowerCase())) {
         throw new Error("Driver capacity is no longer available.");
       }
       const updated = db.prepare("UPDATE driver_availability SET capacity_remaining = capacity_remaining - 1, updated_at = ? WHERE driver_id = ? AND capacity_remaining > 0")

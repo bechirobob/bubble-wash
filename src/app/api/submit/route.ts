@@ -28,6 +28,8 @@ const publicAllowedFields = new Set([
   "phone",
   "company",
   "area",
+  "pickupAddress",
+  "landmark",
   "zone",
   "plan",
   "preferredPlan",
@@ -64,6 +66,7 @@ const staffSubmissionRoles = new Map<string, StaffRole>([
   ["support-ticket-action", "support"],
 ]);
 const crossRoleStaffSubmissionTypes = new Set(["support-ticket"]);
+const queueOnlySubmissionTypes = new Set(["admin-operation", "driver-route-log", "vendor-job-update", "qr-bag-intake"]);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -84,6 +87,7 @@ function listFrom(value: unknown) {
 
 function availabilityStatusFrom(value: unknown, activeWord = "available") {
   const normalized = text(value).toLowerCase();
+  if (normalized.includes("tomorrow")) return "available-tomorrow";
   if (normalized.includes("pause")) return "paused";
   if (normalized.includes("inactive")) return "inactive";
   if (normalized.includes("suspend")) return "suspended";
@@ -246,6 +250,9 @@ export async function POST(request: NextRequest) {
     const authError = await authorizeSubmission(submissionType);
     if (authError) return authError;
     const staffUser = publicSubmissionTypes.has(submissionType) ? null : await getCurrentStaffUser();
+    if (staffUser && queueOnlySubmissionTypes.has(submissionType)) {
+      return NextResponse.json({ ok: false, error: "Use the verified action on the staff order queue for this update." }, { status: 400 });
+    }
     if (staffUser) {
       body.name = staffUser.name;
       body.email = staffUser.email;
@@ -255,6 +262,7 @@ export async function POST(request: NextRequest) {
     if (validationError) return validationError;
 
     const required = publicSubmissionTypes.has(submissionType) ? ["submissionType", "name", "email", "phone", "company"] : ["submissionType"];
+    if (submissionType === "pickup-booking") required.push("pickupAddress");
     for (const field of required) {
       if (!text(body[field])) {
         return NextResponse.json({ ok: false, error: `Missing required field: ${field}` }, { status: 400 });

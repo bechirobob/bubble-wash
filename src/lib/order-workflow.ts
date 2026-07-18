@@ -108,7 +108,12 @@ export function workflowNextStep(order: WorkflowOrderSnapshot) {
   if (order.priority === "Urgent" || order.stageTimer?.tone === "breached") return "Support/admin should handle this as an exception before the customer has to chase.";
   if (stage.key === "vendor-assigned" && (!order.vendor || order.vendor === "Unassigned")) return "Admin should assign a vendor so the next role inherits the order context.";
   if (stage.key === "driver-en-route" && (!order.driver || order.driver === "Unassigned")) return "Admin should attach a driver name before route updates continue.";
+  if (stage.key === "delivered" && !paymentReadyForCloseout(order.payment)) return "Admin should confirm the bank transfer or approve the invoice before closing this order.";
   return stage.staffNext;
+}
+
+export function paymentReadyForCloseout(payment: string) {
+  return /bank transfer confirmed|invoice approved|paid|payment success|settled/i.test(payment.trim());
 }
 
 function roleEmail(role: WorkflowRole) {
@@ -159,8 +164,9 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
         message: `Pickup scheduled from inherited order data. Customer: ${customer}. Area: ${order.area}. Window: ${order.routeWindow}.`,
       }));
     }
-    if (["received", "pickup-scheduled", "exception"].includes(stage.key)) {
-      actions.push(action("admin-assign-vendor", "Auto-assign vendor + driver", "Selects the best available vendor and an admin-onboarded driver, then creates the dispatch handoff.", "admin-operation", "Vendor assigned", {
+    const canAssign = stage.key === "pickup-scheduled" || (stage.key === "exception" && order.lastEventType === "vendor-job-update" && /declined/i.test(order.status));
+    if (canAssign) {
+      actions.push(action("admin-assign-vendor", "Assign vendor + driver", "Selects an eligible vendor and approved driver, then creates the dispatch handoff.", "admin-operation", "Vendor assigned", {
         ...base,
         actionType: "Assign vendor",
         orderStatus: "Vendor assigned",
@@ -169,7 +175,7 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
         message: `Dispatch assignment created from order context. Customer: ${customer}. Payment: ${order.payment}.`,
       }));
     }
-    if (stage.key === "delivered") {
+    if (stage.key === "delivered" && paymentReadyForCloseout(order.payment)) {
       actions.push(action("admin-close-order", "Close order", "Closes the completed order after payment/invoice confirmation.", "admin-operation", "Closed", {
         ...base,
         actionType: "Close order",
@@ -179,6 +185,18 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
         message: `Order closed after delivery. Payment lane: ${order.payment}.`,
       }));
     }
+    if (stage.key === "delivered" && !paymentReadyForCloseout(order.payment)) {
+      const invoice = /invoice/i.test(order.payment);
+      actions.push(action(invoice ? "admin-approve-invoice" : "admin-confirm-bank-transfer", invoice ? "Approve invoice" : "Confirm bank transfer", "Records the pilot billing checkpoint before order closeout becomes available.", "admin-operation", "Delivered", {
+        ...base,
+        actionType: invoice ? "Approve invoice" : "Confirm bank transfer",
+        orderStatus: "Delivered",
+        paymentPreference: invoice ? "Invoice approved" : "Bank transfer confirmed",
+        vendorName: order.vendor,
+        driverName: order.driver,
+        message: `${invoice ? "Invoice approved" : "Bank transfer confirmed"} for ${order.orderId}. Closeout remains a separate admin action.`,
+      }));
+    }
     if (urgent || stage.key === "exception") {
       actions.push(action("admin-escalate-support", "Escalate to support", "Creates a support ticket with customer/order details already attached.", "support-ticket", "Escalated", {
         ...base,
@@ -186,18 +204,18 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
         issueType: "Workflow follow-up",
         ticketStatus: "Escalated",
         priority: urgent ? "Urgent" : "High",
-        message: `Automated escalation for ${order.orderId}. Status: ${order.status}. Timer: ${order.stageTimer?.label ?? "Timer unavailable"}. Next step: ${workflowNextStep(order)}`,
+        message: `Escalation opened for ${order.orderId}. Status: ${order.status}. Timer: ${order.stageTimer?.label ?? "Timer unavailable"}. Next step: ${workflowNextStep(order)}`,
       }));
     }
   }
 
   if (role === "vendor") {
-    if (["vendor-assigned", "pickup-scheduled", "received"].includes(stage.key)) {
+    if (stage.key === "vendor-assigned") {
       actions.push(action("vendor-accept-job", "Accept assigned job", "Accepts the job using the inherited customer, area, and pickup window.", "vendor-job-update", "Accepted", {
         ...base,
         vendorName: order.vendor === "Unassigned" ? "Vendor Partner" : order.vendor,
         jobStatus: "Accepted",
-        message: `Vendor accepted via automation. Customer: ${customer}. Area: ${order.area}. Window: ${order.routeWindow}.`,
+        message: `Vendor accepted from the staff order queue. Customer: ${customer}. Area: ${order.area}. Window: ${order.routeWindow}.`,
       }));
       actions.push(action("vendor-decline-job", "Decline job", "Declines the task and sends it back to admin review without losing the original order timeline.", "vendor-job-update", "Needs attention", {
         ...base,
@@ -207,16 +225,16 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
         message: `Vendor declined ${order.orderId}. Admin should reassign from current vendor availability. Customer/order context remains attached: ${customer}.`,
       }));
     }
-    if (["vendor-accepted", "picked-up"].includes(stage.key)) {
+    if (stage.key === "at-vendor" && order.lastEventType === "driver-route-log") {
       actions.push(action("vendor-log-intake", "Confirm bag intake", "Adds intake to the same timeline; manual notes are only for exceptions.", "qr-bag-intake", "At vendor", {
         ...base,
         vendorName: order.vendor === "Unassigned" ? "Vendor Partner" : order.vendor,
         qrTag: `${order.orderId}-BAG`,
         itemCondition: "All items accepted",
-        message: `Bag intake confirmed for ${order.orderId}. Staff only adds count mismatch, stain, or damage exceptions if needed.`,
+        message: `Bag intake opened for ${order.orderId}. Count, condition, and intake note are required before washing starts.`,
       }));
     }
-    if (["at-vendor", "vendor-accepted"].includes(stage.key)) {
+    if (stage.key === "at-vendor" && order.lastEventType === "qr-bag-intake") {
       actions.push(action("vendor-start-washing", "Start washing", "Moves the order into production without re-entering customer details.", "vendor-job-update", "Washing", {
         ...base,
         vendorName: order.vendor === "Unassigned" ? "Vendor Partner" : order.vendor,
@@ -235,7 +253,7 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
   }
 
   if (role === "driver") {
-    if (["pickup-scheduled", "vendor-assigned", "vendor-accepted"].includes(stage.key)) {
+    if (stage.key === "vendor-accepted") {
       actions.push(action("driver-start-route", "Start pickup route", "Starts route using the inherited area and pickup window.", "driver-route-log", "Driver en route", {
         ...base,
         company: "Bubble Wash Route Team",
@@ -254,7 +272,7 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
         driverName: order.driver === "Unassigned" ? userName : order.driver,
         driverEta: order.routeWindow,
         locationNote: "Pickup confirmed",
-        message: `Pickup confirmed via automation for ${order.orderId}. Add exceptions only if bag count or customer handoff changed.`,
+        message: `Pickup checkpoint opened for ${order.orderId}. Collected count and customer handoff note are required.`,
       }));
     }
     if (stage.key === "picked-up") {
@@ -265,7 +283,7 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
         driverName: order.driver === "Unassigned" ? userName : order.driver,
         driverEta: order.routeWindow,
         locationNote: "Vendor handoff complete",
-        message: `Bags handed to ${order.vendor}. Manual note needed only for count mismatch or exception.`,
+        message: `Vendor handoff opened for ${order.vendor}. Recipient, count, and handoff note are required.`,
       }));
     }
     if (stage.key === "ready") {
@@ -287,7 +305,18 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
         driverName: order.driver === "Unassigned" ? userName : order.driver,
         driverEta: order.routeWindow,
         locationNote: "Delivered to customer",
-        message: `Delivered via automation for ${order.orderId}.`,
+        message: `Delivery confirmed from the route queue for ${order.orderId}.`,
+      }));
+    }
+    if (["vendor-accepted", "driver-en-route", "picked-up", "ready", "out-for-delivery"].includes(stage.key)) {
+      actions.push(action("driver-report-delay", "Report route delay", "Records the delay reason, checkpoint, and revised ETA for admin/support follow-up without losing the route stage.", "support-ticket", "Delay reported", {
+        ...base,
+        company: "Bubble Wash Route Team",
+        issueType: "Pickup delay",
+        ticketStatus: "Open",
+        driverName: order.driver === "Unassigned" ? userName : order.driver,
+        priority: "Urgent",
+        message: `Route delay opened for ${order.orderId}. Revised ETA and reason required from driver.`,
       }));
     }
   }
@@ -301,15 +330,15 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
       priority: urgent ? "High" : order.priority,
       message: `Support follow-up created from ${order.orderId}. Customer: ${customer}. Status: ${order.status}. Next step: ${workflowNextStep(order)}`,
     }));
-    if (urgent || stage.key === "exception") {
-      actions.push(action("support-notify-customer", "Notify customer of delay", "Records customer outreach with the order context already filled.", "support-ticket-action", "Waiting on Customer", {
+    if (stage.key !== "closed") {
+      actions.push(action("support-log-customer-contact", "Log customer contact", "Records the manual pilot follow-up channel, outcome, and next follow-up time.", "support-ticket-action", "Waiting on Customer", {
         ...base,
         company: order.customer,
         assignedRole: "Support",
         escalationLevel: urgent ? "Level 2" : "Level 1",
         ticketStatus: "Waiting on Customer",
         priority: urgent ? "Urgent" : "High",
-        message: `Customer notified about ${order.orderId}. Status: ${order.status}. Timer: ${order.stageTimer?.label ?? "Timer unavailable"}.`,
+        message: `Customer contact log opened for ${order.orderId}. Outcome must be supplied by the support operator.`,
       }));
     }
   }

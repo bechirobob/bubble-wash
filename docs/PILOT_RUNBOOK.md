@@ -48,12 +48,20 @@ Use a fresh test customer and a test bank-transfer/invoice record approved by th
 
 1. Open the homepage on a phone and laptop. Confirm navigation, coverage, visible add-ons, quote, booking, tracking, and staff login retain the approved design. Confirm card, Mobile Money, WhatsApp automation, and email automation are clearly labeled “Coming soon” and cannot be selected.
 2. Submit one pickup booking. Record the Bubble Wash reference and confirm only one order appears in admin.
-3. Support copies the customer's phone/email from the booking record, confirms the route manually, and records the follow-up in the order workflow. Confirm no automated email or WhatsApp request is attempted.
-4. On admin, schedule the pickup and auto-assign the vendor/driver. Double-click once intentionally; the second request must return an already-processed response and must not consume capacity twice.
-5. Complete vendor accept, driver pickup, vendor intake/washing/ready, return delivery, support follow-up, and admin closeout using the same Order ID.
-6. Record bank-transfer or approved-invoice status using the staff workflow and reconcile it against the business payment record. Confirm `/api/payments/initialize` and `/api/payments/verify` return HTTP 503 while online payments are disabled.
+3. Support uses the booking phone/email, then records the channel, outcome, operator note, and next follow-up time on that order. Confirm no automated email or WhatsApp request is attempted.
+4. On admin, enter a confirmed pickup window, then assign the vendor/driver. The assignment must stop if current capacity does not match the order area, if the vendor is tomorrow-only, or if the rider is training/paused. Double-click once intentionally; the second request must return an already-processed response and must not consume capacity twice.
+5. Complete vendor accept, driver pickup with bag-count/handoff proof, vendor handoff, vendor intake with tag/count/condition, washing, ready quality check, return delivery, and recipient proof using the same Order ID.
+6. Record bank-transfer or approved-invoice evidence using its amount, reference, date, and reconciliation note. Closeout must remain unavailable until that evidence is saved. Confirm `/api/payments/initialize` and `/api/payments/verify` return HTTP 503 while online payments are disabled.
 7. Confirm public tracking shows only the customer's first name, area, route window, status, next step, and safe route label. It must not reveal phone, email, payment details, vendor, driver, or location notes.
 8. Sign each role out and verify protected pages and APIs return to login or HTTP 401.
+
+## Staff operating flow
+
+- Admin owns the confirmed collection window, eligibility-checked vendor/rider assignment, payment reconciliation, exception escalation, and final closeout.
+- Vendors work only from the assigned order row: accept/decline, confirm tagged intake, start washing, record the ready count and quality check. Direct free-form stage writes are blocked.
+- Drivers work only from the route row: start, confirm collected count, record the vendor recipient/count, report a delay, and capture final recipient/count proof. A delay opens an urgent support case without rewinding the fulfillment stage.
+- Support can see normal bookings as well as at-risk orders, log manual customer contact, and work one grouped history per case. Support/payment activity must not overwrite the fulfillment stage, SLA start, or customer contact details.
+- Keep the exact customer street address staff-only. Public tracking continues to expose only the safe route label and approved customer fields.
 
 ## Backup and restore
 

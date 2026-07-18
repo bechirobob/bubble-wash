@@ -34,10 +34,10 @@ Pilot operating mode:
 
 - `/api/payments/initialize` returns HTTP 503 while online payments are disabled. When enabled, it accepts a saved booking reference, recalculates that booking on the server, creates a Paystack checkout in GHS, and returns the secure authorization URL. It does not trust a browser-supplied amount.
 - `/api/payments/verify?reference=...` verifies Paystack payment status and appends a payment event to the order timeline.
-- `/api/submit` stores bookings/onboarding/support events. In manual pilot mode, no provider send is attempted and operations follows up from the stored customer details.
-- `/api/orders/advance` appends role-scoped workflow events and clearly reminds staff when manual customer follow-up is required.
+- `/api/submit` stores bookings, roster updates, and support cases. Direct free-form fulfillment-stage writes are rejected; operational transitions must use the verified order queue.
+- `/api/orders/advance` appends role-scoped workflow events, requires evidence for scheduling/payment/intake/handoffs/delivery, and clearly reminds staff when manual customer follow-up is required.
 - `/api/availability` exposes staff-authenticated vendor/driver capacity tables and recent vendor declines.
-- Admin auto-assignment uses SQLite-backed vendor capacity rows and admin-only driver availability rows, decrementing capacity as orders are assigned.
+- Admin assignment uses SQLite-backed capacity rows, fails closed when area/status eligibility does not match, and decrements vendor/rider capacity atomically.
 - Vendors can accept or decline assigned jobs from the shared order board; declines are recorded with reason metadata, release vendor capacity, and move the order into review instead of losing context.
 - `/api/health` is the liveness endpoint. `/api/ready` validates production configuration and database integrity and returns HTTP 503 when the instance must not receive pilot traffic.
 - Payment verification reconciles the provider reference, GHS currency, and amount against the stored checkout, attaches the result to that order, and records each reference/status once.
