@@ -82,13 +82,17 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
   if (publicEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(publicEmail)) {
     errors.push("NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL must be a valid customer contact email or remain unset.");
   }
-  if (!env.PAYSTACK_SECRET_KEY) errors.push("Set PAYSTACK_SECRET_KEY before pilot operations.");
-  if (!env.RESEND_API_KEY) errors.push("Set RESEND_API_KEY before pilot operations.");
-  if (!env.BUBBLEWASH_EMAIL_FROM) errors.push("Set BUBBLEWASH_EMAIL_FROM before pilot operations.");
-  if (!env.BUBBLEWASH_OPERATIONS_EMAIL) errors.push("Set BUBBLEWASH_OPERATIONS_EMAIL before pilot operations.");
-  if (!env.WHATSAPP_ACCESS_TOKEN) errors.push("Set WHATSAPP_ACCESS_TOKEN before pilot operations.");
-  if (!env.WHATSAPP_PHONE_NUMBER_ID) errors.push("Set WHATSAPP_PHONE_NUMBER_ID before pilot operations.");
-  if (!env.BUBBLEWASH_OPERATIONS_WHATSAPP) errors.push("Set BUBBLEWASH_OPERATIONS_WHATSAPP before pilot operations.");
+  if (env.NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED === "true" && !env.PAYSTACK_SECRET_KEY) {
+    errors.push("Set PAYSTACK_SECRET_KEY before enabling online payments.");
+  }
+  if (env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED === "true") {
+    if (!env.RESEND_API_KEY) errors.push("Set RESEND_API_KEY before enabling automated updates.");
+    if (!env.BUBBLEWASH_EMAIL_FROM) errors.push("Set BUBBLEWASH_EMAIL_FROM before enabling automated updates.");
+    if (!env.BUBBLEWASH_OPERATIONS_EMAIL) errors.push("Set BUBBLEWASH_OPERATIONS_EMAIL before enabling automated updates.");
+    if (!env.WHATSAPP_ACCESS_TOKEN) errors.push("Set WHATSAPP_ACCESS_TOKEN before enabling automated updates.");
+    if (!env.WHATSAPP_PHONE_NUMBER_ID) errors.push("Set WHATSAPP_PHONE_NUMBER_ID before enabling automated updates.");
+    if (!env.BUBBLEWASH_OPERATIONS_WHATSAPP) errors.push("Set BUBBLEWASH_OPERATIONS_WHATSAPP before enabling automated updates.");
+  }
   const trustEdgeHeaders = env.BUBBLEWASH_TRUST_EDGE_HEADERS === "true";
   const trustProxyHeaders = env.BUBBLEWASH_TRUST_PROXY_HEADERS === "true";
   if (trustEdgeHeaders === trustProxyHeaders) {
@@ -105,6 +109,12 @@ export function productionReadinessWarnings(env: NodeJS.ProcessEnv | Record<stri
   }
   if (!env.NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL) {
     warnings.push("The optional public email contact link is intentionally hidden.");
+  }
+  if (env.NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED !== "true") {
+    warnings.push("Pilot payment mode is active: bank transfer and approved invoicing only; online checkout is disabled.");
+  }
+  if (env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED !== "true") {
+    warnings.push("Pilot communication mode is active: operations must follow up with customers manually; automated email and WhatsApp updates are disabled.");
   }
   return warnings;
 }
