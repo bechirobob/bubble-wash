@@ -27,7 +27,7 @@ export const plans: Plan[] = [
       { min: 40, max: 59, rate: 16.5 },
       { min: 60, max: null, rate: 15.5 },
     ],
-    features: ["4 scheduled pickups / month", "Basic order updates", "One invoice trail", "Support by WhatsApp", "Assigned laundry partner"],
+    features: ["4 scheduled pickups / month", "Basic order updates", "One invoice trail", "Operations support", "Assigned laundry partner"],
   },
   {
     name: "Twice weekly",
