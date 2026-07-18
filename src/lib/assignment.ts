@@ -1,4 +1,4 @@
-import { listDriverAvailability, listVendorAvailability, reserveDriverCapacity, reserveVendorCapacity, type DriverAvailability, type VendorAvailability } from "./availability-store.ts";
+import { listDriverAvailability, listVendorAvailability, listVendorDeclines, reserveAssignmentCapacity, type DriverAvailability, type VendorAvailability } from "./availability-store.ts";
 
 export type AssignmentRecord = {
   id: string;
@@ -90,8 +90,9 @@ function serviceMatches(vendor: VendorAvailability, serviceType?: string) {
   return vendor.serviceTypes.some((service) => service.toLowerCase().includes(wanted) || wanted.includes(service.toLowerCase()));
 }
 
-function selectAvailabilityVendor(area: string, serviceType?: string) {
-  const available = listVendorAvailability().filter((vendor) => statusAllowsVendor(vendor) && serviceMatches(vendor, serviceType));
+function selectAvailabilityVendor(area: string, serviceType: string | undefined, orderId: string) {
+  const declinedVendorIds = new Set(listVendorDeclines(orderId).map((decline) => decline.vendorId));
+  const available = listVendorAvailability().filter((vendor) => statusAllowsVendor(vendor) && serviceMatches(vendor, serviceType) && !declinedVendorIds.has(vendor.vendorId));
   return available.find((vendor) => listMatches(vendor.serviceZones, area)) ?? available[0];
 }
 
@@ -125,10 +126,9 @@ export function selectAssignmentPair(records: AssignmentRecord[], order: Assignm
 }
 
 export function assignOrderFromAvailability(order: AvailabilityAssignmentOrder): AssignmentPair {
-  const vendorRow = isUnassigned(order.vendor) ? selectAvailabilityVendor(order.area, order.serviceType) : undefined;
+  const vendorRow = isUnassigned(order.vendor) ? selectAvailabilityVendor(order.area, order.serviceType, order.orderId) : undefined;
   const driverRow = isUnassigned(order.driver) ? selectAvailabilityDriver(order.area) : undefined;
-  const reservedVendor = vendorRow ? reserveVendorCapacity(vendorRow.vendorId, order.orderId) : undefined;
-  const reservedDriver = driverRow ? reserveDriverCapacity(driverRow.driverId, order.orderId) : undefined;
+  const { vendor: reservedVendor, driver: reservedDriver } = reserveAssignmentCapacity(vendorRow?.vendorId, driverRow?.driverId);
   const vendorNameValue = isUnassigned(order.vendor) ? (reservedVendor?.vendorName ?? "Needs admin review") : order.vendor;
   const driverNameValue = isUnassigned(order.driver) ? (reservedDriver?.driverName ?? "Needs admin onboarding") : order.driver;
 

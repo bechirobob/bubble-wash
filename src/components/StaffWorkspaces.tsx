@@ -836,7 +836,7 @@ function PortalShell({ title, role, pageRole = role, userName, children }: Porta
   return (
     <main className="portalPage">
       <header className="portalNav">
-        <Link className="brand" href="/" aria-label="Bubble Wash home"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="Bubble Wash logo" width={58} height={58} /><span>Bubble Wash</span></Link>
+        <Link className="brand" href="/" aria-label="Bubble Wash home"><span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={58} height={58} /></span><span>Bubble Wash</span></Link>
         <nav className="portalLinks">
           {portalLinks.map(({ href, label, icon }) => <Link className="portalNavItem" key={href} href={href} aria-current={href === pageHome ? "page" : undefined}><StaffNavIcon type={icon} /><span>{label}</span></Link>)}
           <button className="portalNavItem logoutButton" type="button" onClick={logoutStaff}><StaffNavIcon type="exit" /><span>Exit</span></button>
@@ -848,7 +848,7 @@ function PortalShell({ title, role, pageRole = role, userName, children }: Porta
           <h1>{promise.title}</h1>
           <p>{promise.subtitle}</p>
         </div>
-        <p className="staffSessionLine"><strong>{userName}</strong><span>{title}</span><span>{pageRole} workspace · queue first</span></p>
+        <p className="staffSessionLine"><strong>{userName}</strong><span>{title}</span><span>{pageRole} workspace · today&apos;s work</span></p>
       </section>
       {children}
     </main>
@@ -856,15 +856,14 @@ function PortalShell({ title, role, pageRole = role, userName, children }: Porta
 }
 
 
-function SupportTicketForm({ userName, role, onSubmit, status }: { userName: string; role: StaffRole; onSubmit: SubmitHandler; status?: string }) {
+function SupportTicketForm({ onSubmit, status }: { userName: string; role: StaffRole; onSubmit: SubmitHandler; status?: string }) {
   return (
     <form className="panel supportForm" onSubmit={(event) => onSubmit(event, "support-ticket")}>
       <h3>Open support ticket</h3>
-      <div className="two"><input name="name" placeholder="Your name" defaultValue={userName} required /><input name="email" type="email" placeholder="Email" defaultValue={`${role}@bubblewash.local`} required /></div>
-      <div className="two"><input name="phone" placeholder="Phone / WhatsApp" required /><input name="company" placeholder="Team, vendor, or customer" defaultValue={role === "admin" ? "Bubble Wash Operations" : role === "driver" ? "Bubble Wash Route Team" : role === "vendor" ? "Vendor Partner" : "Bubble Wash Support"} required /></div>
-      <div className="two"><input name="orderId" placeholder="Related Order ID" /><select name="issueType">{supportTypes.map((item) => <option key={item}>{item}</option>)}</select></div>
-      <div className="two"><select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select><select name="ticketStatus"><option>Open</option><option>Waiting on Customer</option><option>Waiting on Vendor</option><option>Waiting on Driver</option></select></div>
-      <textarea name="message" placeholder="What happened? Include the timeline, customer impact, delay reason, payment reference, or item issue." required />
+      <p className="formHint">The signed-in operator is recorded automatically.</p>
+      <div className="two"><label>Related order<input name="orderId" placeholder="BW-…" /></label><label>Issue type<select name="issueType">{supportTypes.map((item) => <option key={item}>{item}</option>)}</select></label></div>
+      <div className="two"><label>Priority<select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select></label><label>Current status<select name="ticketStatus"><option>Open</option><option>Waiting on Customer</option><option>Waiting on Vendor</option><option>Waiting on Driver</option></select></label></div>
+      <label>Case note<textarea name="message" placeholder="Customer impact, delay reason, payment reference, or item issue" required /></label>
       <button className="button primary full" type="submit">Raise Support Ticket</button>
       {status && <p className="status success">{status}</p>}
     </form>
@@ -1051,13 +1050,12 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
           <div className="opsGrid compactManualGrid">
           <form className="panel opsForm" onSubmit={(event) => submitLead(event, "admin-operation")}> 
             <h3>Log admin action</h3>
-            <div className="two"><input name="name" placeholder="Operator name" defaultValue={userName} required /><input name="email" type="email" placeholder="Operator email" defaultValue="admin@bubblewash.local" required /></div>
-            <div className="two"><input name="phone" placeholder="Operator phone" required /><input name="company" placeholder="Bubble Wash operations" defaultValue="Bubble Wash Operations" required /></div>
-            <div className="two"><input name="orderId" placeholder="Shared Order ID e.g. BW-1779979663969" required /><input name="vendorName" placeholder="Assigned vendor e.g. CleanPro Laundry" /></div>
-            <div className="two"><input name="driverName" placeholder="Assigned driver e.g. Kofi Route 1" /><input name="routeWindow" placeholder="ETA/window e.g. 2:30–3:00 PM" /></div>
-            <div className="two"><select name="actionType"><option>New order intake</option><option>Assign vendor</option><option>Update order status</option><option>Payment follow-up</option><option>Quality issue</option><option>Customer escalation</option></select><select name="orderStatus"><option>Received</option><option>Pickup scheduled</option><option>Vendor assigned</option><option>In washing</option><option>Ready for delivery</option><option>Delivered</option><option>Needs attention</option></select></div>
-            <div className="two"><select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select><select name="paymentPreference"><option>Payment not confirmed</option><option>MTN MoMo</option><option>Telecel Cash</option><option>Card</option><option>Bank transfer</option><option>Invoice</option></select></div>
-            <textarea name="message" placeholder="Action notes: customer, vendor, route, promised time, payment status, or quality issue..." required />
+            <p className="formHint">Your operator identity is attached automatically.</p>
+            <div className="two"><label>Order reference<input name="orderId" placeholder="BW-…" required /></label><label>Assigned vendor<input name="vendorName" /></label></div>
+            <div className="two"><label>Assigned driver<input name="driverName" /></label><label>Confirmed time window<input name="routeWindow" placeholder="14:30–15:00" /></label></div>
+            <div className="two"><label>Action<select name="actionType"><option>New order intake</option><option>Assign vendor</option><option>Update order status</option><option>Payment follow-up</option><option>Quality issue</option><option>Customer escalation</option></select></label><label>Order status<select name="orderStatus"><option>Received</option><option>Pickup scheduled</option><option>Vendor assigned</option><option>In washing</option><option>Ready for delivery</option><option>Delivered</option><option>Needs attention</option></select></label></div>
+            <div className="two"><label>Priority<select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select></label><label>Payment<select name="paymentPreference"><option>Payment not confirmed</option><option>Bank transfer pending</option><option>Bank transfer confirmed</option><option>Invoice pending approval</option><option>Invoice approved</option></select></label></div>
+            <label>Action note<textarea name="message" placeholder="Customer impact, promised time, payment status, or quality issue" required /></label>
             <button className="button primary full" type="submit">Save Admin Action</button>
             {formStatus["admin-operation"] && <p className="status success">{formStatus["admin-operation"]}</p>}
           </form>
@@ -1102,30 +1100,26 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
           <div className="vendorGrid">
           <form className="panel vendorForm" onSubmit={(event) => submitLead(event, "vendor-application")}>
             <h3>Update today&apos;s capacity</h3>
-            <div className="two"><input name="name" placeholder="Contact name" defaultValue={userName} required /><input name="email" type="email" placeholder="Email" defaultValue="vendor@bubblewash.local" required /></div>
-            <div className="two"><input name="phone" placeholder="Phone / WhatsApp" required /><input name="company" placeholder="Laundromat name" required /></div>
-            <div className="two"><input name="area" placeholder="Service zones e.g. Osu, Labone" /><input name="capacity" inputMode="numeric" placeholder="Order slots today e.g. 8" /></div>
-            <div className="two"><select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited capacity</option><option>Paused today</option></select><select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></div>
-            <textarea name="message" placeholder="Machines available, turnaround time, pickup limits, delivery support, service notes..." />
+            <p className="formHint">The signed-in vendor account is recorded automatically.</p>
+            <div className="two"><label>Laundry business<input name="company" required /></label><label>Service areas<input name="area" placeholder="Osu, Labone" /></label></div>
+            <div className="two"><label>Order slots remaining<input name="capacity" type="number" min="0" inputMode="numeric" /></label><label>Availability<select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited capacity</option><option>Paused today</option></select></label></div>
+            <label>Available service<select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></label>
+            <label>Capacity note<textarea name="message" placeholder="Turnaround, machine, or service restrictions" /></label>
             <button className="button primary full" type="submit">Update Capacity</button>
             {formStatus["vendor-application"] && <p className="status success">{formStatus["vendor-application"]}</p>}
           </form>
           <form className="panel vendorForm" onSubmit={(event) => submitLead(event, "vendor-job-update")}>
             <h3>Accept or update a job</h3>
-            <div className="two"><input name="name" placeholder="Vendor contact" defaultValue={userName} required /><input name="email" type="email" placeholder="Vendor email" defaultValue="vendor@bubblewash.local" required /></div>
-            <div className="two"><input name="phone" placeholder="Vendor phone" required /><input name="company" placeholder="Laundromat name" required /></div>
-            <div className="two"><input name="orderId" placeholder="Order ID" /><select name="jobStatus"><option>Accepted</option><option>Picked up by vendor</option><option>Washing started</option><option>Ironing / finishing</option><option>Ready for driver</option><option>Issue found</option></select></div>
-            <textarea name="message" placeholder="Weight received, bag count, expected completion, issue notes, missing item notes..." required />
+            <div className="two"><label>Order reference<input name="orderId" placeholder="BW-…" required /></label><label>New status<select name="jobStatus"><option>Accepted</option><option>Picked up by vendor</option><option>Washing started</option><option>Ironing / finishing</option><option>Ready for driver</option><option>Issue found</option></select></label></div>
+            <label>Production note<textarea name="message" placeholder="Verified weight, bag count, completion time, or issue" required /></label>
             <button className="button secondary full" type="submit">Submit Job Update</button>
             {formStatus["vendor-job-update"] && <p className="status success">{formStatus["vendor-job-update"]}</p>}
           </form>
           <form className="panel vendorForm" onSubmit={(event) => submitLead(event, "qr-bag-intake")}> 
             <h3>QR / bag intake check</h3>
-            <div className="two"><input name="name" placeholder="Vendor contact" defaultValue={userName} required /><input name="email" type="email" placeholder="Vendor email" defaultValue="vendor@bubblewash.local" required /></div>
-            <div className="two"><input name="phone" placeholder="Vendor phone" required /><input name="company" placeholder="Laundromat name" required /></div>
-            <div className="two"><input name="orderId" placeholder="Order ID" required /><input name="qrTag" placeholder="QR / bag tag e.g. BW-BAG-04" /></div>
-            <div className="two"><input name="bagCount" placeholder="Bag count / received kg" /><select name="itemCondition"><option>All items accepted</option><option>Stain issue found</option><option>Delicate item flagged</option><option>Missing count mismatch</option><option>Damage risk flagged</option></select></div>
-            <textarea name="message" placeholder="Garment/category notes, stain photos needed, item count mismatch, or special care instruction..." required />
+            <div className="two"><label>Order reference<input name="orderId" placeholder="BW-…" required /></label><label>Bag tag<input name="qrTag" placeholder="BW-BAG-04" /></label></div>
+            <div className="two"><label>Bag count or received kg<input name="bagCount" /></label><label>Intake condition<select name="itemCondition"><option>All items accepted</option><option>Stain issue found</option><option>Delicate item flagged</option><option>Missing count mismatch</option><option>Damage risk flagged</option></select></label></div>
+            <label>Intake note<textarea name="message" placeholder="Item count, stains, special care, or damage risk" required /></label>
             <button className="button primary full" type="submit">Save QR Intake</button>
             {formStatus["qr-bag-intake"] && <p className="status success">{formStatus["qr-bag-intake"]}</p>}
           </form>
@@ -1176,12 +1170,11 @@ export function DriverWorkspace({ userName, role }: { userName: string; role: St
           </div>
           <form className="panel driverForm" onSubmit={(event) => submitLead(event, "driver-route-log")}>
             <h3>Update route status</h3>
-            <div className="two"><input name="name" placeholder="Driver name" defaultValue={userName} required /><input name="email" type="email" placeholder="Driver email" defaultValue="driver@bubblewash.local" required /></div>
-            <div className="two"><input name="phone" placeholder="Driver phone" required /><input name="company" placeholder="Bubble Wash route team" defaultValue="Bubble Wash Route Team" required /></div>
-            <div className="two"><input name="orderId" placeholder="Shared Order ID e.g. BW-1234" required /><select name="orderStatus"><option>Driver en route</option><option>Pickup scheduled</option><option>Picked up</option><option>Dropped at vendor</option><option>Collected from vendor</option><option>Out for delivery</option><option>Delivered</option><option>Delayed</option></select></div>
-            <div className="two"><input name="area" placeholder="Route area / customer area" /><input name="driverEta" placeholder="ETA e.g. 25 min / 3:20 PM" /></div>
-            <div className="two"><input name="locationNote" placeholder="Checkpoint e.g. Spintex Road near Palace" /><input name="bagCount" placeholder="Bag count / kg" /></div>
-            <textarea name="message" placeholder="Pickup note, vendor/customer handoff, delay reason, QR/photo reference, or delivery confirmation..." required />
+            <p className="formHint">The signed-in driver is recorded automatically.</p>
+            <div className="two"><label>Order reference<input name="orderId" placeholder="BW-…" required /></label><label>New status<select name="orderStatus"><option>Driver en route</option><option>Pickup scheduled</option><option>Picked up</option><option>Dropped at vendor</option><option>Collected from vendor</option><option>Out for delivery</option><option>Delivered</option><option>Delayed</option></select></label></div>
+            <div className="two"><label>Route area<input name="area" /></label><label>Estimated arrival<input name="driverEta" placeholder="25 min or 15:20" /></label></div>
+            <div className="two"><label>Current checkpoint<input name="locationNote" placeholder="Spintex Road near Palace" /></label><label>Bag count or kg<input name="bagCount" /></label></div>
+            <label>Handoff or delay note<textarea name="message" placeholder="Pickup, vendor handoff, delay reason, or delivery confirmation" required /></label>
             <button className="button primary full" type="submit">Save Driver Route Update</button>
             {formStatus["driver-route-log"] && <p className="status success">{formStatus["driver-route-log"]}</p>}
           </form>

@@ -16,7 +16,7 @@ type PaystackVerifyResponse = {
   status: boolean;
   message: string;
   data?: {
-    id?: number;
+    id?: number | string;
     status?: string;
     reference?: string;
     amount?: number;
@@ -28,6 +28,7 @@ type PaystackVerifyResponse = {
 };
 
 export type CheckoutInput = {
+  orderId: string;
   name: string;
   email: string;
   phone: string;
@@ -86,7 +87,9 @@ export async function initializePaystackCheckout(input: CheckoutInput) {
       callback_url: `${baseUrl}/?payment_reference=${encodeURIComponent(reference)}#booking`,
       channels: ["card", "mobile_money"],
       metadata: {
+        order_id: input.orderId,
         custom_fields: [
+          { display_name: "Booking reference", variable_name: "booking_reference", value: input.orderId },
           { display_name: "Customer", variable_name: "customer", value: input.name },
           { display_name: "Phone", variable_name: "phone", value: input.phone },
           { display_name: "Account", variable_name: "company", value: input.company },
@@ -107,6 +110,8 @@ export async function initializePaystackCheckout(input: CheckoutInput) {
     authorizationUrl: data.data.authorization_url,
     accessCode: data.data.access_code ?? "",
     amountGhs: input.amountGhs,
+    amountMinor: amount,
+    currency: "GHS" as const,
   };
 }
 

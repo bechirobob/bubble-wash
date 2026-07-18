@@ -4,11 +4,11 @@ import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { staffWriteGuard } from "@/lib/security";
 
 export async function POST(request: NextRequest) {
+  const staffGuardError = staffWriteGuard(request.headers);
+  if (staffGuardError) return staffGuardError;
   if (isRateLimited(clientKey(request.headers, "login"), 10, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many login attempts. Try again shortly." }, { status: 429 });
   }
-  const staffGuardError = staffWriteGuard(request.headers);
-  if (staffGuardError) return staffGuardError;
   try {
     const body = await request.json();
     const email = typeof body.email === "string" ? body.email : "";

@@ -152,6 +152,9 @@ function operationsMessage(record: SubmissionRecord): NotificationMessage {
 }
 
 export async function dispatchSubmissionNotifications(record: SubmissionRecord) {
+  if (process.env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED !== "true") {
+    return [{ channel: "email", target: "operations", sent: false, skipped: "Manual customer follow-up is required during the pilot." }] satisfies NotificationResult[];
+  }
   const type = text(record.data.submissionType);
   const preference = text(record.data.alertPreference);
   const messages = [operationsMessage(record)];
@@ -175,7 +178,8 @@ export function notificationSummary(results: NotificationResult[]) {
   const skipped = results.filter((result) => result.skipped).length;
   const failed = results.filter((result) => result.error).length;
   if (sent) return `${sent} notification${sent === 1 ? "" : "s"} sent${failed ? `, ${failed} failed` : ""}.`;
-  if (skipped && !failed) return "Notifications are ready but provider credentials are not configured yet.";
+  if (results.some((result) => result.skipped?.includes("Manual customer follow-up"))) return "Saved. Manual customer follow-up is required.";
+  if (skipped && !failed) return "Automated updates are enabled but provider credentials are incomplete.";
   if (failed) return `${failed} notification${failed === 1 ? "" : "s"} failed. Check provider configuration.`;
   return "No notifications were required.";
 }

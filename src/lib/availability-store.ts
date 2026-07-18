@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
@@ -131,6 +132,7 @@ export function getAvailabilityDatabase() {
   const db = new Database(databasePath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  db.pragma("busy_timeout = 5000");
   db.exec(`
     CREATE TABLE IF NOT EXISTS vendor_availability (
       vendor_id TEXT PRIMARY KEY,
@@ -319,11 +321,60 @@ export function reserveDriverCapacity(driverId: string, orderId: string): Driver
   return driverFromRow(reserve());
 }
 
+export function reserveAssignmentCapacity(vendorId?: string, driverId?: string) {
+  const db = getAvailabilityDatabase();
+  const reserve = db.transaction(() => {
+    let vendor: VendorAvailability | undefined;
+    let driver: DriverAvailability | undefined;
+
+    if (vendorId) {
+      const row = db.prepare("SELECT * FROM vendor_availability WHERE vendor_id = ?").get(vendorId) as VendorRow | undefined;
+      if (!row || row.capacity_remaining <= 0 || /(paused|closed|unavailable|inactive|suspended)/.test(row.availability_status.toLowerCase())) {
+        throw new Error("Vendor capacity is no longer available.");
+      }
+      const updated = db.prepare("UPDATE vendor_availability SET capacity_remaining = capacity_remaining - 1, updated_at = ? WHERE vendor_id = ? AND capacity_remaining > 0")
+        .run(nowIso(), vendorId);
+      if (updated.changes !== 1) throw new Error("Vendor capacity is no longer available.");
+      vendor = vendorFromRow(db.prepare("SELECT * FROM vendor_availability WHERE vendor_id = ?").get(vendorId) as VendorRow);
+    }
+
+    if (driverId) {
+      const row = db.prepare("SELECT * FROM driver_availability WHERE driver_id = ?").get(driverId) as DriverRow | undefined;
+      if (!row || row.capacity_remaining <= 0 || /(inactive|suspended|offboarded|paused)/.test(row.availability_status.toLowerCase())) {
+        throw new Error("Driver capacity is no longer available.");
+      }
+      const updated = db.prepare("UPDATE driver_availability SET capacity_remaining = capacity_remaining - 1, updated_at = ? WHERE driver_id = ? AND capacity_remaining > 0")
+        .run(nowIso(), driverId);
+      if (updated.changes !== 1) throw new Error("Driver capacity is no longer available.");
+      driver = driverFromRow(db.prepare("SELECT * FROM driver_availability WHERE driver_id = ?").get(driverId) as DriverRow);
+    }
+
+    return { vendor, driver };
+  });
+  return reserve.immediate();
+}
+
+export function releaseAssignmentCapacity(vendorId?: string, driverId?: string) {
+  const db = getAvailabilityDatabase();
+  const release = db.transaction(() => {
+    const updatedAt = nowIso();
+    if (vendorId) {
+      db.prepare("UPDATE vendor_availability SET capacity_remaining = MIN(capacity_remaining + 1, 999), updated_at = ? WHERE vendor_id = ?")
+        .run(updatedAt, vendorId);
+    }
+    if (driverId) {
+      db.prepare("UPDATE driver_availability SET capacity_remaining = MIN(capacity_remaining + 1, 999), updated_at = ? WHERE driver_id = ?")
+        .run(updatedAt, driverId);
+    }
+  });
+  release.immediate();
+}
+
 export function recordVendorDecline(input: VendorDeclineInput): VendorDecline {
   const vendorName = input.vendorName.trim() || "Vendor partner";
   const vendorId = input.vendorId?.trim() || `vendor-${slug(vendorName, "partner")}`;
   const record = {
-    id: `VD-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    id: `VD-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`,
     orderId: input.orderId.trim(),
     vendorId,
     vendorName,
@@ -332,11 +383,15 @@ export function recordVendorDecline(input: VendorDeclineInput): VendorDecline {
     createdAt: nowIso(),
   };
   const db = getAvailabilityDatabase();
-  db.transaction(() => {
+  const save = db.transaction(() => {
+    const existing = db.prepare("SELECT * FROM vendor_declines WHERE order_id = ? AND vendor_id = ? ORDER BY created_at DESC LIMIT 1")
+      .get(record.orderId, vendorId) as DeclineRow | undefined;
+    if (existing) return declineFromRow(existing);
     db.prepare("INSERT INTO vendor_declines (id, order_id, vendor_id, vendor_name, reason, declined_by, created_at) VALUES (@id, @orderId, @vendorId, @vendorName, @reason, @declinedBy, @createdAt)").run(record);
-    db.prepare("UPDATE vendor_availability SET capacity_remaining = capacity_remaining + 1, updated_at = ? WHERE vendor_id = ?").run(record.createdAt, vendorId);
-  })();
-  return record;
+    db.prepare("UPDATE vendor_availability SET capacity_remaining = MIN(capacity_remaining + 1, 999), updated_at = ? WHERE vendor_id = ?").run(record.createdAt, vendorId);
+    return record;
+  });
+  return save.immediate();
 }
 
 export function listVendorDeclines(orderId?: string): VendorDecline[] {

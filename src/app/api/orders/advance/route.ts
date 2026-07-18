@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { appendSubmissionRecord } from "@/lib/data-store";
+import { appendSubmissionRecord, claimWorkflowAction, releaseWorkflowActionClaim } from "@/lib/data-store";
 import { assignOrderFromAvailability } from "@/lib/assignment";
-import { recordVendorDecline } from "@/lib/availability-store";
+import { recordVendorDecline, releaseAssignmentCapacity } from "@/lib/availability-store";
 import { getCurrentStaffUser } from "@/lib/auth";
 import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
 import { automationActionsForOrder } from "@/lib/order-workflow";
@@ -19,6 +19,9 @@ export async function POST(request: NextRequest) {
   const staffGuardError = staffWriteGuard(request.headers);
   if (staffGuardError) return staffGuardError;
 
+  let claimKey = "";
+  let assignment: ReturnType<typeof assignOrderFromAvailability> | null = null;
+  let recordSaved = false;
   try {
     const body = await request.json();
     const orderId = text(body.orderId);
@@ -40,15 +43,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "That automation is not allowed for the current order stage." }, { status: 400 });
     }
 
-    const assignment = actionKey === "admin-assign-vendor" ? assignOrderFromAvailability({
+    claimKey = `${order.orderId}:${actionKey}:${order.updatedAt}`;
+    if (!claimWorkflowAction({ claimKey, orderId: order.orderId, actionKey, orderUpdatedAt: order.updatedAt })) {
+      return NextResponse.json({ ok: false, error: "That action was already processed. Refresh the order board." }, { status: 409 });
+    }
+
+    assignment = actionKey === "admin-assign-vendor" ? assignOrderFromAvailability({
       orderId: order.orderId,
       area: order.area,
-      vendor: order.vendor,
+      vendor: order.workflowStage.key === "exception" ? "Unassigned" : order.vendor,
       driver: order.driver,
     }) : null;
     if (actionKey === "vendor-decline-job") {
       recordVendorDecline({
         orderId: order.orderId,
+        vendorId: order.vendorId || undefined,
         vendorName: order.vendor,
         reason: text(body.reason) || "Vendor declined assignment from shared order board.",
         declinedBy: user.name,
@@ -71,9 +80,34 @@ export async function POST(request: NextRequest) {
     };
 
     appendSubmissionRecord(record);
+    recordSaved = true;
     const notifications = await dispatchSubmissionNotifications(record);
     return NextResponse.json({ ok: true, message: `${selected.label} saved. ${notificationSummary(notifications)}`, id: record.id, nextStatus: selected.nextStatus, notifications });
-  } catch {
+  } catch (error) {
+    if (!recordSaved && assignment) {
+      try {
+        releaseAssignmentCapacity(assignment.vendorId, assignment.driverId);
+      } catch (cleanupError) {
+        console.error("Bubble Wash capacity rollback failed", {
+          message: cleanupError instanceof Error ? cleanupError.message : "Unknown error",
+          claimKey,
+        });
+      }
+    }
+    if (!recordSaved && claimKey) {
+      try {
+        releaseWorkflowActionClaim(claimKey);
+      } catch (cleanupError) {
+        console.error("Bubble Wash workflow claim rollback failed", {
+          message: cleanupError instanceof Error ? cleanupError.message : "Unknown error",
+          claimKey,
+        });
+      }
+    }
+    console.error("Bubble Wash order automation failed", {
+      message: error instanceof Error ? error.message : "Unknown error",
+      claimKey,
+    });
     return NextResponse.json({ ok: false, error: "Unable to run automation." }, { status: 500 });
   }
 }

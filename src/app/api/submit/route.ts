@@ -6,7 +6,7 @@ import { appendSubmissionRecord } from "@/lib/data-store";
 import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
 import { plans, zones } from "@/lib/pricing";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
-import { staffWriteGuard } from "@/lib/security";
+import { sameOriginJsonGuard, staffWriteGuard } from "@/lib/security";
 
 const emailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const maxFieldLength = 1200;
@@ -15,7 +15,7 @@ const planNames = new Set(plans.map((plan) => plan.name));
 const zoneNames = new Set(Object.keys(zones));
 const paymentPreferences = new Set(["MTN MoMo", "Telecel Cash", "Card", "Bank transfer", "Invoice me"]);
 const paymentMethods = new Set(["MTN MoMo", "Telecel Cash", "Visa / Mastercard", "Bank transfer"]);
-const alertPreferences = new Set(["Email + WhatsApp alerts", "WhatsApp only", "Email only", "Call me"]);
+const alertPreferences = new Set(["Order tracking and phone follow-up", "Email + WhatsApp alerts", "WhatsApp only", "Email only", "Call me"]);
 const pickupWindows = new Set(["Any available window", "Morning pickup", "Afternoon pickup", "Evening pickup"]);
 const billingCycles = new Set(["Monthly", "Yearly"]);
 const multiAdminModes = new Set(["Invite team leads", "Single admin only"]);
@@ -158,6 +158,13 @@ function validatePublicPayload(body: Record<string, unknown>, submissionType: st
   const enumError = enumChecks.find(Boolean);
   if (enumError) return enumError;
 
+  if (submissionType === "pickup-booking" && process.env.NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED !== "true") {
+    const paymentPreference = text(body.paymentPreference);
+    if (paymentPreference && !["Bank transfer", "Invoice me"].includes(paymentPreference)) {
+      return NextResponse.json({ ok: false, error: "Choose bank transfer or invoice for the pilot." }, { status: 400 });
+    }
+  }
+
   const kg = text(body.kg);
   if (kg) {
     const parsedKg = Number(kg);
@@ -205,6 +212,8 @@ async function authorizeSubmission(submissionType: string) {
 }
 
 export async function POST(request: NextRequest) {
+  const requestGuardError = sameOriginJsonGuard(request.headers, "submission");
+  if (requestGuardError) return requestGuardError;
   if (isRateLimited(clientKey(request.headers, "submit"), 30, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many requests. Try again shortly." }, { status: 429 });
   }
@@ -236,16 +245,22 @@ export async function POST(request: NextRequest) {
     }
     const authError = await authorizeSubmission(submissionType);
     if (authError) return authError;
+    const staffUser = publicSubmissionTypes.has(submissionType) ? null : await getCurrentStaffUser();
+    if (staffUser) {
+      body.name = staffUser.name;
+      body.email = staffUser.email;
+      body.company = text(body.company) || (staffUser.role === "vendor" ? "Vendor partner" : staffUser.role === "driver" ? "Bubble Wash Route Team" : staffUser.role === "support" ? "Bubble Wash Support" : "Bubble Wash Operations");
+    }
     const validationError = validatePublicPayload(body, submissionType);
     if (validationError) return validationError;
 
-    const required = ["submissionType", "name", "email", "phone", "company"];
+    const required = publicSubmissionTypes.has(submissionType) ? ["submissionType", "name", "email", "phone", "company"] : ["submissionType"];
     for (const field of required) {
       if (!text(body[field])) {
         return NextResponse.json({ ok: false, error: `Missing required field: ${field}` }, { status: 400 });
       }
     }
-    if (!emailPattern.test(text(body.email))) {
+    if (text(body.email) && !emailPattern.test(text(body.email))) {
       return NextResponse.json({ ok: false, error: "Enter a valid email address." }, { status: 400 });
     }
 
@@ -259,8 +274,18 @@ export async function POST(request: NextRequest) {
     appendSubmissionRecord(record);
     syncAvailabilityTables(body, submissionType, text(body.name) || text(body.company) || "Bubble Wash team");
     const notifications = await dispatchSubmissionNotifications(record);
+    if (publicSubmissionTypes.has(submissionType)) {
+      return NextResponse.json({
+        ok: true,
+        message: "Thanks — your request was received. Keep this reference for tracking.",
+        id: record.id,
+      });
+    }
     return NextResponse.json({ ok: true, message: `Thanks — your request was received. ${notificationSummary(notifications)}`, id: record.id, notifications });
-  } catch {
+  } catch (error) {
+    console.error("Bubble Wash submission failed", {
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
     return NextResponse.json({ ok: false, error: "Unable to save submission." }, { status: 500 });
   }
 }

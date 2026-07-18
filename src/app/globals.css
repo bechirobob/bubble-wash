@@ -1,9 +1,7 @@
-@import url("https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap");
-
 :root {
   color-scheme: light;
-  --font-sans: "Source Sans 3", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --page: rgba(255, 255, 255, .76);
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --page: #ffffff;
   --page-soft: #eefbfe;
   --paper: #ffffff;
   --surface: #ffffff;
@@ -28,17 +26,11 @@
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; font-size: 16px; }
-html {
-  background:
-    radial-gradient(circle at 14% 10%, rgba(217, 242, 245, .78) 0 18%, transparent 36%),
-    radial-gradient(circle at 86% 18%, rgba(232, 243, 245, .86) 0 14%, transparent 34%),
-    linear-gradient(180deg, #ffffff 0%, #f4fbfc 48%, #ffffff 100%);
-  background-attachment: fixed;
-}
+html { background: #fff; }
 html, body { margin: 0; min-height: 100%; }
 body {
   font-family: var(--font-sans);
-  font-size: 16px;
+  font-size: 15.5px;
   line-height: 1.5;
   font-weight: 400;
   color: var(--ink);
@@ -47,17 +39,7 @@ body {
   -webkit-font-smoothing: antialiased;
   isolation: isolate;
 }
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.88) 0%, rgba(255,255,255,.68) 44%, rgba(255,255,255,.82) 100%);
-  -webkit-backdrop-filter: blur(18px) saturate(1.12);
-  backdrop-filter: blur(18px) saturate(1.12);
-}
+body::before { display: none; content: none; }
 body::after { display: none !important; content: none !important; }
 body > * { position: relative; z-index: 1; }
 img, svg { max-width: 100%; display: block; }
@@ -82,8 +64,8 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 }
 h1, h2, h3, h4, p { margin-top: 0; }
 h1, h2, h3, h4 { color: var(--ink-strong); letter-spacing: -.03em; font-weight: 700; }
-h1 { max-width: 760px; font-size: clamp(2.2rem, 5vw, 4rem); line-height: .98; margin-bottom: 1.15rem; }
-h2 { font-size: clamp(1.6rem, 3vw, 2.35rem); line-height: 1.08; margin-bottom: .75rem; }
+h1 { max-width: 760px; font-size: clamp(2.25rem, 4.2vw, 3.25rem); line-height: 1.03; margin-bottom: 1.15rem; }
+h2 { font-size: clamp(1.55rem, 2.6vw, 2rem); line-height: 1.12; margin-bottom: .75rem; }
 h3 { font-size: 1.2rem; line-height: 1.25; margin-bottom: .45rem; }
 p { color: var(--muted); font-size: 1rem; line-height: 1.55; }
 small { display: block; color: var(--soft); line-height: 1.35; }
@@ -104,7 +86,9 @@ small { display: block; color: var(--soft); line-height: 1.35; }
 .siteShell { min-height: 100vh; }
 
 .brand { display: inline-flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; font-weight: 700; font-size: 1.1rem; }
-.brandMark { width: 42px; height: 42px; object-fit: cover; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; }
+.brandCrop { width: 42px; height: 42px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; }
+.brandCrop .brandMark { width: 42px; height: 42px; max-width: none; object-fit: cover; transform: scale(2); }
+.brand > .brandMark { width: 42px; height: 42px; object-fit: cover; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; }
 .siteHeader, .nav, .portalNav, .redesignTopbar {
   width: var(--space-page);
   margin: 24px auto 0;
@@ -164,10 +148,10 @@ small { display: block; color: var(--soft); line-height: 1.35; }
   grid-template-columns: minmax(0, 1.05fr) minmax(320px, .72fr);
   gap: 64px;
   align-items: start;
-  padding-block: 72px 54px;
+  padding-block: 62px 50px;
   border-bottom: 1px solid var(--line);
 }
-.homeHeroCopy .lead { font-size: 1.12rem; line-height: 1.55; max-width: 620px; }
+.homeHeroCopy .lead { font-size: 1.08rem; line-height: 1.55; max-width: 620px; }
 .heroActions { display: flex; flex-wrap: wrap; gap: 12px; margin: 26px 0; }
 .servicePanel, .serviceRecordBlock, .bookingForm {
   background: transparent;
@@ -201,7 +185,7 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .serviceFacts div:last-child { border-right: 0; }
 .serviceFacts strong { display: block; font-size: 1.55rem; line-height: 1; color: var(--brand-dark); }
 .serviceFacts span { display: block; margin-top: 6px; color: var(--muted); }
-.serviceSection { padding-block: 54px; border-bottom: 1px solid var(--line); }
+.serviceSection { padding-block: 50px; border-bottom: 1px solid var(--line); }
 .sectionIntro { max-width: 720px; margin-bottom: 24px; }
 .workflowList { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
 .workflowList li { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 18px; padding: 18px 0; border-bottom: 1px solid var(--line); }
@@ -215,7 +199,7 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .coverageRouteList p { margin: 4px 0 0; font-size: .94rem; }
 
 .serviceForm { display: grid; gap: 14px; }
-.serviceForm label { display: grid; gap: 6px; color: var(--ink); font-weight: 700; }
+.serviceForm label { display: grid; gap: 6px; color: var(--ink); font-weight: 600; }
 .inlineFormRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
 .quickTextLinks { display: flex; flex-wrap: wrap; gap: 6px 12px; }
 .quickTextLinks button { min-height: auto; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--brand); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
@@ -233,8 +217,34 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .status.error { color: var(--danger); }
 .formGrid.two, .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .bookingContextSummary { margin: 0; color: var(--brand-dark); font-weight: 700; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 10px 0; }
+.pricingLayout, .trackingLayout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr); gap: 48px; align-items: start; }
+.quoteForm { min-width: 0; }
+.choiceFieldset, .bookingFieldset { min-width: 0; margin: 0; padding: 18px 0 0; border: 0; border-top: 1px solid var(--line); }
+.choiceFieldset legend, .bookingFieldset legend { padding: 0 12px 0 0; color: var(--ink-strong); font-size: 1rem; font-weight: 700; }
+.choiceGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 22px; }
+.checkOption { grid-template-columns: 20px minmax(0, 1fr) !important; align-items: start; gap: 10px !important; padding: 12px 0; border-bottom: 1px solid var(--line); font-weight: 400 !important; }
+.checkOption input, .termsCheck input { width: 17px; min-height: 17px; margin: 3px 0 0; padding: 0; accent-color: var(--brand); }
+.checkOption strong, .checkOption small { display: block; }
+.checkOption small { margin-top: 2px; }
+.quoteSummary, .trackingResult, .bookingConfirmation { border-top: 2px solid var(--brand-dark); padding-top: 18px; }
+.quoteTotal { display: block; margin-top: 24px; color: var(--ink-strong); font-size: 2.35rem; line-height: 1; letter-spacing: -.035em; }
+.quotePeriod { display: block; margin: 7px 0 20px; color: var(--muted); }
+.bookingFieldset { display: grid; gap: 14px; margin-top: 6px; }
+.termsCheck { grid-template-columns: 20px minmax(0, 1fr) !important; align-items: start; gap: 10px !important; font-weight: 400 !important; }
+.bookingConfirmation { margin-top: 24px; max-width: 720px; }
+.bookingConfirmation .button { margin-top: 8px; }
+.trackingLayout > .serviceForm { max-width: 520px; }
+.trackingStatus { display: block; color: var(--ink-strong); font-size: 1.25rem; }
+.policyGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 32px; border-top: 1px solid var(--line); }
+.policyGrid article { padding: 18px 0; border-bottom: 1px solid var(--line); }
+.policyGrid article h3 { font-size: 1.05rem; }
+.policyGrid article p { margin: 0; }
 .paymentStrip { padding-block: 34px; border-bottom: 1px solid var(--line); }
 .paymentStrip p:last-child { max-width: none; }
+.comingSoonList { display: grid; gap: 0; margin-top: 16px; border-top: 1px solid var(--line); }
+.comingSoonList > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 18px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.comingSoonList span { color: var(--brand-dark); font-size: .82rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.comingSoonList small { grid-column: 1 / -1; color: var(--muted); }
 .footer { display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); gap: 28px; padding-block: 42px 68px; }
 .footer a { display: block; margin: 8px 0; color: var(--ink); }
 .footer h3 { font-size: 1rem; }
@@ -242,6 +252,7 @@ dd { margin: 4px 0 0; color: var(--muted); }
 
 .loginPage, .portalPage { min-height: 100vh; padding-bottom: 72px; }
 .redesignLoginGrid { width: min(920px, calc(100% - 40px)); margin: 54px auto; display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 34px; align-items: start; }
+.redesignLoginForm h1 { font-size: clamp(2rem, 4vw, 2.8rem); line-height: 1.04; }
 .redesignRoleRow { display: grid; grid-template-columns: 14px minmax(0,1fr); gap: 12px; padding: 13px 0; border-top: 1px solid var(--line); }
 .redesignRoleRow > span { width: 8px; height: 8px; margin-top: 8px; border-radius: 50%; background: var(--brand); }
 .redesignRoleRow strong { display: block; }
@@ -252,11 +263,11 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .staffAccessShell { width: var(--space-page); margin: 36px auto 72px; }
 .staffAccessShell > .brand { margin-bottom: 34px; }
 .staffAccessHero { max-width: 760px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
-.staffAccessHero h1 { margin-bottom: .85rem; font-size: clamp(2rem, 4.5vw, 3.2rem); }
+.staffAccessHero h1 { margin-bottom: .85rem; font-size: clamp(2rem, 3.8vw, 2.65rem); }
 .staffAccessGrid { display: grid; gap: 0; margin-top: 12px; border-top: 1px solid var(--line); }
 .staffAccessCard {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr) auto;
+  grid-template-columns: 100px 230px minmax(0, 1fr) auto;
   gap: 18px;
   align-items: center;
   padding: 18px 0;
@@ -274,9 +285,9 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .portalPage { width: var(--space-page); margin-inline: auto; }
 .portalPage .portalNav { width: 100%; }
 .portalLinks {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(72px, 1fr));
-  gap: 18px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 16px;
   align-items: end;
   min-width: min(100%, 540px);
   padding: 0;
@@ -287,9 +298,9 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .portalNavItem {
   display: grid;
   justify-items: center;
-  gap: 8px;
-  min-height: 76px;
-  padding: 0 0 10px;
+  gap: 5px;
+  min-height: 58px;
+  padding: 0 0 8px;
   border: 0;
   border-bottom: 4px solid transparent;
   border-radius: 0;
@@ -300,10 +311,11 @@ dd { margin: 4px 0 0; color: var(--muted); }
   line-height: 1.1;
   text-align: center;
   text-decoration: none;
+  min-width: 70px;
 }
 .portalNavItem svg {
-  width: 34px;
-  height: 34px;
+  width: 20px;
+  height: 20px;
   stroke: currentColor;
   fill: none;
   stroke-width: 2.2;
@@ -325,7 +337,7 @@ dd { margin: 4px 0 0; color: var(--muted); }
   padding: 46px 0 30px;
   border-bottom: 1px solid var(--line);
 }
-.staffPageHeader h1 { font-size: clamp(2rem, 4vw, 2.8rem); line-height: 1.05; margin-bottom: .6rem; }
+.staffPageHeader h1 { font-size: clamp(1.9rem, 3.5vw, 2.45rem); line-height: 1.08; margin-bottom: .6rem; }
 .staffPageHeader p { max-width: 720px; }
 .staffSessionLine { margin: 0; border: 0; padding: 0; color: var(--muted); }
 .staffSessionLine strong, .staffSessionLine span { display: block; }
@@ -382,6 +394,23 @@ summary { cursor: pointer; color: var(--brand); font-weight: 700; }
   padding: 18px 0 0;
   box-shadow: none;
 }
+.panel, form.panel, .opsForm, .supportForm, .onboardingForm { display: grid; gap: 14px; }
+.panel label, .opsForm label, .supportForm label, .onboardingForm label { display: grid; gap: 6px; color: var(--ink); font-weight: 600; }
+.manualToolbox > summary { display: flex; justify-content: space-between; align-items: start; gap: 20px; list-style: none; }
+.manualToolbox > summary::-webkit-details-marker { display: none; }
+.manualToolbox > summary div { display: grid; gap: 2px; }
+.manualToolbox > summary span { color: var(--ink-strong); font-size: 1.05rem; }
+.manualToolbox > summary small { font-weight: 400; }
+.manualToolbox > summary em { color: var(--muted); font-size: .86rem; font-style: normal; font-weight: 600; }
+.manualToolbox[open] > summary { margin-bottom: 20px; }
+.vendorGrid, .opsGrid, .driverGrid { display: grid; gap: 26px; }
+.vendorGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.vendorGrid > :last-child { grid-column: 1 / -1; }
+.driverChecklist { display: flex; flex-wrap: wrap; gap: 10px 24px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.supportTicketList { display: grid; gap: 0; border-top: 1px solid var(--line); }
+.supportTicketCard { padding: 18px 0; border-bottom: 1px solid var(--line); }
+.orderBoardTop, .orderMeta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 18px; }
+.orderMeta { justify-content: flex-start; color: var(--muted); font-size: .9rem; }
 .activityGroup { background: transparent; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 18px 0 0; box-shadow: none; }
 .onboardingGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .formTitleRow, .activityGroup summary { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
@@ -426,8 +455,9 @@ summary { cursor: pointer; color: var(--brand); font-weight: 700; }
 
 @media (max-width: 980px) {
   :root { --space-page: min(100% - 32px, 1180px); }
-  .homeHero, .redesignLoginGrid, .staffPageHeader, .activityWorkbench, .supportOpsHero { grid-template-columns: 1fr; gap: 24px; }
-  .serviceRecordGrid, .footer, .onboardingGrid { grid-template-columns: 1fr; }
+  .homeHero, .redesignLoginGrid, .staffPageHeader, .activityWorkbench, .supportOpsHero, .pricingLayout, .trackingLayout { grid-template-columns: 1fr; gap: 24px; }
+  .serviceRecordGrid, .footer, .onboardingGrid, .vendorGrid { grid-template-columns: 1fr; }
+  .vendorGrid > :last-child { grid-column: auto; }
   .serviceFacts, .queueMetricGrid, .queue-summary, .supportLaneGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .queueMetricGrid article:nth-child(2), .queue-summary article:nth-child(2), .supportLaneGrid article:nth-child(2) { border-right: 0; }
   .queueMetricGrid article, .queue-summary article, .supportLaneGrid article { border-bottom: 1px solid var(--line); }
@@ -453,6 +483,7 @@ summary { cursor: pointer; color: var(--brand); font-weight: 700; }
   .serviceForm { gap: 10px; }
   .quickTextLinks { gap: 4px 10px; }
   .inlineFormRow, .formGrid.two, .two { grid-template-columns: 1fr; }
+  .choiceGrid, .policyGrid { grid-template-columns: 1fr; }
   .serviceFacts { grid-template-columns: 1fr; }
   .serviceFacts div { border-right: 0; border-bottom: 1px solid var(--line); padding-left: 0; }
   .serviceSection { padding-block: 38px; }
@@ -525,7 +556,7 @@ summary { cursor: pointer; color: var(--brand); font-weight: 700; }
     background: transparent;
   }
   .portalNavItem { min-height: 68px; padding: 0 0 8px; font-size: .86rem; border: 0; border-bottom: 3px solid transparent; }
-  .portalNavItem svg { width: 28px; height: 28px; }
+  .portalNavItem svg { width: 20px; height: 20px; }
   .portalNavItem[aria-current="page"] { border-bottom-color: var(--brand-dark); background: transparent; }
   .portalLinks .logoutButton { margin: 0; }
 

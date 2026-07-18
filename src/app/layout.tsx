@@ -3,8 +3,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://bubblewash.co"),
-  title: "Bubble Wash — Laundry pickup for busy teams",
-  description: "Book laundry pickups, compare plans, estimate delivery fees, track orders, and manage Bubble Wash operations in Accra.",
+  title: "Bubble Wash — Commercial laundry collection in Accra",
+  description: "Schedule commercial laundry collection, review transparent service estimates, pay securely, and track each order in Accra.",
   applicationName: "Bubble Wash",
   manifest: "/site.webmanifest",
   icons: {
@@ -17,13 +17,13 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "Bubble Wash",
-    description: "Laundry pickup, subscriptions, vendor fulfilment, and route-based pricing for Accra businesses.",
+    description: "Commercial laundry collection, cleaning, delivery, and order tracking for Accra businesses.",
     images: [{ url: "/icon-512.png", width: 512, height: 512, alt: "Bubble Wash icon" }],
   },
   twitter: {
     card: "summary",
     title: "Bubble Wash",
-    description: "Laundry pickup, tracking, and support workflows for Accra.",
+    description: "Commercial laundry collection and order tracking for Accra businesses.",
     images: ["/icon-512.png"],
   },
 };
