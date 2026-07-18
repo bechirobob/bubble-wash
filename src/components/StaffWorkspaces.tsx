@@ -1271,8 +1271,8 @@ export function SupportWorkspace({ userName, role }: { userName: string; role: S
         return;
       }
       const supportRecords = submissionsData.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes("support-ticket"));
-      setRecords(supportRecords.slice(0, 24));
-      setOrders(ordersData.orders.slice(0, 12));
+      setRecords(supportRecords.slice(0, 200));
+      setOrders(ordersData.orders);
       setDeskStatus("Support desk updated.");
     } catch {
       setDeskStatus("Unable to load support desk.");
