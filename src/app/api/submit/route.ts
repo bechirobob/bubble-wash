@@ -15,7 +15,7 @@ const planNames = new Set(plans.map((plan) => plan.name));
 const zoneNames = new Set(Object.keys(zones));
 const paymentPreferences = new Set(["MTN MoMo", "Telecel Cash", "Card", "Bank transfer", "Invoice me"]);
 const paymentMethods = new Set(["MTN MoMo", "Telecel Cash", "Visa / Mastercard", "Bank transfer"]);
-const alertPreferences = new Set(["Email + WhatsApp alerts", "WhatsApp only", "Email only", "Call me"]);
+const alertPreferences = new Set(["Order tracking and phone follow-up", "Email + WhatsApp alerts", "WhatsApp only", "Email only", "Call me"]);
 const pickupWindows = new Set(["Any available window", "Morning pickup", "Afternoon pickup", "Evening pickup"]);
 const billingCycles = new Set(["Monthly", "Yearly"]);
 const multiAdminModes = new Set(["Invite team leads", "Single admin only"]);
@@ -157,6 +157,13 @@ function validatePublicPayload(body: Record<string, unknown>, submissionType: st
   ];
   const enumError = enumChecks.find(Boolean);
   if (enumError) return enumError;
+
+  if (submissionType === "pickup-booking" && process.env.NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED !== "true") {
+    const paymentPreference = text(body.paymentPreference);
+    if (paymentPreference && !["Bank transfer", "Invoice me"].includes(paymentPreference)) {
+      return NextResponse.json({ ok: false, error: "Choose bank transfer or invoice for the pilot." }, { status: 400 });
+    }
+  }
 
   const kg = text(body.kg);
   if (kg) {
