@@ -33,6 +33,9 @@ async function readCheckoutPayload(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  if (process.env.NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED !== "true") {
+    return NextResponse.json({ ok: false, error: "Online payments are coming soon. Use bank transfer or request an invoice for the pilot." }, { status: 503 });
+  }
   const requestGuardError = sameOriginJsonGuard(request.headers, "checkout request");
   if (requestGuardError) return requestGuardError;
   if (isRateLimited(clientKey(request.headers, "payments-initialize"), 12, 60_000)) {
