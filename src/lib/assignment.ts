@@ -20,6 +20,7 @@ export type AssignmentPair = {
   driverId?: string;
   vendorCapacityRemaining?: number;
   driverCapacityRemaining?: number;
+  reservationId?: string;
 };
 
 export type AvailabilityAssignmentOrder = AssignmentOrder & {
@@ -84,10 +85,26 @@ function statusAllowsDriver(driver: DriverAvailability) {
   return driver.capacityRemaining > 0 && !/(inactive|suspended|offboarded|paused|training|tomorrow)/.test(driver.availabilityStatus.toLowerCase());
 }
 
+function serviceCapability(value: string) {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!normalized) return "";
+  if (normalized.includes("express")) return "express";
+  if (normalized.includes("bulk")) return "bulk";
+  if (normalized.includes("iron") && normalized.includes("wash")) return "wash-iron-fold";
+  if (normalized.includes("iron")) return "ironing";
+  if (normalized.includes("wash") && normalized.includes("fold")) return "wash-fold";
+  return normalized;
+}
+
 function serviceMatches(vendor: VendorAvailability, serviceType?: string) {
-  if (!serviceType || vendor.serviceTypes.length === 0) return true;
-  const wanted = serviceType.toLowerCase();
-  return vendor.serviceTypes.some((service) => service.toLowerCase().includes(wanted) || wanted.includes(service.toLowerCase()));
+  const wanted = serviceCapability(serviceType ?? "");
+  if (!wanted) return true;
+  if (vendor.serviceTypes.length === 0) return false;
+  return vendor.serviceTypes.some((service) => {
+    const offered = serviceCapability(service);
+    if (wanted === "wash-fold") return offered === "wash-fold" || offered === "wash-iron-fold";
+    return offered === wanted;
+  });
 }
 
 function selectAvailabilityVendor(area: string, serviceType: string | undefined, orderId: string) {
@@ -135,7 +152,7 @@ export function assignOrderFromAvailability(order: AvailabilityAssignmentOrder):
   if (missing.length) {
     throw new Error(`No eligible ${missing.join(" or ")} matches ${order.area || "this order's route"}. Update approved coverage or capacity before assigning.`);
   }
-  const { vendor: reservedVendor, driver: reservedDriver } = reserveAssignmentCapacity(vendorRow?.vendorId, driverRow?.driverId);
+  const { vendor: reservedVendor, driver: reservedDriver, reservationId } = reserveAssignmentCapacity(order.orderId, vendorRow?.vendorId, driverRow?.driverId);
   const vendorNameValue = isUnassigned(order.vendor) ? (reservedVendor?.vendorName ?? "Needs admin review") : order.vendor;
   const driverNameValue = isUnassigned(order.driver) ? (reservedDriver?.driverName ?? "Needs admin onboarding") : order.driver;
 
@@ -152,5 +169,6 @@ export function assignOrderFromAvailability(order: AvailabilityAssignmentOrder):
     driverId: reservedDriver?.driverId,
     vendorCapacityRemaining: reservedVendor?.capacityRemaining,
     driverCapacityRemaining: reservedDriver?.capacityRemaining,
+    reservationId,
   };
 }

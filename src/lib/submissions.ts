@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { StaffRole } from "@/lib/auth";
-import { readSubmissionRecords } from "@/lib/data-store";
+import { readSubmissionRecords, readSubmissionRecordsForOrder } from "@/lib/data-store";
 import { buildRoutePreview, type RoutePreview } from "@/lib/maps";
 import { type ZoneKey, zones } from "@/lib/pricing";
 import { stageTimerForWorkflow, workflowNextStep, workflowStageFromStatus, type WorkflowStage } from "@/lib/order-workflow";
@@ -24,6 +24,8 @@ export type OrderSummary = {
   area: string;
   pickupAddress: string;
   landmark: string;
+  service: string;
+  serviceType: string;
   vendor: string;
   vendorId: string;
   driver: string;
@@ -54,6 +56,100 @@ export type OrderSummary = {
   }>;
 };
 
+function projectedTimelineNote(type: string, status: string) {
+  const normalizedType = type.toLowerCase();
+  const update = normalizedType === "pickup-booking" || normalizedType === "checkout-request"
+    ? "Customer order received"
+    : normalizedType === "admin-operation"
+      ? "Operations update recorded"
+      : normalizedType === "vendor-job-update"
+        ? "Vendor production update recorded"
+        : normalizedType === "qr-bag-intake"
+          ? "Bag intake update recorded"
+          : normalizedType === "driver-route-log"
+            ? "Route checkpoint recorded"
+            : normalizedType.includes("support")
+              ? "Support follow-up recorded"
+              : normalizedType.includes("payment")
+                ? "Payment status update recorded"
+                : "Order update recorded";
+  return status ? `${update}: ${status}.` : `${update}.`;
+}
+
+function projectTimelineForRole(order: OrderSummary, role: StaffRole) {
+  const hidesPayment = role === "vendor" || role === "driver";
+  return order.timeline.flatMap((event) => {
+    const normalizedType = event.type.toLowerCase();
+    if (hidesPayment && normalizedType.includes("payment")) return [];
+    if (hidesPayment && normalizedType === "checkout-request") {
+      return [{ ...event, type: "order-request", status: "Received", note: "Customer order received." }];
+    }
+    return [{ ...event, note: projectedTimelineNote(event.type, event.status) }];
+  });
+}
+
+function hasAssignedOperationalRoute(order: OrderSummary) {
+  const driver = order.driver.trim();
+  const assigned = Boolean(order.driverId.trim()) || Boolean(driver && !/^(unassigned|next available|needs admin)/i.test(driver));
+  return assigned && !["delivered", "closed"].includes(order.workflowStage.key);
+}
+
+/**
+ * Produces the staff-facing API view without changing the internal order
+ * snapshot used for workflow validation. Blank strings preserve the current
+ * client contract while ensuring hidden fields never reach the browser.
+ */
+export function projectOrderSummaryForRole(order: OrderSummary, role: StaffRole): OrderSummary {
+  const projected: OrderSummary = {
+    ...order,
+    workflowStage: { ...order.workflowStage },
+    route: {
+      ...order.route,
+      pickup: { ...order.route.pickup },
+      hub: { ...order.route.hub },
+    },
+    stageTimer: { ...order.stageTimer },
+    timeline: order.timeline.map((event) => ({ ...event })),
+  };
+
+  if (role === "admin") return projected;
+
+  projected.timeline = projectTimelineForRole(order, role);
+  projected.eventCount = projected.timeline.length;
+
+  if (role === "vendor") {
+    projected.email = "";
+    projected.phone = "";
+    projected.pickupAddress = "";
+    projected.landmark = "";
+    projected.locationNote = "";
+    projected.payment = "";
+    projected.route.pickup.label = order.area || "Pickup area";
+    projected.route.googleMapsUrl = "";
+    projected.route.directionsUrl = "";
+    return projected;
+  }
+
+  if (role === "driver") {
+    projected.email = "";
+    projected.payment = "";
+    if (!hasAssignedOperationalRoute(order)) {
+      projected.phone = "";
+      projected.pickupAddress = "";
+      projected.landmark = "";
+      projected.locationNote = "";
+      projected.route.pickup.label = order.area || "Pickup area";
+      projected.route.googleMapsUrl = "";
+      projected.route.directionsUrl = "";
+    }
+    return projected;
+  }
+
+  // Support needs customer contact, pickup context, and the payment status for
+  // manual pilot follow-up, but receives the same note-safe event projection.
+  return projected;
+}
+
 const roleVisibleTypes: Record<StaffRole, Set<string> | null> = {
   admin: null,
   vendor: new Set(["vendor-application", "vendor-job-update", "qr-bag-intake"]),
@@ -63,26 +159,91 @@ const roleVisibleTypes: Record<StaffRole, Set<string> | null> = {
 
 const workflowSeedTypes = new Set(["pickup-booking", "checkout-request"]);
 
-export function visibleSubmissionRecords(records: SubmissionRecord[], role: StaffRole) {
+function scopedEntityField(role: StaffRole) {
+  return role === "vendor" ? "vendorId" : role === "driver" ? "driverId" : "";
+}
+
+function entityBindingEnabled(role: StaffRole, entityId?: string, production = process.env.NODE_ENV === "production") {
+  if (role !== "vendor" && role !== "driver") return false;
+  return Boolean(entityId?.trim()) || production;
+}
+
+export function orderMatchesStaffEntity(
+  order: Pick<OrderSummary, "vendorId" | "driverId">,
+  role: StaffRole,
+  entityId?: string,
+  production = process.env.NODE_ENV === "production",
+) {
+  if (role !== "vendor" && role !== "driver") return true;
+  if (!entityBindingEnabled(role, entityId, production)) return true;
+  const expected = entityId?.trim().toLowerCase();
+  if (!expected) return false;
+  const actual = (role === "vendor" ? order.vendorId : order.driverId).trim().toLowerCase();
+  return Boolean(actual) && actual === expected;
+}
+
+function latestEntityByOrder(records: SubmissionRecord[], field: string) {
+  const latest = new Map<string, string>();
+  for (const record of [...records].sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())) {
+    const entityId = text(record.data[field]);
+    if (entityId) latest.set(canonicalOrderId(record).toLowerCase(), entityId.toLowerCase());
+  }
+  return latest;
+}
+
+export function visibleSubmissionRecords(
+  records: SubmissionRecord[],
+  role: StaffRole,
+  entityId?: string,
+  production = process.env.NODE_ENV === "production",
+) {
   const visibleTypes = roleVisibleTypes[role];
   if (!visibleTypes) return records;
-  return records.filter((record) => visibleTypes.has(text(record.data.submissionType)));
+  const typeVisible = records.filter((record) => visibleTypes.has(text(record.data.submissionType)));
+  if (!entityBindingEnabled(role, entityId, production)) return typeVisible;
+  const expected = entityId?.trim().toLowerCase();
+  if (!expected) return [];
+  const field = scopedEntityField(role);
+  const currentEntities = latestEntityByOrder(records, field);
+  return typeVisible.filter((record) => {
+    const directEntity = text(record.data[field]).toLowerCase();
+    if (directEntity) return directEntity === expected;
+    return currentEntities.get(canonicalOrderId(record).toLowerCase()) === expected;
+  });
 }
 
 function workflowOrderIds(records: SubmissionRecord[]) {
-  return new Set(records.filter((record) => workflowSeedTypes.has(text(record.data.submissionType))).map(canonicalOrderId));
+  return new Set(records.filter((record) => workflowSeedTypes.has(text(record.data.submissionType))).map((record) => canonicalOrderId(record).toLowerCase()));
 }
 
-export function orderBoardRecords(records: SubmissionRecord[], role: StaffRole) {
+export function orderBoardRecords(
+  records: SubmissionRecord[],
+  role: StaffRole,
+  entityId?: string,
+  production = process.env.NODE_ENV === "production",
+) {
   const seededOrderIds = workflowOrderIds(records);
   if (role === "admin" || role === "support") {
-    return records.filter((record) => seededOrderIds.has(canonicalOrderId(record)));
+    return records.filter((record) => seededOrderIds.has(canonicalOrderId(record).toLowerCase()));
+  }
+
+  if (entityBindingEnabled(role, entityId, production)) {
+    const expected = entityId?.trim().toLowerCase();
+    if (!expected) return [];
+    const field = scopedEntityField(role);
+    const currentEntities = latestEntityByOrder(records, field);
+    const accessibleOrderIds = new Set(
+      [...currentEntities.entries()]
+        .filter(([orderId, currentEntity]) => seededOrderIds.has(orderId) && currentEntity === expected)
+        .map(([orderId]) => orderId),
+    );
+    return records.filter((record) => accessibleOrderIds.has(canonicalOrderId(record).toLowerCase()));
   }
 
   const accessibleOrderIds = new Set<string>();
   for (const record of records) {
     const type = text(record.data.submissionType);
-    const orderId = canonicalOrderId(record);
+    const orderId = canonicalOrderId(record).toLowerCase();
     if (!seededOrderIds.has(orderId)) continue;
     if (role === "vendor" && (type.startsWith("vendor") || type === "qr-bag-intake" || text(record.data.vendorName) || text(record.data.vendor))) {
       accessibleOrderIds.add(orderId);
@@ -92,7 +253,7 @@ export function orderBoardRecords(records: SubmissionRecord[], role: StaffRole) 
     }
   }
 
-  return records.filter((record) => accessibleOrderIds.has(canonicalOrderId(record)));
+  return records.filter((record) => accessibleOrderIds.has(canonicalOrderId(record).toLowerCase()));
 }
 
 export function text(value: unknown) {
@@ -155,6 +316,10 @@ export async function readSubmissions(limit = 200) {
   return readSubmissionRecords(limit);
 }
 
+export async function readSubmissionsForOrder(orderId: string) {
+  return readSubmissionRecordsForOrder(orderId);
+}
+
 export function buildOrderSummaries(records: SubmissionRecord[]) {
   const grouped = new Map<string, SubmissionRecord[]>();
   for (const record of records) {
@@ -199,6 +364,18 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
     const workflowStage = workflowStageFromStatus(status, lastEventType);
     const customerEmail = findLatestFromTypes(["pickup-booking", "checkout-request"], "email");
     const customerPhone = findLatestFromTypes(["pickup-booking", "checkout-request"], "phone");
+    const bookingRecord = [...chronological].reverse().find((record) => text(record.data.submissionType) === "pickup-booking")
+      ?? [...chronological].reverse().find((record) => text(record.data.submissionType) === "checkout-request");
+    const explicitService = text(bookingRecord?.data.service);
+    const bookingAddons = Array.isArray(bookingRecord?.data.addons)
+      ? bookingRecord.data.addons.filter((item): item is string => typeof item === "string").map((item) => item.toLowerCase())
+      : [];
+    const service = explicitService
+      || (bookingAddons.includes("express")
+        ? "Express capable"
+        : bookingAddons.includes("premium") || bookingAddons.includes("ironing")
+          ? "Wash + iron + fold"
+          : "Wash + fold");
     const vendor = findLatest("vendorName", "vendor");
     const driver = findLatest("driverName") || findLatestFromTypes(["driver-route-log"], "name") || "Unassigned";
     const routeWindow = findLatest("routeWindow", "pickupWindow", "driverEta", "eta") || "ETA pending";
@@ -218,6 +395,8 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
       area,
       pickupAddress,
       landmark,
+      service,
+      serviceType: service,
       vendor: vendor || "Unassigned",
       vendorId: findLatest("vendorId"),
       driver,

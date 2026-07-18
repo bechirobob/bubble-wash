@@ -47,8 +47,40 @@ test("productionReadinessErrors fails closed when production demo credentials wo
   assert.ok(errors.some((item) => item.includes("BUBBLEWASH_DISABLE_DEMO_LOGIN=true")));
   assert.ok(errors.some((item) => item.includes("demo login cannot be enabled")));
   assert.ok(errors.some((item) => item.includes("BUBBLEWASH_SESSION_SECRET")));
+  assert.ok(errors.some((item) => item.includes("BUBBLEWASH_VENDOR_ENTITY_ID")));
+  assert.ok(errors.some((item) => item.includes("BUBBLEWASH_DRIVER_ENTITY_ID")));
   assert.equal(errors.some((item) => item.includes("NEXT_PUBLIC_BUBBLEWASH_WHATSAPP")), false);
   assert.equal(errors.some((item) => item.includes("NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL")), false);
+});
+
+test("production readiness requires vendor and rider entity bindings", () => {
+  const base = {
+    NODE_ENV: "production",
+    BUBBLEWASH_DISABLE_DEMO_LOGIN: "true",
+    BUBBLEWASH_SESSION_SECRET: "a-secure-session-secret-with-32-characters",
+    BUBBLEWASH_DATABASE_PATH: "/var/lib/bubblewash/bubblewash.sqlite",
+    BUBBLEWASH_PUBLIC_URL: "https://bubblewash.co",
+    BUBBLEWASH_ADMIN_EMAIL: "admin@example.com",
+    BUBBLEWASH_ADMIN_PASSWORD_HASH: "hash",
+    BUBBLEWASH_VENDOR_EMAIL: "vendor@example.com",
+    BUBBLEWASH_VENDOR_PASSWORD_HASH: "hash",
+    BUBBLEWASH_DRIVER_EMAIL: "driver@example.com",
+    BUBBLEWASH_DRIVER_PASSWORD_HASH: "hash",
+    BUBBLEWASH_SUPPORT_EMAIL: "support@example.com",
+    BUBBLEWASH_SUPPORT_PASSWORD_HASH: "hash",
+    BUBBLEWASH_TRUST_PROXY_HEADERS: "true",
+    BUBBLEWASH_TRUST_EDGE_HEADERS: "false",
+  };
+  const missing = productionReadinessErrors(base);
+  assert.ok(missing.some((item) => item.includes("BUBBLEWASH_VENDOR_ENTITY_ID")));
+  assert.ok(missing.some((item) => item.includes("BUBBLEWASH_DRIVER_ENTITY_ID")));
+
+  const bound = productionReadinessErrors({
+    ...base,
+    BUBBLEWASH_VENDOR_ENTITY_ID: "vendor-approved-partner",
+    BUBBLEWASH_DRIVER_ENTITY_ID: "driver-approved-rider",
+  });
+  assert.equal(bound.some((item) => item.includes("ENTITY_ID")), false);
 });
 
 test("pilot operations may hide optional public contacts while readiness reports warnings", () => {

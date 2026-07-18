@@ -74,6 +74,12 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
     if (!env[`BUBBLEWASH_${role}_EMAIL`]) errors.push(`Set BUBBLEWASH_${role}_EMAIL in production.`);
     if (!env[`BUBBLEWASH_${role}_PASSWORD_HASH`]) errors.push(`Set BUBBLEWASH_${role}_PASSWORD_HASH in production.`);
   }
+  if (!env.BUBBLEWASH_VENDOR_ENTITY_ID?.trim()) {
+    errors.push("Set BUBBLEWASH_VENDOR_ENTITY_ID to the exact approved vendor roster ID in production.");
+  }
+  if (!env.BUBBLEWASH_DRIVER_ENTITY_ID?.trim()) {
+    errors.push("Set BUBBLEWASH_DRIVER_ENTITY_ID to the exact approved driver roster ID in production.");
+  }
   const publicWhatsApp = (env.NEXT_PUBLIC_BUBBLEWASH_WHATSAPP ?? "").replace(/\D/g, "");
   if (publicWhatsApp && (publicWhatsApp.length < 8 || publicWhatsApp.length > 15 || /000000/.test(publicWhatsApp))) {
     errors.push("NEXT_PUBLIC_BUBBLEWASH_WHATSAPP must be a real international-format customer WhatsApp number or remain unset.");

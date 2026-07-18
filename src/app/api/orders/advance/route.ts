@@ -2,15 +2,21 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { appendSubmissionRecord, claimWorkflowAction, releaseWorkflowActionClaim } from "@/lib/data-store";
 import { assignOrderFromAvailability } from "@/lib/assignment";
-import { recordVendorDecline, releaseAssignmentCapacity } from "@/lib/availability-store";
+import { appendSubmissionRecordAndReleaseOrderCapacity, recordVendorDecline, releaseAssignmentCapacity } from "@/lib/availability-store";
 import { getCurrentStaffUser } from "@/lib/auth";
 import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
 import { automationActionsForOrder } from "@/lib/order-workflow";
-import { buildOrderSummaries, orderBoardRecords, readSubmissions } from "@/lib/submissions";
+import { buildOrderSummaries, orderBoardRecords, orderMatchesStaffEntity, readSubmissionsForOrder } from "@/lib/submissions";
 import { staffWriteGuard } from "@/lib/security";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function validEvidenceCount(value: string) {
+  if (!/^\d+$/.test(value)) return false;
+  const count = Number(value);
+  return Number.isSafeInteger(count) && count >= 1 && count <= 10000;
 }
 
 export async function POST(request: NextRequest) {
@@ -30,9 +36,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Missing orderId or actionKey." }, { status: 400 });
     }
 
-    const allRecords = await readSubmissions(500);
-    const accessibleRecords = orderBoardRecords(allRecords, user.role);
-    const order = buildOrderSummaries(accessibleRecords).find((item) => item.orderId.toLowerCase() === orderId.toLowerCase());
+    const orderRecords = await readSubmissionsForOrder(orderId);
+    const accessibleRecords = orderBoardRecords(orderRecords, user.role, user.entityId);
+    const order = buildOrderSummaries(accessibleRecords).find((item) => (
+      item.orderId.toLowerCase() === orderId.toLowerCase()
+      && orderMatchesStaffEntity(item, user.role, user.entityId)
+    ));
     if (!order) {
       return NextResponse.json({ ok: false, error: "Order is not available to this role." }, { status: 404 });
     }
@@ -79,20 +88,20 @@ export async function POST(request: NextRequest) {
     }
     if (actionKey === "vendor-log-intake") {
       const weight = receivedWeightKg ? Number(receivedWeightKg) : 0;
-      if (!bagTag || !intakeBagCount || !intakeCondition || !operatorNote || (receivedWeightKg && (!Number.isFinite(weight) || weight <= 0 || weight > 10000))) {
+      if (!bagTag || !validEvidenceCount(intakeBagCount) || !intakeCondition || !operatorNote || (receivedWeightKg && (!Number.isFinite(weight) || weight <= 0 || weight > 10000))) {
         return NextResponse.json({ ok: false, error: "Record the bag tag, bag/item count, intake condition, note, and a valid received weight if supplied." }, { status: 400 });
       }
     }
-    if (actionKey === "vendor-mark-ready" && (!readyBagCount || !qualityCheck || !operatorNote)) {
+    if (actionKey === "vendor-mark-ready" && (!validEvidenceCount(readyBagCount) || !qualityCheck || !operatorNote)) {
       return NextResponse.json({ ok: false, error: "Record the ready bag/item count, quality check, and dispatch note." }, { status: 400 });
     }
-    if (actionKey === "driver-mark-picked-up" && (!pickupBagCount || !operatorNote)) {
+    if (actionKey === "driver-mark-picked-up" && (!validEvidenceCount(pickupBagCount) || !operatorNote)) {
       return NextResponse.json({ ok: false, error: "Record the collected bag/item count and customer handoff note." }, { status: 400 });
     }
-    if (actionKey === "driver-drop-at-vendor" && (!vendorRecipient || !handoffBagCount || !operatorNote)) {
+    if (actionKey === "driver-drop-at-vendor" && (!vendorRecipient || !validEvidenceCount(handoffBagCount) || !operatorNote)) {
       return NextResponse.json({ ok: false, error: "Record the vendor recipient, handed-over bag/item count, and handoff note." }, { status: 400 });
     }
-    if (actionKey === "driver-mark-delivered" && (!recipientName || !bagCount || !operatorNote)) {
+    if (actionKey === "driver-mark-delivered" && (!recipientName || !validEvidenceCount(bagCount) || !operatorNote)) {
       return NextResponse.json({ ok: false, error: "Record the recipient, returned bag count, and handoff note before delivery." }, { status: 400 });
     }
     if (actionKey === "driver-report-delay" && (!revisedEta || !routeCheckpoint || !operatorNote)) {
@@ -109,6 +118,7 @@ export async function POST(request: NextRequest) {
     assignment = actionKey === "admin-assign-vendor" ? assignOrderFromAvailability({
       orderId: order.orderId,
       area: order.area,
+      serviceType: order.serviceType,
       vendor: order.workflowStage.key === "exception" ? "Unassigned" : order.vendor,
       driver: order.driver,
     }) : null;
@@ -121,14 +131,18 @@ export async function POST(request: NextRequest) {
         declinedBy: user.name,
       });
     }
-    const basePayload = assignment ? {
+    const basePayload: Record<string, string> = assignment ? {
       ...selected.payload,
       vendorName: assignment.vendorName,
       driverName: assignment.driverName,
-      vendorId: assignment.vendorId,
-      driverId: assignment.driverId,
+      ...(assignment.vendorId ? { vendorId: assignment.vendorId } : {}),
+      ...(assignment.driverId ? { driverId: assignment.driverId } : {}),
       message: `${selected.payload.message} ${assignment.assignmentNote}`,
-    } : selected.payload;
+    } : {
+      ...selected.payload,
+      ...(order.vendorId ? { vendorId: order.vendorId } : {}),
+      ...(order.driverId ? { driverId: order.driverId } : {}),
+    };
     const payload = actionKey === "admin-schedule-pickup" ? {
       ...basePayload,
       routeWindow: confirmedPickupWindow,
@@ -193,14 +207,18 @@ export async function POST(request: NextRequest) {
       data: payload,
     };
 
-    appendSubmissionRecord(record);
+    if (actionKey === "admin-close-order") {
+      appendSubmissionRecordAndReleaseOrderCapacity(record, order.orderId, order.vendorId || undefined, order.driverId || undefined);
+    } else {
+      appendSubmissionRecord(record);
+    }
     recordSaved = true;
     const notifications = await dispatchSubmissionNotifications(record);
     return NextResponse.json({ ok: true, message: `${selected.label} saved. ${notificationSummary(notifications)}`, id: record.id, nextStatus: selected.nextStatus, notifications });
   } catch (error) {
     if (!recordSaved && assignment) {
       try {
-        releaseAssignmentCapacity(assignment.vendorId, assignment.driverId);
+        releaseAssignmentCapacity(assignment.reservationId, "workflow-rollback");
       } catch (cleanupError) {
         console.error("Bubble Wash capacity rollback failed", {
           message: cleanupError instanceof Error ? cleanupError.message : "Unknown error",

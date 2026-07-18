@@ -50,6 +50,7 @@ function getDatabase() {
       data TEXT NOT NULL CHECK (json_valid(data))
     );
     CREATE INDEX IF NOT EXISTS idx_submissions_created_at ON submissions(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_submissions_order_id ON submissions(json_extract(data, '$.orderId') COLLATE NOCASE);
 
     CREATE TABLE IF NOT EXISTS rate_limits (
       key TEXT PRIMARY KEY,
@@ -114,6 +115,27 @@ export function readSubmissionRecords(limit = 200): SubmissionRecord[] {
   const rows = getDatabase()
     .prepare("SELECT id, created_at, source, data FROM submissions ORDER BY created_at DESC LIMIT ?")
     .all(limit) as StoredSubmissionRow[];
+
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    source: row.source ?? undefined,
+    data: JSON.parse(row.data) as Record<string, unknown>,
+  }));
+}
+
+export function readSubmissionRecordsForOrder(orderId: string): SubmissionRecord[] {
+  const normalized = orderId.trim();
+  if (!normalized) return [];
+  const rows = getDatabase()
+    .prepare(`
+      SELECT id, created_at, source, data
+      FROM submissions
+      WHERE id = @orderId COLLATE NOCASE
+         OR json_extract(data, '$.orderId') = @orderId COLLATE NOCASE
+      ORDER BY created_at DESC
+    `)
+    .all({ orderId: normalized }) as StoredSubmissionRow[];
 
   return rows.map((row) => ({
     id: row.id,
