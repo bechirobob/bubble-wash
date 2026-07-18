@@ -55,14 +55,28 @@ test("pilot operations may hide optional public contacts while readiness reports
   const warnings = productionReadinessWarnings({ NODE_ENV: "production" });
   assert.ok(warnings.some((item) => item.includes("public WhatsApp contact link")));
   assert.ok(warnings.some((item) => item.includes("public email contact link")));
+  assert.ok(warnings.some((item) => item.includes("bank transfer and approved invoicing")));
+  assert.ok(warnings.some((item) => item.includes("follow up with customers manually")));
 });
 
-test("production readiness blocks missing operational providers and trusted edge configuration", () => {
+test("manual pilot mode allows missing providers but still blocks missing trusted edge configuration", () => {
   const errors = productionReadinessErrors({ NODE_ENV: "production", BUBBLEWASH_DISABLE_DEMO_LOGIN: "true" });
+  assert.equal(errors.some((item) => item.includes("PAYSTACK_SECRET_KEY")), false);
+  assert.equal(errors.some((item) => item.includes("RESEND_API_KEY")), false);
+  assert.equal(errors.some((item) => item.includes("WHATSAPP_ACCESS_TOKEN")), false);
+  assert.ok(errors.some((item) => item.includes("trusted client-IP mode")));
+});
+
+test("enabling future integrations makes their provider credentials blocking", () => {
+  const errors = productionReadinessErrors({
+    NODE_ENV: "production",
+    BUBBLEWASH_DISABLE_DEMO_LOGIN: "true",
+    NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED: "true",
+    NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED: "true",
+  });
   assert.ok(errors.some((item) => item.includes("PAYSTACK_SECRET_KEY")));
   assert.ok(errors.some((item) => item.includes("RESEND_API_KEY")));
   assert.ok(errors.some((item) => item.includes("WHATSAPP_ACCESS_TOKEN")));
-  assert.ok(errors.some((item) => item.includes("trusted client-IP mode")));
 });
 
 test("publicTrackingView redacts internal vendor, driver, payment, and contact details", () => {
