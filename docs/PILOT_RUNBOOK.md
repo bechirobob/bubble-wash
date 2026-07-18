@@ -6,7 +6,9 @@ Target launch: Wednesday, 22 July 2026. This runbook is the go/no-go standard fo
 
 - Run one application instance on Node.js 22 with one mounted persistent volume. SQLite WAL is suitable for this controlled pilot, but the database file must not sit on an ephemeral filesystem, NFS share, or volume mounted by multiple app hosts.
 - Start with one named admin, one vendor operator, one driver, and one support operator. Do not share credentials between people.
-- Keep daily order volume controlled until the first full pickup-to-delivery cycle has been reconciled against the database, provider dashboards, and customer notifications.
+- Keep daily order volume controlled until the first full pickup-to-delivery cycle has been reconciled against the database, billing record, and manual customer follow-up log.
+- Pilot payments are bank transfer or approved invoice only. Operations records and reconciles payment outside the online checkout until Paystack is enabled.
+- Support owns manual customer follow-up using the phone and email stored on each booking. The public tracker remains the customer's self-service status channel.
 - Move to PostgreSQL before horizontal application scaling or multi-city operation.
 
 ## Required production configuration
@@ -16,9 +18,9 @@ Use `.env.production.example` as the inventory. Before launch:
 1. Set `BUBBLEWASH_DATABASE_PATH` to the mounted volume, for example `/var/lib/bubblewash/bubblewash.sqlite`.
 2. Generate a unique 32+ character session secret and unique password hashes for all four roles. Set `BUBBLEWASH_DISABLE_DEMO_LOGIN=true`.
 3. Set `BUBBLEWASH_PUBLIC_URL=https://bubblewash.co`.
-4. `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP` and `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL` are optional public contact links and may remain unset during the pilot; the corresponding links stay hidden. Customer notifications still use the phone and email submitted with each booking. Only real, approved public contact values may be added later.
-5. Configure Paystack with a live Ghana-enabled key. Confirm the merchant account can accept GHS card and mobile-money transactions.
-6. Configure Resend and WhatsApp credentials, sender identity, operations destinations, and approved WhatsApp templates or session-message policy.
+4. Set `NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED=false` and `NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED=false` for the manual operational pilot. The future services appear only as disabled “Coming soon” information.
+5. `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP` and `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL` are optional public contact links and may remain unset during the pilot; the corresponding links stay hidden. Only real, approved public contact values may be added later.
+6. Leave Paystack, Resend, and WhatsApp credentials unset until the business accounts are approved. Do not enable either feature flag until its provider credentials and end-to-end tests are complete.
 7. Enable exactly one trusted IP-header mode appropriate to the deployment edge. Use `BUBBLEWASH_TRUST_EDGE_HEADERS=true` for a controlled Cloudflare/Fly-style edge header, or `BUBBLEWASH_TRUST_PROXY_HEADERS=true` only when the reverse proxy strips public forwarding headers and writes its own.
 8. Restrict the database directory and secret environment values to the application service account. Do not place credentials or provider keys in the repository or client-visible variables.
 
@@ -38,18 +40,18 @@ curl --fail --silent --show-error https://bubblewash.co/api/health
 curl --fail --silent --show-error https://bubblewash.co/api/ready
 ```
 
-`/api/health` is the liveness check. `/api/ready` is the operational release gate and returns HTTP 503 for blocking authentication, URL, persistent-database, payment, notification, trusted-edge, or integrity failures. Warnings are limited to the deliberately hidden optional public contact links.
+`/api/health` is the liveness check. `/api/ready` is the operational release gate and returns HTTP 503 for blocking authentication, URL, persistent-database, trusted-edge, enabled-provider, or integrity failures. It returns HTTP 200 with explicit warnings when the approved manual payment and follow-up pilot mode is active.
 
 ## Wednesday smoke test
 
-Use a fresh test customer and a low-value live transaction approved by the business owner.
+Use a fresh test customer and a test bank-transfer/invoice record approved by the business owner.
 
-1. Open the homepage on a phone and laptop. Confirm navigation, coverage, visible add-ons, quote, booking, tracking, payment callback, and staff login retain the approved design.
+1. Open the homepage on a phone and laptop. Confirm navigation, coverage, visible add-ons, quote, booking, tracking, and staff login retain the approved design. Confirm card, Mobile Money, WhatsApp automation, and email automation are clearly labeled “Coming soon” and cannot be selected.
 2. Submit one pickup booking. Record the Bubble Wash reference and confirm only one order appears in admin.
-3. Confirm customer and operations email/WhatsApp delivery. Provider failures must be visible in server logs and provider dashboards, not exposed to the customer response.
+3. Support copies the customer's phone/email from the booking record, confirms the route manually, and records the follow-up in the order workflow. Confirm no automated email or WhatsApp request is attempted.
 4. On admin, schedule the pickup and auto-assign the vendor/driver. Double-click once intentionally; the second request must return an already-processed response and must not consume capacity twice.
 5. Complete vendor accept, driver pickup, vendor intake/washing/ready, return delivery, support follow-up, and admin closeout using the same Order ID.
-6. Initialize one Paystack payment, complete it, and verify it. Confirm currency and amount match, the event attaches to the original checkout, and refreshing the callback does not create a duplicate status event.
+6. Record bank-transfer or approved-invoice status using the staff workflow and reconcile it against the business payment record. Confirm `/api/payments/initialize` and `/api/payments/verify` return HTTP 503 while online payments are disabled.
 7. Confirm public tracking shows only the customer's first name, area, route window, status, next step, and safe route label. It must not reveal phone, email, payment details, vendor, driver, or location notes.
 8. Sign each role out and verify protected pages and APIs return to login or HTTP 401.
 
@@ -62,8 +64,8 @@ Use a fresh test customer and a low-value live transaction approved by the busin
 
 ## Monitoring and response
 
-- Alert on `/api/ready` non-200 responses, HTTP 5xx rate, SQLite busy/locked errors, login 429 spikes, notification failures, and Paystack verification mismatches.
-- Reconcile Bubble Wash payment events against the Paystack dashboard daily. A successful provider transaction is not fulfilled unless reference, GHS currency, and amount all match the stored checkout.
+- Alert on `/api/ready` non-200 responses, unexpected readiness warning changes, HTTP 5xx rate, SQLite busy/locked errors, and login 429 spikes.
+- Reconcile bank-transfer and invoice status against the business payment record daily. Do not mark an order paid from a customer statement alone.
 - The admin owns dispatch and closeout, support owns customer communication, and one named technical operator owns deployment, database backup, and rollback.
 - For suspected account compromise: disable the affected role, rotate its password hash and the session secret, restart the service, and review the order event trail.
 - For database errors: stop new bookings, keep the site in maintenance mode, preserve the volume, and restore only from a verified backup.
