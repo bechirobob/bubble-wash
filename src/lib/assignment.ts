@@ -54,12 +54,12 @@ function isUnassigned(value: string) {
 
 function isVendorAvailable(record: AssignmentRecord) {
   const availability = normalized(record.data.availability);
-  return text(record.data.submissionType) === "vendor-application" && !/(paused|closed|unavailable|inactive)/.test(availability);
+  return text(record.data.submissionType) === "vendor-application" && !/(paused|closed|unavailable|inactive|tomorrow)/.test(availability);
 }
 
 function isActiveDriver(record: AssignmentRecord) {
   const status = normalized(record.data.driverStatus) || normalized(record.data.availability);
-  return text(record.data.submissionType) === "driver-onboarding" && !/(inactive|suspended|offboarded|paused)/.test(status);
+  return text(record.data.submissionType) === "driver-onboarding" && !/(inactive|suspended|offboarded|paused|training|tomorrow)/.test(status);
 }
 
 function areaMatches(record: AssignmentRecord, area: string) {
@@ -72,16 +72,16 @@ function areaMatches(record: AssignmentRecord, area: string) {
 function listMatches(values: string[], wanted: string) {
   const wantedText = wanted.toLowerCase();
   if (!wantedText) return true;
-  if (values.length === 0) return true;
+  if (values.length === 0) return false;
   return wantedText.split(/[\s,/-]+/).filter(Boolean).some((token) => token.length > 2 && values.some((value) => value.toLowerCase().includes(token)));
 }
 
 function statusAllowsVendor(vendor: VendorAvailability) {
-  return vendor.capacityRemaining > 0 && !/(paused|closed|unavailable|inactive|suspended)/.test(vendor.availabilityStatus.toLowerCase());
+  return vendor.capacityRemaining > 0 && !/(paused|closed|unavailable|inactive|suspended|tomorrow)/.test(vendor.availabilityStatus.toLowerCase());
 }
 
 function statusAllowsDriver(driver: DriverAvailability) {
-  return driver.capacityRemaining > 0 && !/(inactive|suspended|offboarded|paused)/.test(driver.availabilityStatus.toLowerCase());
+  return driver.capacityRemaining > 0 && !/(inactive|suspended|offboarded|paused|training|tomorrow)/.test(driver.availabilityStatus.toLowerCase());
 }
 
 function serviceMatches(vendor: VendorAvailability, serviceType?: string) {
@@ -93,22 +93,22 @@ function serviceMatches(vendor: VendorAvailability, serviceType?: string) {
 function selectAvailabilityVendor(area: string, serviceType: string | undefined, orderId: string) {
   const declinedVendorIds = new Set(listVendorDeclines(orderId).map((decline) => decline.vendorId));
   const available = listVendorAvailability().filter((vendor) => statusAllowsVendor(vendor) && serviceMatches(vendor, serviceType) && !declinedVendorIds.has(vendor.vendorId));
-  return available.find((vendor) => listMatches(vendor.serviceZones, area)) ?? available[0];
+  return available.find((vendor) => listMatches(vendor.serviceZones, area));
 }
 
 function selectAvailabilityDriver(area: string) {
   const active = listDriverAvailability().filter(statusAllowsDriver);
-  return active.find((driver) => listMatches(driver.serviceZones, area)) ?? active[0];
+  return active.find((driver) => listMatches(driver.serviceZones, area));
 }
 
 function selectVendor(records: AssignmentRecord[], area: string) {
   const available = latestFirst(records).filter(isVendorAvailable);
-  return available.find((record) => areaMatches(record, area)) ?? available[0];
+  return available.find((record) => areaMatches(record, area));
 }
 
 function selectDriver(records: AssignmentRecord[], area: string) {
   const active = latestFirst(records).filter(isActiveDriver);
-  return active.find((record) => areaMatches(record, area)) ?? active[0];
+  return active.find((record) => areaMatches(record, area));
 }
 
 export function selectAssignmentPair(records: AssignmentRecord[], order: AssignmentOrder): AssignmentPair {
@@ -128,6 +128,13 @@ export function selectAssignmentPair(records: AssignmentRecord[], order: Assignm
 export function assignOrderFromAvailability(order: AvailabilityAssignmentOrder): AssignmentPair {
   const vendorRow = isUnassigned(order.vendor) ? selectAvailabilityVendor(order.area, order.serviceType, order.orderId) : undefined;
   const driverRow = isUnassigned(order.driver) ? selectAvailabilityDriver(order.area) : undefined;
+  const missing = [
+    isUnassigned(order.vendor) && !vendorRow ? "vendor" : "",
+    isUnassigned(order.driver) && !driverRow ? "driver" : "",
+  ].filter(Boolean);
+  if (missing.length) {
+    throw new Error(`No eligible ${missing.join(" or ")} matches ${order.area || "this order's route"}. Update approved coverage or capacity before assigning.`);
+  }
   const { vendor: reservedVendor, driver: reservedDriver } = reserveAssignmentCapacity(vendorRow?.vendorId, driverRow?.driverId);
   const vendorNameValue = isUnassigned(order.vendor) ? (reservedVendor?.vendorName ?? "Needs admin review") : order.vendor;
   const driverNameValue = isUnassigned(order.driver) ? (reservedDriver?.driverName ?? "Needs admin onboarding") : order.driver;

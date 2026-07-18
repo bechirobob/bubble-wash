@@ -17,10 +17,13 @@ export type OrderSummary = {
   orderId: string;
   createdAt: string;
   updatedAt: string;
+  activityUpdatedAt: string;
   customer: string;
   email: string;
   phone: string;
   area: string;
+  pickupAddress: string;
+  landmark: string;
   vendor: string;
   vendorId: string;
   driver: string;
@@ -72,7 +75,7 @@ function workflowOrderIds(records: SubmissionRecord[]) {
 
 export function orderBoardRecords(records: SubmissionRecord[], role: StaffRole) {
   const seededOrderIds = workflowOrderIds(records);
-  if (role === "admin") {
+  if (role === "admin" || role === "support") {
     return records.filter((record) => seededOrderIds.has(canonicalOrderId(record)));
   }
 
@@ -87,24 +90,9 @@ export function orderBoardRecords(records: SubmissionRecord[], role: StaffRole) 
     if (role === "driver" && (type === "driver-route-log" || text(record.data.driverName) || text(record.data.driver))) {
       accessibleOrderIds.add(orderId);
     }
-    if (role === "support" && (type.startsWith("support") || text(record.data.ticketStatus) || text(record.data.issueType) || isSupportRiskRecord(record))) {
-      accessibleOrderIds.add(orderId);
-    }
   }
 
   return records.filter((record) => accessibleOrderIds.has(canonicalOrderId(record)));
-}
-
-function isSupportRiskRecord(record: SubmissionRecord) {
-  const riskText = [
-    record.data.priority,
-    record.data.ticketStatus,
-    record.data.orderStatus,
-    record.data.jobStatus,
-    record.data.issueType,
-    record.data.message,
-  ].map(text).join(" ");
-  return /urgent|high|delayed|declined|issue|missing|quality|escalated|needs attention|waiting/i.test(riskText);
 }
 
 export function text(value: unknown) {
@@ -142,6 +130,23 @@ function recordStatus(record: SubmissionRecord) {
   return "Request received";
 }
 
+function drivesFulfillmentStage(record: SubmissionRecord) {
+  const type = text(record.data.submissionType);
+  if (type === "pickup-booking") return true;
+  if (type === "admin-operation") return Boolean(text(record.data.orderStatus));
+  if (type === "vendor-job-update") return Boolean(text(record.data.jobStatus));
+  if (type === "qr-bag-intake") return true;
+  if (type === "driver-route-log") return Boolean(text(record.data.orderStatus));
+  return false;
+}
+
+function drivesPaymentState(record: SubmissionRecord) {
+  const type = text(record.data.submissionType);
+  if (["pickup-booking", "checkout-request"].includes(type)) return true;
+  if (/payment/i.test(type) && Boolean(text(record.data.paymentStatus) || text(record.data.paymentPreference) || text(record.data.paymentMethod))) return true;
+  return type === "admin-operation" && /confirm bank transfer|approve invoice|close order/i.test(text(record.data.actionType));
+}
+
 function nextStepFor(summary: Pick<OrderSummary, "status" | "lastEventType" | "vendor" | "driver" | "priority" | "stageTimer" | "customer" | "email" | "phone" | "area" | "routeWindow" | "locationNote" | "payment" | "orderId">) {
   return workflowNextStep(summary);
 }
@@ -177,9 +182,6 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
       });
       return text(customerEvent?.data.company) || text(customerEvent?.data.name) || findLatest("customer", "clientName") || "Bubble Wash customer";
     };
-    const lastEventType = text(latest.data.submissionType) || "request";
-    const status = recordStatus(latest);
-    const workflowStage = workflowStageFromStatus(status, lastEventType);
     const findLatestFromTypes = (types: string[], ...fields: string[]) => {
       for (const record of [...chronological].reverse()) {
         if (!types.includes(text(record.data.submissionType))) continue;
@@ -190,20 +192,32 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
       }
       return "";
     };
+    const fulfillmentRecord = [...chronological].reverse().find(drivesFulfillmentStage) ?? first;
+    const paymentRecord = [...chronological].reverse().find(drivesPaymentState);
+    const lastEventType = text(fulfillmentRecord.data.submissionType) || "request";
+    const status = recordStatus(fulfillmentRecord);
+    const workflowStage = workflowStageFromStatus(status, lastEventType);
+    const customerEmail = findLatestFromTypes(["pickup-booking", "checkout-request"], "email");
+    const customerPhone = findLatestFromTypes(["pickup-booking", "checkout-request"], "phone");
     const vendor = findLatest("vendorName", "vendor");
     const driver = findLatest("driverName") || findLatestFromTypes(["driver-route-log"], "name") || "Unassigned";
     const routeWindow = findLatest("routeWindow", "pickupWindow", "driverEta", "eta") || "ETA pending";
     const locationNote = findLatest("locationNote", "routeCheckpoint") || findLatestFromTypes(["driver-route-log"], "message") || "No driver checkpoint yet";
     const area = findLatest("area", "zone", "routeArea") || "Route pending";
-    const route = buildRoutePreview(zoneKeyFrom(findLatest("zone", "routeArea", "area")), area);
+    const pickupAddress = findLatestFromTypes(["pickup-booking", "checkout-request"], "pickupAddress");
+    const landmark = findLatestFromTypes(["pickup-booking", "checkout-request"], "landmark");
+    const route = buildRoutePreview(zoneKeyFrom(findLatest("zone", "routeArea", "area")), pickupAddress || area);
     const summary: OrderSummary = {
       orderId,
       createdAt: first.createdAt,
-      updatedAt: latest.createdAt,
+      updatedAt: fulfillmentRecord.createdAt,
+      activityUpdatedAt: latest.createdAt,
       customer: findCustomer(),
-      email: findLatest("email") || "",
-      phone: findLatest("phone") || "",
+      email: customerEmail,
+      phone: customerPhone,
       area,
+      pickupAddress,
+      landmark,
       vendor: vendor || "Unassigned",
       vendorId: findLatest("vendorId"),
       driver,
@@ -212,13 +226,13 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
       locationNote,
       status,
       workflowStage,
-      payment: findLatest("paymentStatus", "paymentPreference", "paymentMethod") || "Payment not confirmed",
+      payment: paymentRecord ? text(paymentRecord.data.paymentStatus) || text(paymentRecord.data.paymentPreference) || text(paymentRecord.data.paymentMethod) || "Payment not confirmed" : "Payment not confirmed",
       priority: findLatest("priority") || "Normal",
       nextStep: "",
       eventCount: chronological.length,
       lastEventType,
       route,
-      stageTimer: stageTimerForWorkflow(status, latest.createdAt, lastEventType),
+      stageTimer: stageTimerForWorkflow(status, fulfillmentRecord.createdAt, lastEventType),
       timeline: chronological.map((record) => ({
         id: record.id,
         createdAt: record.createdAt,

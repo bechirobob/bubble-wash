@@ -40,11 +40,69 @@ export async function POST(request: NextRequest) {
     const actions = automationActionsForOrder(order, user.role, user.name);
     const selected = actions.find((action) => action.key === actionKey);
     if (!selected) {
-      return NextResponse.json({ ok: false, error: "That automation is not allowed for the current order stage." }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "That action is not allowed for the current order stage." }, { status: 400 });
     }
 
-    claimKey = `${order.orderId}:${actionKey}:${order.updatedAt}`;
-    if (!claimWorkflowAction({ claimKey, orderId: order.orderId, actionKey, orderUpdatedAt: order.updatedAt })) {
+    const operatorNote = text(body.operatorNote).slice(0, 600);
+    const confirmedPickupWindow = text(body.confirmedPickupWindow).slice(0, 120);
+    const contactChannel = text(body.contactChannel).slice(0, 80);
+    const contactOutcome = text(body.contactOutcome).slice(0, 160);
+    const nextFollowUpAt = text(body.nextFollowUpAt).slice(0, 80);
+    const paymentReference = text(body.paymentReference).slice(0, 120);
+    const paymentAmount = text(body.paymentAmount).replace(/[^\d.]/g, "");
+    const paymentReceivedAt = text(body.paymentReceivedAt).slice(0, 40);
+    const bagTag = text(body.bagTag).slice(0, 120);
+    const intakeBagCount = text(body.intakeBagCount).slice(0, 40);
+    const receivedWeightKg = text(body.receivedWeightKg).replace(/[^\d.]/g, "");
+    const intakeCondition = text(body.intakeCondition).slice(0, 160);
+    const readyBagCount = text(body.readyBagCount).slice(0, 40);
+    const qualityCheck = text(body.qualityCheck).slice(0, 200);
+    const pickupBagCount = text(body.pickupBagCount).slice(0, 40);
+    const vendorRecipient = text(body.vendorRecipient).slice(0, 160);
+    const handoffBagCount = text(body.handoffBagCount).slice(0, 40);
+    const recipientName = text(body.recipientName).slice(0, 160);
+    const bagCount = text(body.bagCount).slice(0, 40);
+    const revisedEta = text(body.revisedEta).slice(0, 80);
+    const routeCheckpoint = text(body.routeCheckpoint).slice(0, 240);
+
+    if (actionKey === "admin-schedule-pickup" && (!confirmedPickupWindow || !operatorNote)) {
+      return NextResponse.json({ ok: false, error: "Record the confirmed pickup window and scheduling note." }, { status: 400 });
+    }
+    if (actionKey === "support-log-customer-contact" && (!contactChannel || !contactOutcome || !nextFollowUpAt || !operatorNote)) {
+      return NextResponse.json({ ok: false, error: "Record the contact channel, outcome, next follow-up time, and operator note." }, { status: 400 });
+    }
+    if (["admin-confirm-bank-transfer", "admin-approve-invoice"].includes(actionKey)) {
+      const amount = Number(paymentAmount);
+      if (!paymentReference || !paymentReceivedAt || !operatorNote || !Number.isFinite(amount) || amount <= 0 || amount > 250000) {
+        return NextResponse.json({ ok: false, error: "Record a valid amount, reference, received/approved date, and reconciliation note." }, { status: 400 });
+      }
+    }
+    if (actionKey === "vendor-log-intake") {
+      const weight = receivedWeightKg ? Number(receivedWeightKg) : 0;
+      if (!bagTag || !intakeBagCount || !intakeCondition || !operatorNote || (receivedWeightKg && (!Number.isFinite(weight) || weight <= 0 || weight > 10000))) {
+        return NextResponse.json({ ok: false, error: "Record the bag tag, bag/item count, intake condition, note, and a valid received weight if supplied." }, { status: 400 });
+      }
+    }
+    if (actionKey === "vendor-mark-ready" && (!readyBagCount || !qualityCheck || !operatorNote)) {
+      return NextResponse.json({ ok: false, error: "Record the ready bag/item count, quality check, and dispatch note." }, { status: 400 });
+    }
+    if (actionKey === "driver-mark-picked-up" && (!pickupBagCount || !operatorNote)) {
+      return NextResponse.json({ ok: false, error: "Record the collected bag/item count and customer handoff note." }, { status: 400 });
+    }
+    if (actionKey === "driver-drop-at-vendor" && (!vendorRecipient || !handoffBagCount || !operatorNote)) {
+      return NextResponse.json({ ok: false, error: "Record the vendor recipient, handed-over bag/item count, and handoff note." }, { status: 400 });
+    }
+    if (actionKey === "driver-mark-delivered" && (!recipientName || !bagCount || !operatorNote)) {
+      return NextResponse.json({ ok: false, error: "Record the recipient, returned bag count, and handoff note before delivery." }, { status: 400 });
+    }
+    if (actionKey === "driver-report-delay" && (!revisedEta || !routeCheckpoint || !operatorNote)) {
+      return NextResponse.json({ ok: false, error: "Record the revised ETA, current checkpoint, and delay reason." }, { status: 400 });
+    }
+
+    const changesFulfillment = ["admin-operation", "vendor-job-update", "qr-bag-intake", "driver-route-log"].includes(selected.submissionType);
+    const version = changesFulfillment ? order.updatedAt : order.activityUpdatedAt;
+    claimKey = changesFulfillment ? `${order.orderId}:fulfillment:${version}` : `${order.orderId}:${actionKey}:${version}`;
+    if (!claimWorkflowAction({ claimKey, orderId: order.orderId, actionKey, orderUpdatedAt: version })) {
       return NextResponse.json({ ok: false, error: "That action was already processed. Refresh the order board." }, { status: 409 });
     }
 
@@ -63,7 +121,7 @@ export async function POST(request: NextRequest) {
         declinedBy: user.name,
       });
     }
-    const payload = assignment ? {
+    const basePayload = assignment ? {
       ...selected.payload,
       vendorName: assignment.vendorName,
       driverName: assignment.driverName,
@@ -71,6 +129,62 @@ export async function POST(request: NextRequest) {
       driverId: assignment.driverId,
       message: `${selected.payload.message} ${assignment.assignmentNote}`,
     } : selected.payload;
+    const payload = actionKey === "admin-schedule-pickup" ? {
+      ...basePayload,
+      routeWindow: confirmedPickupWindow,
+      scheduleNote: operatorNote,
+      message: `${basePayload.message} Confirmed window: ${confirmedPickupWindow}. Scheduling note: ${operatorNote}`,
+    } : actionKey === "support-log-customer-contact" ? {
+      ...basePayload,
+      contactChannel,
+      contactOutcome,
+      nextFollowUpAt,
+      message: `${basePayload.message} Channel: ${contactChannel}. Outcome: ${contactOutcome}. Follow-up: ${nextFollowUpAt}. Operator note: ${operatorNote}`,
+    } : ["admin-confirm-bank-transfer", "admin-approve-invoice"].includes(actionKey) ? {
+      ...basePayload,
+      paymentReference,
+      paymentAmount: `GHS ${Number(paymentAmount).toFixed(2)}`,
+      paymentReceivedAt,
+      reconciliationNote: operatorNote,
+      message: `${basePayload.message} Reference: ${paymentReference}. Amount: GHS ${Number(paymentAmount).toFixed(2)}. Date: ${paymentReceivedAt}. Reconciliation: ${operatorNote}`,
+    } : actionKey === "vendor-log-intake" ? {
+      ...basePayload,
+      qrTag: bagTag,
+      bagCount: intakeBagCount,
+      receivedWeightKg: receivedWeightKg ? `${Number(receivedWeightKg).toFixed(2)} kg` : "Not recorded",
+      itemCondition: intakeCondition,
+      intakeNote: operatorNote,
+      message: `${basePayload.message} Bag tag: ${bagTag}. Count: ${intakeBagCount}. Received weight: ${receivedWeightKg ? `${Number(receivedWeightKg).toFixed(2)} kg` : "not recorded"}. Condition: ${intakeCondition}. Note: ${operatorNote}`,
+    } : actionKey === "vendor-mark-ready" ? {
+      ...basePayload,
+      bagCount: readyBagCount,
+      qualityCheck,
+      dispatchNote: operatorNote,
+      message: `${basePayload.message} Ready count: ${readyBagCount}. Quality check: ${qualityCheck}. Dispatch note: ${operatorNote}`,
+    } : actionKey === "driver-mark-picked-up" ? {
+      ...basePayload,
+      bagCount: pickupBagCount,
+      handoffNote: operatorNote,
+      message: `${basePayload.message} Collected count: ${pickupBagCount}. Customer handoff: ${operatorNote}`,
+    } : actionKey === "driver-drop-at-vendor" ? {
+      ...basePayload,
+      recipientName: vendorRecipient,
+      bagCount: handoffBagCount,
+      handoffNote: operatorNote,
+      message: `${basePayload.message} Vendor recipient: ${vendorRecipient}. Handed-over count: ${handoffBagCount}. Handoff: ${operatorNote}`,
+    } : actionKey === "driver-mark-delivered" ? {
+      ...basePayload,
+      recipientName,
+      bagCount,
+      proofNote: operatorNote,
+      message: `${basePayload.message} Recipient: ${recipientName}. Returned bags/items: ${bagCount}. Handoff: ${operatorNote}`,
+    } : actionKey === "driver-report-delay" ? {
+      ...basePayload,
+      driverEta: revisedEta,
+      locationNote: routeCheckpoint,
+      delayReason: operatorNote,
+      message: `${basePayload.message} Revised ETA: ${revisedEta}. Checkpoint: ${routeCheckpoint}. Reason: ${operatorNote}`,
+    } : basePayload;
 
     const record = {
       id: `BW-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`,
@@ -104,10 +218,14 @@ export async function POST(request: NextRequest) {
         });
       }
     }
-    console.error("Bubble Wash order automation failed", {
-      message: error instanceof Error ? error.message : "Unknown error",
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("Bubble Wash order workflow action failed", {
+      message: errorMessage,
       claimKey,
     });
-    return NextResponse.json({ ok: false, error: "Unable to run automation." }, { status: 500 });
+    if (errorMessage.startsWith("No eligible ")) {
+      return NextResponse.json({ ok: false, error: errorMessage }, { status: 409 });
+    }
+    return NextResponse.json({ ok: false, error: "Unable to complete workflow action." }, { status: 500 });
   }
 }

@@ -9,7 +9,7 @@ test("selectAssignmentPair prefers available vendor matching the order area and 
   const result = selectAssignmentPair([
     { id: "v1", createdAt: now, data: { submissionType: "vendor-application", name: "Ama", company: "CleanPro Osu", area: "Osu, Labone", availability: "Available today", capacity: "120kg" } },
     { id: "v2", createdAt: later, data: { submissionType: "vendor-application", name: "Kojo", company: "Paused Laundry", area: "Osu", availability: "Paused today", capacity: "400kg" } },
-    { id: "d1", createdAt: now, data: { submissionType: "driver-onboarding", name: "Kofi Route 1", phone: "0550000000", area: "Core Accra", driverStatus: "Active" } },
+    { id: "d1", createdAt: now, data: { submissionType: "driver-onboarding", name: "Kofi Route 1", phone: "0550000000", area: "Osu, Labone", driverStatus: "Active" } },
   ], { area: "Osu", driver: "Unassigned", vendor: "Unassigned" });
 
   assert.equal(result.vendorName, "CleanPro Osu");
@@ -28,6 +28,16 @@ test("selectAssignmentPair falls back safely when no available vendor or active 
     { id: "v1", createdAt: now, data: { submissionType: "vendor-application", company: "Paused Laundry", availability: "Paused today" } },
     { id: "d1", createdAt: now, data: { submissionType: "driver-onboarding", name: "Old Driver", driverStatus: "Inactive" } },
   ], { area: "Tema", vendor: "Unassigned", driver: "Unassigned" });
+
+  assert.equal(result.vendorName, "Needs admin review");
+  assert.equal(result.driverName, "Needs admin onboarding");
+});
+
+test("selectAssignmentPair does not assign an otherwise available out-of-zone team", () => {
+  const result = selectAssignmentPair([
+    { id: "v1", createdAt: now, data: { submissionType: "vendor-application", company: "Tema Laundry", area: "Tema", availability: "Available today" } },
+    { id: "d1", createdAt: now, data: { submissionType: "driver-onboarding", name: "Tema Rider", area: "Tema", driverStatus: "Active" } },
+  ], { area: "Osu", vendor: "Unassigned", driver: "Unassigned" });
 
   assert.equal(result.vendorName, "Needs admin review");
   assert.equal(result.driverName, "Needs admin onboarding");
