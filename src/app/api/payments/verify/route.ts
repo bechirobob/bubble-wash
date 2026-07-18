@@ -17,6 +17,9 @@ function expectedAmountMinor(data: Record<string, unknown>) {
 }
 
 export async function GET(request: NextRequest) {
+  if (process.env.NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED !== "true") {
+    return NextResponse.json({ ok: false, error: "Online payment verification is not enabled for the pilot." }, { status: 503 });
+  }
   if (isRateLimited(clientKey(request.headers, "payments-verify"), 30, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many verification requests. Try again shortly." }, { status: 429 });
   }
