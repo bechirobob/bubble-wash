@@ -1,6 +1,6 @@
 # Bubble Wash
 
-Bubble Wash is a Next.js operations web app for Accra laundry pickup, pricing, order tracking, staff handoffs, notifications, and payment checkout.
+Bubble Wash is a Next.js operations web app for Accra laundry pickup, pricing, order tracking, staff handoffs, customer follow-up, and billing.
 
 ## Local development
 
@@ -23,19 +23,19 @@ Required for staff auth hardening:
 npm run hash-password -- "your-strong-password"
 ```
 
-Payment and notification integrations:
+Pilot operating mode:
 
-- Paystack checkout: `PAYSTACK_SECRET_KEY`, `BUBBLEWASH_PUBLIC_URL`
-- Optional public customer contact links: `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP`, `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL`. When unset, the links remain hidden without blocking pilot operations. Customer updates still use the contact information submitted with each booking.
-- Email alerts: `RESEND_API_KEY`, `BUBBLEWASH_EMAIL_FROM`, `BUBBLEWASH_OPERATIONS_EMAIL`
-- WhatsApp alerts: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_API_VERSION`, `BUBBLEWASH_OPERATIONS_WHATSAPP`
+- Keep `NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED=false` to accept bank-transfer and approved-invoice preferences only. Card and Mobile Money remain visible as clearly disabled “Coming soon” services.
+- Keep `NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED=false` while operations handles customer follow-up manually from the booking record. Automated WhatsApp and email updates remain visible as “Coming soon.”
+- Optional public contact links use `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP` and `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL`. When unset, the links remain hidden without blocking pilot operations.
+- Paystack credentials become required only when online payments are enabled. Resend and WhatsApp provider credentials become required only when automated updates are enabled.
 
 ## Integration behavior
 
-- `/api/payments/initialize` accepts a saved booking reference, recalculates that booking on the server, creates a Paystack checkout in GHS, and returns the secure authorization URL. It does not trust a browser-supplied amount.
+- `/api/payments/initialize` returns HTTP 503 while online payments are disabled. When enabled, it accepts a saved booking reference, recalculates that booking on the server, creates a Paystack checkout in GHS, and returns the secure authorization URL. It does not trust a browser-supplied amount.
 - `/api/payments/verify?reference=...` verifies Paystack payment status and appends a payment event to the order timeline.
-- `/api/submit` stores bookings/onboarding/support events and attempts email/WhatsApp notifications when provider credentials are configured.
-- `/api/orders/advance` appends role-scoped workflow events and attempts timeline notifications.
+- `/api/submit` stores bookings/onboarding/support events. In manual pilot mode, no provider send is attempted and operations follows up from the stored customer details.
+- `/api/orders/advance` appends role-scoped workflow events and clearly reminds staff when manual customer follow-up is required.
 - `/api/availability` exposes staff-authenticated vendor/driver capacity tables and recent vendor declines.
 - Admin auto-assignment uses SQLite-backed vendor capacity rows and admin-only driver availability rows, decrementing capacity as orders are assigned.
 - Vendors can accept or decline assigned jobs from the shared order board; declines are recorded with reason metadata, release vendor capacity, and move the order into review instead of losing context.
@@ -51,4 +51,4 @@ npm run check
 
 The GitHub `Pilot CI` workflow runs the same lint, test, and Webpack production-build gate on pushes and pull requests. Next.js development still uses Turbopack; the release build uses the supported `--webpack` path for deterministic compatibility with the current native SQLite dependency.
 
-Missing payment, notification, staff-authentication, persistent-storage, or trusted-edge configuration blocks `/api/ready`; the app does not fake operational readiness or live sends.
+Missing staff-authentication, public URL, persistent-storage, or trusted-edge configuration blocks `/api/ready`. Missing provider credentials block readiness only if the matching integration has been explicitly enabled. Manual pilot mode is reported in readiness warnings and does not claim that online payments or automated sends are live.
