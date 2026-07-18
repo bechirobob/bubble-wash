@@ -13,6 +13,21 @@ export type SubmissionRecord = {
   data: Record<string, unknown>;
 };
 
+export type DispatchEtaSource = "rider-reported" | "area-estimate" | "scheduled-window" | "unavailable";
+export type DispatchCheckpointSource = "rider-reported" | "rider-route-update" | "unavailable";
+
+export type DispatchProjection = {
+  scheduledWindow: string;
+  estimatedDistanceKm: number;
+  estimatedDriveMinutes: number;
+  etaText: string;
+  etaSource: DispatchEtaSource;
+  etaUpdatedAt: string;
+  checkpoint: string;
+  checkpointSource: DispatchCheckpointSource;
+  checkpointUpdatedAt: string;
+};
+
 export type OrderSummary = {
   orderId: string;
   createdAt: string;
@@ -40,6 +55,7 @@ export type OrderSummary = {
   eventCount: number;
   lastEventType: string;
   route: RoutePreview;
+  dispatch: DispatchProjection;
   stageTimer: {
     label: string;
     tone: "ok" | "due" | "breached" | "paused";
@@ -94,6 +110,35 @@ function hasAssignedOperationalRoute(order: OrderSummary) {
   return assigned && !["delivered", "closed"].includes(order.workflowStage.key);
 }
 
+function unavailableDispatch(scheduledWindow = ""): DispatchProjection {
+  return {
+    scheduledWindow,
+    estimatedDistanceKm: 0,
+    estimatedDriveMinutes: 0,
+    etaText: "",
+    etaSource: "unavailable",
+    etaUpdatedAt: "",
+    checkpoint: "",
+    checkpointSource: "unavailable",
+    checkpointUpdatedAt: "",
+  };
+}
+
+function safeAreaEstimateDispatch(dispatch: DispatchProjection): DispatchProjection {
+  if (dispatch.estimatedDriveMinutes <= 0) return unavailableDispatch(dispatch.scheduledWindow);
+  return {
+    scheduledWindow: dispatch.scheduledWindow,
+    estimatedDistanceKm: dispatch.estimatedDistanceKm,
+    estimatedDriveMinutes: dispatch.estimatedDriveMinutes,
+    etaText: `${dispatch.estimatedDriveMinutes} min`,
+    etaSource: "area-estimate",
+    etaUpdatedAt: dispatch.etaSource === "area-estimate" ? dispatch.etaUpdatedAt : "",
+    checkpoint: "",
+    checkpointSource: "unavailable",
+    checkpointUpdatedAt: "",
+  };
+}
+
 /**
  * Produces the staff-facing API view without changing the internal order
  * snapshot used for workflow validation. Blank strings preserve the current
@@ -108,6 +153,7 @@ export function projectOrderSummaryForRole(order: OrderSummary, role: StaffRole)
       pickup: { ...order.route.pickup },
       hub: { ...order.route.hub },
     },
+    dispatch: { ...order.dispatch },
     stageTimer: { ...order.stageTimer },
     timeline: order.timeline.map((event) => ({ ...event })),
   };
@@ -127,6 +173,7 @@ export function projectOrderSummaryForRole(order: OrderSummary, role: StaffRole)
     projected.route.pickup.label = order.area || "Pickup area";
     projected.route.googleMapsUrl = "";
     projected.route.directionsUrl = "";
+    projected.dispatch = safeAreaEstimateDispatch(order.dispatch);
     return projected;
   }
 
@@ -141,6 +188,7 @@ export function projectOrderSummaryForRole(order: OrderSummary, role: StaffRole)
       projected.route.pickup.label = order.area || "Pickup area";
       projected.route.googleMapsUrl = "";
       projected.route.directionsUrl = "";
+      projected.dispatch = unavailableDispatch(order.dispatch.scheduledWindow);
     }
     return projected;
   }
@@ -308,6 +356,78 @@ function drivesPaymentState(record: SubmissionRecord) {
   return type === "admin-operation" && /confirm bank transfer|approve invoice|close order/i.test(text(record.data.actionType));
 }
 
+function explicitRiderEta(record: SubmissionRecord) {
+  const driverEtaAt = text(record.data.driverEtaAt);
+  if (driverEtaAt && text(record.data.etaSource).toLowerCase() === "rider-reported") return driverEtaAt;
+
+  const revisedEta = text(record.data.revisedEta);
+  if (revisedEta) return revisedEta;
+
+  const driverEta = text(record.data.driverEta);
+  const delayContext = `${text(record.data.issueType)} ${text(record.data.actionType)}`;
+  if (driverEta && text(record.data.delayReason) && /delay/i.test(delayContext)) return driverEta;
+  return "";
+}
+
+function routeCheckpoint(record: SubmissionRecord) {
+  const type = text(record.data.submissionType);
+  if (type !== "driver-route-log" && !explicitRiderEta(record)) return "";
+  return text(record.data.routeCheckpoint) || text(record.data.locationNote);
+}
+
+function buildDispatchProjection(chronological: SubmissionRecord[], route: RoutePreview): DispatchProjection {
+  const latestFirst = [...chronological].reverse();
+  const confirmedWindowRecord = latestFirst.find((record) => (
+    text(record.data.submissionType) === "admin-operation"
+    && /schedule pickup/i.test(text(record.data.actionType))
+    && Boolean(text(record.data.routeWindow) || text(record.data.pickupWindow))
+  ));
+  const requestedWindowRecord = latestFirst.find((record) => (
+    workflowSeedTypes.has(text(record.data.submissionType))
+    && Boolean(text(record.data.pickupWindow) || text(record.data.routeWindow))
+  ));
+  const scheduledWindowRecord = confirmedWindowRecord ?? requestedWindowRecord;
+  const scheduledWindow = scheduledWindowRecord
+    ? text(scheduledWindowRecord.data.routeWindow) || text(scheduledWindowRecord.data.pickupWindow)
+    : "";
+
+  const riderEtaRecord = latestFirst.find((record) => Boolean(explicitRiderEta(record)));
+  const checkpointRecord = latestFirst.find((record) => Boolean(routeCheckpoint(record)));
+  const riderEta = riderEtaRecord ? explicitRiderEta(riderEtaRecord) : "";
+  const checkpoint = checkpointRecord ? routeCheckpoint(checkpointRecord) : "";
+
+  let etaText = "";
+  let etaSource: DispatchEtaSource = "unavailable";
+  let etaUpdatedAt = "";
+  if (riderEtaRecord && riderEta) {
+    etaText = riderEta;
+    etaSource = "rider-reported";
+    etaUpdatedAt = riderEtaRecord.createdAt;
+  } else if (route.estimatedDriveMinutes > 0) {
+    etaText = `${route.estimatedDriveMinutes} min`;
+    etaSource = "area-estimate";
+    etaUpdatedAt = requestedWindowRecord?.createdAt ?? chronological[0]?.createdAt ?? "";
+  } else if (confirmedWindowRecord && scheduledWindow) {
+    etaText = scheduledWindow;
+    etaSource = "scheduled-window";
+    etaUpdatedAt = confirmedWindowRecord.createdAt;
+  }
+
+  return {
+    scheduledWindow,
+    estimatedDistanceKm: route.estimatedDistanceKm,
+    estimatedDriveMinutes: route.estimatedDriveMinutes,
+    etaText,
+    etaSource,
+    etaUpdatedAt,
+    checkpoint,
+    checkpointSource: checkpointRecord
+      ? explicitRiderEta(checkpointRecord) ? "rider-reported" : "rider-route-update"
+      : "unavailable",
+    checkpointUpdatedAt: checkpointRecord?.createdAt ?? "",
+  };
+}
+
 function nextStepFor(summary: Pick<OrderSummary, "status" | "lastEventType" | "vendor" | "driver" | "priority" | "stageTimer" | "customer" | "email" | "phone" | "area" | "routeWindow" | "locationNote" | "payment" | "orderId">) {
   return workflowNextStep(summary);
 }
@@ -378,12 +498,13 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
           : "Wash + fold");
     const vendor = findLatest("vendorName", "vendor");
     const driver = findLatest("driverName") || findLatestFromTypes(["driver-route-log"], "name") || "Unassigned";
-    const routeWindow = findLatest("routeWindow", "pickupWindow", "driverEta", "eta") || "ETA pending";
-    const locationNote = findLatest("locationNote", "routeCheckpoint") || findLatestFromTypes(["driver-route-log"], "message") || "No driver checkpoint yet";
     const area = findLatest("area", "zone", "routeArea") || "Route pending";
     const pickupAddress = findLatestFromTypes(["pickup-booking", "checkout-request"], "pickupAddress");
     const landmark = findLatestFromTypes(["pickup-booking", "checkout-request"], "landmark");
     const route = buildRoutePreview(zoneKeyFrom(findLatest("zone", "routeArea", "area")), pickupAddress || area);
+    const dispatch = buildDispatchProjection(chronological, route);
+    const routeWindow = dispatch.scheduledWindow || "ETA pending";
+    const locationNote = dispatch.checkpoint || "No driver checkpoint yet";
     const summary: OrderSummary = {
       orderId,
       createdAt: first.createdAt,
@@ -411,6 +532,7 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
       eventCount: chronological.length,
       lastEventType,
       route,
+      dispatch,
       stageTimer: stageTimerForWorkflow(status, fulfillmentRecord.createdAt, lastEventType),
       timeline: chronological.map((record) => ({
         id: record.id,

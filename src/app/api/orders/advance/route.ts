@@ -5,7 +5,7 @@ import { assignOrderFromAvailability } from "@/lib/assignment";
 import { appendSubmissionRecordAndReleaseOrderCapacity, recordVendorDecline, releaseAssignmentCapacity } from "@/lib/availability-store";
 import { getCurrentStaffUser } from "@/lib/auth";
 import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
-import { automationActionsForOrder } from "@/lib/order-workflow";
+import { automationActionsForOrder, isValidDriverEtaAt } from "@/lib/order-workflow";
 import { buildOrderSummaries, orderBoardRecords, orderMatchesStaffEntity, readSubmissionsForOrder } from "@/lib/submissions";
 import { staffWriteGuard } from "@/lib/security";
 
@@ -52,7 +52,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "That action is not allowed for the current order stage." }, { status: 400 });
     }
 
-    const operatorNote = text(body.operatorNote).slice(0, 600);
+    const rawOperatorNote = text(body.operatorNote);
+    const operatorNote = rawOperatorNote.slice(0, 600);
     const confirmedPickupWindow = text(body.confirmedPickupWindow).slice(0, 120);
     const contactChannel = text(body.contactChannel).slice(0, 80);
     const contactOutcome = text(body.contactOutcome).slice(0, 160);
@@ -72,7 +73,9 @@ export async function POST(request: NextRequest) {
     const recipientName = text(body.recipientName).slice(0, 160);
     const bagCount = text(body.bagCount).slice(0, 40);
     const revisedEta = text(body.revisedEta).slice(0, 80);
-    const routeCheckpoint = text(body.routeCheckpoint).slice(0, 240);
+    const driverEtaAt = text(body.driverEtaAt);
+    const rawRouteCheckpoint = text(body.routeCheckpoint);
+    const routeCheckpoint = rawRouteCheckpoint.slice(0, 240);
 
     if (actionKey === "admin-schedule-pickup" && (!confirmedPickupWindow || !operatorNote)) {
       return NextResponse.json({ ok: false, error: "Record the confirmed pickup window and scheduling note." }, { status: 400 });
@@ -107,8 +110,12 @@ export async function POST(request: NextRequest) {
     if (actionKey === "driver-report-delay" && (!revisedEta || !routeCheckpoint || !operatorNote)) {
       return NextResponse.json({ ok: false, error: "Record the revised ETA, current checkpoint, and delay reason." }, { status: 400 });
     }
+    if (actionKey === "driver-update-eta" && (!isValidDriverEtaAt(driverEtaAt) || !routeCheckpoint || rawRouteCheckpoint.length > 240 || rawOperatorNote.length > 240)) {
+      return NextResponse.json({ ok: false, error: "Record ETA as HH:MM, a current checkpoint up to 240 characters, and an optional note up to 240 characters." }, { status: 400 });
+    }
 
-    const changesFulfillment = ["admin-operation", "vendor-job-update", "qr-bag-intake", "driver-route-log"].includes(selected.submissionType);
+    const changesFulfillment = actionKey !== "driver-update-eta"
+      && ["admin-operation", "vendor-job-update", "qr-bag-intake", "driver-route-log"].includes(selected.submissionType);
     const version = changesFulfillment ? order.updatedAt : order.activityUpdatedAt;
     claimKey = changesFulfillment ? `${order.orderId}:fulfillment:${version}` : `${order.orderId}:${actionKey}:${version}`;
     if (!claimWorkflowAction({ claimKey, orderId: order.orderId, actionKey, orderUpdatedAt: version })) {
@@ -192,6 +199,15 @@ export async function POST(request: NextRequest) {
       bagCount,
       proofNote: operatorNote,
       message: `${basePayload.message} Recipient: ${recipientName}. Returned bags/items: ${bagCount}. Handoff: ${operatorNote}`,
+    } : actionKey === "driver-update-eta" ? {
+      ...basePayload,
+      driverEtaAt,
+      driverEta: driverEtaAt,
+      etaSource: "rider-reported",
+      routeCheckpoint,
+      locationNote: routeCheckpoint,
+      ...(operatorNote ? { operatorNote } : {}),
+      message: `Rider ETA updated for ${order.orderId}. ETA: ${driverEtaAt}. Checkpoint: ${routeCheckpoint}.${operatorNote ? ` Note: ${operatorNote}` : ""}`,
     } : actionKey === "driver-report-delay" ? {
       ...basePayload,
       driverEta: revisedEta,

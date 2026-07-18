@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { AdminWorkspace } from "@/components/StaffWorkspaces";
 import { canAccess, getCurrentStaffUser } from "@/lib/auth";
 
-type AdminView = "overview" | "orders" | "people" | "cases" | "activity";
+type AdminView = "overview" | "dispatch" | "orders" | "people" | "cases" | "activity";
 
 type AdminPageProps = {
   searchParams: Promise<{
@@ -13,7 +13,7 @@ type AdminPageProps = {
   }>;
 };
 
-const adminViews = new Set<AdminView>(["overview", "orders", "people", "cases", "activity"]);
+const adminViews = new Set<AdminView>(["overview", "dispatch", "orders", "people", "cases", "activity"]);
 
 function firstSearchParam(value: string | string[] | undefined) {
   const candidate = Array.isArray(value) ? value[0] : value;

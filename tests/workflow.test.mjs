@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { automationActionsForOrder, paymentReadyForCloseout, workflowNextStep, workflowStageFromStatus } from "../src/lib/order-workflow.ts";
+import { automationActionsForOrder, isValidDriverEtaAt, paymentReadyForCloseout, workflowNextStep, workflowStageFromStatus } from "../src/lib/order-workflow.ts";
 
 const baseOrder = {
   orderId: "BW-TEST-001",
@@ -92,4 +92,31 @@ test("workflow actions enforce vendor acceptance, route, handoff, and intake ord
 
   const intake = { ...baseOrder, status: "At vendor", lastEventType: "qr-bag-intake" };
   assert.ok(automationActionsForOrder(intake, "vendor", "Vendor Partner").some((action) => action.key === "vendor-start-washing"));
+});
+
+test("driver ETA updates are limited to moving legs and preserve the current route context", () => {
+  for (const status of ["Driver en route", "Picked up", "Out for delivery"]) {
+    const movingOrder = { ...baseOrder, status, lastEventType: "driver-route-log" };
+    const update = automationActionsForOrder(movingOrder, "driver", "Route Driver").find((action) => action.key === "driver-update-eta");
+    assert.ok(update, `${status} should expose an ETA update`);
+    assert.equal(update.submissionType, "driver-route-log");
+    assert.equal(update.nextStatus, status);
+    assert.equal(update.payload.currentOrderStatus, status);
+    assert.equal(Object.hasOwn(update.payload, "orderStatus"), false, "ETA checkpoints must not reset the fulfillment-stage timer");
+    assert.equal(update.payload.vendorName, baseOrder.vendor);
+    assert.equal(update.payload.driverName, baseOrder.driver);
+  }
+
+  for (const status of ["Accepted", "Ready", "Dropped at vendor", "Delivered", "Closed"]) {
+    const stationaryOrder = { ...baseOrder, status, lastEventType: "driver-route-log" };
+    assert.equal(automationActionsForOrder(stationaryOrder, "driver", "Route Driver").some((action) => action.key === "driver-update-eta"), false);
+  }
+
+  const repeatedUpdate = { ...baseOrder, status: "Driver en route", lastEventType: "driver-route-log", locationNote: "37 Military Hospital" };
+  assert.ok(automationActionsForOrder(repeatedUpdate, "driver", "Route Driver").some((action) => action.key === "driver-update-eta"));
+});
+
+test("rider-reported ETA uses a strict 24-hour clock value", () => {
+  for (const value of ["00:00", "09:05", "15:20", "23:59"]) assert.equal(isValidDriverEtaAt(value), true);
+  for (const value of ["", "9:05", "24:00", "15:60", "3 PM", "15:20 tomorrow"]) assert.equal(isValidDriverEtaAt(value), false);
 });

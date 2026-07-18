@@ -81,6 +81,11 @@ assert.equal(summary.pickupAddress, "14 Oxford Street, Osu");
 assert.equal(summary.service, "Wash + fold");
 assert.equal(summary.serviceType, "Wash + fold");
 assert.equal(summary.payment, "success");
+assert.equal(summary.routeWindow, "Morning pickup");
+assert.equal(summary.dispatch.scheduledWindow, "Morning pickup");
+assert.equal(summary.dispatch.etaSource, "area-estimate");
+assert.equal(summary.dispatch.etaText, `${summary.route.estimatedDriveMinutes} min`);
+assert.equal(summary.dispatch.checkpointSource, "unavailable");
 assert.equal(orderBoardRecords([booking, washing, support, payment, laterSupport], "support").length, 5);
 
 const adminView = projectOrderSummaryForRole(summary, "admin");
@@ -89,6 +94,7 @@ assert.notEqual(adminView, summary);
 assert.notEqual(adminView.timeline, summary.timeline);
 assert.notEqual(adminView.route, summary.route);
 assert.notEqual(adminView.route.pickup, summary.route.pickup);
+assert.notEqual(adminView.dispatch, summary.dispatch);
 
 const vendorView = projectOrderSummaryForRole(summary, "vendor");
 assert.equal(vendorView.email, "");
@@ -101,6 +107,10 @@ assert.equal(vendorView.route.pickup.label, summary.area);
 assert.notEqual(vendorView.route.pickup.label, summary.pickupAddress);
 assert.equal(vendorView.route.googleMapsUrl, "");
 assert.equal(vendorView.route.directionsUrl, "");
+assert.equal(vendorView.dispatch.etaSource, "area-estimate");
+assert.equal(vendorView.dispatch.etaText, `${summary.route.estimatedDriveMinutes} min`);
+assert.equal(vendorView.dispatch.checkpoint, "");
+assert.equal(vendorView.dispatch.checkpointUpdatedAt, "");
 assert.ok(vendorView.timeline.every((event) => !event.note.includes("ama@example.com") && !event.note.includes("0550000000") && event.note !== "Production started."));
 assert.ok(vendorView.timeline.every((event) => !event.type.includes("payment") && event.status !== "success"));
 assert.equal(vendorView.eventCount, vendorView.timeline.length);
@@ -113,6 +123,7 @@ assert.equal(driverView.phone, summary.phone);
 assert.equal(driverView.pickupAddress, summary.pickupAddress);
 assert.equal(driverView.landmark, summary.landmark);
 assert.equal(driverView.route.directionsUrl, summary.route.directionsUrl);
+assert.deepEqual(driverView.dispatch, summary.dispatch);
 assert.ok(driverView.timeline.every((event) => event.note !== "Production started."));
 assert.ok(driverView.timeline.every((event) => !event.type.includes("payment") && event.status !== "success"));
 assert.equal(driverView.eventCount, driverView.timeline.length);
@@ -126,12 +137,16 @@ assert.equal(deliveredDriverView.pickupAddress, "");
 assert.equal(deliveredDriverView.landmark, "");
 assert.equal(deliveredDriverView.route.pickup.label, summary.area);
 assert.equal(deliveredDriverView.route.directionsUrl, "");
+assert.equal(deliveredDriverView.dispatch.etaSource, "unavailable");
+assert.equal(deliveredDriverView.dispatch.etaText, "");
+assert.equal(deliveredDriverView.dispatch.checkpoint, "");
 
 const supportView = projectOrderSummaryForRole(summary, "support");
 assert.equal(supportView.email, summary.email);
 assert.equal(supportView.phone, summary.phone);
 assert.equal(supportView.pickupAddress, summary.pickupAddress);
 assert.equal(supportView.payment, summary.payment);
+assert.deepEqual(supportView.dispatch, summary.dispatch);
 assert.ok(supportView.timeline.every((event) => event.note !== "Production started."));
 
 assert.equal(summary.email, "ama@example.com");
@@ -146,6 +161,109 @@ const expressSummary = buildOrderSummaries([{
 }])[0];
 assert.equal(expressSummary.service, "Express capable");
 assert.equal(expressSummary.serviceType, "Express capable");
+
+const dispatchAssignment = {
+  id: "BW-DISPATCH-ASSIGN",
+  createdAt: "2026-07-18T10:00:00.000Z",
+  data: {
+    submissionType: "admin-operation",
+    orderId: booking.id,
+    actionType: "Assign vendor",
+    orderStatus: "Vendor assigned",
+    vendorId: "vendor-dispatch",
+    vendorName: "Dispatch Laundry",
+    driverId: "driver-dispatch",
+    driverName: "Dispatch Rider",
+  },
+};
+const ordinaryRouteStart = {
+  id: "BW-DISPATCH-START",
+  createdAt: "2026-07-18T10:10:00.000Z",
+  data: {
+    submissionType: "driver-route-log",
+    orderId: booking.id,
+    orderStatus: "Driver en route",
+    vendorId: "vendor-dispatch",
+    driverId: "driver-dispatch",
+    driverName: "Dispatch Rider",
+    routeWindow: "Morning pickup",
+    driverEta: "Morning pickup",
+    driverEtaAt: "10:45",
+    etaSource: "scheduled-window",
+    locationNote: "Route started",
+  },
+};
+const preReportDispatch = buildOrderSummaries([booking, dispatchAssignment, ordinaryRouteStart])[0];
+assert.equal(preReportDispatch.routeWindow, "Morning pickup");
+assert.equal(preReportDispatch.dispatch.etaSource, "area-estimate");
+assert.notEqual(preReportDispatch.dispatch.etaText, ordinaryRouteStart.data.driverEta);
+assert.equal(preReportDispatch.dispatch.checkpoint, "Route started");
+assert.equal(preReportDispatch.dispatch.checkpointSource, "rider-route-update");
+assert.equal(preReportDispatch.dispatch.checkpointUpdatedAt, ordinaryRouteStart.createdAt);
+
+const explicitEtaUpdate = {
+  id: "BW-DISPATCH-ETA",
+  createdAt: "2026-07-18T10:20:00.000Z",
+  data: {
+    submissionType: "driver-route-log",
+    orderId: booking.id,
+    currentOrderStatus: "Driver en route",
+    vendorId: "vendor-dispatch",
+    driverId: "driver-dispatch",
+    driverName: "Dispatch Rider",
+    routeWindow: "Morning pickup",
+    driverEtaAt: "11:05",
+    driverEta: "11:05",
+    etaSource: "rider-reported",
+    routeCheckpoint: "37 Military Hospital junction",
+    locationNote: "37 Military Hospital junction",
+  },
+};
+const explicitEtaSummary = buildOrderSummaries([booking, dispatchAssignment, ordinaryRouteStart, explicitEtaUpdate])[0];
+assert.equal(explicitEtaSummary.routeWindow, "Morning pickup");
+assert.equal(explicitEtaSummary.dispatch.scheduledWindow, "Morning pickup");
+assert.equal(explicitEtaSummary.dispatch.etaText, "11:05");
+assert.equal(explicitEtaSummary.dispatch.etaSource, "rider-reported");
+assert.equal(explicitEtaSummary.dispatch.etaUpdatedAt, explicitEtaUpdate.createdAt);
+assert.equal(explicitEtaSummary.dispatch.checkpoint, "37 Military Hospital junction");
+assert.equal(explicitEtaSummary.dispatch.checkpointSource, "rider-reported");
+assert.equal(explicitEtaSummary.dispatch.checkpointUpdatedAt, explicitEtaUpdate.createdAt);
+
+const explicitDelayUpdate = {
+  id: "BW-DISPATCH-DELAY",
+  createdAt: "2026-07-18T10:30:00.000Z",
+  data: {
+    submissionType: "support-ticket",
+    orderId: booking.id,
+    issueType: "Pickup delay",
+    routeWindow: "Morning pickup",
+    driverEta: "11:25",
+    locationNote: "Airport roundabout",
+    delayReason: "Heavy traffic",
+  },
+};
+const revisedEtaSummary = buildOrderSummaries([booking, dispatchAssignment, ordinaryRouteStart, explicitEtaUpdate, explicitDelayUpdate])[0];
+assert.equal(revisedEtaSummary.routeWindow, "Morning pickup");
+assert.equal(revisedEtaSummary.dispatch.etaText, "11:25");
+assert.equal(revisedEtaSummary.dispatch.etaSource, "rider-reported");
+assert.equal(revisedEtaSummary.dispatch.etaUpdatedAt, explicitDelayUpdate.createdAt);
+assert.equal(revisedEtaSummary.dispatch.checkpoint, "Airport roundabout");
+assert.equal(revisedEtaSummary.dispatch.checkpointUpdatedAt, explicitDelayUpdate.createdAt);
+
+const dispatchAdminView = projectOrderSummaryForRole(revisedEtaSummary, "admin");
+const dispatchVendorView = projectOrderSummaryForRole(revisedEtaSummary, "vendor");
+const dispatchDriverView = projectOrderSummaryForRole(revisedEtaSummary, "driver");
+const dispatchSupportView = projectOrderSummaryForRole(revisedEtaSummary, "support");
+assert.equal(dispatchAdminView.dispatch.etaText, "11:25");
+assert.equal(dispatchDriverView.dispatch.etaText, "11:25");
+assert.equal(dispatchSupportView.dispatch.etaText, "11:25");
+assert.equal(Object.hasOwn(dispatchSupportView.dispatch, "lat"), false);
+assert.equal(dispatchVendorView.dispatch.etaSource, "area-estimate");
+assert.equal(dispatchVendorView.dispatch.etaText, `${revisedEtaSummary.route.estimatedDriveMinutes} min`);
+assert.equal(dispatchVendorView.dispatch.etaUpdatedAt, "");
+assert.equal(dispatchVendorView.dispatch.checkpoint, "");
+assert.equal(dispatchVendorView.dispatch.checkpointSource, "unavailable");
+assert.equal(Object.hasOwn(dispatchVendorView.dispatch, "lng"), false);
 
 const entityBookingA = { ...booking, id: "BW-ENTITY-A" };
 const entityBookingB = { ...booking, id: "BW-ENTITY-B" };
@@ -200,4 +318,4 @@ assert.deepEqual(visibleSubmissionRecords(entityRecords, "driver", "driver-a", t
 assert.equal(visibleSubmissionRecords(entityRecords, "vendor", undefined, true).length, 0);
 assert.equal(visibleSubmissionRecords(entityRecords, "vendor", undefined, false).length, 2);
 
-console.log(JSON.stringify({ ok: true, checks: 71 }));
+console.log(JSON.stringify({ ok: true, checks: 117 }));

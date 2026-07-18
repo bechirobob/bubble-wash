@@ -47,7 +47,28 @@ type OrderSummary = {
   nextStep: string;
   eventCount: number;
   lastEventType: string;
-  route: { googleMapsUrl: string; directionsUrl: string; zoneLabel: string; zoneNote: string };
+  route: {
+    pickup: { label: string; lat: number; lng: number };
+    hub: { label: string; lat: number; lng: number };
+    zoneKey: string;
+    googleMapsUrl: string;
+    directionsUrl: string;
+    zoneLabel: string;
+    zoneNote: string;
+    estimatedDistanceKm: number;
+    estimatedDriveMinutes: number;
+  };
+  dispatch?: {
+    scheduledWindow: string;
+    estimatedDistanceKm: number;
+    estimatedDriveMinutes: number;
+    etaText: string;
+    etaSource: "rider-reported" | "area-estimate" | "scheduled-window" | "unavailable";
+    etaUpdatedAt: string;
+    checkpoint: string;
+    checkpointSource: "rider-reported" | "rider-route-update" | "unavailable";
+    checkpointUpdatedAt: string;
+  };
   stageTimer: { label: string; tone: "ok" | "due" | "breached" | "paused"; elapsedMinutes: number; targetMinutes: number };
   timeline: Array<{ id: string; createdAt: string; type: string; status: string; actor: string; note: string }>;
 };
@@ -91,6 +112,7 @@ function rolePromise(role: StaffRole, view: string) {
   const copy: Record<StaffRole, Record<string, { eyebrow: string; title: string; subtitle: string }>> = {
     admin: {
       overview: { eyebrow: "Operations", title: "Today at Bubble Wash", subtitle: "A read-only view of orders, partners, routes, support, and payment follow-up." },
+      dispatch: { eyebrow: "Dispatch", title: "Rider routes and ETAs", subtitle: "Monitor assigned route work, recorded windows, and area-level drive estimates from one calm view." },
       orders: { eyebrow: "Orders", title: "Order operations", subtitle: "Review one queue, then open an order for its next verified action and full history." },
       people: { eyebrow: "People & onboarding", title: "Partners and staff", subtitle: "Manage vendor capacity, rider coverage, and the operating roster in one clear place." },
       cases: { eyebrow: "Support oversight", title: "Customer cases", subtitle: "Review open cases and follow-up without entering the support team workspace." },
@@ -770,7 +792,7 @@ function AutomatedOrderActions({ order, role, userName, onSaved }: { order: Orde
         <span>{actions.length ? `${actions.length} available` : "Waiting"}</span>
       </div>
       <div className="automationActions">
-        {actions.length ? actions.map((action, index) => <button className={`button ${index === 0 ? "primary" : "secondary"}`} disabled={Boolean(pendingLabel)} key={action.label} onClick={() => action.key === "vendor-decline-job" ? setDeclineOpen(true) : ["admin-schedule-pickup", "support-log-customer-contact", "admin-confirm-bank-transfer", "admin-approve-invoice", "vendor-log-intake", "vendor-mark-ready", "driver-mark-picked-up", "driver-drop-at-vendor", "driver-mark-delivered", "driver-report-delay"].includes(action.key) ? setStructuredAction(action.key) : void run(action)} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>) : <span className="status">Waiting</span>}
+        {actions.length ? actions.map((action, index) => <button className={`button ${index === 0 ? "primary" : "secondary"}`} disabled={Boolean(pendingLabel)} key={action.label} onClick={() => action.key === "vendor-decline-job" ? setDeclineOpen(true) : ["admin-schedule-pickup", "support-log-customer-contact", "admin-confirm-bank-transfer", "admin-approve-invoice", "vendor-log-intake", "vendor-mark-ready", "driver-mark-picked-up", "driver-drop-at-vendor", "driver-mark-delivered", "driver-update-eta", "driver-report-delay"].includes(action.key) ? setStructuredAction(action.key) : void run(action)} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>) : <span className="status">Waiting</span>}
       </div>
       {declineOpen ? <form className="declineReasonForm" onSubmit={(event) => { event.preventDefault(); const decline = actions.find((action) => action.key === "vendor-decline-job"); if (decline && declineReason.trim()) void run(decline, { reason: declineReason.trim() }); }}><label>Reason for admin reassignment<textarea value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} maxLength={300} placeholder="Capacity, machine issue, service mismatch, or timing conflict" required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={!declineReason.trim() || Boolean(pendingLabel)}>Confirm decline</button><button className="button secondary" type="button" onClick={() => { setDeclineOpen(false); setDeclineReason(""); }}>Cancel</button></div></form> : null}
       {structuredAction === "admin-schedule-pickup" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Confirmed pickup window<input name="confirmedPickupWindow" placeholder="Tuesday, 10:00–12:00" maxLength={120} required /></label><label>Scheduling note<textarea name="operatorNote" placeholder="Who confirmed the window and any access or collection instructions" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save pickup window</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
@@ -781,6 +803,7 @@ function AutomatedOrderActions({ order, role, userName, onSaved }: { order: Orde
       {structuredAction === "driver-mark-picked-up" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Collected bag/item count<input name="pickupBagCount" type="number" min="1" max="10000" step="1" required /></label><label>Customer handoff note<textarea name="operatorNote" placeholder="Who released the order, collection point, and any count or access exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm pickup</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "driver-drop-at-vendor" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Vendor recipient<input name="vendorRecipient" maxLength={160} required /></label><label>Handed-over bag/item count<input name="handoffBagCount" type="number" min="1" max="10000" step="1" required /></label></div><label>Vendor handoff note<textarea name="operatorNote" placeholder="Handoff point, time, recipient confirmation, or discrepancy" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm vendor handoff</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "driver-mark-delivered" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Recipient name<input name="recipientName" maxLength={160} required /></label><label>Returned bag/item count<input name="bagCount" type="number" min="1" max="10000" step="1" required /></label></div><label>Handoff note<textarea name="operatorNote" placeholder="Where and to whom the order was handed over; note any exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm delivery</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "driver-update-eta" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Estimated arrival time<input name="driverEtaAt" type="time" required /></label><label>Current checkpoint<input name="routeCheckpoint" placeholder="Street, junction, or visible landmark" maxLength={240} required /></label></div><label>Route note (optional)<textarea name="operatorNote" placeholder="Traffic or access detail that dispatch should know" maxLength={240} /></label><p className="formHint">This saves a rider-reported estimate and checkpoint. It does not enable live tracking.</p><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Update ETA &amp; checkpoint</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "driver-report-delay" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Revised ETA<input name="revisedEta" placeholder="25 minutes or 15:20" maxLength={80} required /></label><label>Current checkpoint<input name="routeCheckpoint" placeholder="Street, junction, or vendor" maxLength={240} required /></label></div><label>Delay reason<textarea name="operatorNote" placeholder="Traffic, customer unavailable, vehicle issue, or handoff delay" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save delay report</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {status && <p className={`status ${failed ? "error" : "success"}`} role="status" aria-live="polite">{status}</p>}
     </div>
@@ -810,6 +833,161 @@ function driverStopGroup(order: OrderSummary) {
   if (["picked-up", "at-vendor", "washing"].includes(order.workflowStage.key)) return "Vendor handoffs";
   if (["ready", "out-for-delivery"].includes(order.workflowStage.key)) return "Return deliveries";
   return "Other assigned work";
+}
+
+const dispatchStages = new Set(["vendor-accepted", "driver-en-route", "picked-up", "ready", "out-for-delivery"]);
+
+function routeLegLabel(order: OrderSummary) {
+  if (["vendor-accepted", "driver-en-route"].includes(order.workflowStage.key)) return "Customer pickup";
+  if (order.workflowStage.key === "picked-up") return "Vendor handoff";
+  if (order.workflowStage.key === "ready") return "Vendor collection";
+  if (order.workflowStage.key === "out-for-delivery") return "Return delivery";
+  return "Route work";
+}
+
+function hasCustomerRoutePreview(order: OrderSummary) {
+  return ["vendor-accepted", "driver-en-route", "out-for-delivery"].includes(order.workflowStage.key);
+}
+
+function hasHubToCustomerDirections(order: OrderSummary) {
+  return ["vendor-accepted", "driver-en-route"].includes(order.workflowStage.key);
+}
+
+function dispatchFreshness(timestamp: string) {
+  const savedAt = new Date(timestamp).getTime();
+  if (!Number.isFinite(savedAt)) return "time unavailable";
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - savedAt) / 60_000));
+  if (elapsedMinutes < 1) return "just now";
+  if (elapsedMinutes < 15) return `${elapsedMinutes} min ago`;
+  if (elapsedMinutes < 60) return `${elapsedMinutes} min ago · stale; confirm with rider`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours} hr ago · stale; confirm with rider`;
+  return `${Math.floor(elapsedHours / 24)} day${elapsedHours < 48 ? "" : "s"} ago · stale; confirm with rider`;
+}
+
+function dispatchEta(order: OrderSummary) {
+  const minutes = Number(order.dispatch?.estimatedDriveMinutes ?? order.route?.estimatedDriveMinutes ?? 0);
+  const distance = Number(order.dispatch?.estimatedDistanceKm ?? order.route?.estimatedDistanceKm ?? 0);
+  const source = order.dispatch ? order.dispatch.etaSource : minutes > 0 ? "area-estimate" : order.routeWindow && order.routeWindow !== "ETA pending" ? "scheduled-window" : "unavailable";
+  const legacyText = source === "area-estimate" && minutes > 0 ? `${minutes} min` : order.routeWindow && order.routeWindow !== "ETA pending" ? order.routeWindow : "Estimate pending";
+  const text = order.dispatch ? order.dispatch.etaText || (source === "scheduled-window" ? order.dispatch.scheduledWindow : "Estimate pending") : legacyText;
+  const label = source === "rider-reported" ? "Rider-reported ETA" : source === "area-estimate" ? "Area estimate" : source === "scheduled-window" ? "Scheduled window" : "ETA";
+  return { distance, minutes, source, text, label, updatedAt: order.dispatch?.etaUpdatedAt || "" };
+}
+
+function dispatchEtaForLeg(order: OrderSummary) {
+  const eta = dispatchEta(order);
+  if (hasCustomerRoutePreview(order) || (order.workflowStage.key === "picked-up" && eta.source === "rider-reported")) return eta;
+  return { ...eta, distance: 0, minutes: 0, source: "unavailable" as const, text: "Unavailable", label: "Vendor destination needed", updatedAt: "" };
+}
+
+function dispatchPointPosition(point: { lat: number; lng: number } | undefined, fallback: { x: number; y: number }) {
+  if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return fallback;
+  const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
+  return {
+    x: clamp(((point.lng + 0.24) / 0.3) * 100, 8, 92),
+    y: clamp(((5.72 - point.lat) / 0.2) * 100, 10, 90),
+  };
+}
+
+function DispatchMap({ order, detail = false }: { order: OrderSummary; detail?: boolean }) {
+  const hub = dispatchPointPosition(order.route?.hub, { x: 20, y: 78 });
+  const pickup = dispatchPointPosition(order.route?.pickup, { x: 74, y: 28 });
+  const controlY = Math.min(88, Math.max(12, (hub.y + pickup.y) / 2));
+  const eta = dispatchEta(order);
+  const checkpoint = order.dispatch?.checkpoint || order.locationNote;
+  const distanceText = eta.distance > 0 ? `${eta.distance} km planning distance` : "Distance pending";
+  const etaBasis = eta.source === "rider-reported" ? `Reported ${eta.updatedAt ? dispatchFreshness(eta.updatedAt) : "by rider; time unavailable"}` : eta.source === "area-estimate" ? "Based on the service-area planning estimate" : eta.source === "scheduled-window" ? "Scheduled by operations" : "No ETA source recorded";
+
+  return <figure className={`dispatchMap${detail ? " dispatchMapDetail" : ""}`} aria-labelledby={`dispatch-caption-${order.orderId}`}>
+    <div className="dispatchMapCanvas" aria-hidden="true">
+      <span className="dispatchStreet dispatchStreetOne" />
+      <span className="dispatchStreet dispatchStreetTwo" />
+      <span className="dispatchStreet dispatchStreetThree" />
+      <svg className="dispatchRouteLine" viewBox="0 0 100 100" preserveAspectRatio="none" focusable="false">
+        <path d={`M ${hub.x} ${hub.y} C ${hub.x} ${controlY}, ${pickup.x} ${controlY}, ${pickup.x} ${pickup.y}`} />
+      </svg>
+      <span className="dispatchMarker dispatchMarkerHub" style={{ left: `${hub.x}%`, top: `${hub.y}%` }}><i>H</i><b>Dispatch hub</b></span>
+      <span className="dispatchMarker dispatchMarkerStop" style={{ left: `${pickup.x}%`, top: `${pickup.y}%` }}><i aria-hidden="true" /><b>{order.area}</b></span>
+      <span className="dispatchMapLabel">Area-level route preview</span>
+    </div>
+    <figcaption id={`dispatch-caption-${order.orderId}`}>
+      <div className="dispatchEta"><span>{eta.label}</span><strong>{eta.text}</strong><small>{etaBasis} · {distanceText}</small></div>
+      <div><span className="staffFieldLabel">Last reported checkpoint</span><strong>{checkpoint || "No rider checkpoint yet"}</strong><small>{order.dispatch?.checkpointUpdatedAt ? `Reported ${dispatchFreshness(order.dispatch.checkpointUpdatedAt)}` : order.routeWindow && order.routeWindow !== "ETA pending" ? `No rider report · recorded window: ${order.routeWindow}` : "No checkpoint time recorded"}</small></div>
+      <p>Planning view only. It does not show live rider GPS or live traffic.</p>
+    </figcaption>
+  </figure>;
+}
+
+function DispatchDestinationUnavailable({ order, detail = false }: { order: OrderSummary; detail?: boolean }) {
+  const eta = dispatchEtaForLeg(order);
+  return <div className={`dispatchDestinationUnavailable${detail ? " dispatchDestinationUnavailableDetail" : ""}`} role="note">
+    <span className="staffFieldLabel">{routeLegLabel(order)}</span>
+    <h3>Vendor location not recorded</h3>
+    <p>This leg cannot show a route or directions until the vendor destination is saved. The customer service-area map is intentionally not reused here.</p>
+    <dl><div><dt>{eta.label}</dt><dd>{eta.text}</dd></div><div><dt>Last reported checkpoint</dt><dd>{order.dispatch?.checkpoint || order.locationNote || "No rider checkpoint yet"}</dd></div></dl>
+  </div>;
+}
+
+function DispatchBoard({ orders, role, basePath, hasLoaded, lastSyncedAt = "", embedded = false, error = "" }: { orders: OrderSummary[]; role: "admin" | "driver"; basePath: string; hasLoaded: boolean; lastSyncedAt?: string; embedded?: boolean; error?: string }) {
+  const routeOrders = useMemo(() => orders
+    .filter((order) => !isClosedOrder(order) && dispatchStages.has(order.workflowStage.key))
+    .sort((left, right) => {
+      const activeLeg = (order: OrderSummary) => ["driver-en-route", "out-for-delivery"].includes(order.workflowStage.key) ? 0 : ["picked-up", "ready"].includes(order.workflowStage.key) ? 1 : 2;
+      const risk = (order: OrderSummary) => order.stageTimer.tone === "breached" ? 0 : order.stageTimer.tone === "due" ? 1 : 2;
+      return activeLeg(left) - activeLeg(right) || risk(left) - risk(right) || new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime();
+    }), [orders]);
+  const [selectedId, setSelectedId] = useState("");
+  const selectedOrder = routeOrders.find((order) => order.orderId === selectedId) ?? routeOrders[0];
+  const assignedOrders = routeOrders.filter((order) => order.driver !== "Unassigned");
+  const activeRiders = new Set(assignedOrders.map((order) => order.driver.trim().toLowerCase()).filter(Boolean));
+  const needsRider = routeOrders.length - assignedOrders.length;
+  const detailHref = selectedOrder ? `${basePath}${basePath.includes("?") ? "&" : "?"}order=${encodeURIComponent(selectedOrder.orderId)}` : basePath;
+
+  return <section className={embedded ? "dispatchEmbedded" : "staffContentSection dispatchSection"} aria-labelledby={`${role}-dispatch-heading`}>
+    <div className="staffSectionHeader dispatchHeader"><div><h2 id={`${role}-dispatch-heading`}>{role === "admin" ? "Current dispatch board" : "Today’s route map"}</h2><p>{role === "admin" ? "Assigned route work and recorded ETAs across the pilot." : "Open a stop to see its route estimate, window, and directions."}</p></div>{lastSyncedAt ? <span className="dispatchSync">Board refreshed {formatMetricTime(lastSyncedAt)}</span> : null}</div>
+    {!hasLoaded ? <div className="staffEmptyState" role="status"><h3>Loading dispatch…</h3><p>Checking assigned route work and planning estimates.</p></div> : error && !orders.length ? <div className="staffEmptyState" role="alert"><h3>Dispatch unavailable</h3><p>{error} The board will retry automatically.</p></div> : selectedOrder ? <>
+      <div className="dispatchSummaryLine" aria-label="Dispatch summary"><span><strong>{assignedOrders.length}</strong> assigned moves</span><span><strong>{activeRiders.size}</strong> {activeRiders.size === 1 ? "rider" : "riders"} assigned</span><span><strong>{needsRider}</strong> awaiting rider</span></div>
+      <div className="dispatchBoard">
+        {hasCustomerRoutePreview(selectedOrder) ? <DispatchMap order={selectedOrder} /> : <DispatchDestinationUnavailable order={selectedOrder} />}
+        <div className="dispatchStopPanel"><div className="dispatchStopPanelHeader"><h3>Route work</h3><span>Operational order, not an optimized stop sequence</span></div><div className="dispatchStopList" role="list">
+          {routeOrders.slice(0, 10).map((order) => { const eta = dispatchEtaForLeg(order); return <div key={order.orderId} role="listitem"><button aria-pressed={order.orderId === selectedOrder.orderId} className="dispatchStopRow" onClick={() => setSelectedId(order.orderId)} type="button"><span><strong>{order.driver === "Unassigned" ? "Rider needed" : order.driver}</strong><small>{order.orderId} · {routeLegLabel(order)}</small></span><span><strong>{eta.text}</strong><small>{eta.label} · {order.area}</small></span></button></div>; })}
+        </div>{routeOrders.length > 10 ? <p className="dispatchMore">Showing 10 of {routeOrders.length} route moves.</p> : null}<div className="dispatchStopActions"><Link className="button primary" href={detailHref}>{role === "admin" ? "Open order" : "Open stop"}</Link>{hasHubToCustomerDirections(selectedOrder) && selectedOrder.route.directionsUrl ? <a className="button secondary" href={selectedOrder.route.directionsUrl} target="_blank" rel="noopener noreferrer">Open pickup directions</a> : selectedOrder.workflowStage.key === "out-for-delivery" && selectedOrder.route.googleMapsUrl ? <a className="button secondary" href={selectedOrder.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Open destination area</a> : null}</div></div>
+      </div>
+      <p className="dispatchDisclosure">ETAs are rider-reported, scheduled, or calculated from the dispatch hub to a representative service area. This pilot view does not track live location or traffic.</p>
+    </> : <div className="staffEmptyState"><h3>No active route work</h3><p>Assigned customer pickups, vendor handoffs, and return deliveries will appear here.</p></div>}
+    {error && orders.length ? <p className="status error" role="alert">{error} Showing the last available dispatch view.</p> : null}
+  </section>;
+}
+
+function AdminDispatchWorkspace() {
+  const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState("");
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    async function refresh() {
+      try {
+        const response = await fetch("/api/orders");
+        const data = await response.json();
+        if (!active) return;
+        if (!response.ok || !data.ok) throw new Error(data.error ?? "Unable to load dispatch.");
+        setOrders(data.orders ?? []);
+        setLastSyncedAt(new Date().toISOString());
+        setLoadError("");
+      } catch (error) {
+        if (active) setLoadError(error instanceof Error ? error.message : "Unable to load dispatch.");
+      } finally {
+        if (active) setHasLoaded(true);
+      }
+    }
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 30_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, []);
+  return <DispatchBoard orders={orders} role="admin" basePath="/admin?view=orders" hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={loadError} />;
 }
 
 function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { role: StaffRole; userName: string; selectedOrderId?: string; basePath: string }) {
@@ -882,6 +1060,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
   const stats = queueStats(activeOrders, role, userName);
   const queueHeading = !hasLoaded ? "Loading order queue…" : queueView === "action" ? (stats.focusCount ? `${stats.focusCount} ${stats.focusLabel}` : "No work needs this role right now") : queueView === "active" ? `${activeOrders.length} active orders` : `${orders.length} total orders`;
   const selectedOrder = selectedOrderId ? orders.find((order) => order.orderId.toLowerCase() === selectedOrderId.toLowerCase()) : null;
+  const selectedDispatchEta = selectedOrder && dispatchStages.has(selectedOrder.workflowStage.key) ? dispatchEtaForLeg(selectedOrder) : null;
   const canSeePayment = role === "admin" || role === "support";
   const canSeeCollection = role !== "vendor";
   const detailHref = (orderId: string) => `${basePath}${basePath.includes("?") ? "&" : "?"}order=${encodeURIComponent(orderId)}`;
@@ -889,6 +1068,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
 
   return (
     <section className="staffContentSection sharedBoardSection">
+      {role === "driver" && !selectedOrderId ? <DispatchBoard orders={orders} role="driver" basePath={basePath} hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={/unable/i.test(status) ? status : ""} embedded /> : null}
       {selectedOrderId ? selectedOrder ? <article className="staffDetailView orderDetail">
         <Link className="staffBackLink" href={basePath}>← Back to order list</Link>
         <header className="staffDetailHeader">
@@ -907,8 +1087,10 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
             {canSeeCollection ? <><div><dt>Pickup address</dt><dd>{selectedOrder.pickupAddress || "Not recorded"}</dd></div><div><dt>Landmark</dt><dd>{selectedOrder.landmark || "Not recorded"}</dd></div><div><dt>Phone</dt><dd>{selectedOrder.phone || "Not recorded"}</dd></div></> : null}
           </dl>{canSeeCollection ? <CustomerContactActions order={selectedOrder} role={role} /> : null}</section>
 
-          <section className="staffDetailSection"><h3>Assignment and route</h3><dl className="staffDefinitionList"><div><dt>Vendor</dt><dd>{selectedOrder.vendor}</dd></div><div><dt>Rider</dt><dd>{selectedOrder.driver}</dd></div><div><dt>Checkpoint</dt><dd>{selectedOrder.locationNote}</dd></div><div><dt>Priority</dt><dd>{selectedOrder.priority}</dd></div></dl>
-            {canSeeCollection && (selectedOrder.route.directionsUrl || selectedOrder.route.googleMapsUrl) ? <div className="staffDetailActions">{selectedOrder.route.directionsUrl ? <a className="button secondary" href={selectedOrder.route.directionsUrl} target="_blank" rel="noopener noreferrer">Open directions</a> : null}{selectedOrder.route.googleMapsUrl ? <a className="button secondary" href={selectedOrder.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Open area map</a> : null}</div> : null}
+          <section className="staffDetailSection"><h3>Assignment and route</h3><dl className="staffDefinitionList"><div><dt>Vendor</dt><dd>{selectedOrder.vendor}</dd></div><div><dt>Rider</dt><dd>{selectedOrder.driver}</dd></div><div><dt>Last reported checkpoint</dt><dd>{selectedOrder.dispatch?.checkpoint || selectedOrder.locationNote}</dd></div>{role !== "vendor" && selectedDispatchEta ? <><div><dt>{selectedDispatchEta.label}</dt><dd>{selectedDispatchEta.text}{selectedDispatchEta.source === "rider-reported" && selectedDispatchEta.updatedAt ? ` · reported ${dispatchFreshness(selectedDispatchEta.updatedAt)}` : ""}</dd></div><div><dt>Planning distance</dt><dd>{selectedDispatchEta.distance > 0 ? `${selectedDispatchEta.distance} km from dispatch hub to service area` : "Not available"}</dd></div></> : null}<div><dt>Priority</dt><dd>{selectedOrder.priority}</dd></div></dl>
+            {(role === "admin" || role === "driver") ? hasCustomerRoutePreview(selectedOrder) ? <DispatchMap order={selectedOrder} detail /> : <DispatchDestinationUnavailable order={selectedOrder} detail /> : null}
+            {canSeeCollection && hasCustomerRoutePreview(selectedOrder) && (selectedOrder.route.directionsUrl || selectedOrder.route.googleMapsUrl) ? <div className="staffDetailActions">{hasHubToCustomerDirections(selectedOrder) && selectedOrder.route.directionsUrl ? <a className="button secondary" href={selectedOrder.route.directionsUrl} target="_blank" rel="noopener noreferrer">Open pickup directions</a> : null}{selectedOrder.route.googleMapsUrl ? <a className="button secondary" href={selectedOrder.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Open {selectedOrder.workflowStage.key === "out-for-delivery" ? "destination area" : "service area"}</a> : null}</div> : null}
+            {role === "support" ? <p className="dispatchDetailDisclosure">{hasCustomerRoutePreview(selectedOrder) ? "Planning information only; Bubble Wash does not receive live rider GPS or live traffic in this pilot." : "Vendor location not recorded; route directions are unavailable for this leg. Bubble Wash does not receive live rider GPS in this pilot."}</p> : null}
           </section>
 
           {canSeePayment ? <section className="staffDetailSection"><h3>Payment</h3><dl className="staffDefinitionList"><div><dt>Status</dt><dd>{selectedOrder.payment}</dd></div><div><dt>Customer email</dt><dd>{selectedOrder.email || "Not recorded"}</dd></div></dl></section> : null}
@@ -1147,7 +1329,7 @@ function AdminOverview({ userName }: { userName: string }) {
   const overviewRows = [
     { area: "Orders", state: `${activeOrders.length} active · ${unassignedOrders.length} unassigned`, attention: `${riskOrders.length} need attention`, href: "/admin?view=orders", link: "Review orders" },
     { area: "Vendors", state: `${activeVendors.length} taking work · ${activeVendors.reduce((sum, item) => sum + item.capacityRemaining, 0)} slots`, attention: `${vendors.length - activeVendors.length} paused or unavailable`, href: "/admin?view=people", link: "View partners" },
-    { area: "Routes", state: `${activeDrivers.length} active riders · ${activeDrivers.reduce((sum, item) => sum + item.capacityRemaining, 0)} route slots`, attention: `${unassignedOrders.filter((order) => order.driver === "Unassigned").length} awaiting rider`, href: "/admin?view=people", link: "View riders" },
+    { area: "Routes", state: `${activeDrivers.length} active riders · ${activeDrivers.reduce((sum, item) => sum + item.capacityRemaining, 0)} route slots`, attention: `${unassignedOrders.filter((order) => order.driver === "Unassigned").length} awaiting rider`, href: "/admin?view=dispatch", link: "Open dispatch" },
     { area: "Support", state: `${openCases.length} open · ${waitingCases.length} waiting`, attention: `${urgentCases.length} high priority`, href: "/admin?view=cases", link: "Review cases" },
     { area: "Payments", state: `${awaitingPayment.length} delivered awaiting evidence`, attention: `${readyForCloseout.length} ready for closeout`, href: "/admin?view=orders", link: "Review payments" },
   ];
@@ -1288,6 +1470,7 @@ export function AdminWorkspace({ userName, role, initialView = "overview", selec
 
   const navigation = [
     { href: "/admin", label: "Overview", view: "overview" },
+    { href: "/admin?view=dispatch", label: "Dispatch", view: "dispatch" },
     { href: "/admin?view=orders", label: "Orders", view: "orders" },
     { href: "/admin?view=people", label: "People & onboarding", view: "people" },
     { href: "/admin?view=cases", label: "Cases", view: "cases" },
@@ -1297,6 +1480,7 @@ export function AdminWorkspace({ userName, role, initialView = "overview", selec
   return (
     <PortalShell role={role} userName={userName} title="Admin workspace" currentView={initialView} navigation={navigation}>
       {initialView === "overview" ? <AdminOverview userName={userName} /> : null}
+      {initialView === "dispatch" ? <AdminDispatchWorkspace /> : null}
       {initialView === "orders" ? <SharedOrderBoard role="admin" userName={userName} selectedOrderId={selectedOrderId} basePath="/admin?view=orders" /> : null}
       {initialView === "people" ? <><AvailabilityBoard role="admin" refreshToken={availabilityVersion} /><StaffAccessRoster refreshToken={rosterVersion} /><AdminOnboardingCenter onSubmit={submitLead} status={formStatus} pendingType={pendingType} /></> : null}
       {initialView === "cases" ? <><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Open a new case</strong><small>Use when an existing case does not cover the issue</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="admin" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section><SupportTicketDesk userName={userName} selectedCaseId={selectedCaseId} basePath="/admin?view=cases" refreshToken={casesVersion} /></> : null}
