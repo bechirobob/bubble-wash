@@ -241,6 +241,10 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .policyGrid article p { margin: 0; }
 .paymentStrip { padding-block: 34px; border-bottom: 1px solid var(--line); }
 .paymentStrip p:last-child { max-width: none; }
+.comingSoonList { display: grid; gap: 0; margin-top: 16px; border-top: 1px solid var(--line); }
+.comingSoonList > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 18px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.comingSoonList span { color: var(--brand-dark); font-size: .82rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.comingSoonList small { grid-column: 1 / -1; color: var(--muted); }
 .footer { display: grid; grid-template-columns: 1.4fr repeat(3, 1fr); gap: 28px; padding-block: 42px 68px; }
 .footer a { display: block; margin: 8px 0; color: var(--ink); }
 .footer h3 { font-size: 1rem; }
