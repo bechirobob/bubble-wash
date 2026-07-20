@@ -20,14 +20,14 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      BUBBLEWASH_DATABASE_PATH: ${{ runner.temp }}/bubblewash-ci.sqlite
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - name: Configure CI database
+        run: echo "BUBBLEWASH_DATABASE_PATH=$RUNNER_TEMP/bubblewash-ci.sqlite" >> "$GITHUB_ENV"
       - run: npm ci
       - run: npm run lint
       - run: npm test
