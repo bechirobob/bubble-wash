@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { canAccess, getCurrentStaffUser, type StaffRole } from "@/lib/auth";
-import { upsertDriverAvailability, upsertVendorAvailability } from "@/lib/availability-store";
+import { listVendorAvailability, upsertDriverAvailability, upsertVendorAvailability } from "@/lib/availability-store";
 import { appendSubmissionRecord } from "@/lib/data-store";
 import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
 import { plans, zones } from "@/lib/pricing";
@@ -20,6 +20,8 @@ const pickupWindows = new Set(["Any available window", "Morning pickup", "Aftern
 const billingCycles = new Set(["Monthly", "Yearly"]);
 const multiAdminModes = new Set(["Invite team leads", "Single admin only"]);
 const accountGoals = new Set(["Start ordering this week", "Open account this week", "Need vendor coverage check"]);
+const staffRosterRoles = new Set(["Support", "Admin", "Operations"]);
+const staffRosterStatuses = new Set(["Active", "Training", "Pending checks", "Inactive"]);
 const publicSubmissionTypes = new Set(["pickup-booking", "checkout-request", "client-onboarding"]);
 const publicAllowedFields = new Set([
   "submissionType",
@@ -64,6 +66,7 @@ const staffSubmissionRoles = new Map<string, StaffRole>([
   ["qr-bag-intake", "vendor"],
   ["support-ticket", "support"],
   ["support-ticket-action", "support"],
+  ["staff-onboarding", "admin"],
 ]);
 const crossRoleStaffSubmissionTypes = new Set(["support-ticket"]);
 const queueOnlySubmissionTypes = new Set(["admin-operation", "driver-route-log", "vendor-job-update", "qr-bag-intake"]);
@@ -100,6 +103,7 @@ function availabilityStatusFrom(value: unknown, activeWord = "available") {
 function syncAvailabilityTables(body: Record<string, unknown>, submissionType: string, actorName: string) {
   if (submissionType === "vendor-application") {
     upsertVendorAvailability({
+      vendorId: text(body.vendorId) || undefined,
       vendorName: text(body.company) || text(body.vendorName) || text(body.name) || "Vendor partner",
       serviceZones: listFrom(body.area || body.zone || body.routeArea || body.serviceZones),
       serviceTypes: listFrom(body.services || body.service),
@@ -112,6 +116,7 @@ function syncAvailabilityTables(body: Record<string, unknown>, submissionType: s
 
   if (submissionType === "driver-onboarding") {
     upsertDriverAvailability({
+      driverId: text(body.driverId) || undefined,
       driverName: text(body.name) || text(body.driverName) || "Route driver",
       serviceZones: listFrom(body.area || body.routeArea || body.zone || body.serviceZones),
       vehicle: text(body.vehicle),
@@ -254,12 +259,82 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Use the verified action on the staff order queue for this update." }, { status: 400 });
     }
     if (staffUser) {
-      body.name = staffUser.name;
-      body.email = staffUser.email;
-      body.company = text(body.company) || (staffUser.role === "vendor" ? "Vendor partner" : staffUser.role === "driver" ? "Bubble Wash Route Team" : staffUser.role === "support" ? "Bubble Wash Support" : "Bubble Wash Operations");
+      if ((staffUser.role === "vendor" || staffUser.role === "driver") && process.env.NODE_ENV === "production" && !staffUser.entityId) {
+        return NextResponse.json({ ok: false, error: "Staff roster binding is required." }, { status: 403 });
+      }
+      if (staffUser.role === "vendor" && staffUser.entityId) body.vendorId = staffUser.entityId;
+      if (staffUser.role === "driver" && staffUser.entityId) body.driverId = staffUser.entityId;
+      if (staffUser.role === "vendor" && submissionType === "vendor-application" && staffUser.entityId) {
+        const boundVendor = listVendorAvailability().find((vendor) => vendor.vendorId === staffUser.entityId);
+        if (!boundVendor) {
+          return NextResponse.json({ ok: false, error: "The configured vendor roster entity was not found." }, { status: 409 });
+        }
+        body.vendorName = boundVendor.vendorName;
+        body.company = boundVendor.vendorName;
+      }
+      body.submittedByName = staffUser.name;
+      body.submittedByEmail = staffUser.email;
+      body.submittedByRole = staffUser.role;
+
+      const adminIsOnboarding = staffUser.role === "admin" && ["vendor-application", "driver-onboarding", "staff-onboarding"].includes(submissionType);
+      if (!adminIsOnboarding) {
+        body.name = staffUser.name;
+        body.email = staffUser.email;
+        body.company = text(body.company) || (staffUser.role === "vendor" ? "Vendor partner" : staffUser.role === "driver" ? "Bubble Wash Route Team" : staffUser.role === "support" ? "Bubble Wash Support" : "Bubble Wash Operations");
+      }
     }
     const validationError = validatePublicPayload(body, submissionType);
     if (validationError) return validationError;
+
+    if (submissionType === "vendor-application" && staffUser?.role === "admin") {
+      const vendorName = text(body.company);
+      const contactName = text(body.name);
+      const contactEmail = text(body.email);
+      const contactPhone = text(body.phone);
+      const serviceArea = text(body.area);
+      const services = text(body.services);
+      const capacity = Number(text(body.capacity));
+      if (!vendorName || !contactName || !contactEmail || !contactPhone || !serviceArea || !services || !text(body.message)) {
+        return NextResponse.json({ ok: false, error: "Complete the vendor business, contact, coverage, service, capacity, and onboarding note." }, { status: 400 });
+      }
+      if (!emailPattern.test(contactEmail)) {
+        return NextResponse.json({ ok: false, error: "Enter a valid vendor contact email." }, { status: 400 });
+      }
+      if (!Number.isInteger(capacity) || capacity < 0 || capacity > 10_000) {
+        return NextResponse.json({ ok: false, error: "Vendor capacity must be a whole number between 0 and 10,000." }, { status: 400 });
+      }
+    }
+
+    if (submissionType === "driver-onboarding") {
+      const routeCapacity = Number(text(body.routeCapacity));
+      if (!text(body.name) || !text(body.email) || !text(body.phone) || !text(body.area) || !text(body.vehicle) || !text(body.driverStatus) || !text(body.message)) {
+        return NextResponse.json({ ok: false, error: "Complete the rider identity, contact, route coverage, vehicle, status, and onboarding note." }, { status: 400 });
+      }
+      if (!emailPattern.test(text(body.email))) {
+        return NextResponse.json({ ok: false, error: "Enter a valid rider email." }, { status: 400 });
+      }
+      if (text(body.routeCapacity) && (!Number.isInteger(routeCapacity) || routeCapacity < 0 || routeCapacity > 10_000)) {
+        return NextResponse.json({ ok: false, error: "Rider route capacity must be a whole number between 0 and 10,000." }, { status: 400 });
+      }
+    }
+
+    if (submissionType === "staff-onboarding") {
+      const staffName = text(body.staffName);
+      const staffEmail = text(body.staffEmail);
+      const staffPhone = text(body.staffPhone);
+      const staffRole = text(body.staffRole);
+      const employmentStatus = text(body.employmentStatus);
+      const workArea = text(body.workArea);
+      if (!staffName || !staffEmail || !staffPhone || !staffRole || !employmentStatus || !workArea) {
+        return NextResponse.json({ ok: false, error: "Complete the staff member’s name, email, phone, role, status, and work area." }, { status: 400 });
+      }
+      if (!emailPattern.test(staffEmail)) {
+        return NextResponse.json({ ok: false, error: "Enter a valid staff work email." }, { status: 400 });
+      }
+      if (!staffRosterRoles.has(staffRole) || !staffRosterStatuses.has(employmentStatus)) {
+        return NextResponse.json({ ok: false, error: "Select a valid staff role and employment status." }, { status: 400 });
+      }
+    }
 
     const required = publicSubmissionTypes.has(submissionType) ? ["submissionType", "name", "email", "phone", "company"] : ["submissionType"];
     if (submissionType === "pickup-booking") required.push("pickupAddress");

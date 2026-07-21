@@ -88,7 +88,7 @@
 - Automation implementation principle: automate predictable state transitions server-side, keep humans in the loop for exceptions/new facts, make role dashboards show only the next valid actions, and use event logs/timelines for auditability instead of overwriting history.
 - Operational exceptions: manual inputs are only for new facts that were not in the initial order, such as vendor exceptions, bag-count mismatch, delay reason, payment reference, stain/damage notes, or customer escalation outcome.
 - Timers: show elapsed time in the current stage plus SLA state. Internal staff see due/overdue labels; customer tracking keeps it simpler with delivery windows and next step.
-- Maps: current production stage uses privacy-safe Google Maps URL search/directions. Live GPS is a later level that needs driver consent, retention policy, HTTPS geolocation, location pings, and restricted Maps keys.
+- Maps: the pilot uses privacy-safe Google Maps URL search/directions plus explicit, rider-authorized foreground GPS for the currently bound rider. Dispatch stores only the latest accepted point, exposes it only to Admin and that rider, clears or redacts it when stopped/stale/unassigned/completed, and never claims background tracking, live traffic, or optimized routing. HTTPS, rider consent/training, and the approved retention policy are release requirements.
 
 ## 2026-07-09 public homepage correction — prototype-first, no speed-run
 

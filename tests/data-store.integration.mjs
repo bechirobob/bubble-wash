@@ -55,6 +55,19 @@ const verificationInput = {
 assert.equal(store.appendPaymentVerificationOnce(verificationInput), true);
 assert.equal(store.appendPaymentVerificationOnce({ ...verificationInput, record: { ...verification, id: "BW-VERIFY-DUPLICATE" } }), false);
 assert.equal(store.readSubmissionRecords(10).length, 2);
+for (let index = 0; index < 510; index += 1) {
+  store.appendSubmissionRecord({
+    id: `BW-FILLER-${String(index).padStart(4, "0")}`,
+    createdAt: `2026-07-18T${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:00.000Z`,
+    source: "test",
+    data: { submissionType: "support-ticket", message: "Unrelated record" },
+  });
+}
+assert.equal(store.readSubmissionRecords(500).some((record) => record.id === checkout.id), false);
+const exactOrderRecords = store.readSubmissionRecordsForOrder(checkout.id);
+assert.deepEqual(new Set(exactOrderRecords.map((record) => record.id)), new Set([checkout.id, verification.id]));
+assert.equal(store.readSubmissionRecordsForOrder(checkout.id.toLowerCase()).length, 2);
+assert.deepEqual(store.readSubmissionRecordsForOrder(""), []);
 assert.equal(store.databaseReadiness(), true);
 
-console.log(JSON.stringify({ ok: true, checks: 15 }));
+console.log(JSON.stringify({ ok: true, checks: 19 }));

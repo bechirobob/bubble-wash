@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server.js";
 import type { OrderSummary } from "@/lib/submissions";
-import { securityHeaders } from "./security-headers.js";
+import { privateNoStoreHeaders, securityHeaders } from "./security-headers.js";
 
-export { securityHeaders };
+export { privateNoStoreHeaders, securityHeaders };
 export type SecurityHeader = ReturnType<typeof securityHeaders>[number];
 
 export function clientScopeKey(headers: Headers, scope: string) {
@@ -73,6 +73,12 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
   for (const role of ["ADMIN", "VENDOR", "DRIVER", "SUPPORT"]) {
     if (!env[`BUBBLEWASH_${role}_EMAIL`]) errors.push(`Set BUBBLEWASH_${role}_EMAIL in production.`);
     if (!env[`BUBBLEWASH_${role}_PASSWORD_HASH`]) errors.push(`Set BUBBLEWASH_${role}_PASSWORD_HASH in production.`);
+  }
+  if (!env.BUBBLEWASH_VENDOR_ENTITY_ID?.trim()) {
+    errors.push("Set BUBBLEWASH_VENDOR_ENTITY_ID to the exact approved vendor roster ID in production.");
+  }
+  if (!env.BUBBLEWASH_DRIVER_ENTITY_ID?.trim()) {
+    errors.push("Set BUBBLEWASH_DRIVER_ENTITY_ID to the exact approved driver roster ID in production.");
   }
   const publicWhatsApp = (env.NEXT_PUBLIC_BUBBLEWASH_WHATSAPP ?? "").replace(/\D/g, "");
   if (publicWhatsApp && (publicWhatsApp.length < 8 || publicWhatsApp.length > 15 || /000000/.test(publicWhatsApp))) {

@@ -63,7 +63,7 @@ test("paired capacity reservation rolls back the vendor decrement when the drive
   store.upsertVendorAvailability({ vendorId: "vendor-atomic", vendorName: "Atomic Vendor", serviceZones: ["Osu"], serviceTypes: ["wash-fold"], capacityRemaining: 1, availabilityStatus: "available", updatedBy: "Admin" });
 
   assert.throws(
-    () => store.reserveAssignmentCapacity("vendor-atomic", "missing-driver"),
+    () => store.reserveAssignmentCapacity("BW-ATOMIC-1", "vendor-atomic", "missing-driver"),
     /Driver capacity is no longer available/,
   );
   assert.equal(store.listVendorAvailability()[0].capacityRemaining, 1);
@@ -104,4 +104,88 @@ test("assignment fails closed for out-of-zone, tomorrow-only, and training capac
   );
   assert.equal(store.listVendorAvailability().find((vendor) => vendor.vendorId === "vendor-tomorrow").capacityRemaining, 3);
   assert.equal(store.listDriverAvailability()[0].capacityRemaining, 3);
+});
+
+test("assignment enforces the projected order service capability", () => {
+  store.resetDataStoreForTests();
+  store.upsertVendorAvailability({ vendorId: "vendor-fold", vendorName: "Fold Vendor", serviceZones: ["Osu"], serviceTypes: ["Wash + fold"], capacityRemaining: 4, availabilityStatus: "available", updatedBy: "Admin" });
+  store.upsertVendorAvailability({ vendorId: "vendor-premium", vendorName: "Premium Vendor", serviceZones: ["Osu"], serviceTypes: ["Wash + iron + fold"], capacityRemaining: 2, availabilityStatus: "available", updatedBy: "Admin" });
+  store.upsertDriverAvailability({ driverId: "driver-service", driverName: "Service Rider", serviceZones: ["Osu"], capacityRemaining: 2, availabilityStatus: "active", updatedBy: "Admin" });
+
+  const result = assignment.assignOrderFromAvailability({ orderId: "BW-SERVICE-1", area: "Osu", serviceType: "Wash + iron + fold", vendor: "Unassigned", driver: "Unassigned" });
+  assert.equal(result.vendorId, "vendor-premium");
+  assert.equal(store.listVendorAvailability().find((vendor) => vendor.vendorId === "vendor-fold").capacityRemaining, 4);
+});
+
+test("assignment fails closed when a vendor has no declared service capability", () => {
+  store.resetDataStoreForTests();
+  store.upsertVendorAvailability({ vendorId: "vendor-unspecified", vendorName: "Unspecified Vendor", serviceZones: ["Osu"], serviceTypes: [], capacityRemaining: 3, availabilityStatus: "available", updatedBy: "Admin" });
+  store.upsertDriverAvailability({ driverId: "driver-unspecified", driverName: "Available Rider", serviceZones: ["Osu"], capacityRemaining: 3, availabilityStatus: "active", updatedBy: "Admin" });
+
+  assert.throws(
+    () => assignment.assignOrderFromAvailability({ orderId: "BW-SERVICE-2", area: "Osu", serviceType: "Wash + fold", vendor: "Unassigned", driver: "Unassigned" }),
+    /No eligible vendor matches Osu/,
+  );
+});
+
+test("final close releases a paired reservation exactly once", () => {
+  store.resetDataStoreForTests();
+  store.upsertVendorAvailability({ vendorId: "vendor-close", vendorName: "Close Vendor", serviceZones: ["Osu"], serviceTypes: ["Wash + fold"], capacityRemaining: 2, availabilityStatus: "available", updatedBy: "Admin" });
+  store.upsertDriverAvailability({ driverId: "driver-close", driverName: "Close Rider", serviceZones: ["Osu"], capacityRemaining: 2, availabilityStatus: "active", updatedBy: "Admin" });
+  const assigned = assignment.assignOrderFromAvailability({ orderId: "BW-CLOSE-1", area: "Osu", serviceType: "Wash + fold", vendor: "Unassigned", driver: "Unassigned" });
+  assert.equal(store.listVendorAvailability()[0].capacityRemaining, 1);
+  assert.equal(store.listDriverAvailability()[0].capacityRemaining, 1);
+
+  const released = store.appendSubmissionRecordAndReleaseOrderCapacity({
+    id: "BW-CLOSE-EVENT-1",
+    createdAt: "2026-07-18T12:00:00.000Z",
+    source: "test",
+    data: { submissionType: "admin-operation", orderId: "BW-CLOSE-1", orderStatus: "Closed" },
+  }, "BW-CLOSE-1", assigned.vendorId, assigned.driverId);
+  assert.deepEqual(released, { vendorReleases: 1, driverReleases: 1 });
+  assert.equal(store.listVendorAvailability()[0].capacityRemaining, 2);
+  assert.equal(store.listDriverAvailability()[0].capacityRemaining, 2);
+  assert.deepEqual(store.releaseAssignmentCapacity(assigned.reservationId, "duplicate-release"), { vendorReleases: 0, driverReleases: 0 });
+  assert.equal(store.listVendorAvailability()[0].capacityRemaining, 2);
+  assert.equal(store.listDriverAvailability()[0].capacityRemaining, 2);
+});
+
+test("vendor decline releases only its component and close cannot release it twice", () => {
+  store.resetDataStoreForTests();
+  store.upsertVendorAvailability({ vendorId: "vendor-decline-ledger", vendorName: "Decline Ledger Vendor", serviceZones: ["Osu"], serviceTypes: ["Wash + fold"], capacityRemaining: 2, availabilityStatus: "available", updatedBy: "Admin" });
+  store.upsertDriverAvailability({ driverId: "driver-decline-ledger", driverName: "Decline Ledger Rider", serviceZones: ["Osu"], capacityRemaining: 2, availabilityStatus: "active", updatedBy: "Admin" });
+  const assigned = assignment.assignOrderFromAvailability({ orderId: "BW-DECLINE-LEDGER", area: "Osu", serviceType: "Wash + fold", vendor: "Unassigned", driver: "Unassigned" });
+
+  store.recordVendorDecline({ orderId: "BW-DECLINE-LEDGER", vendorId: assigned.vendorId, vendorName: assigned.vendorName, reason: "Capacity changed", declinedBy: "Vendor" });
+  assert.equal(store.listVendorAvailability()[0].capacityRemaining, 2);
+  assert.equal(store.listDriverAvailability()[0].capacityRemaining, 1);
+
+  const released = store.appendSubmissionRecordAndReleaseOrderCapacity({
+    id: "BW-CLOSE-EVENT-DECLINE",
+    createdAt: "2026-07-18T12:05:00.000Z",
+    source: "test",
+    data: { submissionType: "admin-operation", orderId: "BW-DECLINE-LEDGER", orderStatus: "Closed" },
+  }, "BW-DECLINE-LEDGER", assigned.vendorId, assigned.driverId);
+  assert.deepEqual(released, { vendorReleases: 0, driverReleases: 1 });
+  assert.equal(store.listVendorAvailability()[0].capacityRemaining, 2);
+  assert.equal(store.listDriverAvailability()[0].capacityRemaining, 2);
+});
+
+test("failed close append rolls back its capacity release transaction", () => {
+  store.resetDataStoreForTests();
+  store.upsertVendorAvailability({ vendorId: "vendor-atomic-close", vendorName: "Atomic Close Vendor", serviceZones: ["Osu"], serviceTypes: ["Wash + fold"], capacityRemaining: 1, availabilityStatus: "available", updatedBy: "Admin" });
+  store.upsertDriverAvailability({ driverId: "driver-atomic-close", driverName: "Atomic Close Rider", serviceZones: ["Osu"], capacityRemaining: 1, availabilityStatus: "active", updatedBy: "Admin" });
+  const assigned = assignment.assignOrderFromAvailability({ orderId: "BW-ATOMIC-CLOSE", area: "Osu", serviceType: "Wash + fold", vendor: "Unassigned", driver: "Unassigned" });
+  store.getAvailabilityDatabase().prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (?, ?, ?, ?)")
+    .run("BW-DUPLICATE-CLOSE", "2026-07-18T12:10:00.000Z", "test", JSON.stringify({ submissionType: "support-ticket" }));
+
+  assert.throws(() => store.appendSubmissionRecordAndReleaseOrderCapacity({
+    id: "BW-DUPLICATE-CLOSE",
+    createdAt: "2026-07-18T12:11:00.000Z",
+    source: "test",
+    data: { submissionType: "admin-operation", orderId: "BW-ATOMIC-CLOSE", orderStatus: "Closed" },
+  }, "BW-ATOMIC-CLOSE", assigned.vendorId, assigned.driverId), /UNIQUE constraint failed/);
+  assert.equal(store.listVendorAvailability()[0].capacityRemaining, 0);
+  assert.equal(store.listDriverAvailability()[0].capacityRemaining, 0);
+  assert.deepEqual(store.releaseAssignmentCapacity(assigned.reservationId), { vendorReleases: 1, driverReleases: 1 });
 });

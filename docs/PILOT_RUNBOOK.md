@@ -18,11 +18,12 @@ Use `.env.production.example` as the inventory. Before launch:
 1. Set `BUBBLEWASH_DATABASE_PATH` to the mounted volume, for example `/var/lib/bubblewash/bubblewash.sqlite`.
 2. Generate a unique 32+ character session secret and unique password hashes for all four roles. Set `BUBBLEWASH_DISABLE_DEMO_LOGIN=true`.
 3. Set `BUBBLEWASH_PUBLIC_URL=https://bubblewash.co`.
-4. Set `NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED=false` and `NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED=false` for the manual operational pilot. The future services appear only as disabled “Coming soon” information.
-5. `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP` and `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL` are optional public contact links and may remain unset during the pilot; the corresponding links stay hidden. Only real, approved public contact values may be added later.
-6. Leave Paystack, Resend, and WhatsApp credentials unset until the business accounts are approved. Do not enable either feature flag until its provider credentials and end-to-end tests are complete.
-7. Enable exactly one trusted IP-header mode appropriate to the deployment edge. Use `BUBBLEWASH_TRUST_EDGE_HEADERS=true` for a controlled Cloudflare/Fly-style edge header, or `BUBBLEWASH_TRUST_PROXY_HEADERS=true` only when the reverse proxy strips public forwarding headers and writes its own.
-8. Restrict the database directory and secret environment values to the application service account. Do not place credentials or provider keys in the repository or client-visible variables.
+4. Set `BUBBLEWASH_VENDOR_ENTITY_ID` and `BUBBLEWASH_DRIVER_ENTITY_ID` to the exact approved roster IDs. The current pilot has one configured rider login; only that bound rider may share foreground GPS.
+5. Set `NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED=false` and `NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED=false` for the manual operational pilot. The future services appear only as disabled “Coming soon” information.
+6. `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP` and `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL` are optional public contact links and may remain unset during the pilot; the corresponding links stay hidden. Only real, approved public contact values may be added later.
+7. Leave Paystack, Resend, and WhatsApp credentials unset until the business accounts are approved. Do not enable either feature flag until its provider credentials and end-to-end tests are complete.
+8. Enable exactly one trusted IP-header mode appropriate to the deployment edge. Use `BUBBLEWASH_TRUST_EDGE_HEADERS=true` for a controlled Cloudflare/Fly-style edge header, or `BUBBLEWASH_TRUST_PROXY_HEADERS=true` only when the reverse proxy strips public forwarding headers and writes its own.
+9. Restrict the database directory and secret environment values to the application service account. Do not place credentials or provider keys in the repository or client-visible variables.
 
 ## Release gate
 
@@ -51,9 +52,10 @@ Use a fresh test customer and a test bank-transfer/invoice record approved by th
 3. Support uses the booking phone/email, then records the channel, outcome, operator note, and next follow-up time on that order. Confirm no automated email or WhatsApp request is attempted.
 4. On admin, enter a confirmed pickup window, then assign the vendor/driver. The assignment must stop if current capacity does not match the order area, if the vendor is tomorrow-only, or if the rider is training/paused. Double-click once intentionally; the second request must return an already-processed response and must not consume capacity twice.
 5. Complete vendor accept, driver pickup with bag-count/handoff proof, vendor handoff, vendor intake with tag/count/condition, washing, ready quality check, return delivery, and recipient proof using the same Order ID.
-6. Record bank-transfer or approved-invoice evidence using its amount, reference, date, and reconciliation note. Closeout must remain unavailable until that evidence is saved. Confirm `/api/payments/initialize` and `/api/payments/verify` return HTTP 503 while online payments are disabled.
-7. Confirm public tracking shows only the customer's first name, area, route window, status, next step, and safe route label. It must not reveal phone, email, payment details, vendor, driver, or location notes.
-8. Sign each role out and verify protected pages and APIs return to login or HTTP 401.
+6. On the rider's HTTPS mobile route page, confirm location permission is requested only after selecting **Start live sharing**. Admin must see the matching live/recent marker and freshness within about 15 seconds. Vendor, Support, public tracking, and unauthenticated requests must not receive coordinates. Select **Stop sharing** and confirm the marker clears; completing or reassigning the order must also invalidate it.
+7. Record bank-transfer or approved-invoice evidence using its amount, reference, date, and reconciliation note. Closeout must remain unavailable until that evidence is saved. Confirm `/api/payments/initialize` and `/api/payments/verify` return HTTP 503 while online payments are disabled.
+8. Confirm public tracking shows only the customer's first name, area, route window, status, next step, and safe route label. It must not reveal phone, email, payment details, vendor, driver, or location notes.
+9. Sign each role out and verify protected pages and APIs return to login or HTTP 401.
 
 ## Staff operating flow
 

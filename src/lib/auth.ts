@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies } from "next/headers.js";
 
 export type StaffRole = "admin" | "vendor" | "driver" | "support";
 
@@ -10,9 +10,10 @@ export type StaffUser = {
   email: string;
   passwordHash: string;
   role: StaffRole;
+  entityId?: string;
 };
 
-export type StaffSession = Pick<StaffUser, "email" | "role" | "name"> & {
+export type StaffSession = Pick<StaffUser, "email" | "role" | "name" | "entityId"> & {
   issuedAt: number;
   expiresAt: number;
   nonce: string;
@@ -46,12 +47,17 @@ function staffCredential(role: StaffRole, demoEmail: string, displayName: string
   const configuredHash = process.env[`${prefix}_PASSWORD_HASH`];
   const allowDemoFallback = demoCredentialFallbackEnabled();
   const email = process.env[`${prefix}_EMAIL`] ?? (allowDemoFallback ? demoEmail : "");
+  const entityId = role === "vendor"
+    ? process.env.BUBBLEWASH_VENDOR_ENTITY_ID?.trim()
+    : role === "driver"
+      ? process.env.BUBBLEWASH_DRIVER_ENTITY_ID?.trim()
+      : undefined;
   const devPassword = process.env[`${prefix}_PASSWORD`] ?? (role === "admin" ? demoPassword : `${role[0].toUpperCase()}${role.slice(1)}123!`);
 
   if (!email) return null;
-  if (configuredHash) return { name: displayName, email, passwordHash: configuredHash, role };
+  if (configuredHash) return { name: displayName, email, passwordHash: configuredHash, role, entityId };
   if (process.env.NODE_ENV === "production") return null;
-  return { name: displayName, email, passwordHash: createPasswordHash(devPassword), role };
+  return { name: displayName, email, passwordHash: createPasswordHash(devPassword), role, entityId };
 }
 
 export const staffUsers: StaffUser[] = [
@@ -95,6 +101,7 @@ export function encodeSession(user: StaffUser) {
     email: user.email,
     role: user.role,
     name: user.name,
+    entityId: user.entityId,
     issuedAt: now,
     expiresAt: now + sessionMaxAgeSeconds,
     nonce: randomUUID(),
@@ -111,7 +118,8 @@ export function decodeSession(value?: string) {
     const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as StaffSession;
     if (!session.expiresAt || session.expiresAt < Math.floor(Date.now() / 1000)) return null;
     const user = staffUsers.find((item) => item.email === session.email && item.role === session.role);
-    return user ? { email: session.email, role: session.role, name: user.name } : null;
+    if (!user || session.entityId !== user.entityId) return null;
+    return { email: session.email, role: session.role, name: user.name, entityId: user.entityId };
   } catch {
     return null;
   }

@@ -116,6 +116,10 @@ export function paymentReadyForCloseout(payment: string) {
   return /bank transfer confirmed|invoice approved|paid|payment success|settled/i.test(payment.trim());
 }
 
+export function isValidDriverEtaAt(value: string) {
+  return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value.trim());
+}
+
 function roleEmail(role: WorkflowRole) {
   return `${role}@bubblewash.local`;
 }
@@ -306,6 +310,17 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
         driverEta: order.routeWindow,
         locationNote: "Delivered to customer",
         message: `Delivery confirmed from the route queue for ${order.orderId}.`,
+      }));
+    }
+    if (["driver-en-route", "picked-up", "out-for-delivery"].includes(stage.key)) {
+      actions.push(action("driver-update-eta", "Update ETA and checkpoint", "Shares a rider-reported arrival time and current checkpoint without changing the route stage.", "driver-route-log", order.status, {
+        ...base,
+        company: "Bubble Wash Route Team",
+        actionType: "Update rider ETA",
+        currentOrderStatus: order.status,
+        vendorName: order.vendor,
+        driverName: order.driver === "Unassigned" ? userName : order.driver,
+        message: `Rider ETA update opened for ${order.orderId}. Arrival time and checkpoint are required.`,
       }));
     }
     if (["vendor-accepted", "driver-en-route", "picked-up", "ready", "out-for-delivery"].includes(stage.key)) {

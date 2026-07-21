@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { StaffRole } from "@/lib/auth";
-import { automationActionsForOrder } from "@/lib/order-workflow";
+import { automationActionsForOrder, paymentReadyForCloseout } from "@/lib/order-workflow";
 
 const supportTypes = ["Pickup delay", "Payment issue", "Missing item", "Quality complaint", "Vendor escalation", "General question"];
 
@@ -13,6 +13,8 @@ type PortalShellProps = {
   role: StaffRole;
   pageRole?: StaffRole;
   userName: string;
+  currentView: string;
+  navigation: Array<{ href: string; label: string; view: string }>;
   children: ReactNode;
 };
 
@@ -33,8 +35,10 @@ type OrderSummary = {
   area: string;
   pickupAddress: string;
   landmark: string;
+  serviceType: string;
   vendor: string;
   driver: string;
+  driverId?: string;
   routeWindow: string;
   locationNote: string;
   status: string;
@@ -44,9 +48,43 @@ type OrderSummary = {
   nextStep: string;
   eventCount: number;
   lastEventType: string;
-  route: { googleMapsUrl: string; directionsUrl: string; zoneLabel: string; zoneNote: string };
+  route: {
+    pickup: { label: string; lat: number; lng: number };
+    hub: { label: string; lat: number; lng: number };
+    zoneKey: string;
+    googleMapsUrl: string;
+    directionsUrl: string;
+    zoneLabel: string;
+    zoneNote: string;
+    estimatedDistanceKm: number;
+    estimatedDriveMinutes: number;
+  };
+  dispatch?: {
+    scheduledWindow: string;
+    estimatedDistanceKm: number;
+    estimatedDriveMinutes: number;
+    etaText: string;
+    etaSource: "rider-reported" | "area-estimate" | "scheduled-window" | "unavailable";
+    etaUpdatedAt: string;
+    checkpoint: string;
+    checkpointSource: "rider-reported" | "rider-route-update" | "unavailable";
+    checkpointUpdatedAt: string;
+  };
   stageTimer: { label: string; tone: "ok" | "due" | "breached" | "paused"; elapsedMinutes: number; targetMinutes: number };
   timeline: Array<{ id: string; createdAt: string; type: string; status: string; actor: string; note: string }>;
+};
+
+type DispatchLiveLocation = {
+  driverId: string;
+  driverName: string;
+  orderId: string;
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  capturedAt: string;
+  receivedAt: string;
+  state: "live" | "recent" | "offline";
+  live: boolean;
 };
 
 type SubmitHandler = (event: FormEvent<HTMLFormElement>, type: string) => Promise<void>;
@@ -54,12 +92,20 @@ type SubmitHandler = (event: FormEvent<HTMLFormElement>, type: string) => Promis
 type VendorAvailabilityRow = { vendorId: string; vendorName: string; serviceZones: string[]; serviceTypes: string[]; capacityRemaining: number; availabilityStatus: string; updatedAt: string; notes?: string };
 type DriverAvailabilityRow = { driverId: string; driverName: string; serviceZones: string[]; vehicle?: string; capacityRemaining: number; availabilityStatus: string; updatedAt: string; notes?: string };
 type VendorDeclineRow = { id: string; orderId: string; vendorName: string; reason: string; declinedBy: string; createdAt: string };
+type StaffRosterMember = { id: string; name: string; email: string; phone: string; role: string; status: string; workArea: string; access: "configured" | "roster-only"; updatedAt: string };
 
 type AutomationAction = ReturnType<typeof automationActionsForOrder>[number];
 
 type QueueStats = { focusLabel: string; focusCount: number; automationCount: number; riskCount: number; capacityLabel: string };
-type PortalLink = { href: string; label: string; icon: "admin" | "vendor" | "routes" | "support" };
 type QueueView = "action" | "active" | "all";
+type WorkspaceProps = {
+  userName: string;
+  role: StaffRole;
+  initialView?: string;
+  selectedOrderId?: string;
+  selectedCaseId?: string;
+  selectedActivityId?: string;
+};
 type SupportCase = {
   ticketId: string;
   orderId: string;
@@ -68,17 +114,40 @@ type SupportCase = {
   events: SubmissionRecord[];
   status: string;
   priority: string;
+  assignedRole: string;
+  escalationLevel: string;
 };
 
 function noticeClass(message: string) {
   return `status ${/(unable|failed|invalid|missing|required|not allowed|not available|too many)/i.test(message) ? "error" : "success"}`;
 }
 
-function rolePromise(role: StaffRole) {
-  if (role === "admin") return { eyebrow: "Operations desk", title: "Admin queue", subtitle: "Review active jobs, reassign work, and resolve exceptions before the customer has to chase." };
-  if (role === "vendor") return { eyebrow: "Vendor workspace", title: "Washing queue", subtitle: "Start each load, mark it ready, or flag a problem without opening separate partner tools first." };
-  if (role === "driver") return { eyebrow: "Driver workspace", title: "Route handoffs", subtitle: "See the next stop, confirm arrival, and keep proof attached to the same order trail." };
-  return { eyebrow: "Support Desk", title: "Tickets and follow-up", subtitle: "Track at-risk orders, open cases, and customer-facing resolutions from one queue." };
+function rolePromise(role: StaffRole, view: string) {
+  const copy: Record<StaffRole, Record<string, { eyebrow: string; title: string; subtitle: string }>> = {
+    admin: {
+      overview: { eyebrow: "Operations", title: "Today at Bubble Wash", subtitle: "A read-only view of orders, partners, routes, support, and payment follow-up." },
+      dispatch: { eyebrow: "Dispatch", title: "Rider routes and ETAs", subtitle: "Monitor assigned route work, recent foreground locations, recorded windows, and drive estimates from one calm view." },
+      orders: { eyebrow: "Orders", title: "Order operations", subtitle: "Review one queue, then open an order for its next verified action and full history." },
+      people: { eyebrow: "People & onboarding", title: "Partners and staff", subtitle: "Manage vendor capacity, rider coverage, and the operating roster in one clear place." },
+      cases: { eyebrow: "Support oversight", title: "Customer cases", subtitle: "Review open cases and follow-up without entering the support team workspace." },
+      activity: { eyebrow: "Audit trail", title: "Operational activity", subtitle: "Inspect saved changes across the pilot and export the current view when needed." },
+    },
+    vendor: {
+      jobs: { eyebrow: "Vendor workspace", title: "Laundry jobs", subtitle: "Open one assigned job at a time to accept, receive, wash, or mark it ready." },
+      capacity: { eyebrow: "Vendor capacity", title: "Today’s availability", subtitle: "Keep capacity and service coverage accurate for assignment." },
+      activity: { eyebrow: "Vendor history", title: "Saved updates", subtitle: "Review the production updates recorded by this workspace." },
+    },
+    driver: {
+      route: { eyebrow: "Driver workspace", title: "Today’s assigned stops", subtitle: "Open the next stop for directions, optional live sharing, handoff evidence, delivery, or a delay report." },
+      activity: { eyebrow: "Route history", title: "Saved route updates", subtitle: "Review handoffs and route evidence already recorded." },
+    },
+    support: {
+      cases: { eyebrow: "Support desk", title: "Customer cases", subtitle: "Work one case at a time, keeping every decision attached to its case history." },
+      orders: { eyebrow: "Order follow-up", title: "Orders needing support", subtitle: "Find an order, review customer impact, and record the next support action." },
+      activity: { eyebrow: "Support history", title: "Saved support updates", subtitle: "Review case and customer follow-up activity." },
+    },
+  };
+  return copy[role][view] ?? Object.values(copy[role])[0];
 }
 
 function isRiskOrder(order: OrderSummary) {
@@ -109,6 +178,8 @@ function supportCases(records: SubmissionRecord[]) {
       events,
       status: activityValue(latest, "ticketStatus") || activityValue(root, "ticketStatus") || "Open",
       priority: activityValue(latest, "priority") || activityValue(root, "priority") || "Normal",
+      assignedRole: [...events].reverse().map((event) => activityValue(event, "assignedRole")).find(Boolean) || "Support",
+      escalationLevel: [...events].reverse().map((event) => activityValue(event, "escalationLevel")).find(Boolean) || "Level 0",
     };
   }).sort((left, right) => {
     const leftClosed = /closed|resolved/i.test(left.status);
@@ -120,10 +191,10 @@ function supportCases(records: SubmissionRecord[]) {
 
 function orderMatchesRoleFocus(order: OrderSummary, role: StaffRole, userName: string) {
   const actions = automationActionsForOrder(order, role, userName);
-  if (role === "admin") return isRiskOrder(order) || actions.some((action) => action.key.includes("assign") || action.key.includes("schedule"));
+  if (role === "admin") return isRiskOrder(order) || actions.length > 0;
   if (role === "vendor") return actions.some((action) => action.key.includes("vendor"));
   if (role === "driver") return actions.some((action) => action.key.includes("driver"));
-  return isRiskOrder(order) || actions.some((action) => action.key.includes("support"));
+  return isRiskOrder(order);
 }
 
 function queueStats(orders: OrderSummary[], role: StaffRole, userName: string, availabilityCount = 0): QueueStats {
@@ -137,22 +208,6 @@ function queueStats(orders: OrderSummary[], role: StaffRole, userName: string, a
     riskCount,
     capacityLabel: availabilityCount ? `${availabilityCount} live capacity rows` : "capacity waiting",
   };
-}
-
-function StaffNavIcon({ type }: { type: PortalLink["icon"] | "exit" }) {
-  if (type === "admin") {
-    return <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="16" rx="2.5" /><circle cx="12" cy="13" r="4" /><path d="M8 7h3" /><path d="M15.5 7h.1" /></svg>;
-  }
-  if (type === "vendor") {
-    return <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="7" rx="3.5" /><path d="M8 13.5h7" /><circle cx="8" cy="7" r="1.2" /><circle cx="12" cy="5" r="1" /><circle cx="16" cy="7.2" r="1.1" /></svg>;
-  }
-  if (type === "routes") {
-    return <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="7" cy="17" r="2" /><circle cx="17" cy="17" r="2" /><path d="M7 17h4l2.5-5H17l-2-4h-3" /><path d="M10 12H7.5" /><path d="M14 8h3" /><path d="M5 14.5h2" /></svg>;
-  }
-  if (type === "support") {
-    return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 14 0" /><path d="M5 12v3a2 2 0 0 0 2 2h1v-5H5Z" /><path d="M19 12v3a2 2 0 0 1-2 2h-1v-5h3Z" /><path d="M9 19h4" /></svg>;
-  }
-  return <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5H5v14h4" /><path d="M12 12h8" /><path d="m17 8 4 4-4 4" /></svg>;
 }
 
 function formatShortTime(value: string) {
@@ -215,7 +270,7 @@ function activityType(record: SubmissionRecord) {
 }
 
 function activitySubject(record: SubmissionRecord) {
-  return activityValue(record, "company", "name", "orderId", "ticketId") || "Bubble Wash request";
+  return activityValue(record, "company", "staffName", "driverName", "name", "orderId", "ticketId") || "Bubble Wash request";
 }
 
 function activityEntityKey(record: SubmissionRecord) {
@@ -313,8 +368,10 @@ function activitySectionedEntries(record: SubmissionRecord) {
         ["Subject", activitySubject(record)],
         ["Company", activityValue(record, "company")],
         ["Customer", activityValue(record, "name")],
+        ["Staff member", activityValue(record, "staffName")],
         ["Vendor", activityValue(record, "vendorName", "vendor")],
         ["Driver", activityValue(record, "driverName", "driver")],
+        ["Saved by", activityValue(record, "submittedByName")],
       ],
     },
     {
@@ -374,24 +431,32 @@ function StageCountdown({ order }: { order: OrderSummary }) {
   );
 }
 
-function AvailabilityBoard({ role }: { role: StaffRole }) {
+function AvailabilityBoard({ role, mode = "all", refreshToken = 0 }: { role: StaffRole; mode?: "all" | "vendors" | "drivers"; refreshToken?: number }) {
   const [vendors, setVendors] = useState<VendorAvailabilityRow[]>([]);
   const [drivers, setDrivers] = useState<DriverAvailabilityRow[]>([]);
   const [declines, setDeclines] = useState<VendorDeclineRow[]>([]);
   const [status, setStatus] = useState("Loading availability table…");
+  const [hasLoaded, setHasLoaded] = useState(false);
 
   async function loadAvailability(showLoading = true) {
     if (showLoading) setStatus("Loading availability table…");
-    const response = await fetch("/api/availability");
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      setStatus(data.error ?? "Unable to load availability table.");
-      return;
+    try {
+      const response = await fetch("/api/availability");
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        setStatus(data.error ?? "Unable to load availability table.");
+        setHasLoaded(true);
+        return;
+      }
+      setVendors(data.vendors ?? []);
+      setDrivers(data.drivers ?? []);
+      setDeclines(data.declines ?? []);
+      setStatus("Availability table loaded.");
+      setHasLoaded(true);
+    } catch {
+      setStatus("Unable to load availability table.");
+      setHasLoaded(true);
     }
-    setVendors(data.vendors ?? []);
-    setDrivers(data.drivers ?? []);
-    setDeclines(data.declines ?? []);
-    setStatus("Availability table loaded.");
   }
 
   useEffect(() => {
@@ -402,50 +467,79 @@ function AvailabilityBoard({ role }: { role: StaffRole }) {
         if (!active) return;
         if (!ok || !data.ok) {
           setStatus(data.error ?? "Unable to load availability table.");
+          setHasLoaded(true);
           return;
         }
         setVendors(data.vendors ?? []);
         setDrivers(data.drivers ?? []);
         setDeclines(data.declines ?? []);
         setStatus("Availability table loaded.");
+        setHasLoaded(true);
       })
       .catch(() => {
-        if (active) setStatus("Unable to load availability table.");
+        if (active) {
+          setStatus("Unable to load availability table.");
+          setHasLoaded(true);
+        }
       });
     return () => { active = false; };
-  }, []);
+  }, [refreshToken]);
+
+  const showVendors = mode !== "drivers" && role !== "driver";
+  const showDrivers = mode !== "vendors" && (role === "admin" || role === "driver");
 
   return (
-    <section className="section portalSection availabilitySection">
-      <div className="activityHeader"><div><p className="eyebrow">Capacity summary</p><h2>Availability and coverage</h2></div><button className="button secondary" type="button" onClick={() => loadAvailability()}>Refresh summary</button></div>
-      <div className="opsTableWrap">
-        <table className="opsTable availabilityTable">
-          <thead>
-            <tr><th scope="col">Desk</th><th scope="col">Status</th><th scope="col">Capacity</th><th scope="col">Coverage</th><th scope="col">Note</th></tr>
-          </thead>
-          <tbody>
-            {vendors.slice(0, 6).map((vendor) => <tr key={vendor.vendorId}><td data-label="Desk"><strong>{vendor.vendorName}</strong><small>Vendor</small></td><td data-label="Status">{vendor.availabilityStatus}</td><td data-label="Capacity">{vendor.capacityRemaining}</td><td data-label="Coverage">{vendor.serviceZones.join(", ") || "Any"}<small>{vendor.serviceTypes.join(", ") || "Any service"}</small></td><td data-label="Note">{vendor.notes || "No vendor note."}</td></tr>)}
-            {(role === "admin" || role === "driver") && drivers.slice(0, 6).map((driver) => <tr key={driver.driverId}><td data-label="Desk"><strong>{driver.driverName}</strong><small>Rider</small></td><td data-label="Status">{driver.availabilityStatus}</td><td data-label="Capacity">{driver.capacityRemaining}</td><td data-label="Coverage">{driver.serviceZones.join(", ") || "Any"}<small>{driver.vehicle || "Vehicle not set"}</small></td><td data-label="Note">{driver.notes || "No driver note."}</td></tr>)}
-            {!vendors.length && !(role === "admin" || role === "driver") ? <tr><td colSpan={5}>No capacity rows yet.</td></tr> : null}
-          </tbody>
-        </table>
+    <section className="staffContentSection availabilitySection">
+      <div className="staffSectionHeader">
+        <div><h2>Availability and coverage</h2><p>Current working capacity used by assignment.</p></div>
+        <button className="button secondary" type="button" onClick={() => loadAvailability()}>Refresh</button>
       </div>
-      {role === "admin" && declines.length > 0 && <div className="opsTableWrap declineTableWrap"><table className="opsTable"><caption>Recent vendor declines</caption><thead><tr><th scope="col">Order</th><th scope="col">Vendor</th><th scope="col">Reason</th><th scope="col">Saved</th></tr></thead><tbody>{declines.slice(0, 4).map((decline) => <tr key={decline.id}><td data-label="Order"><strong>{decline.orderId}</strong><small>By {decline.declinedBy}</small></td><td data-label="Vendor">{decline.vendorName}</td><td data-label="Reason">{decline.reason}</td><td data-label="Saved">{formatActivityTime(decline.createdAt)}</td></tr>)}</tbody></table></div>}
-      <p className="status">{status}</p>
+
+      {showVendors ? <div className="staffRosterGroup">
+        <div className="staffSubsectionHeader"><h3>Vendor partners</h3><span>{hasLoaded ? `${vendors.length} on roster` : "Loading…"}</span></div>
+        <div className="staffRosterList">
+          {vendors.length ? vendors.map((vendor) => <article className="staffRosterRow" key={vendor.vendorId}>
+            <div><strong>{vendor.vendorName}</strong><span>{vendor.serviceTypes.join(", ") || "Services not set"}</span>{role === "admin" ? <small>ID: {vendor.vendorId}</small> : null}</div>
+            <div><span className="staffFieldLabel">Status</span><strong>{vendor.availabilityStatus}</strong></div>
+            <div><span className="staffFieldLabel">Capacity</span><strong>{vendor.capacityRemaining} order slots</strong></div>
+            <div><span className="staffFieldLabel">Coverage</span><strong>{vendor.serviceZones.join(", ") || "Any approved zone"}</strong></div>
+            <p>{vendor.notes || "No capacity note."}</p>
+          </article>) : <p className="staffEmptyState">{hasLoaded ? "No vendor capacity rows yet." : "Loading vendor capacity…"}</p>}
+        </div>
+      </div> : null}
+
+      {showDrivers ? <div className="staffRosterGroup">
+        <div className="staffSubsectionHeader"><h3>Riders</h3><span>{hasLoaded ? `${drivers.length} on roster` : "Loading…"}</span></div>
+        <div className="staffRosterList">
+          {drivers.length ? drivers.map((driver) => <article className="staffRosterRow" key={driver.driverId}>
+            <div><strong>{driver.driverName}</strong><span>{driver.vehicle || "Vehicle not set"}</span>{role === "admin" ? <small>ID: {driver.driverId}</small> : null}</div>
+            <div><span className="staffFieldLabel">Status</span><strong>{driver.availabilityStatus}</strong></div>
+            <div><span className="staffFieldLabel">Capacity</span><strong>{driver.capacityRemaining} route slots</strong></div>
+            <div><span className="staffFieldLabel">Coverage</span><strong>{driver.serviceZones.join(", ") || "Any approved zone"}</strong></div>
+            <p>{driver.notes || "No route note."}</p>
+          </article>) : <p className="staffEmptyState">{hasLoaded ? "No rider availability rows yet." : "Loading rider availability…"}</p>}
+        </div>
+      </div> : null}
+
+      {role === "admin" && declines.length > 0 ? <div className="staffRosterGroup">
+        <div className="staffSubsectionHeader"><h3>Recent vendor declines</h3><span>{declines.length} recorded</span></div>
+        <div className="staffSimpleList">{declines.slice(0, 6).map((decline) => <div className="staffSimpleRow" key={decline.id}><strong>{decline.orderId}</strong><span>{decline.vendorName}</span><p>{decline.reason}</p><time>{formatActivityTime(decline.createdAt)}</time></div>)}</div>
+      </div> : null}
+      <p className="status" role="status" aria-live="polite">{status}</p>
     </section>
   );
 }
 
-function RecentActivity({ filter }: { filter?: string }) {
+function RecentActivity({ filter, initialSelectedId = "", basePath }: { filter?: string; initialSelectedId?: string; basePath: string }) {
   const [records, setRecords] = useState<SubmissionRecord[]>([]);
   const [status, setStatus] = useState("Loading recent activity…");
-  const [isOpen, setIsOpen] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [category, setCategory] = useState<ActivityCategory>("all");
   const [scope, setScope] = useState<ActivityScope>("active");
   const [windowMode, setWindowMode] = useState<ActivityWindow>("20");
   const [sortKey, setSortKey] = useState<ActivitySortKey>("saved");
   const [sortDirection, setSortDirection] = useState<ActivitySortDirection>("desc");
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(initialSelectedId);
   const [freshIds, setFreshIds] = useState<string[]>([]);
   const [lastUpdatedAt, setLastUpdatedAt] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
@@ -458,6 +552,7 @@ function RecentActivity({ filter }: { filter?: string }) {
       const data = await response.json();
       if (!response.ok || !data.ok) {
         setStatus(data.error ?? "Unable to load activity.");
+        setHasLoaded(true);
         return;
       }
       const scoped = filter ? data.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes(filter)) : data.records;
@@ -468,6 +563,7 @@ function RecentActivity({ filter }: { filter?: string }) {
       setRecords(nextRecords);
       setFreshIds(newIds);
       setLastUpdatedAt(new Date().toISOString());
+      setHasLoaded(true);
       if (newIds.length && !showLoading) {
         setStatus(`${newIds.length} new update${newIds.length === 1 ? "" : "s"} just landed.`);
         return;
@@ -475,6 +571,7 @@ function RecentActivity({ filter }: { filter?: string }) {
       setStatus(nextRecords.length ? "Recent activity loaded." : "No matching activity yet.");
     } catch {
       setStatus("Unable to load activity.");
+      setHasLoaded(true);
     }
   }
 
@@ -490,6 +587,7 @@ function RecentActivity({ filter }: { filter?: string }) {
         if (!active) return;
         if (!response.ok || !data.ok) {
           setStatus(data.error ?? "Unable to load activity.");
+          setHasLoaded(true);
           return;
         }
         const scoped = filter ? data.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes(filter)) : data.records;
@@ -500,13 +598,17 @@ function RecentActivity({ filter }: { filter?: string }) {
         setRecords(nextRecords);
         setFreshIds(newIds);
         setLastUpdatedAt(new Date().toISOString());
+        setHasLoaded(true);
         if (newIds.length && !showLoading) {
           setStatus(`${newIds.length} new update${newIds.length === 1 ? "" : "s"} just landed.`);
           return;
         }
         setStatus(nextRecords.length ? "Recent activity loaded." : "No matching activity yet.");
       } catch {
-        if (active) setStatus("Unable to load activity.");
+        if (active) {
+          setStatus("Unable to load activity.");
+          setHasLoaded(true);
+        }
       }
     }
 
@@ -572,7 +674,7 @@ function RecentActivity({ filter }: { filter?: string }) {
     return sorted;
   }, [records, category, scope, windowMode, sortKey, sortDirection]);
 
-  const selectedRecord = visibleRecords.find((record) => record.id === selectedId) ?? visibleRecords[0] ?? null;
+  const selectedRecord = records.find((record) => record.id === selectedId) ?? null;
   const selectedSections = useMemo(() => selectedRecord ? activitySectionedEntries(selectedRecord) : [], [selectedRecord]);
 
   function toggleSort(nextKey: ActivitySortKey) {
@@ -612,120 +714,46 @@ function RecentActivity({ filter }: { filter?: string }) {
   }
 
   return (
-    <section className="section activitySection">
-      <details className="activityGroup" open={isOpen} onToggle={(event) => setIsOpen(event.currentTarget.open)}>
-        <summary>
-          <div>
-            <p className="eyebrow">Recent activity</p>
-            <h2>Latest saved updates</h2>
-            <small>{visibleRecords.length ? `${visibleRecords.length} saved updates in this view` : "No saved updates yet"}</small>
-          </div>
-          <div className="activitySummaryMeta">
-            <span className="activityCountPill">{visibleRecords.length} updates</span>
-            <em>{isOpen ? "Minimize" : "Expand"}</em>
-          </div>
-        </summary>
-        <div className="activityGroupBody">
-          <div className="activityUtilityBar">
-            <div className="activityChipRow" aria-label="Quick activity filters">
-              {([
-                ["all", "All"],
-                ["orders", "Orders"],
-                ["support", "Support"],
-                ["onboarding", "Onboarding"],
-                ["payments", "Payments"],
-                ["ops", "Ops"],
-              ] as Array<[ActivityCategory, string]>).map(([key, label]) => <button className={`activityChip ${category === key ? "active" : ""}`} key={key} onClick={() => setCategory(key)} type="button">{label}<span>{categoryCounts[key]}</span></button>)}
-            </div>
-            <div className="activityControlGroup">
-              <div className="activitySegmented" aria-label="Retention scope">
-                {([
-                  ["active", "Active"],
-                  ["archived", "Archived"],
-                  ["all", "All"],
-                ] as Array<[ActivityScope, string]>).map(([key, label]) => <button className={scope === key ? "active" : ""} key={key} onClick={() => setScope(key)} type="button">{label}</button>)}
-              </div>
-              <div className="activitySegmented" aria-label="Retention window">
-                {([
-                  ["20", "Last 20"],
-                  ["50", "Last 50"],
-                  ["today", "Today"],
-                ] as Array<[ActivityWindow, string]>).map(([key, label]) => <button className={windowMode === key ? "active" : ""} key={key} onClick={() => setWindowMode(key)} type="button">{label}</button>)}
-              </div>
-            </div>
-          </div>
-
-          <div className="activityGroupActions">
-            <div className="activityLiveMeta">
-              <strong>Auto-refresh</strong>
-              <span>Every 30s{lastUpdatedAt ? ` · Last sync ${formatMetricTime(lastUpdatedAt)}` : ""}</span>
-            </div>
-            <div className="activityActionButtons">
-              <button className="button secondary" type="button" onClick={exportVisibleCsv}>Export CSV</button>
-              <button className="button secondary" type="button" onClick={() => void loadRecords()}>Refresh</button>
-            </div>
-          </div>
-
-          <div className="activityWorkbench">
-            <div className="activityTableWrap">
-              <table className="activityTable">
-                <thead>
-                  <tr>
-                    <th scope="col"><button className="activitySortButton" onClick={() => toggleSort("saved")} type="button">Reference</button></th>
-                    <th scope="col"><button className="activitySortButton" onClick={() => toggleSort("type")} type="button">Type</button></th>
-                    <th scope="col"><button className="activitySortButton" onClick={() => toggleSort("subject")} type="button">Subject</button></th>
-                    <th scope="col">What changed</th>
-                    <th scope="col"><button className="activitySortButton" onClick={() => toggleSort("saved")} type="button">Saved</button></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleRecords.length ? visibleRecords.map((record) => <tr className={`${selectedId === record.id ? "is-selected" : ""} ${freshIds.includes(record.id) ? "is-new" : ""}`} key={record.id}>
-                    <td data-label="Reference"><button className="activityRowButton" type="button" aria-pressed={selectedId === record.id} onClick={() => setSelectedId(record.id)}><strong>{record.id}</strong><span>View details</span></button></td>
-                    <td data-label="Type">{activityTypeLabel(activityType(record))}</td>
-                    <td data-label="Subject">{activitySubject(record)}</td>
-                    <td data-label="What changed">{changeSummaries.get(record.id)}</td>
-                    <td data-label="Saved">{formatActivityTime(record.createdAt)}</td>
-                  </tr>) : <tr><td className="activityEmptyState" colSpan={5}>No matching activity yet.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-
-            <aside className="activityDetailPanel" aria-live="polite">
-              {selectedRecord ? <>
-                <div className="activityDetailHeader">
-                  <p className="eyebrow">Update details</p>
-                  <h3>{activitySubject(selectedRecord)}</h3>
-                  <span>{activityTypeLabel(activityType(selectedRecord))}</span>
-                </div>
-                <div className="activityDetailCard">
-                  <strong>{changeSummaries.get(selectedRecord.id)}</strong>
-                  <small>Saved {formatActivityTime(selectedRecord.createdAt)} · Ref {selectedRecord.id}</small>
-                </div>
-                <div className="activityDetailActions">
-                  <button className="activityQuietButton" onClick={() => void copyValue("Reference", selectedRecord.id)} type="button">Copy ref</button>
-                  {activityValue(selectedRecord, "orderId") ? <button className="activityQuietButton" onClick={() => void copyValue("Order ID", activityValue(selectedRecord, "orderId"))} type="button">Copy order</button> : null}
-                  {activityValue(selectedRecord, "phone") ? <button className="activityQuietButton" onClick={() => void copyValue("Phone", activityValue(selectedRecord, "phone"))} type="button">Copy phone</button> : null}
-                  {activityValue(selectedRecord, "email") ? <button className="activityQuietButton" onClick={() => void copyValue("Email", activityValue(selectedRecord, "email"))} type="button">Copy email</button> : null}
-                  <button className="activityQuietButton" onClick={() => filterToSubject(selectedRecord)} type="button">Show similar</button>
-                  <button className="activityQuietButton" onClick={() => toggleSort("saved")} type="button">Newest first</button>
-                </div>
-                {copyStatus ? <p className="activityCopyStatus" role="status">{copyStatus}</p> : null}
-                <div className="activityDetailSections">
-                  {selectedSections.map((section) => <section className="activityDetailSection" key={section.title}>
-                    <header>
-                      <h4>{section.title}</h4>
-                    </header>
-                    <dl className="activityDetailList">
-                      {section.entries.map(([key, value]) => <div key={`${section.title}-${key}`}><dt>{key}</dt><dd>{value}</dd></div>)}
-                    </dl>
-                  </section>)}
-                </div>
-              </> : <div className="activityDetailEmpty"><strong>Select an update</strong><p>Click any row to inspect the saved payload without leaving the queue view.</p></div>}
-            </aside>
-          </div>
+    <section className="staffContentSection activitySection">
+      {selectedRecord ? <div className="staffDetailView" aria-live="polite">
+        <Link className="staffBackLink" href={basePath}>← Back to activity</Link>
+        <div className="staffDetailHeader">
+          <div><span className="staffFieldLabel">{activityTypeLabel(activityType(selectedRecord))}</span><h2>{activitySubject(selectedRecord)}</h2><p>{changeSummaries.get(selectedRecord.id)}</p></div>
+          <div className="staffDetailReference"><span>Reference</span><strong>{selectedRecord.id}</strong><time>{formatActivityTime(selectedRecord.createdAt)}</time></div>
         </div>
-      </details>
-      <p className="status">{status}</p>
+        <div className="activityDetailActions">
+          <button className="button secondary" onClick={() => void copyValue("Reference", selectedRecord.id)} type="button">Copy reference</button>
+          {activityValue(selectedRecord, "orderId") ? <button className="button secondary" onClick={() => void copyValue("Order ID", activityValue(selectedRecord, "orderId"))} type="button">Copy order ID</button> : null}
+          {activityValue(selectedRecord, "phone") ? <button className="button secondary" onClick={() => void copyValue("Phone", activityValue(selectedRecord, "phone"))} type="button">Copy phone</button> : null}
+          {activityValue(selectedRecord, "email") ? <button className="button secondary" onClick={() => void copyValue("Email", activityValue(selectedRecord, "email"))} type="button">Copy email</button> : null}
+          <button className="button secondary" onClick={() => { filterToSubject(selectedRecord); setSelectedId(""); window.history.replaceState(null, "", basePath); }} type="button">Show similar</button>
+        </div>
+        {copyStatus ? <p className="activityCopyStatus" role="status">{copyStatus}</p> : null}
+        <div className="staffDetailSections">
+          {selectedSections.map((section) => <section className="staffDetailSection" key={section.title}><h3>{section.title}</h3><dl className="staffDefinitionList">{section.entries.map(([key, value]) => <div key={`${section.title}-${key}`}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></section>)}
+        </div>
+      </div> : selectedId && hasLoaded ? <div className="staffEmptyState"><h2>Activity not found</h2><p>This update is unavailable to this staff role or outside the retained activity window.</p><Link href={basePath}>Back to activity</Link></div> : <>
+        <div className="staffSectionHeader">
+          <div><h2>Latest saved updates</h2><p>{!hasLoaded ? "Loading saved updates…" : visibleRecords.length ? `${visibleRecords.length} updates in this view` : "No saved updates yet"}</p></div>
+          <div className="staffHeaderActions"><button className="button secondary" type="button" onClick={exportVisibleCsv}>Export CSV</button><button className="button secondary" type="button" onClick={() => void loadRecords()}>Refresh</button></div>
+        </div>
+        <div className="staffFilterBar">
+          <div className="staffTextFilters" aria-label="Activity type">
+            {([ ["all", "All"], ["orders", "Orders"], ["support", "Support"], ["onboarding", "Onboarding"], ["payments", "Payments"], ["ops", "Operations"] ] as Array<[ActivityCategory, string]>).map(([key, label]) => <button aria-pressed={category === key} className={category === key ? "active" : ""} key={key} onClick={() => setCategory(key)} type="button">{label} <span>{categoryCounts[key]}</span></button>)}
+          </div>
+          <div className="staffSelectFilters"><label>Scope<select value={scope} onChange={(event) => setScope(event.target.value as ActivityScope)}><option value="active">Active</option><option value="archived">Archived</option><option value="all">All</option></select></label><label>Time window<select value={windowMode} onChange={(event) => setWindowMode(event.target.value as ActivityWindow)}><option value="20">Last 20</option><option value="50">Last 50</option><option value="today">Today</option></select></label></div>
+        </div>
+        <div className="staffActivityList" role="list">
+          {visibleRecords.length ? visibleRecords.map((record) => <article key={record.id} role="listitem"><Link className={`staffActivityRow ${freshIds.includes(record.id) ? "is-new" : ""}`} href={`${basePath}${basePath.includes("?") ? "&" : "?"}activity=${encodeURIComponent(record.id)}`}>
+            <span><strong>{activitySubject(record)}</strong><small>{record.id}</small></span>
+            <span><strong>{activityTypeLabel(activityType(record))}</strong><small>{changeSummaries.get(record.id)}</small></span>
+            <time>{formatActivityTime(record.createdAt)}</time>
+            <b>View details</b>
+          </Link></article>) : hasLoaded ? <p className="staffEmptyState">No activity matches these filters.</p> : <p className="staffEmptyState" role="status">Loading activity…</p>}
+        </div>
+        <p className="staffSyncLine">Auto-refreshes every 30 seconds{lastUpdatedAt ? ` · Last synced ${formatMetricTime(lastUpdatedAt)}` : ""}. <button type="button" onClick={() => toggleSort("saved")}>Toggle date order</button></p>
+      </>}
+      <p className="status" role="status" aria-live="polite">{status}</p>
     </section>
   );
 }
@@ -778,17 +806,18 @@ function AutomatedOrderActions({ order, role, userName, onSaved }: { order: Orde
         <span>{actions.length ? `${actions.length} available` : "Waiting"}</span>
       </div>
       <div className="automationActions">
-        {actions.length ? actions.map((action, index) => <button className={`button ${index === 0 ? "primary" : "secondary"}`} disabled={Boolean(pendingLabel)} key={action.label} onClick={() => action.key === "vendor-decline-job" ? setDeclineOpen(true) : ["admin-schedule-pickup", "support-log-customer-contact", "admin-confirm-bank-transfer", "admin-approve-invoice", "vendor-log-intake", "vendor-mark-ready", "driver-mark-picked-up", "driver-drop-at-vendor", "driver-mark-delivered", "driver-report-delay"].includes(action.key) ? setStructuredAction(action.key) : void run(action)} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>) : <span className="status">Waiting</span>}
+        {actions.length ? actions.map((action, index) => <button className={`button ${index === 0 ? "primary" : "secondary"}`} disabled={Boolean(pendingLabel)} key={action.label} onClick={() => action.key === "vendor-decline-job" ? setDeclineOpen(true) : ["admin-schedule-pickup", "support-log-customer-contact", "admin-confirm-bank-transfer", "admin-approve-invoice", "vendor-log-intake", "vendor-mark-ready", "driver-mark-picked-up", "driver-drop-at-vendor", "driver-mark-delivered", "driver-update-eta", "driver-report-delay"].includes(action.key) ? setStructuredAction(action.key) : void run(action)} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>) : <span className="status">Waiting</span>}
       </div>
       {declineOpen ? <form className="declineReasonForm" onSubmit={(event) => { event.preventDefault(); const decline = actions.find((action) => action.key === "vendor-decline-job"); if (decline && declineReason.trim()) void run(decline, { reason: declineReason.trim() }); }}><label>Reason for admin reassignment<textarea value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} maxLength={300} placeholder="Capacity, machine issue, service mismatch, or timing conflict" required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={!declineReason.trim() || Boolean(pendingLabel)}>Confirm decline</button><button className="button secondary" type="button" onClick={() => { setDeclineOpen(false); setDeclineReason(""); }}>Cancel</button></div></form> : null}
       {structuredAction === "admin-schedule-pickup" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Confirmed pickup window<input name="confirmedPickupWindow" placeholder="Tuesday, 10:00–12:00" maxLength={120} required /></label><label>Scheduling note<textarea name="operatorNote" placeholder="Who confirmed the window and any access or collection instructions" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save pickup window</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "support-log-customer-contact" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Contact channel<select name="contactChannel" required><option>Phone call</option><option>Email</option></select></label><label>Outcome<select name="contactOutcome" required><option>Reached customer</option><option>No answer</option><option>Message left</option><option>Email sent</option><option>Follow-up required</option></select></label></div><label>Next follow-up<input name="nextFollowUpAt" type="datetime-local" required /></label><label>Operator note<textarea name="operatorNote" placeholder="What was discussed, promised, or left unresolved" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save contact log</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {["admin-confirm-bank-transfer", "admin-approve-invoice"].includes(structuredAction) ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>{structuredAction === "admin-approve-invoice" ? "Invoice number" : "Transfer reference"}<input name="paymentReference" maxLength={120} required /></label><label>Amount (GHS)<input name="paymentAmount" type="number" min="0.01" max="250000" step="0.01" inputMode="decimal" required /></label></div><label>{structuredAction === "admin-approve-invoice" ? "Approval date" : "Received date"}<input name="paymentReceivedAt" type="date" required /></label><label>Reconciliation note<textarea name="operatorNote" placeholder="Account checked, approver, payer name, or exception reviewed" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>{structuredAction === "admin-approve-invoice" ? "Save invoice approval" : "Confirm bank transfer"}</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
-      {structuredAction === "vendor-log-intake" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Bag tag<input name="bagTag" defaultValue={`${order.orderId}-BAG`} maxLength={120} required /></label><label>Bag/item count<input name="intakeBagCount" inputMode="numeric" maxLength={40} required /></label></div><div className="two"><label>Received weight (kg, optional)<input name="receivedWeightKg" type="number" min="0.01" max="10000" step="0.01" inputMode="decimal" /></label><label>Intake condition<select name="intakeCondition" required><option>Count and condition matched</option><option>Stain or special care flagged</option><option>Count mismatch</option><option>Damage risk flagged</option></select></label></div><label>Intake note<textarea name="operatorNote" placeholder="Count check, visible condition, special care, or discrepancy" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm intake</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
-      {structuredAction === "vendor-mark-ready" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Ready bag/item count<input name="readyBagCount" inputMode="numeric" maxLength={40} required /></label><label>Quality check<select name="qualityCheck" required><option>Count, finish, and packaging checked</option><option>Ready with noted exception</option></select></label></div><label>Dispatch note<textarea name="operatorNote" placeholder="Packaging, storage point, collection instructions, or exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Mark ready</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
-      {structuredAction === "driver-mark-picked-up" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Collected bag/item count<input name="pickupBagCount" inputMode="numeric" maxLength={40} required /></label><label>Customer handoff note<textarea name="operatorNote" placeholder="Who released the order, collection point, and any count or access exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm pickup</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
-      {structuredAction === "driver-drop-at-vendor" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Vendor recipient<input name="vendorRecipient" maxLength={160} required /></label><label>Handed-over bag/item count<input name="handoffBagCount" inputMode="numeric" maxLength={40} required /></label></div><label>Vendor handoff note<textarea name="operatorNote" placeholder="Handoff point, time, recipient confirmation, or discrepancy" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm vendor handoff</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
-      {structuredAction === "driver-mark-delivered" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Recipient name<input name="recipientName" maxLength={160} required /></label><label>Returned bag/item count<input name="bagCount" maxLength={40} inputMode="numeric" required /></label></div><label>Handoff note<textarea name="operatorNote" placeholder="Where and to whom the order was handed over; note any exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm delivery</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "vendor-log-intake" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Bag tag<input name="bagTag" defaultValue={`${order.orderId}-BAG`} maxLength={120} required /></label><label>Bag/item count<input name="intakeBagCount" type="number" min="1" max="10000" step="1" required /></label></div><div className="two"><label>Received weight (kg, optional)<input name="receivedWeightKg" type="number" min="0.01" max="10000" step="0.01" inputMode="decimal" /></label><label>Intake condition<select name="intakeCondition" required><option>Count and condition matched</option><option>Stain or special care flagged</option><option>Count mismatch</option><option>Damage risk flagged</option></select></label></div><label>Intake note<textarea name="operatorNote" placeholder="Count check, visible condition, special care, or discrepancy" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm intake</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "vendor-mark-ready" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Ready bag/item count<input name="readyBagCount" type="number" min="1" max="10000" step="1" required /></label><label>Quality check<select name="qualityCheck" required><option>Count, finish, and packaging checked</option><option>Ready with noted exception</option></select></label></div><label>Dispatch note<textarea name="operatorNote" placeholder="Packaging, storage point, collection instructions, or exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Mark ready</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "driver-mark-picked-up" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Collected bag/item count<input name="pickupBagCount" type="number" min="1" max="10000" step="1" required /></label><label>Customer handoff note<textarea name="operatorNote" placeholder="Who released the order, collection point, and any count or access exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm pickup</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "driver-drop-at-vendor" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Vendor recipient<input name="vendorRecipient" maxLength={160} required /></label><label>Handed-over bag/item count<input name="handoffBagCount" type="number" min="1" max="10000" step="1" required /></label></div><label>Vendor handoff note<textarea name="operatorNote" placeholder="Handoff point, time, recipient confirmation, or discrepancy" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm vendor handoff</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "driver-mark-delivered" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Recipient name<input name="recipientName" maxLength={160} required /></label><label>Returned bag/item count<input name="bagCount" type="number" min="1" max="10000" step="1" required /></label></div><label>Handoff note<textarea name="operatorNote" placeholder="Where and to whom the order was handed over; note any exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm delivery</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "driver-update-eta" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Estimated arrival time<input name="driverEtaAt" type="time" required /></label><label>Current checkpoint<input name="routeCheckpoint" placeholder="Street, junction, or visible landmark" maxLength={240} required /></label></div><label>Route note (optional)<textarea name="operatorNote" placeholder="Traffic or access detail that dispatch should know" maxLength={240} /></label><p className="formHint">This saves a manual ETA and checkpoint. Use the separate live location control while travelling.</p><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Update ETA &amp; checkpoint</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "driver-report-delay" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Revised ETA<input name="revisedEta" placeholder="25 minutes or 15:20" maxLength={80} required /></label><label>Current checkpoint<input name="routeCheckpoint" placeholder="Street, junction, or vendor" maxLength={240} required /></label></div><label>Delay reason<textarea name="operatorNote" placeholder="Traffic, customer unavailable, vehicle issue, or handoff delay" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save delay report</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {status && <p className={`status ${failed ? "error" : "success"}`} role="status" aria-live="polite">{status}</p>}
     </div>
@@ -803,24 +832,449 @@ function CustomerContactActions({ order, role }: { order: OrderSummary; role: St
   return <div className="customerContactActions" aria-label={`Contact ${order.customer}`}>{phone ? <a href={`tel:${phone}`}>Call customer</a> : null}{canEmail ? <a href={`mailto:${order.email}?subject=${encodeURIComponent(`Bubble Wash order ${order.orderId}`)}`}>Email customer</a> : null}</div>;
 }
 
-function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: string }) {
+function OrderQueueRow({ order, href }: { order: OrderSummary; href: string }) {
+  return <article className={`staffOrderRow timer-${order.stageTimer.tone}`} role="listitem">
+    <div><strong>{order.orderId}</strong><span>{order.customer}</span></div>
+    <div><strong>{order.workflowStage.label}</strong><span>{order.stageTimer.label}</span></div>
+    <div><strong>{order.area}</strong><span>{order.routeWindow}</span></div>
+    <div><strong>{order.vendor !== "Unassigned" ? order.vendor : "Vendor pending"}</strong><span>{order.driver !== "Unassigned" ? order.driver : "Rider pending"}</span></div>
+    <Link href={href}>View order</Link>
+  </article>;
+}
+
+function driverStopGroup(order: OrderSummary) {
+  if (["vendor-accepted", "driver-en-route"].includes(order.workflowStage.key)) return "Customer pickups";
+  if (["picked-up", "at-vendor", "washing"].includes(order.workflowStage.key)) return "Vendor handoffs";
+  if (["ready", "out-for-delivery"].includes(order.workflowStage.key)) return "Return deliveries";
+  return "Other assigned work";
+}
+
+const dispatchStages = new Set(["vendor-accepted", "driver-en-route", "picked-up", "ready", "out-for-delivery"]);
+const liveLocationStages = new Set(["driver-en-route", "picked-up", "out-for-delivery"]);
+const liveLocationCadenceMs = 12_000;
+const liveLocationMaximumAgeMs = 2 * 60_000;
+
+function normalizeLiveLocation(value: unknown): DispatchLiveLocation | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const latitude = Number(row.latitude ?? row.lat);
+  const longitude = Number(row.longitude ?? row.lng);
+  const accuracyMeters = Number(row.accuracyMeters ?? row.accuracy ?? 0);
+  const stateValue = String(row.state ?? row.status ?? "").toLowerCase();
+  const explicitLive = row.live === true || row.isLive === true;
+  const state = stateValue === "live" || stateValue === "recent" ? stateValue : explicitLive ? "live" : "offline";
+  const capturedAt = String(row.capturedAt ?? row.recordedAt ?? row.updatedAt ?? "");
+  const receivedAt = String(row.receivedAt ?? row.updatedAt ?? capturedAt);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  return {
+    driverId: String(row.driverId ?? row.riderId ?? row.entityId ?? ""),
+    driverName: String(row.driverName ?? row.riderName ?? ""),
+    orderId: String(row.orderId ?? ""),
+    latitude,
+    longitude,
+    accuracyMeters: Number.isFinite(accuracyMeters) && accuracyMeters >= 0 ? accuracyMeters : 0,
+    capturedAt,
+    receivedAt,
+    state,
+    live: explicitLive || state === "live",
+  };
+}
+
+function normalizeLiveLocations(payload: unknown) {
+  if (!payload || typeof payload !== "object") return [];
+  const data = payload as Record<string, unknown>;
+  const rows = Array.isArray(data.locations) ? data.locations : data.location ? [data.location] : [];
+  return rows.map(normalizeLiveLocation).filter((location): location is DispatchLiveLocation => Boolean(location));
+}
+
+function locationIsRecent(location: DispatchLiveLocation) {
+  if (location.state !== "live" && location.state !== "recent") return false;
+  const timestamp = new Date(location.receivedAt || location.capturedAt).getTime();
+  return Number.isFinite(timestamp) && Date.now() - timestamp <= liveLocationMaximumAgeMs;
+}
+
+function liveLocationForOrder(order: OrderSummary, locations: DispatchLiveLocation[]) {
+  if (!order.driverId) return undefined;
+  return locations.find((location) => location.orderId === order.orderId && location.driverId === order.driverId && locationIsRecent(location));
+}
+
+function routeLegLabel(order: OrderSummary) {
+  if (["vendor-accepted", "driver-en-route"].includes(order.workflowStage.key)) return "Customer pickup";
+  if (order.workflowStage.key === "picked-up") return "Vendor handoff";
+  if (order.workflowStage.key === "ready") return "Vendor collection";
+  if (order.workflowStage.key === "out-for-delivery") return "Return delivery";
+  return "Route work";
+}
+
+function hasCustomerRoutePreview(order: OrderSummary) {
+  return ["vendor-accepted", "driver-en-route", "out-for-delivery"].includes(order.workflowStage.key);
+}
+
+function hasHubToCustomerDirections(order: OrderSummary) {
+  return ["vendor-accepted", "driver-en-route"].includes(order.workflowStage.key);
+}
+
+function dispatchFreshness(timestamp: string) {
+  const savedAt = new Date(timestamp).getTime();
+  if (!Number.isFinite(savedAt)) return "time unavailable";
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - savedAt) / 60_000));
+  if (elapsedMinutes < 1) return "just now";
+  if (elapsedMinutes < 15) return `${elapsedMinutes} min ago`;
+  if (elapsedMinutes < 60) return `${elapsedMinutes} min ago · stale; confirm with rider`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours} hr ago · stale; confirm with rider`;
+  return `${Math.floor(elapsedHours / 24)} day${elapsedHours < 48 ? "" : "s"} ago · stale; confirm with rider`;
+}
+
+function dispatchEta(order: OrderSummary) {
+  const minutes = Number(order.dispatch?.estimatedDriveMinutes ?? order.route?.estimatedDriveMinutes ?? 0);
+  const distance = Number(order.dispatch?.estimatedDistanceKm ?? order.route?.estimatedDistanceKm ?? 0);
+  const source = order.dispatch ? order.dispatch.etaSource : minutes > 0 ? "area-estimate" : order.routeWindow && order.routeWindow !== "ETA pending" ? "scheduled-window" : "unavailable";
+  const legacyText = source === "area-estimate" && minutes > 0 ? `${minutes} min` : order.routeWindow && order.routeWindow !== "ETA pending" ? order.routeWindow : "Estimate pending";
+  const text = order.dispatch ? order.dispatch.etaText || (source === "scheduled-window" ? order.dispatch.scheduledWindow : "Estimate pending") : legacyText;
+  const label = source === "rider-reported" ? "Rider-reported ETA" : source === "area-estimate" ? "Area estimate" : source === "scheduled-window" ? "Scheduled window" : "ETA";
+  return { distance, minutes, source, text, label, updatedAt: order.dispatch?.etaUpdatedAt || "" };
+}
+
+function dispatchEtaForLeg(order: OrderSummary) {
+  const eta = dispatchEta(order);
+  if (hasCustomerRoutePreview(order) || (order.workflowStage.key === "picked-up" && eta.source === "rider-reported")) return eta;
+  return { ...eta, distance: 0, minutes: 0, source: "unavailable" as const, text: "Unavailable", label: "Vendor destination needed", updatedAt: "" };
+}
+
+function dispatchPointPosition(point: { lat: number; lng: number } | undefined, fallback: { x: number; y: number }) {
+  if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return fallback;
+  const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
+  return {
+    x: clamp(((point.lng + 0.45) / 0.65) * 100, 8, 92),
+    y: clamp(((5.95 - point.lat) / 0.5) * 100, 10, 90),
+  };
+}
+
+function DispatchMap({ order, detail = false, liveLocation }: { order: OrderSummary; detail?: boolean; liveLocation?: DispatchLiveLocation }) {
+  const hub = dispatchPointPosition(order.route?.hub, { x: 20, y: 78 });
+  const pickup = dispatchPointPosition(order.route?.pickup, { x: 74, y: 28 });
+  const rider = liveLocation ? dispatchPointPosition({ lat: liveLocation.latitude, lng: liveLocation.longitude }, { x: 50, y: 50 }) : null;
+  const controlY = Math.min(88, Math.max(12, (hub.y + pickup.y) / 2));
+  const showCustomerRoute = hasCustomerRoutePreview(order);
+  const eta = showCustomerRoute ? dispatchEta(order) : dispatchEtaForLeg(order);
+  const checkpoint = order.dispatch?.checkpoint || order.locationNote;
+  const distanceText = eta.distance > 0 ? `${eta.distance} km planning distance` : "Distance pending";
+  const etaBasis = eta.source === "rider-reported" ? `Reported ${eta.updatedAt ? dispatchFreshness(eta.updatedAt) : "by rider; time unavailable"}` : eta.source === "area-estimate" ? "Based on the service-area planning estimate" : eta.source === "scheduled-window" ? "Scheduled by operations" : "No ETA source recorded";
+
+  return <figure className={`dispatchMap${detail ? " dispatchMapDetail" : ""}`} aria-labelledby={`dispatch-caption-${order.orderId}`}>
+    <div className="dispatchMapCanvas" aria-hidden="true">
+      <span className="dispatchStreet dispatchStreetOne" />
+      <span className="dispatchStreet dispatchStreetTwo" />
+      <span className="dispatchStreet dispatchStreetThree" />
+      {showCustomerRoute ? <svg className="dispatchRouteLine" viewBox="0 0 100 100" preserveAspectRatio="none" focusable="false">
+        <path d={`M ${hub.x} ${hub.y} C ${hub.x} ${controlY}, ${pickup.x} ${controlY}, ${pickup.x} ${pickup.y}`} />
+      </svg> : null}
+      {showCustomerRoute ? <><span className="dispatchMarker dispatchMarkerHub" style={{ left: `${hub.x}%`, top: `${hub.y}%` }}><i>H</i><b>Dispatch hub</b></span><span className="dispatchMarker dispatchMarkerStop" style={{ left: `${pickup.x}%`, top: `${pickup.y}%` }}><i aria-hidden="true" /><b>{order.area}</b></span></> : null}
+      {rider ? <span className={`dispatchMarker dispatchMarkerRider is-${liveLocation?.state}`} style={{ left: `${rider.x}%`, top: `${rider.y}%` }}><i>R</i><b>{liveLocation?.state === "live" ? "Rider sharing live" : "Recent rider position"}</b></span> : null}
+      <span className="dispatchMapLabel">{rider ? "Rider location" : "Area-level route preview"}</span>
+    </div>
+    <figcaption id={`dispatch-caption-${order.orderId}`}>
+      <div className="dispatchEta"><span>{eta.label}</span><strong>{eta.text}</strong><small>{etaBasis} · {distanceText}</small></div>
+      <div><span className="staffFieldLabel">Last reported checkpoint</span><strong>{checkpoint || "No rider checkpoint yet"}</strong><small>{order.dispatch?.checkpointUpdatedAt ? `Reported ${dispatchFreshness(order.dispatch.checkpointUpdatedAt)}` : order.routeWindow && order.routeWindow !== "ETA pending" ? `No rider report · recorded window: ${order.routeWindow}` : "No checkpoint time recorded"}</small></div>
+      {liveLocation ? <div className="dispatchLiveReading"><span>{liveLocation.state === "live" ? "Live GPS" : "Recent GPS"}</span><strong>{liveLocation.driverName || order.driver}</strong><small>Received {dispatchFreshness(liveLocation.receivedAt || liveLocation.capturedAt)}{liveLocation.accuracyMeters ? ` · ±${Math.round(liveLocation.accuracyMeters)} m accuracy` : ""}</small><a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${liveLocation.latitude},${liveLocation.longitude}`)}`} target="_blank" rel="noopener noreferrer">Open live position</a></div> : null}
+      <p>{liveLocation ? "The rider marker is based on their latest foreground location share. Traffic is not live." : "No live rider location is available. Route and ETA information remains a planning view."}</p>
+    </figcaption>
+  </figure>;
+}
+
+function DispatchDestinationUnavailable({ order, detail = false }: { order: OrderSummary; detail?: boolean }) {
+  const eta = dispatchEtaForLeg(order);
+  return <div className={`dispatchDestinationUnavailable${detail ? " dispatchDestinationUnavailableDetail" : ""}`} role="note">
+    <span className="staffFieldLabel">{routeLegLabel(order)}</span>
+    <h3>Vendor location not recorded</h3>
+    <p>This leg cannot show a route or directions until the vendor destination is saved. The customer service-area map is intentionally not reused here.</p>
+    <dl><div><dt>{eta.label}</dt><dd>{eta.text}</dd></div><div><dt>Last reported checkpoint</dt><dd>{order.dispatch?.checkpoint || order.locationNote || "No rider checkpoint yet"}</dd></div></dl>
+  </div>;
+}
+
+function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
+  const [isWatching, setIsWatching] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const [message, setMessage] = useState("Live location is off.");
+  const [lastSentAt, setLastSentAt] = useState("");
+  const [accuracyMeters, setAccuracyMeters] = useState(0);
+  const watchIdRef = useRef<number | null>(null);
+  const lastSentMsRef = useRef(0);
+  const pendingUpdateRef = useRef<Promise<void> | null>(null);
+  const sharingRef = useRef(false);
+  const eligible = liveLocationStages.has(order.workflowStage.key);
+
+  async function tellServerSharingStopped(keepalive = false) {
+    const response = await fetch("/api/dispatch/location", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      cache: "no-store",
+      keepalive,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new Error(data.error ?? "Dispatch could not confirm the stop.");
+  }
+
+  function clearLocationWatch() {
+    if (watchIdRef.current !== null && typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+    }
+    watchIdRef.current = null;
+    sharingRef.current = false;
+    setIsWatching(false);
+  }
+
+  useEffect(() => () => {
+    if (watchIdRef.current !== null && navigator.geolocation) navigator.geolocation.clearWatch(watchIdRef.current);
+    const pendingUpdate = pendingUpdateRef.current;
+    if (sharingRef.current || pendingUpdate) {
+      const clearServerLocation = () => fetch("/api/dispatch/location", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+        cache: "no-store",
+        keepalive: true,
+      }).catch(() => undefined);
+      if (pendingUpdate) void pendingUpdate.finally(clearServerLocation);
+      else void clearServerLocation();
+    }
+    watchIdRef.current = null;
+    sharingRef.current = false;
+  }, [order.orderId]);
+
+  useEffect(() => {
+    if (eligible || watchIdRef.current === null) return;
+    const pendingUpdate = pendingUpdateRef.current;
+    navigator.geolocation.clearWatch(watchIdRef.current);
+    watchIdRef.current = null;
+    sharingRef.current = false;
+    setIsWatching(false);
+    setLastSentAt("");
+    setAccuracyMeters(0);
+    setMessage("Live location stopped because this route leg is no longer moving.");
+    const clearServerLocation = () => fetch("/api/dispatch/location", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      cache: "no-store",
+      keepalive: true,
+    }).catch(() => undefined);
+    if (pendingUpdate) void pendingUpdate.finally(clearServerLocation);
+    else void clearServerLocation();
+  }, [eligible]);
+
+  function startSharing() {
+    if (!eligible || isWatching) return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setMessage("This browser does not support location sharing. Use a current mobile browser or report your checkpoint manually.");
+      return;
+    }
+    setMessage("Waiting for location permission and the first GPS reading…");
+    lastSentMsRef.current = 0;
+    const watchId = navigator.geolocation.watchPosition((position) => {
+      const now = Date.now();
+      if (pendingUpdateRef.current || (lastSentMsRef.current && now - lastSentMsRef.current < liveLocationCadenceMs)) return;
+      const latitude = Number(position.coords.latitude);
+      const longitude = Number(position.coords.longitude);
+      const accuracy = Number(position.coords.accuracy);
+      if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+        setMessage("The browser returned an invalid location. Keep this page open and try again.");
+        return;
+      }
+      const update = (async () => {
+        try {
+          const response = await fetch("/api/dispatch/location", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              orderId: order.orderId,
+              latitude,
+              longitude,
+              accuracyMeters: Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : 0,
+              capturedAt: new Date(position.timestamp || now).toISOString(),
+            }),
+            cache: "no-store",
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok || !data.ok) throw new Error(data.error ?? "Dispatch could not receive this location.");
+          if (watchIdRef.current !== watchId) return;
+          lastSentMsRef.current = now;
+          sharingRef.current = true;
+          setLastSentAt(new Date().toISOString());
+          setAccuracyMeters(Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : 0);
+          setMessage("Live location is being shared with dispatch.");
+        } catch (error) {
+          if (watchIdRef.current === watchId) setMessage(error instanceof Error ? `${error.message} The browser will retry while this page stays open.` : "Location could not be sent. The browser will retry while this page stays open.");
+        } finally {
+          pendingUpdateRef.current = null;
+        }
+      })();
+      pendingUpdateRef.current = update;
+    }, (error) => {
+      const pendingUpdate = pendingUpdateRef.current;
+      const hadShared = sharingRef.current;
+      clearLocationWatch();
+      if (pendingUpdate || hadShared) {
+        const clearServerLocation = () => tellServerSharingStopped(true).catch(() => undefined);
+        if (pendingUpdate) void pendingUpdate.finally(clearServerLocation);
+        else void clearServerLocation();
+      }
+      const reason = error.code === 1
+        ? "Location permission was denied. Allow location access for this site in browser settings, then try again."
+        : error.code === 2
+          ? "Your location is currently unavailable. Move somewhere with a clearer signal, then try again."
+          : error.code === 3
+            ? "The location request timed out. Check GPS and mobile data, then try again."
+            : "Live location could not start. Check browser location settings, then try again.";
+      setMessage(reason);
+    }, { enableHighAccuracy: true, maximumAge: 5_000, timeout: 20_000 });
+    watchIdRef.current = watchId;
+    setIsWatching(true);
+  }
+
+  async function stopSharing() {
+    setIsStopping(true);
+    const pendingUpdate = pendingUpdateRef.current;
+    clearLocationWatch();
+    try {
+      if (pendingUpdate) await pendingUpdate.catch(() => undefined);
+      await tellServerSharingStopped();
+      setMessage("Live location is off and the dispatch marker was cleared.");
+    } catch (error) {
+      setMessage(error instanceof Error ? `${error.message} Sharing has stopped on this device and the last position will expire.` : "Sharing has stopped on this device and the last position will expire.");
+    } finally {
+      setIsStopping(false);
+      setLastSentAt("");
+      setAccuracyMeters(0);
+    }
+  }
+
+  return <section className="driverLiveShare" aria-labelledby={`live-share-${order.orderId}`}>
+    <div className="driverLiveShareCopy"><span className="staffFieldLabel">Foreground GPS · {order.orderId}</span><h3 id={`live-share-${order.orderId}`}>Live location sharing</h3><p>{eligible ? "Share your position with Bubble Wash dispatch while traveling on this route leg." : "Live sharing becomes available after this route leg begins moving."}</p></div>
+    <div className="driverLiveShareStatus"><span className={`liveShareIndicator${lastSentAt ? " is-on" : ""}`} aria-hidden="true" /><div><strong>{isWatching ? lastSentAt ? "Sharing on" : "Starting…" : "Sharing off"}</strong><p role="status" aria-live="polite">{message}{lastSentAt ? ` Last sent ${dispatchFreshness(lastSentAt)}${accuracyMeters ? ` with about ±${Math.round(accuracyMeters)} m accuracy` : ""}.` : ""}</p></div></div>
+    <div className="driverLiveShareActions">{isWatching ? <button className="button secondary" type="button" disabled={isStopping} onClick={() => void stopSharing()}>{isStopping ? "Stopping…" : "Stop sharing"}</button> : <button className="button primary" type="button" disabled={!eligible || isStopping} onClick={startSharing}>Start live sharing</button>}<p>Location permission is requested only after you start. Keep this page open during the trip; locking the phone, closing the page, or losing data can pause updates.</p></div>
+  </section>;
+}
+
+function DispatchBoard({ orders, role, basePath, hasLoaded, lastSyncedAt = "", embedded = false, error = "", liveLocations = [], locationError = "" }: { orders: OrderSummary[]; role: "admin" | "driver"; basePath: string; hasLoaded: boolean; lastSyncedAt?: string; embedded?: boolean; error?: string; liveLocations?: DispatchLiveLocation[]; locationError?: string }) {
+  const routeOrders = useMemo(() => orders
+    .filter((order) => !isClosedOrder(order) && dispatchStages.has(order.workflowStage.key))
+    .sort((left, right) => {
+      const activeLeg = (order: OrderSummary) => ["driver-en-route", "out-for-delivery"].includes(order.workflowStage.key) ? 0 : ["picked-up", "ready"].includes(order.workflowStage.key) ? 1 : 2;
+      const risk = (order: OrderSummary) => order.stageTimer.tone === "breached" ? 0 : order.stageTimer.tone === "due" ? 1 : 2;
+      return activeLeg(left) - activeLeg(right) || risk(left) - risk(right) || new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime();
+    }), [orders]);
+  const [selectedId, setSelectedId] = useState("");
+  const selectedOrder = routeOrders.find((order) => order.orderId === selectedId) ?? routeOrders[0];
+  const assignedOrders = routeOrders.filter((order) => order.driver !== "Unassigned");
+  const activeRiders = new Set(assignedOrders.map((order) => order.driver.trim().toLowerCase()).filter(Boolean));
+  const needsRider = routeOrders.length - assignedOrders.length;
+  const selectedLiveLocation = role === "admin" && selectedOrder ? liveLocationForOrder(selectedOrder, liveLocations) : undefined;
+  const liveRiderCount = role === "admin" ? new Set(routeOrders.map((order) => liveLocationForOrder(order, liveLocations)?.driverId || "").filter(Boolean)).size : 0;
+  const detailHref = selectedOrder ? `${basePath}${basePath.includes("?") ? "&" : "?"}order=${encodeURIComponent(selectedOrder.orderId)}` : basePath;
+
+  return <section className={embedded ? "dispatchEmbedded" : "staffContentSection dispatchSection"} aria-labelledby={`${role}-dispatch-heading`}>
+    <div className="staffSectionHeader dispatchHeader"><div><h2 id={`${role}-dispatch-heading`}>{role === "admin" ? "Current dispatch board" : "Today’s route map"}</h2><p>{role === "admin" ? "Assigned route work, recorded ETAs, and rider-authorized foreground locations across the pilot." : "Open a stop to see its route estimate, window, directions, and live sharing control."}</p></div>{lastSyncedAt ? <span className="dispatchSync">Board refreshed {formatMetricTime(lastSyncedAt)}</span> : null}</div>
+    {!hasLoaded ? <div className="staffEmptyState" role="status"><h3>Loading dispatch…</h3><p>Checking assigned route work and planning estimates.</p></div> : error && !orders.length ? <div className="staffEmptyState" role="alert"><h3>Dispatch unavailable</h3><p>{error} The board will retry automatically.</p></div> : selectedOrder ? <>
+      {role === "driver" ? <DriverLiveLocationSharing key={selectedOrder.orderId} order={selectedOrder} /> : null}
+      <div className="dispatchSummaryLine" aria-label="Dispatch summary"><span><strong>{assignedOrders.length}</strong> assigned moves</span><span><strong>{activeRiders.size}</strong> {activeRiders.size === 1 ? "rider" : "riders"} assigned</span><span><strong>{needsRider}</strong> awaiting rider</span>{role === "admin" ? <span><strong>{liveRiderCount}</strong> sharing live</span> : null}</div>
+      <div className="dispatchBoard">
+        {hasCustomerRoutePreview(selectedOrder) || selectedLiveLocation ? <DispatchMap order={selectedOrder} liveLocation={selectedLiveLocation} /> : <DispatchDestinationUnavailable order={selectedOrder} />}
+        <div className="dispatchStopPanel"><div className="dispatchStopPanelHeader"><h3>Route work</h3><span>Operational order, not an optimized stop sequence</span></div><div className="dispatchStopList" role="list">
+          {routeOrders.slice(0, 10).map((order) => { const eta = dispatchEtaForLeg(order); return <div key={order.orderId} role="listitem"><button aria-pressed={order.orderId === selectedOrder.orderId} className="dispatchStopRow" onClick={() => setSelectedId(order.orderId)} type="button"><span><strong>{order.driver === "Unassigned" ? "Rider needed" : order.driver}</strong><small>{order.orderId} · {routeLegLabel(order)}</small></span><span><strong>{eta.text}</strong><small>{eta.label} · {order.area}</small></span></button></div>; })}
+        </div>{routeOrders.length > 10 ? <p className="dispatchMore">Showing 10 of {routeOrders.length} route moves.</p> : null}<div className="dispatchStopActions"><Link className="button primary" href={detailHref}>{role === "admin" ? "Open order" : "Open stop"}</Link>{hasHubToCustomerDirections(selectedOrder) && selectedOrder.route.directionsUrl ? <a className="button secondary" href={selectedOrder.route.directionsUrl} target="_blank" rel="noopener noreferrer">Open pickup directions</a> : selectedOrder.workflowStage.key === "out-for-delivery" && selectedOrder.route.googleMapsUrl ? <a className="button secondary" href={selectedOrder.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Open destination area</a> : null}</div></div>
+      </div>
+      <p className="dispatchDisclosure">{role === "admin" ? "A rider marker appears only while that assigned rider is actively sharing a recent foreground GPS position for the selected order. ETAs and traffic are not live." : "ETAs are rider-reported, scheduled, or calculated from the dispatch hub to a representative service area."}</p>
+    </> : <div className="staffEmptyState"><h3>No active route work</h3><p>Assigned customer pickups, vendor handoffs, and return deliveries will appear here.</p></div>}
+    {error && orders.length ? <p className="status error" role="alert">{error} Showing the last available dispatch view.</p> : null}
+    {role === "admin" && locationError ? <p className="status error" role="alert">{locationError} Live rider markers are hidden until tracking reconnects.</p> : null}
+  </section>;
+}
+
+function AdminDispatchWorkspace() {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const [liveLocations, setLiveLocations] = useState<DispatchLiveLocation[]>([]);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [locationError, setLocationError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    async function refresh() {
+      try {
+        const response = await fetch("/api/orders");
+        const data = await response.json();
+        if (!active) return;
+        if (!response.ok || !data.ok) throw new Error(data.error ?? "Unable to load dispatch.");
+        setOrders(data.orders ?? []);
+        setLastSyncedAt(new Date().toISOString());
+        setLoadError("");
+      } catch (error) {
+        if (active) setLoadError(error instanceof Error ? error.message : "Unable to load dispatch.");
+      } finally {
+        if (active) setHasLoaded(true);
+      }
+    }
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 30_000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function refreshLocations() {
+      try {
+        const response = await fetch("/api/dispatch/location", { cache: "no-store" });
+        const data = await response.json().catch(() => ({}));
+        if (!active) return;
+        if (!response.ok || !data.ok) throw new Error(data.error ?? "Live rider locations are unavailable.");
+        setLiveLocations(normalizeLiveLocations(data));
+        setLocationError("");
+      } catch (error) {
+        if (!active) return;
+        setLiveLocations([]);
+        setLocationError(error instanceof Error ? error.message : "Live rider locations are unavailable.");
+      }
+    }
+    void refreshLocations();
+    const interval = window.setInterval(() => void refreshLocations(), liveLocationCadenceMs);
+    return () => { active = false; window.clearInterval(interval); };
+  }, []);
+
+  return <DispatchBoard orders={orders} role="admin" basePath="/admin?view=orders" hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={loadError} liveLocations={liveLocations} locationError={locationError} />;
+}
+
+function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { role: StaffRole; userName: string; selectedOrderId?: string; basePath: string }) {
+  const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const [liveLocations, setLiveLocations] = useState<DispatchLiveLocation[]>([]);
+  const [locationError, setLocationError] = useState("");
   const [status, setStatus] = useState("Loading shared order board…");
   const [lastSyncedAt, setLastSyncedAt] = useState("");
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [queueView, setQueueView] = useState<QueueView>("action");
   const [query, setQuery] = useState("");
 
   async function loadOrders(showLoading = true) {
     if (showLoading) setStatus("Loading shared order board…");
-    const response = await fetch("/api/orders");
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      setStatus(data.error ?? "Unable to load shared orders.");
-      return;
+    try {
+      const response = await fetch("/api/orders");
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        setStatus(data.error ?? "Unable to load shared orders.");
+        setHasLoaded(true);
+        return;
+      }
+      setOrders(data.orders);
+      setHasLoaded(true);
+      setLastSyncedAt(new Date().toISOString());
+      setStatus(data.orders.length ? "Updated." : "No shared orders yet.");
+    } catch {
+      setStatus("Unable to load shared orders.");
+      setHasLoaded(true);
     }
-    setOrders(data.orders);
-    setLastSyncedAt(new Date().toISOString());
-    setStatus(data.orders.length ? "Updated." : "No shared orders yet.");
   }
 
   useEffect(() => {
@@ -834,13 +1288,18 @@ function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: strin
         if (!active) return;
         if (!response.ok || !data.ok) {
           setStatus(data.error ?? "Unable to load shared orders.");
+          setHasLoaded(true);
           return;
         }
         setOrders(data.orders);
+        setHasLoaded(true);
         setLastSyncedAt(new Date().toISOString());
         setStatus(data.orders.length ? "Updated." : "No shared orders yet.");
       } catch {
-        if (active) setStatus("Unable to load shared orders.");
+        if (active) {
+          setStatus("Unable to load shared orders.");
+          setHasLoaded(true);
+        }
       }
     }
     refresh(true);
@@ -851,6 +1310,28 @@ function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: strin
     };
   }, []);
 
+  useEffect(() => {
+    if (role !== "admin" || !selectedOrderId) return;
+    let active = true;
+    async function refreshLocation() {
+      try {
+        const response = await fetch("/api/dispatch/location", { cache: "no-store" });
+        const data = await response.json().catch(() => ({}));
+        if (!active) return;
+        if (!response.ok || !data.ok) throw new Error(data.error ?? "Live rider location is unavailable.");
+        setLiveLocations(normalizeLiveLocations(data));
+        setLocationError("");
+      } catch (error) {
+        if (!active) return;
+        setLiveLocations([]);
+        setLocationError(error instanceof Error ? error.message : "Live rider location is unavailable.");
+      }
+    }
+    void refreshLocation();
+    const interval = window.setInterval(() => void refreshLocation(), liveLocationCadenceMs);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [role, selectedOrderId]);
+
   const activeOrders = orders.filter((order) => !isClosedOrder(order));
   const focusOrders = activeOrders.filter((order) => orderMatchesRoleFocus(order, role, userName));
   const sourceOrders = queueView === "action" ? focusOrders : queueView === "active" ? activeOrders : orders;
@@ -858,49 +1339,61 @@ function SharedOrderBoard({ role, userName }: { role: StaffRole; userName: strin
   const matchingOrders = normalizedQuery ? sourceOrders.filter((order) => [order.orderId, order.customer, order.phone, order.email, order.area, order.vendor, order.driver, order.status, order.payment].join(" ").toLowerCase().includes(normalizedQuery)) : sourceOrders;
   const visibleOrders = matchingOrders.slice(0, 12);
   const stats = queueStats(activeOrders, role, userName);
-  const showPayment = role === "admin" || role === "support";
-  const columnCount = showPayment ? 6 : 5;
-  const queueHeading = queueView === "action" ? (stats.focusCount ? `${stats.focusCount} ${stats.focusLabel}` : "No work needs this role right now") : queueView === "active" ? `${activeOrders.length} active orders` : `${orders.length} total orders`;
+  const queueHeading = !hasLoaded ? "Loading order queue…" : queueView === "action" ? (stats.focusCount ? `${stats.focusCount} ${stats.focusLabel}` : "No work needs this role right now") : queueView === "active" ? `${activeOrders.length} active orders` : `${orders.length} total orders`;
+  const selectedOrder = selectedOrderId ? orders.find((order) => order.orderId.toLowerCase() === selectedOrderId.toLowerCase()) : null;
+  const selectedLiveLocation = role === "admin" && selectedOrder ? liveLocationForOrder(selectedOrder, liveLocations) : undefined;
+  const selectedDispatchEta = selectedOrder && dispatchStages.has(selectedOrder.workflowStage.key) ? dispatchEtaForLeg(selectedOrder) : null;
+  const canSeePayment = role === "admin" || role === "support";
+  const canSeeCollection = role !== "vendor";
+  const detailHref = (orderId: string) => `${basePath}${basePath.includes("?") ? "&" : "?"}order=${encodeURIComponent(orderId)}`;
+  const driverGroups = ["Customer pickups", "Vendor handoffs", "Return deliveries", "Other assigned work"].map((label) => ({ label, orders: visibleOrders.filter((order) => driverStopGroup(order) === label) })).filter((group) => group.orders.length);
 
   return (
-    <section className="section sharedBoardSection">
-      <div className="staffQueueHeader">
-        <div>
-          <p className="eyebrow">Live queue</p>
-          <h2>{queueHeading}</h2>
-          <p className="formHint">{role === "admin" ? "Use this queue for assignment, payment checks, closeout, and exceptions." : role === "vendor" ? "Use each order row to accept, receive, wash, or mark work ready." : role === "driver" ? "Use each order row for the next stop, handoff, delay, or delivery proof." : "Start with at-risk orders and customer follow-up before opening a new case."}</p>
+    <section className="staffContentSection sharedBoardSection">
+      {role === "driver" && !selectedOrderId ? <DispatchBoard orders={orders} role="driver" basePath={basePath} hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={/unable/i.test(status) ? status : ""} embedded /> : null}
+      {selectedOrderId ? selectedOrder ? <article className="staffDetailView orderDetail">
+        <Link className="staffBackLink" href={basePath}>← Back to order list</Link>
+        <header className="staffDetailHeader">
+          <div><span className="staffFieldLabel">{selectedOrder.orderId}</span><h2>{selectedOrder.customer}</h2><p>{selectedOrder.workflowStage.label} · {workflowPhaseLabel(selectedOrder.workflowStage.key)}</p></div>
+          <StageCountdown order={selectedOrder} />
+        </header>
+
+        <section className="staffPrimaryAction" aria-labelledby="order-next-action"><div><span className="staffFieldLabel">Next verified action</span><h3 id="order-next-action">{selectedOrder.nextStep}</h3></div><AutomatedOrderActions order={selectedOrder} role={role} userName={userName} onSaved={() => loadOrders(false)} /></section>
+
+        <div className="staffDetailSections">
+          <section className="staffDetailSection"><h3>Customer and collection</h3><dl className="staffDefinitionList">
+            <div><dt>Customer</dt><dd>{selectedOrder.customer}</dd></div>
+            <div><dt>Service</dt><dd>{selectedOrder.serviceType || "Not recorded"}</dd></div>
+            <div><dt>Area</dt><dd>{selectedOrder.area}</dd></div>
+            <div><dt>Collection window</dt><dd>{selectedOrder.routeWindow}</dd></div>
+            {canSeeCollection ? <><div><dt>Pickup address</dt><dd>{selectedOrder.pickupAddress || "Not recorded"}</dd></div><div><dt>Landmark</dt><dd>{selectedOrder.landmark || "Not recorded"}</dd></div><div><dt>Phone</dt><dd>{selectedOrder.phone || "Not recorded"}</dd></div></> : null}
+          </dl>{canSeeCollection ? <CustomerContactActions order={selectedOrder} role={role} /> : null}</section>
+
+          <section className="staffDetailSection"><h3>Assignment and route</h3><dl className="staffDefinitionList"><div><dt>Vendor</dt><dd>{selectedOrder.vendor}</dd></div><div><dt>Rider</dt><dd>{selectedOrder.driver}</dd></div><div><dt>Last reported checkpoint</dt><dd>{selectedOrder.dispatch?.checkpoint || selectedOrder.locationNote}</dd></div>{role !== "vendor" && selectedDispatchEta ? <><div><dt>{selectedDispatchEta.label}</dt><dd>{selectedDispatchEta.text}{selectedDispatchEta.source === "rider-reported" && selectedDispatchEta.updatedAt ? ` · reported ${dispatchFreshness(selectedDispatchEta.updatedAt)}` : ""}</dd></div><div><dt>Planning distance</dt><dd>{selectedDispatchEta.distance > 0 ? `${selectedDispatchEta.distance} km from dispatch hub to service area` : "Not available"}</dd></div></> : null}<div><dt>Priority</dt><dd>{selectedOrder.priority}</dd></div></dl>
+            {role === "driver" ? <DriverLiveLocationSharing key={selectedOrder.orderId} order={selectedOrder} /> : null}
+            {(role === "admin" || role === "driver") ? hasCustomerRoutePreview(selectedOrder) || selectedLiveLocation ? <DispatchMap order={selectedOrder} detail liveLocation={selectedLiveLocation} /> : <DispatchDestinationUnavailable order={selectedOrder} detail /> : null}
+            {role === "admin" && locationError ? <p className="status error" role="alert">{locationError} Live rider markers are hidden until tracking reconnects.</p> : null}
+            {canSeeCollection && hasCustomerRoutePreview(selectedOrder) && (selectedOrder.route.directionsUrl || selectedOrder.route.googleMapsUrl) ? <div className="staffDetailActions">{hasHubToCustomerDirections(selectedOrder) && selectedOrder.route.directionsUrl ? <a className="button secondary" href={selectedOrder.route.directionsUrl} target="_blank" rel="noopener noreferrer">Open pickup directions</a> : null}{selectedOrder.route.googleMapsUrl ? <a className="button secondary" href={selectedOrder.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Open {selectedOrder.workflowStage.key === "out-for-delivery" ? "destination area" : "service area"}</a> : null}</div> : null}
+            {role === "support" ? <p className="dispatchDetailDisclosure">{hasCustomerRoutePreview(selectedOrder) ? "Planning information only. Support cannot access live rider GPS, and live traffic is not available." : "Vendor location not recorded; route directions are unavailable for this leg. Support cannot access live rider GPS."}</p> : null}
+          </section>
+
+          {canSeePayment ? <section className="staffDetailSection"><h3>Payment</h3><dl className="staffDefinitionList"><div><dt>Status</dt><dd>{selectedOrder.payment}</dd></div><div><dt>Customer email</dt><dd>{selectedOrder.email || "Not recorded"}</dd></div></dl></section> : null}
+
+          <section className="staffDetailSection staffTimelineSection"><h3>Order history</h3><p>{compactTimelineLabel(selectedOrder.eventCount)} attached to this order.</p><div className="staffTimeline">{selectedOrder.timeline.map((event) => <div key={`${selectedOrder.orderId}-${event.id}-${event.createdAt}`}><time>{formatShortTime(event.createdAt)}</time><div><strong>{event.status}</strong><span>{event.type} · {event.actor}</span><p>{event.note}</p></div></div>)}</div></section>
         </div>
-        <button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh queue</button>
-      </div>
-      <div className="queueMetricGrid" aria-label="Queue summary">
-        <article><span>{stats.focusLabel}</span><strong>{stats.focusCount}</strong></article>
-        <article><span>available actions</span><strong>{stats.automationCount}</strong></article>
-        <article><span>at risk</span><strong>{stats.riskCount}</strong></article>
-        <article><span>latest update</span><strong>{orders[0] ? formatMetricTime(orders[0].updatedAt) : "—"}</strong></article>
-      </div>
-      <div className="queueTools">
-        <div className="queueViewLinks" aria-label="Order queue view">{([['action', 'Needs action'], ['active', 'All active'], ['all', 'Recent history']] as Array<[QueueView, string]>).map(([key, label]) => <button className={queueView === key ? "active" : ""} key={key} type="button" onClick={() => setQueueView(key)}>{label}</button>)}</div>
-        <label className="queueSearch"><span>Find an order</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Reference, customer, area, vendor…" /></label>
-      </div>
-      <div className="opsTableWrap queueTableWrap">
-        <table className="opsTable queueTable">
-          <thead>
-            <tr><th scope="col">Order</th><th scope="col">Stage</th><th scope="col">Route</th><th scope="col">Assignment</th>{showPayment ? <th scope="col">Payment</th> : null}<th scope="col">Next action</th></tr>
-          </thead>
-          <tbody>
-            {visibleOrders.map((order) => <tr className={`timer-${order.stageTimer.tone}`} key={order.orderId}>
-              <td data-label="Order"><strong>{order.orderId}</strong><small>{order.customer}</small>{role !== "vendor" ? <small>{order.phone || "No phone"}</small> : null}<CustomerContactActions order={order} role={role} /></td>
-              <td data-label="Stage"><span className="textFlag">{order.workflowStage.label}</span><small>{workflowPhaseLabel(order.workflowStage.key)} · {isRiskOrder(order) ? "Needs intervention" : order.priority}</small><StageCountdown order={order} /></td>
-              <td data-label="Route">{role === "vendor" ? order.area : order.pickupAddress || order.area}<small>{role !== "vendor" && order.landmark ? `${order.landmark} · ${order.routeWindow}` : order.routeWindow}</small><div className="tableActionRow"><a className="button secondary" href={order.route.directionsUrl} target="_blank" rel="noopener noreferrer">Directions</a><a className="button secondary" href={order.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Area map</a></div></td>
-              <td data-label="Assignment">{order.vendor !== "Unassigned" ? order.vendor : "Vendor pending"}<small>{order.driver !== "Unassigned" ? order.driver : "Driver pending"}</small></td>
-              {showPayment ? <td data-label="Payment">{order.payment}<small>{order.email || "No email"}</small></td> : null}
-              <td data-label="Next action"><p className="nextActionLine"><strong>Next:</strong> {order.nextStep}</p><AutomatedOrderActions order={order} role={role} userName={userName} onSaved={() => loadOrders(false)} /><details className="quietDetails"><summary>Timeline · {compactTimelineLabel(order.eventCount)}</summary><div className="timelineList">{order.timeline.slice(0, 4).map((event) => <div key={`${order.orderId}-${event.id}-${event.createdAt}`}><b>{event.status}</b><span>{event.type} · {event.actor} · {formatShortTime(event.createdAt)}</span><p>{event.note}</p></div>)}</div></details></td>
-            </tr>)}
-            {!visibleOrders.length ? <tr><td colSpan={columnCount}>{normalizedQuery ? "No orders match this search." : queueView === "action" ? "No orders currently need action from this role." : "No order rows in this view yet."}</td></tr> : null}
-          </tbody>
-        </table>
-      </div>
-      <p className="status">{status}{lastSyncedAt ? ` Last synced ${formatMetricTime(lastSyncedAt)}. Showing ${visibleOrders.length} of ${matchingOrders.length}.` : ""}</p>
+      </article> : <div className="staffEmptyState"><h2>{hasLoaded ? "Order not found" : "Loading order…"}</h2><p>{hasLoaded ? "This order is not available to this staff role." : "Checking the latest staff order data."}</p>{hasLoaded ? <Link href={basePath}>Back to the order list</Link> : null}</div> : <>
+        <div className="staffSectionHeader"><div><h2>{queueHeading}</h2><p>{stats.riskCount} at risk · {stats.automationCount} verified actions available</p></div><button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh</button></div>
+        <div className="staffFilterBar">
+          <div className="staffTextFilters" aria-label="Order queue view">{([ ["action", "Needs action"], ["active", "All active"], ["all", "History"] ] as Array<[QueueView, string]>).map(([key, label]) => <button aria-pressed={queueView === key} className={queueView === key ? "active" : ""} key={key} type="button" onClick={() => setQueueView(key)}>{label}</button>)}</div>
+          <label className="staffSearch"><span>Find an order</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Reference, customer, area, assignment…" /></label>
+        </div>
+        <div className="staffOrderList" role="list">
+          <div className="staffOrderListHeader" aria-hidden="true"><span>Order</span><span>Stage</span><span>Collection</span><span>Assignment</span><span></span></div>
+          {role === "driver" ? driverGroups.map((group) => <section className="staffOrderGroup" key={group.label} aria-labelledby={`driver-group-${group.label.replaceAll(" ", "-").toLowerCase()}`}><h3 className="staffOrderGroupTitle" id={`driver-group-${group.label.replaceAll(" ", "-").toLowerCase()}`}>{group.label}<span>{group.orders.length}</span></h3>{group.orders.map((order) => <OrderQueueRow href={detailHref(order.orderId)} key={order.orderId} order={order} />)}</section>) : visibleOrders.map((order) => <OrderQueueRow href={detailHref(order.orderId)} key={order.orderId} order={order} />)}
+          {!visibleOrders.length ? <p className="staffEmptyState">{!hasLoaded ? "Loading orders…" : normalizedQuery ? "No orders match this search." : queueView === "action" ? "No orders currently need action from this role." : "No orders in this view yet."}</p> : null}
+        </div>
+      </>}
+      <p className="status" role="status" aria-live="polite">{status}{lastSyncedAt ? ` Last synced ${formatMetricTime(lastSyncedAt)}. ${selectedOrderId ? "" : `Showing ${visibleOrders.length} of ${matchingOrders.length}.`}` : ""}</p>
     </section>
   );
 }
@@ -912,13 +1405,8 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
   return data;
 }
 
-function PortalShell({ title, role, pageRole = role, userName, children }: PortalShellProps) {
-  const pageHome = pageRole === "admin" ? "/admin" : pageRole === "vendor" ? "/vendors" : pageRole === "driver" ? "/drivers" : "/support";
-  const portalLinks = pageRole === "admin" ? [{ href: "/admin", label: "Admin", icon: "admin" }] satisfies PortalLink[]
-    : pageRole === "vendor" ? [{ href: "/vendors", label: "Vendor", icon: "vendor" }] satisfies PortalLink[]
-    : pageRole === "driver" ? [{ href: "/drivers", label: "Routes", icon: "routes" }] satisfies PortalLink[]
-    : [{ href: "/support", label: "Support", icon: "support" }] satisfies PortalLink[];
-  const promise = rolePromise(pageRole);
+function PortalShell({ title, role, pageRole = role, userName, currentView, navigation, children }: PortalShellProps) {
+  const promise = rolePromise(pageRole, currentView);
 
   async function logoutStaff() {
     try {
@@ -930,28 +1418,25 @@ function PortalShell({ title, role, pageRole = role, userName, children }: Porta
 
   return (
     <main className="portalPage">
-      <header className="portalNav">
-        <Link className="brand" href="/" aria-label="Bubble Wash home"><span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={58} height={58} /></span><span>Bubble Wash</span></Link>
-        <nav className="portalLinks">
-          {portalLinks.map(({ href, label, icon }) => <Link className="portalNavItem" key={href} href={href} aria-current={href === pageHome ? "page" : undefined}><StaffNavIcon type={icon} /><span>{label}</span></Link>)}
-          <button className="portalNavItem logoutButton" type="button" onClick={logoutStaff}><StaffNavIcon type="exit" /><span>Sign out</span></button>
-        </nav>
+      <header className="staffTopbar">
+        <Link className="brand" href="/" aria-label="Bubble Wash home"><span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={46} height={46} /></span><span>Bubble Wash</span></Link>
+        <div className="staffAccount"><span><strong>{userName}</strong><small>{title}</small></span><button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button></div>
       </header>
-      <section className="staffPageHeader">
-        <div>
-          <p className="eyebrow">{promise.eyebrow}</p>
-          <h1>{promise.title}</h1>
-          <p>{promise.subtitle}</p>
-        </div>
-        <p className="staffSessionLine"><strong>{userName}</strong><span>{title}</span><span>{pageRole} workspace · today&apos;s work</span></p>
+      <nav className="staffSectionNav" aria-label={`${pageRole} workspace sections`}>
+        {navigation.map((item) => <Link key={item.view} href={item.href} aria-current={item.view === currentView ? "page" : undefined}>{item.label}</Link>)}
+      </nav>
+      <section className="staffViewHeader">
+        <p className="eyebrow">{promise.eyebrow}</p>
+        <h1>{promise.title}</h1>
+        <p>{promise.subtitle}</p>
       </section>
-      {children}
+      <div className="staffView">{children}</div>
     </main>
   );
 }
 
 
-function SupportTicketForm({ onSubmit, status }: { userName: string; role: StaffRole; onSubmit: SubmitHandler; status?: string }) {
+function SupportTicketForm({ onSubmit, status, pending = false }: { userName: string; role: StaffRole; onSubmit: SubmitHandler; status?: string; pending?: boolean }) {
   return (
     <form className="panel supportForm" onSubmit={(event) => onSubmit(event, "support-ticket")}>
       <h3>Open support ticket</h3>
@@ -959,39 +1444,81 @@ function SupportTicketForm({ onSubmit, status }: { userName: string; role: Staff
       <div className="two"><label>Related order<input name="orderId" placeholder="BW-…" /></label><label>Issue type<select name="issueType">{supportTypes.map((item) => <option key={item}>{item}</option>)}</select></label></div>
       <div className="two"><label>Priority<select name="priority"><option>Normal</option><option>High</option><option>Urgent</option></select></label><label>Current status<select name="ticketStatus"><option>Open</option><option>Waiting on Customer</option><option>Waiting on Vendor</option><option>Waiting on Driver</option></select></label></div>
       <label>Case note<textarea name="message" placeholder="Customer impact, delay reason, payment reference, or item issue" required /></label>
-      <button className="button primary full" type="submit">Raise Support Ticket</button>
+      <button className="button primary full" type="submit" disabled={pending}>{pending ? "Saving ticket…" : "Raise Support Ticket"}</button>
       {status && <p className={noticeClass(status)} role="status">{status}</p>}
     </form>
   );
 }
 
-function AdminOnboardingCenter({ userName, onSubmit, status }: { userName: string; onSubmit: SubmitHandler; status: Record<string, string> }) {
+function StaffAccessRoster({ refreshToken = 0 }: { refreshToken?: number }) {
+  const [members, setMembers] = useState<StaffRosterMember[]>([]);
+  const [status, setStatus] = useState("Loading staff roster…");
+
+  async function loadRoster() {
+    setStatus("Loading staff roster…");
+    try {
+      const response = await fetch("/api/staff/roster");
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        setStatus(data.error ?? "Unable to load staff roster.");
+        return;
+      }
+      setMembers(data.members ?? []);
+      setStatus(data.members?.length ? "Staff roster updated." : "No staff roster entries yet.");
+    } catch {
+      setStatus("Unable to load staff roster.");
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/staff/roster")
+      .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+      .then(({ ok, data }) => {
+        if (!active) return;
+        if (!ok || !data.ok) {
+          setStatus(data.error ?? "Unable to load staff roster.");
+          return;
+        }
+        setMembers(data.members ?? []);
+        setStatus(data.members?.length ? "Staff roster updated." : "No staff roster entries yet.");
+      })
+      .catch(() => { if (active) setStatus("Unable to load staff roster."); });
+    return () => { active = false; };
+  }, [refreshToken]);
+
+  return <section className="staffContentSection">
+    <div className="staffSectionHeader"><div><h2>Bubble Wash staff access</h2><p>Roster status and whether secure sign-in has been configured.</p></div><button className="button secondary" type="button" onClick={() => void loadRoster()}>Refresh</button></div>
+    <div className="staffRosterList">
+      {members.map((member) => <article className="staffRosterRow staffAccessRow" key={member.id}>
+        <div><strong>{member.name}</strong><span>{member.email}</span></div>
+        <div><span className="staffFieldLabel">Role</span><strong>{member.role}</strong></div>
+        <div><span className="staffFieldLabel">Status</span><strong>{member.status}</strong></div>
+        <div><span className="staffFieldLabel">Access</span><strong>{member.access === "configured" ? "Sign-in configured" : "Roster only"}</strong></div>
+        <p>{member.workArea || member.phone || "Work area not recorded."}</p>
+      </article>)}
+      {!members.length && !/loading/i.test(status) ? <p className="staffEmptyState">No staff roster entries yet.</p> : null}
+    </div>
+    <p className="status" role="status" aria-live="polite">{status}</p>
+  </section>;
+}
+
+function AdminOnboardingCenter({ onSubmit, status, pendingType = "" }: { onSubmit: SubmitHandler; status: Record<string, string>; pendingType?: string }) {
   return (
-    <section className="section portalSection onboardingCenter" aria-labelledby="admin-onboarding-title">
-      <div className="onboardingHeader">
-        <div>
-          <p className="eyebrow">Roster updates</p>
-          <h2 id="admin-onboarding-title">Vendor and rider access</h2>
-          <p>Use these forms only when roster access, capacity ownership, or route coverage actually needs a manual update.</p>
-        </div>
-        <div className="onboardingBadges" aria-label="Roster workflow summary">
-          <span>Vendor capacity → assignment</span>
-          <span>Rider slots → dispatch</span>
-          <span>Paused rows excluded</span>
-        </div>
-      </div>
-      <div className="onboardingGrid">
-        <form className="panel opsForm onboardingForm" onSubmit={(event) => onSubmit(event, "vendor-application")}>
+    <section className="staffContentSection onboardingCenter" aria-labelledby="admin-onboarding-title">
+      <div className="staffSectionHeader"><div><h2 id="admin-onboarding-title">Onboard partners and staff</h2><p>Add one person or partner at a time. Roster entry does not expose or generate a password.</p></div></div>
+      <div className="staffOnboardingList">
+        <details className="staffRosterEditor"><summary><span><strong>Vendor partner</strong><small>Business, coverage, services, and capacity</small></span><b>Open form</b></summary><form className="staffForm" onSubmit={(event) => onSubmit(event, "vendor-application")}>
           <div className="formTitleRow"><h3>Onboard vendor</h3><span>Admin owned</span></div>
-          <div className="two"><label>Admin contact<input name="name" defaultValue={userName} required /></label><label>Admin email<input name="email" type="email" defaultValue="admin@bubblewash.local" required /></label></div>
+          <div className="two"><label>Vendor contact name<input name="name" required /></label><label>Vendor contact email<input name="email" type="email" required /></label></div>
           <div className="two"><label>Vendor phone<input name="phone" placeholder="Phone or WhatsApp" required /></label><label>Laundry business<input name="company" required /></label></div>
           <div className="two"><label>Approved zones<input name="area" placeholder="Osu, Labone" required /></label><label>Order slots today<input name="capacity" type="number" min="0" inputMode="numeric" placeholder="8" required /></label></div>
           <div className="two"><label>Availability<select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited capacity</option><option>Paused today</option></select></label><label>Approved service<select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></label></div>
           <label>Roster note<textarea name="message" placeholder="KYC checks, machine capacity, turnaround promise, pickup limits, or restrictions" required /></label>
-          <button className="button primary full" type="submit">Save Vendor Roster</button>
+          <button className="button primary full" type="submit" disabled={Boolean(pendingType)}>{pendingType === "vendor-application" ? "Saving vendor…" : "Save Vendor Roster"}</button>
           {status["vendor-application"] && <p className={noticeClass(status["vendor-application"])} role="status">{status["vendor-application"]}</p>}
-        </form>
-        <form className="panel opsForm onboardingForm" onSubmit={(event) => onSubmit(event, "driver-onboarding")}>
+        </form></details>
+        <details className="staffRosterEditor"><summary><span><strong>Rider</strong><small>Identity, vehicle, route zones, and slots</small></span><b>Open form</b></summary><form className="staffForm" onSubmit={(event) => onSubmit(event, "driver-onboarding")}>
           <div className="formTitleRow"><h3>Onboard rider</h3><span>Dispatch source</span></div>
           <div className="two"><label>Rider full name<input name="name" required /></label><label>Rider email<input name="email" type="email" required /></label></div>
           <div className="two"><label>Rider phone<input name="phone" placeholder="Phone or WhatsApp" required /></label><label>Route team<input name="company" defaultValue="Bubble Wash Route Team" required /></label></div>
@@ -999,76 +1526,146 @@ function AdminOnboardingCenter({ userName, onSubmit, status }: { userName: strin
           <div className="two"><label>Route slots today<input name="routeCapacity" type="number" min="0" inputMode="numeric" defaultValue="4" /></label><label>Rider status<select name="driverStatus"><option>Active</option><option>Training</option><option>Inactive</option><option>Suspended</option></select></label></div>
           <div className="two"><label>Availability<select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited route capacity</option><option>Paused today</option></select></label><label>Backup zones<input name="serviceZones" placeholder="Airport, Cantonments" /></label></div>
           <label>Roster note<textarea name="message" placeholder="ID or licence check, route restrictions, emergency contact, or bag handoff rules" required /></label>
-          <button className="button primary full" type="submit">Save Rider Roster</button>
+          <button className="button primary full" type="submit" disabled={Boolean(pendingType)}>{pendingType === "driver-onboarding" ? "Saving rider…" : "Save Rider Roster"}</button>
           {status["driver-onboarding"] && <p className={noticeClass(status["driver-onboarding"])} role="status">{status["driver-onboarding"]}</p>}
-        </form>
+        </form></details>
+        <details className="staffRosterEditor"><summary><span><strong>Bubble Wash staff</strong><small>Admin, support, or operations roster entry</small></span><b>Open form</b></summary><form className="staffForm" onSubmit={(event) => onSubmit(event, "staff-onboarding")}>
+          <div className="formTitleRow"><h3>Onboard staff member</h3><span>Roster only</span></div>
+          <div className="two"><label>Full name<input name="staffName" required /></label><label>Work email<input name="staffEmail" type="email" required /></label></div>
+          <div className="two"><label>Phone<input name="staffPhone" required /></label><label>Role<select name="staffRole"><option>Support</option><option>Admin</option><option>Operations</option></select></label></div>
+          <div className="two"><label>Employment status<select name="employmentStatus"><option>Active</option><option>Training</option><option>Pending checks</option><option>Inactive</option></select></label><label>Primary work area<input name="workArea" placeholder="Support desk, dispatch, finance…" required /></label></div>
+          <label>Onboarding note<textarea name="message" placeholder="Checks completed, training still required, permissions requested, or start date" required /></label>
+          <p className="formHint">Login access remains controlled by the secure deployment configuration. No password is stored in this roster form.</p>
+          <button className="button primary full" type="submit" disabled={Boolean(pendingType)}>{pendingType === "staff-onboarding" ? "Saving staff member…" : "Save Staff Roster"}</button>
+          {status["staff-onboarding"] && <p className={noticeClass(status["staff-onboarding"])} role="status">{status["staff-onboarding"]}</p>}
+        </form></details>
       </div>
     </section>
   );
 }
 
-function SupportOpsOverview({ cases, orders }: { cases: SupportCase[]; orders: OrderSummary[] }) {
-  const openTickets = cases.filter((item) => !/closed|resolved/i.test(item.status));
-  const urgentTickets = cases.filter((item) => /urgent|high/i.test(item.priority));
-  const waitingTickets = cases.filter((item) => /waiting/i.test(item.status));
-  const breachedOrders = orders.filter((order) => isRiskOrder(order));
-  const lanes = [
-    { label: "Triage", value: openTickets.length, note: "New or unresolved tickets" },
-    { label: "Escalate", value: urgentTickets.length + breachedOrders.length, note: "Urgent tickets + SLA risk" },
-    { label: "Waiting", value: waitingTickets.length, note: "Customer/vendor/driver response" },
-    { label: "Resolve", value: cases.filter((item) => /resolved|closed/i.test(item.status)).length, note: "Closed support loops" },
+function AdminOverview({ userName }: { userName: string }) {
+  const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const [vendors, setVendors] = useState<VendorAvailabilityRow[]>([]);
+  const [drivers, setDrivers] = useState<DriverAvailabilityRow[]>([]);
+  const [records, setRecords] = useState<SubmissionRecord[]>([]);
+  const [status, setStatus] = useState("Loading today’s overview…");
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [loadError, setLoadError] = useState("");
+
+  async function loadOverview() {
+    setStatus("Loading today’s overview…");
+    setLoadError("");
+    try {
+      const [orderResponse, availabilityResponse, submissionResponse] = await Promise.all([fetch("/api/orders"), fetch("/api/availability"), fetch("/api/submissions")]);
+      const [orderData, availabilityData, submissionData] = await Promise.all([orderResponse.json(), availabilityResponse.json(), submissionResponse.json()]);
+      if (!orderResponse.ok || !orderData.ok) throw new Error(orderData.error ?? "Unable to load orders.");
+      if (!availabilityResponse.ok || !availabilityData.ok) throw new Error(availabilityData.error ?? "Unable to load capacity.");
+      if (!submissionResponse.ok || !submissionData.ok) throw new Error(submissionData.error ?? "Unable to load support activity.");
+      setOrders(orderData.orders ?? []);
+      setVendors(availabilityData.vendors ?? []);
+      setDrivers(availabilityData.drivers ?? []);
+      setRecords(submissionData.records ?? []);
+      setStatus("Overview updated.");
+      setLoadError("");
+      setHasLoaded(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load operations overview.";
+      setStatus(message);
+      setLoadError(message);
+      setHasLoaded(true);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([fetch("/api/orders"), fetch("/api/availability"), fetch("/api/submissions")])
+      .then(async ([orderResponse, availabilityResponse, submissionResponse]) => {
+        const [orderData, availabilityData, submissionData] = await Promise.all([orderResponse.json(), availabilityResponse.json(), submissionResponse.json()]);
+        if (!active) return;
+        if (!orderResponse.ok || !orderData.ok) throw new Error(orderData.error ?? "Unable to load orders.");
+        if (!availabilityResponse.ok || !availabilityData.ok) throw new Error(availabilityData.error ?? "Unable to load capacity.");
+        if (!submissionResponse.ok || !submissionData.ok) throw new Error(submissionData.error ?? "Unable to load support activity.");
+        setOrders(orderData.orders ?? []);
+        setVendors(availabilityData.vendors ?? []);
+        setDrivers(availabilityData.drivers ?? []);
+        setRecords(submissionData.records ?? []);
+        setStatus("Overview updated.");
+        setLoadError("");
+        setHasLoaded(true);
+      })
+      .catch((error) => { if (active) { const message = error instanceof Error ? error.message : "Unable to load operations overview."; setStatus(message); setLoadError(message); setHasLoaded(true); } });
+    return () => { active = false; };
+  }, []);
+
+  const activeOrders = orders.filter((order) => !isClosedOrder(order));
+  const riskOrders = activeOrders.filter(isRiskOrder);
+  const unassignedOrders = activeOrders.filter((order) => order.vendor === "Unassigned" || order.driver === "Unassigned");
+  const deliveredOrders = activeOrders.filter((order) => order.workflowStage.key === "delivered");
+  const awaitingPayment = deliveredOrders.filter((order) => !paymentReadyForCloseout(order.payment));
+  const readyForCloseout = deliveredOrders.filter((order) => paymentReadyForCloseout(order.payment));
+  const activeVendors = vendors.filter((vendor) => !/paused|inactive|suspended|tomorrow/i.test(vendor.availabilityStatus));
+  const activeDrivers = drivers.filter((driver) => !/paused|inactive|suspended|training|tomorrow/i.test(driver.availabilityStatus));
+  const cases = supportCases(records.filter((record) => String(record.data.submissionType ?? "").includes("support-ticket")));
+  const openCases = cases.filter((supportCase) => !/resolved|closed/i.test(supportCase.status));
+  const urgentCases = openCases.filter((supportCase) => /urgent|high/i.test(supportCase.priority));
+  const waitingCases = openCases.filter((supportCase) => /waiting/i.test(supportCase.status));
+  const overviewRows = [
+    { area: "Orders", state: `${activeOrders.length} active · ${unassignedOrders.length} unassigned`, attention: `${riskOrders.length} need attention`, href: "/admin?view=orders", link: "Review orders" },
+    { area: "Vendors", state: `${activeVendors.length} taking work · ${activeVendors.reduce((sum, item) => sum + item.capacityRemaining, 0)} slots`, attention: `${vendors.length - activeVendors.length} paused or unavailable`, href: "/admin?view=people", link: "View partners" },
+    { area: "Routes", state: `${activeDrivers.length} active riders · ${activeDrivers.reduce((sum, item) => sum + item.capacityRemaining, 0)} route slots`, attention: `${unassignedOrders.filter((order) => order.driver === "Unassigned").length} awaiting rider`, href: "/admin?view=dispatch", link: "Open dispatch" },
+    { area: "Support", state: `${openCases.length} open · ${waitingCases.length} waiting`, attention: `${urgentCases.length} high priority`, href: "/admin?view=cases", link: "Review cases" },
+    { area: "Payments", state: `${awaitingPayment.length} delivered awaiting evidence`, attention: `${readyForCloseout.length} ready for closeout`, href: "/admin?view=orders", link: "Review payments" },
   ];
-  return (
-    <section className="section supportOpsHero" aria-label="Support queue overview">
-      <div className="supportOpsCopy">
-        <p className="eyebrow">Support desk</p>
-        <h2>Work the queue before opening manual case forms.</h2>
-        <p>Start from customer impact: delayed pickup, payment issue, missing item, quality problem, or vendor escalation. Ticket actions should keep the original Order ID attached.</p>
-      </div>
-      <div className="supportLaneGrid">
-        {lanes.map((lane) => <article key={lane.label}><span>{lane.label}</span><strong>{lane.value}</strong><small>{lane.note}</small></article>)}
-      </div>
+  const priorityOrders = activeOrders.filter((order) => isRiskOrder(order) || order.vendor === "Unassigned" || order.driver === "Unassigned" || automationActionsForOrder(order, "admin", userName).length > 0).sort((left, right) => Number(isRiskOrder(right)) - Number(isRiskOrder(left)) || Number(right.vendor === "Unassigned" || right.driver === "Unassigned") - Number(left.vendor === "Unassigned" || left.driver === "Unassigned") || new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime()).slice(0, 5);
+
+  if (!hasLoaded) return <section className="staffContentSection"><div className="staffEmptyState" role="status"><h2>Loading today’s operations…</h2><p>Checking orders, capacity, routes, and support cases.</p></div></section>;
+  if (loadError) return <section className="staffContentSection"><div className="staffEmptyState" role="alert"><h2>Operations overview unavailable</h2><p>{loadError} No totals are shown until all overview sources load successfully.</p><button className="button secondary" type="button" onClick={() => void loadOverview()}>Try again</button></div></section>;
+
+  return <>
+    <section className="staffContentSection adminOverview" aria-labelledby="operations-by-area"><div className="staffSectionHeader"><div><h2 id="operations-by-area">Operations by area</h2><p>A read-only view across the pilot. Open a section to take action.</p></div><button className="button secondary" type="button" onClick={() => void loadOverview()}>Refresh</button></div>
+      <div className="overviewLedger">{overviewRows.map((row) => <article className="overviewRow" key={row.area}><h3>{row.area}</h3><p>{row.state}</p><p className="overviewAttention">{row.attention}</p><Link href={row.href}>{row.link}</Link></article>)}</div><p className="status" role="status" aria-live="polite">{status}</p>
     </section>
-  );
+    <section className="staffContentSection"><div className="staffSectionHeader"><div><h2>Needs attention</h2><p>The highest-risk active orders, limited to five.</p></div><Link href="/admin?view=orders">View full order queue</Link></div>
+      <div className="staffPriorityList">{priorityOrders.length ? priorityOrders.map((order) => <article className={`staffPriorityRow timer-${order.stageTimer.tone}`} key={order.orderId}><div><strong>{order.orderId}</strong><span>{order.customer}</span></div><div><strong>{order.workflowStage.label}</strong><span>{order.nextStep}</span></div><div><strong>{order.stageTimer.label}</strong><span>{order.vendor === "Unassigned" || order.driver === "Unassigned" ? "Assignment incomplete" : order.priority}</span></div><Link href={`/admin?view=orders&order=${encodeURIComponent(order.orderId)}`}>Review order</Link></article>) : <p className="staffEmptyState">No active orders need attention.</p>}</div>
+    </section>
+    <section className="staffContentSection"><div className="staffSectionHeader"><div><h2>Latest operational changes</h2><p>The five most recent saved records.</p></div><Link href="/admin?view=activity">Open activity</Link></div><div className="staffSimpleList">{records.slice(0, 5).map((record) => <div className="staffSimpleRow" key={record.id}><strong>{activityTypeLabel(activityType(record))}</strong><span>{activitySubject(record)}</span><p>{activityChangeSummary(record)}</p><time>{formatActivityTime(record.createdAt)}</time></div>)}</div></section>
+  </>;
 }
 
-function SupportOrderWatchlist({ orders }: { orders: OrderSummary[] }) {
-  const watchlist = orders.filter(isRiskOrder).slice(0, 5);
-  return (
-    <section className="section supportWatchlist" aria-label="Support SLA watchlist">
-      <div className="activityHeader"><div><p className="eyebrow">At-risk orders</p><h2>Orders support should watch now</h2></div></div>
-      <div className="supportWatchGrid">
-        {watchlist.length ? watchlist.map((order) => <article className={`supportWatchCard timer-${order.stageTimer.tone}`} key={order.orderId}>
-          <div className="orderBoardTop"><strong>{order.orderId}</strong><span>{order.workflowStage.label}</span></div>
-          <h3>{order.customer}</h3>
-          <div className="orderMeta minimalMeta"><span>{order.phone || "No phone"}</span><span>{order.area}</span><span>{order.stageTimer.label}</span></div>
-          <p>{order.nextStep}</p>
-        </article>) : <article className="supportWatchCard empty"><strong>No breached SLA right now</strong><p>The support desk can stay focused on new tickets and customer replies.</p></article>}
-      </div>
-    </section>
-  );
-}
-
-function SupportTicketDesk({ userName }: { userName: string }) {
+function SupportTicketDesk({ userName, selectedCaseId = "", basePath, refreshToken = 0 }: { userName: string; selectedCaseId?: string; basePath: string; refreshToken?: number }) {
   const [records, setRecords] = useState<SubmissionRecord[]>([]);
   const [status, setStatus] = useState("Loading support tickets…");
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
+  const pendingActions = useRef(new Set<string>());
+  const [pendingCaseId, setPendingCaseId] = useState("");
 
   async function loadTickets(showLoading = true) {
     if (showLoading) setStatus("Loading support tickets…");
-    const response = await fetch("/api/submissions");
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      setStatus(data.error ?? "Unable to load support tickets.");
-      return;
+    try {
+      const response = await fetch("/api/submissions");
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        setStatus(data.error ?? "Unable to load support tickets.");
+        setHasLoaded(true);
+        return;
+      }
+      const tickets = data.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes("support-ticket"));
+      setRecords(tickets.slice(0, 200));
+      setStatus(tickets.length ? "Support ticket desk loaded." : "No support tickets yet.");
+      setHasLoaded(true);
+    } catch {
+      setStatus("Unable to load support tickets.");
+      setHasLoaded(true);
     }
-    const tickets = data.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes("support-ticket"));
-    setRecords(tickets.slice(0, 200));
-    setStatus(tickets.length ? "Support ticket desk loaded." : "No support tickets yet.");
   }
 
   async function action(event: FormEvent<HTMLFormElement>, supportCase: SupportCase) {
     event.preventDefault();
+    if (pendingActions.current.has(supportCase.ticketId)) return;
+    pendingActions.current.add(supportCase.ticketId);
+    setPendingCaseId(supportCase.ticketId);
     const form = event.currentTarget;
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.submissionType = "support-ticket-action";
@@ -1084,43 +1681,59 @@ function SupportTicketDesk({ userName }: { userName: string }) {
       await loadTickets(false);
     } catch (error) {
       setFormStatus((current) => ({ ...current, [supportCase.ticketId]: error instanceof Error ? error.message : "Unable to save ticket action." }));
+    } finally {
+      pendingActions.current.delete(supportCase.ticketId);
+      setPendingCaseId((current) => current === supportCase.ticketId ? "" : current);
     }
   }
 
-  useEffect(() => { loadTickets(); }, []);
+  useEffect(() => { loadTickets(); }, [refreshToken]);
 
   const cases = supportCases(records);
+  const selectedCase = selectedCaseId ? cases.find((supportCase) => supportCase.ticketId.toLowerCase() === selectedCaseId.toLowerCase()) : null;
+  const caseHref = (ticketId: string) => `${basePath}${basePath.includes("?") ? "&" : "?"}case=${encodeURIComponent(ticketId)}`;
 
   return (
-    <section className="section supportDeskSection">
-      <div className="activityHeader"><div><p className="eyebrow">Case queue</p><h2>Customer cases</h2><p className="formHint">Each case appears once; actions remain attached to its history.</p></div><button className="button secondary" type="button" onClick={() => loadTickets()}>Refresh</button></div>
-      <div className="supportTicketList">
-        {cases.map((supportCase) => <article className="orderBoardCard supportTicketCard" key={supportCase.ticketId}>
-          <div className="orderBoardTop"><strong>{supportCase.orderId || "Unlinked case"}</strong><span>{supportCase.status}</span></div>
-          <h3>{supportCase.root.data.issueType || "Support ticket"}</h3>
-          <div className="orderMeta"><span>Case: {supportCase.ticketId}</span><span>Raised by: {supportCase.root.data.name || "Team member"}</span><span>Team/customer: {supportCase.root.data.company || "Bubble Wash"}</span><span>Priority: {supportCase.priority}</span><span>Updated: {formatActivityTime(supportCase.latest.createdAt)}</span></div>
-          <p>{supportCase.latest.data.message || supportCase.root.data.message || "No ticket note supplied."}</p>
-          <details className="quietDetails"><summary>Case history · {compactTimelineLabel(supportCase.events.length)}</summary><div className="timelineList">{[...supportCase.events].reverse().map((event) => <div key={event.id}><b>{event.data.ticketStatus || event.data.issueType || "Open"}</b><span>{formatActivityTime(event.createdAt)} · {event.data.name || "Staff"}</span><p>{event.data.message || "No note supplied."}</p></div>)}</div></details>
-          <form className="ticketActionForm" onSubmit={(event) => action(event, supportCase)}>
-            <div className="two"><label>Case status<select name="ticketStatus" defaultValue={supportCase.status}><option>Open</option><option>In Review</option><option>Assigned</option><option>Waiting on Customer</option><option>Waiting on Vendor</option><option>Waiting on Driver</option><option>Escalated</option><option>Resolved</option><option>Closed</option><option>Reopened</option></select></label><label>Priority<select name="priority" defaultValue={supportCase.priority}><option>Normal</option><option>High</option><option>Urgent</option></select></label></div>
-            <div className="two"><label>Assigned desk<select name="assignedRole"><option>Support</option><option>Admin</option><option>Vendor</option><option>Driver</option></select></label><label>Escalation level<select name="escalationLevel"><option>Level 0</option><option>Level 1</option><option>Level 2</option><option>Level 3</option></select></label></div>
+    <section className="staffContentSection supportDeskSection">
+      {selectedCaseId ? selectedCase ? <article className="staffDetailView caseDetail">
+        <Link className="staffBackLink" href={basePath}>← Back to case list</Link>
+        <header className="staffDetailHeader"><div><span className="staffFieldLabel">{selectedCase.ticketId}</span><h2>{String(selectedCase.root.data.issueType || "Support ticket")}</h2><p>{selectedCase.orderId || "Not linked to an order"}</p></div><div className="staffDetailReference"><span>Status</span><strong>{selectedCase.status}</strong><small>{selectedCase.priority} priority</small></div></header>
+        <div className="staffDetailSections">
+          <section className="staffDetailSection"><h3>Case context</h3><dl className="staffDefinitionList"><div><dt>Order</dt><dd>{selectedCase.orderId || "Unlinked case"}</dd></div><div><dt>Raised by</dt><dd>{String(selectedCase.root.data.name || "Team member")}</dd></div><div><dt>Customer/team</dt><dd>{String(selectedCase.root.data.company || "Bubble Wash")}</dd></div><div><dt>Last updated</dt><dd>{formatActivityTime(selectedCase.latest.createdAt)}</dd></div></dl></section>
+          <section className="staffDetailSection"><h3>Case history</h3><div className="staffTimeline">{[...selectedCase.events].reverse().map((event) => <div key={event.id}><time>{formatActivityTime(event.createdAt)}</time><div><strong>{String(event.data.ticketStatus || event.data.issueType || "Open")}</strong><span>{String(event.data.name || "Staff")}</span><p>{String(event.data.message || "No note supplied.")}</p></div></div>)}</div></section>
+          <section className="staffDetailSection"><h3>Record next case action</h3><form className="staffForm" onSubmit={(event) => action(event, selectedCase)}>
+            <div className="two"><label>Case status<select name="ticketStatus" defaultValue={selectedCase.status}><option>Open</option><option>In Review</option><option>Assigned</option><option>Waiting on Customer</option><option>Waiting on Vendor</option><option>Waiting on Driver</option><option>Escalated</option><option>Resolved</option><option>Closed</option><option>Reopened</option></select></label><label>Priority<select name="priority" defaultValue={selectedCase.priority}><option>Normal</option><option>High</option><option>Urgent</option></select></label></div>
+            <div className="two"><label>Assigned desk<select name="assignedRole" defaultValue={selectedCase.assignedRole}><option>Support</option><option>Admin</option><option>Vendor</option><option>Driver</option></select></label><label>Escalation level<select name="escalationLevel" defaultValue={selectedCase.escalationLevel}><option>Level 0</option><option>Level 1</option><option>Level 2</option><option>Level 3</option></select></label></div>
             <label>Case note<textarea name="message" placeholder="Action, escalation reason, customer impact, or resolution summary" required /></label>
-            <button className="button primary full" type="submit">Save Ticket Action</button>
-            {formStatus[supportCase.ticketId] && <p className={noticeClass(formStatus[supportCase.ticketId])} role="status">{formStatus[supportCase.ticketId]}</p>}
-          </form>
-        </article>)}
-        {!cases.length ? <p className="status">No customer cases yet.</p> : null}
-      </div>
-      <p className="status">{status}</p>
+            <button className="button primary" type="submit" disabled={pendingCaseId === selectedCase.ticketId}>{pendingCaseId === selectedCase.ticketId ? "Saving action…" : "Save case action"}</button>
+            {formStatus[selectedCase.ticketId] ? <p className={noticeClass(formStatus[selectedCase.ticketId])} role="status">{formStatus[selectedCase.ticketId]}</p> : null}
+          </form></section>
+        </div>
+      </article> : <div className="staffEmptyState"><h2>{hasLoaded ? "Case not found" : "Loading case…"}</h2><p>{hasLoaded ? "This case is unavailable to this staff role." : "Checking the latest case history."}</p>{hasLoaded ? <Link href={basePath}>Back to cases</Link> : null}</div> : <>
+        <div className="staffSectionHeader"><div><h2>Customer cases</h2><p>Each case appears once. Open it to see history and record an action.</p></div><button className="button secondary" type="button" onClick={() => loadTickets()}>Refresh</button></div>
+        <div className="staffCaseList" role="list"><div className="staffCaseListHeader" aria-hidden="true"><span>Case</span><span>Status</span><span>Priority</span><span>Updated</span><span></span></div>
+          {cases.map((supportCase) => <article className="staffCaseRow" key={supportCase.ticketId} role="listitem"><div><strong>{String(supportCase.root.data.issueType || "Support ticket")}</strong><span>{supportCase.ticketId}</span><small>{supportCase.orderId || "Unlinked case"}</small></div><div><strong>{supportCase.status}</strong><span>{String(supportCase.latest.data.message || supportCase.root.data.message || "No note supplied.")}</span></div><strong>{supportCase.priority}</strong><time>{formatActivityTime(supportCase.latest.createdAt)}</time><Link href={caseHref(supportCase.ticketId)}>View case</Link></article>)}
+          {!cases.length ? <p className="staffEmptyState">No customer cases yet.</p> : null}
+        </div>
+      </>}
+      <p className="status" role="status" aria-live="polite">{status}</p>
     </section>
   );
 }
 
-export function AdminWorkspace({ userName, role }: { userName: string; role: StaffRole }) {
+export function AdminWorkspace({ userName, role, initialView = "overview", selectedOrderId, selectedCaseId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
+  const pendingSubmission = useRef(false);
+  const [pendingType, setPendingType] = useState("");
+  const [casesVersion, setCasesVersion] = useState(0);
+  const [rosterVersion, setRosterVersion] = useState(0);
+  const [availabilityVersion, setAvailabilityVersion] = useState(0);
 
   async function submitLead(event: FormEvent<HTMLFormElement>, type: string) {
     event.preventDefault();
+    if (pendingSubmission.current) return;
+    pendingSubmission.current = true;
+    setPendingType(type);
     const form = event.currentTarget;
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.submissionType = type;
@@ -1128,37 +1741,49 @@ export function AdminWorkspace({ userName, role }: { userName: string; role: Sta
       const data = await postJSON<{ ok: boolean; message: string; id: string }>("/api/submit", payload);
       setFormStatus((current) => ({ ...current, [type]: `${data.message} Reference: ${data.id}` }));
       form.reset();
+      if (type === "support-ticket") setCasesVersion((current) => current + 1);
+      if (type === "staff-onboarding") setRosterVersion((current) => current + 1);
+      if (type === "vendor-application" || type === "driver-onboarding") setAvailabilityVersion((current) => current + 1);
     } catch (error) {
       setFormStatus((current) => ({ ...current, [type]: error instanceof Error ? error.message : "Unable to save request." }));
+    } finally {
+      pendingSubmission.current = false;
+      setPendingType((current) => current === type ? "" : current);
     }
   }
 
+  const navigation = [
+    { href: "/admin", label: "Overview", view: "overview" },
+    { href: "/admin?view=dispatch", label: "Dispatch", view: "dispatch" },
+    { href: "/admin?view=orders", label: "Orders", view: "orders" },
+    { href: "/admin?view=people", label: "People & onboarding", view: "people" },
+    { href: "/admin?view=cases", label: "Cases", view: "cases" },
+    { href: "/admin?view=activity", label: "Activity", view: "activity" },
+  ];
+
   return (
-    <PortalShell role={role} userName={userName} title="Admin workspace">
-      <SharedOrderBoard role={role} userName={userName} />
-      <AvailabilityBoard role={role} />
-      <section className="section portalSection manualSection">
-        <details className="manualToolbox">
-          <summary><div><span>Roster and capacity</span><small>Only when vendor or rider access changes</small></div><em>Open when needed</em></summary>
-          <AdminOnboardingCenter userName={userName} onSubmit={submitLead} status={formStatus} />
-        </details>
-      </section>
-      <section className="section portalSection supportCreateSection manualSection">
-        <details className="manualToolbox">
-          <summary><div><span>Open a case</span><small>Use for an exception that the order queue does not cover</small></div><em>Open when needed</em></summary>
-          <SupportTicketForm userName={userName} role="admin" onSubmit={submitLead} status={formStatus["support-ticket"]} />
-        </details>
-      </section>
-      <RecentActivity />
+    <PortalShell role={role} userName={userName} title="Admin workspace" currentView={initialView} navigation={navigation}>
+      {initialView === "overview" ? <AdminOverview userName={userName} /> : null}
+      {initialView === "dispatch" ? <AdminDispatchWorkspace /> : null}
+      {initialView === "orders" ? <SharedOrderBoard role="admin" userName={userName} selectedOrderId={selectedOrderId} basePath="/admin?view=orders" /> : null}
+      {initialView === "people" ? <><AvailabilityBoard role="admin" refreshToken={availabilityVersion} /><StaffAccessRoster refreshToken={rosterVersion} /><AdminOnboardingCenter onSubmit={submitLead} status={formStatus} pendingType={pendingType} /></> : null}
+      {initialView === "cases" ? <><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Open a new case</strong><small>Use when an existing case does not cover the issue</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="admin" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section><SupportTicketDesk userName={userName} selectedCaseId={selectedCaseId} basePath="/admin?view=cases" refreshToken={casesVersion} /></> : null}
+      {initialView === "activity" ? <RecentActivity initialSelectedId={selectedActivityId} basePath="/admin?view=activity" /> : null}
     </PortalShell>
   );
 }
 
-export function VendorWorkspace({ userName, role }: { userName: string; role: StaffRole }) {
+export function VendorWorkspace({ userName, role, initialView = "jobs", selectedOrderId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
+  const pendingSubmission = useRef(false);
+  const [pendingType, setPendingType] = useState("");
+  const [availabilityVersion, setAvailabilityVersion] = useState(0);
 
   async function submitLead(event: FormEvent<HTMLFormElement>, type: string) {
     event.preventDefault();
+    if (pendingSubmission.current) return;
+    pendingSubmission.current = true;
+    setPendingType(type);
     const form = event.currentTarget;
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.submissionType = type;
@@ -1166,48 +1791,40 @@ export function VendorWorkspace({ userName, role }: { userName: string; role: St
       const data = await postJSON<{ ok: boolean; message: string; id: string }>("/api/submit", payload);
       setFormStatus((current) => ({ ...current, [type]: `${data.message} Reference: ${data.id}` }));
       form.reset();
+      if (type === "vendor-application") setAvailabilityVersion((current) => current + 1);
     } catch (error) {
       setFormStatus((current) => ({ ...current, [type]: error instanceof Error ? error.message : "Unable to save request." }));
+    } finally {
+      pendingSubmission.current = false;
+      setPendingType((current) => current === type ? "" : current);
     }
   }
 
+  const navigation = [
+    { href: "/vendors", label: "Jobs", view: "jobs" },
+    { href: "/vendors?view=capacity", label: "Capacity", view: "capacity" },
+    { href: "/vendors?view=activity", label: "Activity", view: "activity" },
+  ];
+
   return (
-    <PortalShell role={role} pageRole="vendor" userName={userName} title="Vendor workspace">
-      <SharedOrderBoard role="vendor" userName={userName} />
-      <AvailabilityBoard role="vendor" />
-      <section className="section vendorSection portalSection manualSection">
-        <details className="manualToolbox">
-          <summary><div><span>Today&apos;s capacity</span><small>Update the slots and services the partner can accept</small></div><em>Open when needed</em></summary>
-          <div className="vendorGrid">
-          <form className="panel vendorForm" onSubmit={(event) => submitLead(event, "vendor-application")}>
-            <h3>Update today&apos;s capacity</h3>
-            <p className="formHint">The signed-in vendor account is recorded automatically.</p>
-            <div className="two"><label>Laundry business<input name="company" required /></label><label>Service areas<input name="area" placeholder="Osu, Labone" /></label></div>
-            <div className="two"><label>Order slots remaining<input name="capacity" type="number" min="0" inputMode="numeric" /></label><label>Availability<select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited capacity</option><option>Paused today</option></select></label></div>
-            <label>Available service<select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></label>
-            <label>Capacity note<textarea name="message" placeholder="Turnaround, machine, or service restrictions" /></label>
-            <button className="button primary full" type="submit">Update Capacity</button>
-            {formStatus["vendor-application"] && <p className={noticeClass(formStatus["vendor-application"])} role="status">{formStatus["vendor-application"]}</p>}
-          </form>
-          </div>
-        </details>
-      </section>
-      <section className="section portalSection supportCreateSection manualSection">
-        <details className="manualToolbox">
-          <summary><div><span>Open a case</span><small>Use for a production exception that the order queue does not cover</small></div><em>Open when needed</em></summary>
-          <SupportTicketForm userName={userName} role="vendor" onSubmit={submitLead} status={formStatus["support-ticket"]} />
-        </details>
-      </section>
-      <RecentActivity filter="vendor" />
+    <PortalShell role={role} pageRole="vendor" userName={userName} title="Vendor workspace" currentView={initialView} navigation={navigation}>
+      {initialView === "jobs" ? <><SharedOrderBoard role="vendor" userName={userName} selectedOrderId={selectedOrderId} basePath="/vendors?view=jobs" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a production exception</strong><small>Open a case when the verified job actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="vendor" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
+      {initialView === "capacity" ? <><AvailabilityBoard role="vendor" mode="vendors" refreshToken={availabilityVersion} /><section className="staffContentSection"><div className="staffSectionHeader"><div><h2>Update today&apos;s capacity</h2><p>The signed-in vendor identity is applied automatically.</p></div></div><form className="staffForm staffNarrowForm" onSubmit={(event) => submitLead(event, "vendor-application")}><div className="two"><label>Service areas<input name="area" placeholder="Osu, Labone" required /></label><label>Order slots remaining<input name="capacity" type="number" min="0" inputMode="numeric" required /></label></div><div className="two"><label>Availability<select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited capacity</option><option>Paused today</option></select></label><label>Available service<select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></label></div><label>Capacity note<textarea name="message" placeholder="Turnaround, machine, or service restrictions" /></label><button className="button primary" type="submit" disabled={pendingType === "vendor-application"}>{pendingType === "vendor-application" ? "Updating capacity…" : "Update capacity"}</button>{formStatus["vendor-application"] ? <p className={noticeClass(formStatus["vendor-application"])} role="status">{formStatus["vendor-application"]}</p> : null}</form></section></> : null}
+      {initialView === "activity" ? <RecentActivity filter="vendor" initialSelectedId={selectedActivityId} basePath="/vendors?view=activity" /> : null}
     </PortalShell>
   );
 }
 
-export function DriverWorkspace({ userName, role }: { userName: string; role: StaffRole }) {
+export function DriverWorkspace({ userName, role, initialView = "route", selectedOrderId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
+  const pendingSubmission = useRef(false);
+  const [pendingType, setPendingType] = useState("");
 
   async function submitLead(event: FormEvent<HTMLFormElement>, type: string) {
     event.preventDefault();
+    if (pendingSubmission.current) return;
+    pendingSubmission.current = true;
+    setPendingType(type);
     const form = event.currentTarget;
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.submissionType = type;
@@ -1217,32 +1834,36 @@ export function DriverWorkspace({ userName, role }: { userName: string; role: St
       form.reset();
     } catch (error) {
       setFormStatus((current) => ({ ...current, [type]: error instanceof Error ? error.message : "Unable to save route update." }));
+    } finally {
+      pendingSubmission.current = false;
+      setPendingType((current) => current === type ? "" : current);
     }
   }
 
+  const navigation = [
+    { href: "/drivers", label: "Today’s route", view: "route" },
+    { href: "/drivers?view=activity", label: "Activity", view: "activity" },
+  ];
+
   return (
-    <PortalShell role={role} pageRole="driver" userName={userName} title="Driver route board">
-      <SharedOrderBoard role="driver" userName={userName} />
-      <AvailabilityBoard role="driver" />
-      <section className="section portalSection supportCreateSection manualSection">
-        <details className="manualToolbox">
-          <summary><div><span>Open a route case</span><small>Use for an exception that the order queue does not cover</small></div><em>Open when needed</em></summary>
-          <SupportTicketForm userName={userName} role="driver" onSubmit={submitLead} status={formStatus["support-ticket"]} />
-        </details>
-      </section>
-      <RecentActivity filter="driver-route-log" />
+    <PortalShell role={role} pageRole="driver" userName={userName} title="Driver route board" currentView={initialView} navigation={navigation}>
+      {initialView === "route" ? <><SharedOrderBoard role="driver" userName={userName} selectedOrderId={selectedOrderId} basePath="/drivers?view=route" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a route exception</strong><small>Use when the delay or handoff actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="driver" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
+      {initialView === "activity" ? <RecentActivity filter="driver-route-log" initialSelectedId={selectedActivityId} basePath="/drivers?view=activity" /> : null}
     </PortalShell>
   );
 }
 
-export function SupportWorkspace({ userName, role }: { userName: string; role: StaffRole }) {
+export function SupportWorkspace({ userName, role, initialView = "cases", selectedOrderId, selectedCaseId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
-  const [records, setRecords] = useState<SubmissionRecord[]>([]);
-  const [orders, setOrders] = useState<OrderSummary[]>([]);
-  const [deskStatus, setDeskStatus] = useState("Loading support desk…");
+  const pendingSubmission = useRef(false);
+  const [pendingType, setPendingType] = useState("");
+  const [casesVersion, setCasesVersion] = useState(0);
 
   async function submitLead(event: FormEvent<HTMLFormElement>, type: string) {
     event.preventDefault();
+    if (pendingSubmission.current) return;
+    pendingSubmission.current = true;
+    setPendingType(type);
     const form = event.currentTarget;
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.submissionType = type;
@@ -1250,51 +1871,26 @@ export function SupportWorkspace({ userName, role }: { userName: string; role: S
       const data = await postJSON<{ ok: boolean; message: string; id: string }>("/api/submit", payload);
       setFormStatus((current) => ({ ...current, [type]: `${data.message} Reference: ${data.id}` }));
       form.reset();
-      await loadSupportDesk(false);
+      if (type === "support-ticket") setCasesVersion((current) => current + 1);
     } catch (error) {
       setFormStatus((current) => ({ ...current, [type]: error instanceof Error ? error.message : "Unable to save request." }));
+    } finally {
+      pendingSubmission.current = false;
+      setPendingType((current) => current === type ? "" : current);
     }
   }
 
-  async function loadSupportDesk(showLoading = true) {
-    if (showLoading) setDeskStatus("Loading support desk…");
-    try {
-      const [submissionsResponse, ordersResponse] = await Promise.all([fetch("/api/submissions"), fetch("/api/orders")]);
-      const submissionsData = await submissionsResponse.json();
-      const ordersData = await ordersResponse.json();
-      if (!submissionsResponse.ok || !submissionsData.ok) {
-        setDeskStatus(submissionsData.error ?? "Unable to load support tickets.");
-        return;
-      }
-      if (!ordersResponse.ok || !ordersData.ok) {
-        setDeskStatus(ordersData.error ?? "Unable to load support order watchlist.");
-        return;
-      }
-      const supportRecords = submissionsData.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes("support-ticket"));
-      setRecords(supportRecords.slice(0, 200));
-      setOrders(ordersData.orders);
-      setDeskStatus("Support desk updated.");
-    } catch {
-      setDeskStatus("Unable to load support desk.");
-    }
-  }
-
-  useEffect(() => { loadSupportDesk(); }, []);
+  const navigation = [
+    { href: "/support", label: "Cases", view: "cases" },
+    { href: "/support?view=orders", label: "Orders", view: "orders" },
+    { href: "/support?view=activity", label: "Activity", view: "activity" },
+  ];
 
   return (
-    <PortalShell role={role} pageRole="support" userName={userName} title="Support workspace">
-      <SupportOpsOverview cases={supportCases(records)} orders={orders} />
-      <SupportOrderWatchlist orders={orders} />
-      <SupportTicketDesk userName={userName} />
-      <SharedOrderBoard role="support" userName={userName} />
-      <section className="section portalSection supportCreateSection manualSection">
-        <details className="manualToolbox">
-          <summary><div><span>Open a case</span><small>Use when an existing order or case does not cover the issue</small></div><em>Open when needed</em></summary>
-          <SupportTicketForm userName={userName} role="support" onSubmit={submitLead} status={formStatus["support-ticket"]} />
-        </details>
-      </section>
-      <RecentActivity filter="support" />
-      <p className="status supportDeskStatus">{deskStatus}</p>
+    <PortalShell role={role} pageRole="support" userName={userName} title="Support workspace" currentView={initialView} navigation={navigation}>
+      {initialView === "cases" ? <><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Open a new case</strong><small>Use when an existing case does not cover the issue</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="support" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section><SupportTicketDesk userName={userName} selectedCaseId={selectedCaseId} basePath="/support?view=cases" refreshToken={casesVersion} /></> : null}
+      {initialView === "orders" ? <SharedOrderBoard role="support" userName={userName} selectedOrderId={selectedOrderId} basePath="/support?view=orders" /> : null}
+      {initialView === "activity" ? <RecentActivity filter="support" initialSelectedId={selectedActivityId} basePath="/support?view=activity" /> : null}
     </PortalShell>
   );
 }
