@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import nextConfig from "../next.config.mjs";
 import { clientScopeKey, privateNoStoreHeaders, securityHeaders, staffWriteGuard, productionReadinessErrors, productionReadinessWarnings, publicTrackingView } from "../src/lib/security.ts";
+import { createPasswordHash, knownDemoPasswords, matchesKnownDemoPassword, verifyPasswordHash } from "../src/lib/passwords.ts";
 
 function headers(input = {}) {
   return new Headers(input);
@@ -72,6 +73,44 @@ test("productionReadinessErrors fails closed when production demo credentials wo
   assert.ok(errors.some((item) => item.includes("BUBBLEWASH_DRIVER_ENTITY_ID")));
   assert.equal(errors.some((item) => item.includes("NEXT_PUBLIC_BUBBLEWASH_WHATSAPP")), false);
   assert.equal(errors.some((item) => item.includes("NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL")), false);
+});
+
+test("password hashes reject malformed values and detect every built-in demo credential", () => {
+  assert.equal(verifyPasswordHash("anything", "not-a-scrypt-hash"), false);
+  assert.equal(verifyPasswordHash("anything", "scrypt$salt$short"), false);
+
+  for (const password of knownDemoPasswords) {
+    const hash = createPasswordHash(password, `test-salt-${password}`);
+    assert.equal(verifyPasswordHash(password, hash), true);
+    assert.equal(matchesKnownDemoPassword(hash), true);
+  }
+
+  const uniqueHash = createPasswordHash("pilot-only-unique-credential", "unique-test-salt");
+  assert.equal(matchesKnownDemoPassword(uniqueHash), false);
+});
+
+test("production readiness rejects known demo hashes for every staff role", () => {
+  const env = {
+    NODE_ENV: "production",
+    BUBBLEWASH_DISABLE_DEMO_LOGIN: "true",
+    BUBBLEWASH_SESSION_SECRET: "a-secure-session-secret-with-32-characters",
+    BUBBLEWASH_DATABASE_PATH: "/var/lib/bubblewash/bubblewash.sqlite",
+    BUBBLEWASH_PUBLIC_URL: "https://bubblewash.co",
+    BUBBLEWASH_VENDOR_ENTITY_ID: "vendor-approved-partner",
+    BUBBLEWASH_DRIVER_ENTITY_ID: "driver-approved-rider",
+    BUBBLEWASH_TRUST_PROXY_HEADERS: "true",
+    BUBBLEWASH_TRUST_EDGE_HEADERS: "false",
+  };
+
+  for (const [index, role] of ["ADMIN", "VENDOR", "DRIVER", "SUPPORT"].entries()) {
+    env[`BUBBLEWASH_${role}_EMAIL`] = `${role.toLowerCase()}@example.com`;
+    env[`BUBBLEWASH_${role}_PASSWORD_HASH`] = createPasswordHash(knownDemoPasswords[index], `readiness-${role}`);
+  }
+
+  const errors = productionReadinessErrors(env);
+  for (const role of ["ADMIN", "VENDOR", "DRIVER", "SUPPORT"]) {
+    assert.ok(errors.some((item) => item.includes(`BUBBLEWASH_${role}_PASSWORD_HASH`) && item.includes("known demo credentials")));
+  }
 });
 
 test("production readiness requires vendor and rider entity bindings", () => {
