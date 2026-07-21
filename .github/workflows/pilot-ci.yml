@@ -4,10 +4,10 @@ on:
   push:
     branches:
       - main
-      - "agent/**"
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,6 +20,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,9 +30,17 @@ jobs:
           cache: npm
       - name: Configure CI database
         run: echo "BUBBLEWASH_DATABASE_PATH=$RUNNER_TEMP/bubblewash-ci.sqlite" >> "$GITHUB_ENV"
-      - run: npm ci
-      - run: npm run lint
-      - run: npm test
-      - run: npm run build
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Unit and integration tests
+        run: npm test
+      - name: TypeScript
+        run: npm run typecheck
+      - name: Production dependency audit
+        run: npm run audit:prod
+      - name: Production build
+        run: npm run build
       - name: Verify required production routes
         run: npm run verify:routes
