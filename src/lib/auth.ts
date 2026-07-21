@@ -1,7 +1,10 @@
 import "server-only";
 
-import { createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers.js";
+import { createPasswordHash, matchesKnownDemoPassword, verifyPasswordHash } from "./passwords.ts";
+
+export { createPasswordHash } from "./passwords.ts";
 
 export type StaffRole = "admin" | "vendor" | "driver" | "support";
 
@@ -28,20 +31,6 @@ function demoCredentialFallbackEnabled() {
   return process.env.BUBBLEWASH_DISABLE_DEMO_LOGIN !== "true";
 }
 
-export function createPasswordHash(password: string, salt = randomBytes(16).toString("base64url")) {
-  const hash = scryptSync(password, salt, 64).toString("base64url");
-  return `scrypt$${salt}$${hash}`;
-}
-
-function verifyPassword(password: string, passwordHash: string) {
-  const [scheme, salt, expectedHash] = passwordHash.split("$");
-  if (scheme !== "scrypt" || !salt || !expectedHash) return false;
-  const actualHash = scryptSync(password, salt, 64).toString("base64url");
-  const actual = Buffer.from(actualHash);
-  const expected = Buffer.from(expectedHash);
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
-
 function staffCredential(role: StaffRole, demoEmail: string, displayName: string): StaffUser | null {
   const prefix = `BUBBLEWASH_${role.toUpperCase()}`;
   const configuredHash = process.env[`${prefix}_PASSWORD_HASH`];
@@ -55,7 +44,10 @@ function staffCredential(role: StaffRole, demoEmail: string, displayName: string
   const devPassword = process.env[`${prefix}_PASSWORD`] ?? (role === "admin" ? demoPassword : `${role[0].toUpperCase()}${role.slice(1)}123!`);
 
   if (!email) return null;
-  if (configuredHash) return { name: displayName, email, passwordHash: configuredHash, role, entityId };
+  if (configuredHash) {
+    if (process.env.NODE_ENV === "production" && matchesKnownDemoPassword(configuredHash)) return null;
+    return { name: displayName, email, passwordHash: configuredHash, role, entityId };
+  }
   if (process.env.NODE_ENV === "production") return null;
   return { name: displayName, email, passwordHash: createPasswordHash(devPassword), role, entityId };
 }
@@ -92,7 +84,7 @@ export function sanitizeNextPath(value?: string) {
 }
 
 export function findStaffUser(email: string, password: string) {
-  return staffUsers.find((user) => user.email.toLowerCase() === email.trim().toLowerCase() && verifyPassword(password, user.passwordHash)) ?? null;
+  return staffUsers.find((user) => user.email.toLowerCase() === email.trim().toLowerCase() && verifyPasswordHash(password, user.passwordHash)) ?? null;
 }
 
 export function encodeSession(user: StaffUser) {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server.js";
 import type { OrderSummary } from "@/lib/submissions";
 import { privateNoStoreHeaders, securityHeaders } from "./security-headers.js";
+import { matchesKnownDemoPassword } from "./passwords.ts";
 
 export { privateNoStoreHeaders, securityHeaders };
 export type SecurityHeader = ReturnType<typeof securityHeaders>[number];
@@ -72,7 +73,12 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
   }
   for (const role of ["ADMIN", "VENDOR", "DRIVER", "SUPPORT"]) {
     if (!env[`BUBBLEWASH_${role}_EMAIL`]) errors.push(`Set BUBBLEWASH_${role}_EMAIL in production.`);
-    if (!env[`BUBBLEWASH_${role}_PASSWORD_HASH`]) errors.push(`Set BUBBLEWASH_${role}_PASSWORD_HASH in production.`);
+    const passwordHash = env[`BUBBLEWASH_${role}_PASSWORD_HASH`];
+    if (!passwordHash) {
+      errors.push(`Set BUBBLEWASH_${role}_PASSWORD_HASH in production.`);
+    } else if (matchesKnownDemoPassword(passwordHash)) {
+      errors.push(`Rotate BUBBLEWASH_${role}_PASSWORD_HASH; known demo credentials are prohibited in production.`);
+    }
   }
   if (!env.BUBBLEWASH_VENDOR_ENTITY_ID?.trim()) {
     errors.push("Set BUBBLEWASH_VENDOR_ENTITY_ID to the exact approved vendor roster ID in production.");

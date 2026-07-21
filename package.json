@@ -10,7 +10,7 @@
     "lint": "eslint",
     "test": "npm run test:unit && npm run test:data",
     "test:unit": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/*.test.mjs",
-    "test:data": "node --conditions=react-server --experimental-strip-types tests/data-store.integration.mjs && node --conditions=react-server --experimental-strip-types tests/dispatch-location-store.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/submissions.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth.integration.mjs",
+    "test:data": "node --conditions=react-server --experimental-strip-types tests/data-store.integration.mjs && node --conditions=react-server --experimental-strip-types tests/dispatch-location-store.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/submissions.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth-production.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-defaults-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-roles-http.integration.mjs",
     "typecheck": "tsc --noEmit",
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",
     "check": "npm run lint && npm test && npm run typecheck && npm run audit:prod && npm run build && npm run verify:routes",

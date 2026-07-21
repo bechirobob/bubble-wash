@@ -16,7 +16,7 @@ Target launch: Wednesday, 22 July 2026. This runbook is the go/no-go standard fo
 Use `.env.production.example` as the inventory. Before launch:
 
 1. Set `BUBBLEWASH_DATABASE_PATH` to the mounted volume, for example `/var/lib/bubblewash/bubblewash.sqlite`.
-2. Generate a unique 32+ character session secret and unique password hashes for all four roles. Set `BUBBLEWASH_DISABLE_DEMO_LOGIN=true`.
+2. Generate a unique 32+ character session secret and a different strong password hash for each of the four roles. Set `BUBBLEWASH_DISABLE_DEMO_LOGIN=true`. Confirm `Admin123!`, `Vendor123!`, `Driver123!`, and `Support123!` each return HTTP 401 for every production staff account before approving a release.
 3. Set `BUBBLEWASH_PUBLIC_URL=https://bubblewash.co`.
 4. Set `BUBBLEWASH_VENDOR_ENTITY_ID` and `BUBBLEWASH_DRIVER_ENTITY_ID` to the exact approved roster IDs. The current pilot has one configured rider login; only that bound rider may share foreground GPS.
 5. Set `NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED=false` and `NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED=false` for the manual operational pilot. The future services appear only as disabled “Coming soon” information.
