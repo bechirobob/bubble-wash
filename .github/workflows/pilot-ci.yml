@@ -40,6 +40,8 @@ jobs:
         run: npm test
       - name: TypeScript
         run: npm run typecheck
+      - name: Full dependency audit
+        run: npm run audit:full
       - name: Production dependency audit
         run: npm run audit:prod
       - name: Production build
