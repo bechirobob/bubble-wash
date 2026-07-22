@@ -13,7 +13,8 @@
     "test:data": "node --conditions=react-server --experimental-strip-types tests/data-store.integration.mjs && node --conditions=react-server --experimental-strip-types tests/dispatch-location-store.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/submissions.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth-production.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-defaults-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-roles-http.integration.mjs",
     "typecheck": "tsc --noEmit",
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",
-    "check": "npm run lint && npm test && npm run typecheck && npm run audit:prod && npm run build && npm run verify:routes",
+    "check": "npm run lint && npm test && npm run typecheck && npm run audit:prod && npm run build && npm run verify:image-runtime && npm run verify:routes",
+    "verify:image-runtime": "node scripts/verify-image-runtime.mjs",
     "verify:routes": "node scripts/verify-required-routes.mjs",
     "hash-password": "node scripts/hash-password.mjs",
     "db:backup": "node scripts/backup-database.mjs"
@@ -26,7 +27,8 @@
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "sharp": "0.35.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -38,6 +40,9 @@
     "typescript": "^5"
   },
   "overrides": {
-    "postcss": "8.5.10"
+    "postcss": "8.5.10",
+    "next@16.2.6": {
+      "sharp": "$sharp"
+    }
   }
 }
