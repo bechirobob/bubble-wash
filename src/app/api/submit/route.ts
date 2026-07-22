@@ -7,6 +7,7 @@ import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/noti
 import { plans, zones } from "@/lib/pricing";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { sameOriginJsonGuard, staffWriteGuard } from "@/lib/security";
+import { parseServiceTypes } from "@/lib/service-capabilities";
 
 const emailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const maxFieldLength = 1200;
@@ -106,7 +107,7 @@ function syncAvailabilityTables(body: Record<string, unknown>, submissionType: s
       vendorId: text(body.vendorId) || undefined,
       vendorName: text(body.company) || text(body.vendorName) || text(body.name) || "Vendor partner",
       serviceZones: listFrom(body.area || body.zone || body.routeArea || body.serviceZones),
-      serviceTypes: listFrom(body.services || body.service),
+      serviceTypes: parseServiceTypes(body.services || body.service),
       capacityRemaining: numberFrom(body.capacity, 1),
       availabilityStatus: availabilityStatusFrom(body.availability),
       updatedBy: actorName,
