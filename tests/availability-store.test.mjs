@@ -8,6 +8,47 @@ process.env.BUBBLEWASH_DATABASE_PATH = path.join(mkdtempSync(path.join(tmpdir(),
 
 const store = await import("../src/lib/availability-store.ts");
 const assignment = await import("../src/lib/assignment.ts");
+const services = await import("../src/lib/service-capabilities.ts");
+
+test("service selections preserve combined capabilities instead of splitting on plus signs", () => {
+  assert.deepEqual(services.parseServiceTypes("Wash + fold"), ["Wash + fold"]);
+  assert.deepEqual(services.parseServiceTypes("Wash + iron + fold"), ["Wash + iron + fold"]);
+  assert.deepEqual(services.parseServiceTypes("Wash + fold, Ironing only"), ["Wash + fold", "Ironing only"]);
+});
+
+test("a normally submitted Wash + fold capability is eligible for assignment", () => {
+  store.resetDataStoreForTests();
+  store.upsertVendorAvailability({
+    vendorId: "vendor-service-parser",
+    vendorName: "Service Parser Vendor",
+    serviceZones: ["Osu"],
+    serviceTypes: services.parseServiceTypes("Wash + fold"),
+    capacityRemaining: 2,
+    availabilityStatus: "available",
+    updatedBy: "Vendor",
+  });
+  store.upsertDriverAvailability({
+    driverId: "driver-service-parser",
+    driverName: "Service Parser Rider",
+    serviceZones: ["Osu"],
+    capacityRemaining: 2,
+    availabilityStatus: "active",
+    updatedBy: "Admin",
+  });
+
+  const result = assignment.assignOrderFromAvailability({
+    orderId: "BW-SERVICE-PARSER",
+    area: "Osu",
+    serviceType: "Wash + fold",
+    vendor: "Unassigned",
+    driver: "Unassigned",
+  });
+
+  assert.equal(result.vendorId, "vendor-service-parser");
+  assert.equal(result.driverId, "driver-service-parser");
+  assert.equal(result.vendorCapacityRemaining, 1);
+  assert.equal(result.driverCapacityRemaining, 1);
+});
 
 test("vendor availability rows are upserted into a real table and decrement on assignment", () => {
   store.resetDataStoreForTests();

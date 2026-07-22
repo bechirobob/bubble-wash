@@ -1,4 +1,5 @@
 import { listDriverAvailability, listVendorAvailability, listVendorDeclines, reserveAssignmentCapacity, type DriverAvailability, type VendorAvailability } from "./availability-store.ts";
+import { serviceCapability } from "./service-capabilities.ts";
 
 export type AssignmentRecord = {
   id: string;
@@ -83,17 +84,6 @@ function statusAllowsVendor(vendor: VendorAvailability) {
 
 function statusAllowsDriver(driver: DriverAvailability) {
   return driver.capacityRemaining > 0 && !/(inactive|suspended|offboarded|paused|training|tomorrow)/.test(driver.availabilityStatus.toLowerCase());
-}
-
-function serviceCapability(value: string) {
-  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  if (!normalized) return "";
-  if (normalized.includes("express")) return "express";
-  if (normalized.includes("bulk")) return "bulk";
-  if (normalized.includes("iron") && normalized.includes("wash")) return "wash-iron-fold";
-  if (normalized.includes("iron")) return "ironing";
-  if (normalized.includes("wash") && normalized.includes("fold")) return "wash-fold";
-  return normalized;
 }
 
 function serviceMatches(vendor: VendorAvailability, serviceType?: string) {
