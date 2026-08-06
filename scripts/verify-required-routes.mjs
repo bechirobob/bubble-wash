@@ -4,6 +4,7 @@ const manifestPath = ".next/server/app-paths-manifest.json";
 const requiredRoutes = [
   "/admin/page",
   "/drivers/page",
+  "/early-access/page",
   "/api/health/route",
   "/api/ready/route",
   "/api/orders/route",
