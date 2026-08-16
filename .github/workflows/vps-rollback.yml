@@ -1,0 +1,39 @@
+name: Bubble Wash VPS Rollback
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/vps-rollback.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bubblewash-vps-rollback
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Connect to the production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+
+      - name: Restore the retained VPS release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ssh root@hermes 'app_uid="$(id -u ubuntu)"; runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user start bubblewash-local.service; runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user is-active --quiet bubblewash-local.service'
+
+      - name: Verify restored production
+        shell: bash
+        run: curl --fail --silent --show-error --location --retry 12 --retry-all-errors --max-time 15 --output /dev/null https://bubblewash.co/api/health
