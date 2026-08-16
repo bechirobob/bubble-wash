@@ -19,7 +19,7 @@ export function CustomerOrderManager() {
     setPending(true);
     const form = new FormData(event.currentTarget);
     const response = await fetch("/api/customer/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) });
-    const body = await response.json();
+    const body = await response.json<{ error?: string; order: CustomerOrder }>();
     setPending(false);
     if (!response.ok) return setStatus(body.error ?? "Unable to verify this booking.");
     setOrder(body.order);
@@ -31,7 +31,7 @@ export function CustomerOrderManager() {
     setPending(true);
     const form = new FormData(event.currentTarget);
     const response = await fetch("/api/customer/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) });
-    const body = await response.json();
+    const body = await response.json<{ message?: string; error?: string }>();
     setPending(false);
     setStatus(body.message ?? body.error ?? "Unable to save this request.");
     if (response.ok) event.currentTarget.reset();

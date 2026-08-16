@@ -102,9 +102,9 @@ function availabilityStatusFrom(value: unknown, activeWord = "available") {
   return activeWord;
 }
 
-function syncAvailabilityTables(body: Record<string, unknown>, submissionType: string, actorName: string) {
+async function syncAvailabilityTables(body: Record<string, unknown>, submissionType: string, actorName: string) {
   if (submissionType === "vendor-application") {
-    upsertVendorAvailability({
+    await upsertVendorAvailability({
       vendorId: text(body.vendorId) || undefined,
       vendorName: text(body.company) || text(body.vendorName) || text(body.name) || "Vendor partner",
       serviceZones: listFrom(body.area || body.zone || body.routeArea || body.serviceZones),
@@ -117,7 +117,7 @@ function syncAvailabilityTables(body: Record<string, unknown>, submissionType: s
   }
 
   if (submissionType === "driver-onboarding") {
-    upsertDriverAvailability({
+    await upsertDriverAvailability({
       driverId: text(body.driverId) || undefined,
       driverName: text(body.name) || text(body.driverName) || "Route driver",
       serviceZones: listFrom(body.area || body.routeArea || body.zone || body.serviceZones),
@@ -225,7 +225,7 @@ async function authorizeSubmission(submissionType: string) {
 export async function POST(request: NextRequest) {
   const requestGuardError = sameOriginJsonGuard(request.headers, "submission");
   if (requestGuardError) return requestGuardError;
-  if (isRateLimited(clientKey(request.headers, "submit"), 30, 60_000)) {
+  if (await isRateLimited(clientKey(request.headers, "submit"), 30, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many requests. Try again shortly." }, { status: 429 });
   }
   try {
@@ -267,7 +267,7 @@ export async function POST(request: NextRequest) {
       if (staffUser.role === "vendor" && staffUser.entityId) body.vendorId = staffUser.entityId;
       if (staffUser.role === "driver" && staffUser.entityId) body.driverId = staffUser.entityId;
       if (staffUser.role === "vendor" && submissionType === "vendor-application" && staffUser.entityId) {
-        const boundVendor = listVendorAvailability().find((vendor) => vendor.vendorId === staffUser.entityId);
+        const boundVendor = (await listVendorAvailability()).find((vendor) => vendor.vendorId === staffUser.entityId);
         if (!boundVendor) {
           return NextResponse.json({ ok: false, error: "The configured vendor roster entity was not found." }, { status: 409 });
         }
@@ -356,9 +356,9 @@ export async function POST(request: NextRequest) {
       data: body,
     };
 
-    appendSubmissionRecord(record);
-    const deliveryCode = ["pickup-booking", "checkout-request"].includes(submissionType) ? createDeliveryCode(record.id) : "";
-    syncAvailabilityTables(body, submissionType, text(body.name) || text(body.company) || "Bubble Wash team");
+    await appendSubmissionRecord(record);
+    const deliveryCode = ["pickup-booking", "checkout-request"].includes(submissionType) ? await createDeliveryCode(record.id) : "";
+    await syncAvailabilityTables(body, submissionType, text(body.name) || text(body.company) || "Bubble Wash team");
     const notifications = await dispatchSubmissionNotifications(record);
     if (publicSubmissionTypes.has(submissionType)) {
       return NextResponse.json({

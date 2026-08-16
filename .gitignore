@@ -19,6 +19,10 @@
 
 # production
 /build
+/dist/
+/.vinext/
+/.wrangler/
+worker-configuration.d.ts
 
 # misc
 .DS_Store

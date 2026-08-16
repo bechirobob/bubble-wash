@@ -1,10 +1,5 @@
 import { randomUUID } from "node:crypto";
-import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import path from "node:path";
-
-const dataDir = path.join(process.cwd(), "data");
-const databasePath = process.env.BUBBLEWASH_DATABASE_PATH ?? path.join(dataDir, "bubblewash.sqlite");
+import { getDatabase } from "./data-store.ts";
 
 export type AvailabilityStatus = "available" | "limited" | "paused" | "inactive" | "active" | "training" | "suspended";
 
@@ -48,24 +43,9 @@ export type DriverAvailability = Required<Omit<DriverAvailabilityInput, "driverI
   updatedAt: string;
 };
 
-export type VendorDeclineInput = {
-  orderId: string;
-  vendorId?: string;
-  vendorName: string;
-  reason: string;
-  declinedBy: string;
-};
-
-export type VendorDecline = Required<Omit<VendorDeclineInput, "vendorId">> & {
-  id: string;
-  vendorId: string;
-  createdAt: string;
-};
-
-export type CapacityReleaseResult = {
-  vendorReleases: number;
-  driverReleases: number;
-};
+export type VendorDeclineInput = { orderId: string; vendorId?: string; vendorName: string; reason: string; declinedBy: string };
+export type VendorDecline = Required<Omit<VendorDeclineInput, "vendorId">> & { id: string; vendorId: string; createdAt: string };
+export type CapacityReleaseResult = { vendorReleases: number; driverReleases: number };
 
 type VendorRow = {
   vendor_id: string;
@@ -113,8 +93,6 @@ type ReservationRow = {
   created_at: string;
 };
 
-let database: Database.Database | null = null;
-
 function slug(value: string, fallback: string) {
   const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return normalized || fallback;
@@ -143,79 +121,7 @@ function clampCapacity(value: number) {
 }
 
 export function getAvailabilityDatabase() {
-  if (database) return database;
-  mkdirSync(path.dirname(databasePath), { recursive: true });
-  const db = new Database(databasePath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.pragma("busy_timeout = 5000");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS submissions (
-      id TEXT PRIMARY KEY,
-      created_at TEXT NOT NULL,
-      source TEXT,
-      data TEXT NOT NULL CHECK (json_valid(data))
-    );
-
-    CREATE TABLE IF NOT EXISTS vendor_availability (
-      vendor_id TEXT PRIMARY KEY,
-      vendor_name TEXT NOT NULL,
-      service_zones TEXT NOT NULL CHECK (json_valid(service_zones)),
-      service_types TEXT NOT NULL CHECK (json_valid(service_types)),
-      capacity_remaining INTEGER NOT NULL DEFAULT 0 CHECK (capacity_remaining >= 0),
-      availability_status TEXT NOT NULL,
-      next_available_at TEXT,
-      updated_by TEXT NOT NULL,
-      notes TEXT,
-      updated_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_vendor_availability_status_capacity ON vendor_availability(availability_status, capacity_remaining);
-
-    CREATE TABLE IF NOT EXISTS driver_availability (
-      driver_id TEXT PRIMARY KEY,
-      driver_name TEXT NOT NULL,
-      service_zones TEXT NOT NULL CHECK (json_valid(service_zones)),
-      vehicle TEXT,
-      capacity_remaining INTEGER NOT NULL DEFAULT 0 CHECK (capacity_remaining >= 0),
-      availability_status TEXT NOT NULL,
-      updated_by TEXT NOT NULL,
-      notes TEXT,
-      updated_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_driver_availability_status_capacity ON driver_availability(availability_status, capacity_remaining);
-
-    CREATE TABLE IF NOT EXISTS vendor_declines (
-      id TEXT PRIMARY KEY,
-      order_id TEXT NOT NULL,
-      vendor_id TEXT NOT NULL,
-      vendor_name TEXT NOT NULL,
-      reason TEXT NOT NULL,
-      declined_by TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_vendor_declines_order_id ON vendor_declines(order_id);
-
-    CREATE TABLE IF NOT EXISTS assignment_capacity_reservations (
-      reservation_id TEXT PRIMARY KEY,
-      order_id TEXT NOT NULL,
-      vendor_id TEXT,
-      driver_id TEXT,
-      vendor_released_at TEXT,
-      driver_released_at TEXT,
-      release_reason TEXT,
-      created_at TEXT NOT NULL,
-      CHECK (vendor_id IS NOT NULL OR driver_id IS NOT NULL)
-    );
-    CREATE INDEX IF NOT EXISTS idx_capacity_reservations_order_id ON assignment_capacity_reservations(order_id COLLATE NOCASE);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_capacity_reservations_order_vendor
-      ON assignment_capacity_reservations(order_id COLLATE NOCASE, vendor_id)
-      WHERE vendor_id IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_capacity_reservations_order_driver
-      ON assignment_capacity_reservations(order_id COLLATE NOCASE, driver_id)
-      WHERE driver_id IS NOT NULL;
-  `);
-  database = db;
-  return db;
+  return getDatabase();
 }
 
 function vendorFromRow(row: VendorRow): VendorAvailability {
@@ -259,7 +165,7 @@ function declineFromRow(row: DeclineRow): VendorDecline {
   };
 }
 
-export function upsertVendorAvailability(input: VendorAvailabilityInput): VendorAvailability {
+export async function upsertVendorAvailability(input: VendorAvailabilityInput): Promise<VendorAvailability> {
   const vendorName = input.vendorName.trim() || "Vendor partner";
   const record = {
     vendorId: input.vendorId?.trim() || `vendor-${slug(vendorName, "partner")}`,
@@ -273,26 +179,25 @@ export function upsertVendorAvailability(input: VendorAvailabilityInput): Vendor
     notes: input.notes?.trim() || null,
     updatedAt: nowIso(),
   };
-  getAvailabilityDatabase()
-    .prepare(`
-      INSERT INTO vendor_availability (vendor_id, vendor_name, service_zones, service_types, capacity_remaining, availability_status, next_available_at, updated_by, notes, updated_at)
-      VALUES (@vendorId, @vendorName, @serviceZones, @serviceTypes, @capacityRemaining, @availabilityStatus, @nextAvailableAt, @updatedBy, @notes, @updatedAt)
-      ON CONFLICT(vendor_id) DO UPDATE SET
-        vendor_name = excluded.vendor_name,
-        service_zones = excluded.service_zones,
-        service_types = excluded.service_types,
-        capacity_remaining = excluded.capacity_remaining,
-        availability_status = excluded.availability_status,
-        next_available_at = excluded.next_available_at,
-        updated_by = excluded.updated_by,
-        notes = excluded.notes,
-        updated_at = excluded.updated_at
-    `)
-    .run(record);
-  return listVendorAvailability().find((vendor) => vendor.vendorId === record.vendorId)!;
+  const row = await getDatabase().prepare(`
+    INSERT INTO vendor_availability
+      (vendor_id, vendor_name, service_zones, service_types, capacity_remaining, availability_status, next_available_at, updated_by, notes, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(vendor_id) DO UPDATE SET vendor_name = excluded.vendor_name,
+      service_zones = excluded.service_zones, service_types = excluded.service_types,
+      capacity_remaining = excluded.capacity_remaining, availability_status = excluded.availability_status,
+      next_available_at = excluded.next_available_at, updated_by = excluded.updated_by,
+      notes = excluded.notes, updated_at = excluded.updated_at RETURNING *
+  `).bind(
+    record.vendorId, record.vendorName, record.serviceZones, record.serviceTypes,
+    record.capacityRemaining, record.availabilityStatus, record.nextAvailableAt,
+    record.updatedBy, record.notes, record.updatedAt,
+  ).first<VendorRow>();
+  if (!row) throw new Error("Vendor availability was not stored.");
+  return vendorFromRow(row);
 }
 
-export function upsertDriverAvailability(input: DriverAvailabilityInput): DriverAvailability {
+export async function upsertDriverAvailability(input: DriverAvailabilityInput): Promise<DriverAvailability> {
   const driverName = input.driverName.trim() || "Route driver";
   const record = {
     driverId: input.driverId?.trim() || `driver-${slug(driverName, "route")}`,
@@ -305,228 +210,134 @@ export function upsertDriverAvailability(input: DriverAvailabilityInput): Driver
     notes: input.notes?.trim() || null,
     updatedAt: nowIso(),
   };
-  getAvailabilityDatabase()
-    .prepare(`
-      INSERT INTO driver_availability (driver_id, driver_name, service_zones, vehicle, capacity_remaining, availability_status, updated_by, notes, updated_at)
-      VALUES (@driverId, @driverName, @serviceZones, @vehicle, @capacityRemaining, @availabilityStatus, @updatedBy, @notes, @updatedAt)
-      ON CONFLICT(driver_id) DO UPDATE SET
-        driver_name = excluded.driver_name,
-        service_zones = excluded.service_zones,
-        vehicle = excluded.vehicle,
-        capacity_remaining = excluded.capacity_remaining,
-        availability_status = excluded.availability_status,
-        updated_by = excluded.updated_by,
-        notes = excluded.notes,
-        updated_at = excluded.updated_at
-    `)
-    .run(record);
-  return listDriverAvailability().find((driver) => driver.driverId === record.driverId)!;
+  const row = await getDatabase().prepare(`
+    INSERT INTO driver_availability
+      (driver_id, driver_name, service_zones, vehicle, capacity_remaining, availability_status, updated_by, notes, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(driver_id) DO UPDATE SET driver_name = excluded.driver_name,
+      service_zones = excluded.service_zones, vehicle = excluded.vehicle,
+      capacity_remaining = excluded.capacity_remaining, availability_status = excluded.availability_status,
+      updated_by = excluded.updated_by, notes = excluded.notes, updated_at = excluded.updated_at RETURNING *
+  `).bind(
+    record.driverId, record.driverName, record.serviceZones, record.vehicle,
+    record.capacityRemaining, record.availabilityStatus, record.updatedBy, record.notes, record.updatedAt,
+  ).first<DriverRow>();
+  if (!row) throw new Error("Driver availability was not stored.");
+  return driverFromRow(row);
 }
 
-export function listVendorAvailability(): VendorAvailability[] {
-  const rows = getAvailabilityDatabase()
-    .prepare("SELECT * FROM vendor_availability ORDER BY capacity_remaining DESC, updated_at DESC")
-    .all() as VendorRow[];
-  return rows.map(vendorFromRow);
+export async function listVendorAvailability(): Promise<VendorAvailability[]> {
+  const result = await getDatabase().prepare(
+    "SELECT * FROM vendor_availability ORDER BY capacity_remaining DESC, updated_at DESC",
+  ).all<VendorRow>();
+  return result.results.map(vendorFromRow);
 }
 
-export function listDriverAvailability(): DriverAvailability[] {
-  const rows = getAvailabilityDatabase()
-    .prepare("SELECT * FROM driver_availability ORDER BY capacity_remaining DESC, updated_at DESC")
-    .all() as DriverRow[];
-  return rows.map(driverFromRow);
+export async function listDriverAvailability(): Promise<DriverAvailability[]> {
+  const result = await getDatabase().prepare(
+    "SELECT * FROM driver_availability ORDER BY capacity_remaining DESC, updated_at DESC",
+  ).all<DriverRow>();
+  return result.results.map(driverFromRow);
 }
 
-export function reserveVendorCapacity(vendorId: string, orderId: string): VendorAvailability {
+export async function reserveVendorCapacity(vendorId: string, orderId: string): Promise<VendorAvailability> {
   void orderId;
-  const db = getAvailabilityDatabase();
-  const reserve = db.transaction(() => {
-    const row = db.prepare("SELECT * FROM vendor_availability WHERE vendor_id = ?").get(vendorId) as VendorRow | undefined;
-    if (!row) throw new Error("Vendor availability row not found.");
-    const nextCapacity = Math.max(0, row.capacity_remaining - 1);
-    db.prepare("UPDATE vendor_availability SET capacity_remaining = ?, updated_at = ? WHERE vendor_id = ?").run(nextCapacity, nowIso(), vendorId);
-    return db.prepare("SELECT * FROM vendor_availability WHERE vendor_id = ?").get(vendorId) as VendorRow;
-  });
-  return vendorFromRow(reserve());
+  const row = await getDatabase().prepare(`
+    UPDATE vendor_availability SET capacity_remaining = capacity_remaining - 1, updated_at = ?
+    WHERE vendor_id = ? AND capacity_remaining > 0 RETURNING *
+  `).bind(nowIso(), vendorId).first<VendorRow>();
+  if (!row) throw new Error("Vendor availability row not found or has no capacity.");
+  return vendorFromRow(row);
 }
 
-export function reserveDriverCapacity(driverId: string, orderId: string): DriverAvailability {
+export async function reserveDriverCapacity(driverId: string, orderId: string): Promise<DriverAvailability> {
   void orderId;
-  const db = getAvailabilityDatabase();
-  const reserve = db.transaction(() => {
-    const row = db.prepare("SELECT * FROM driver_availability WHERE driver_id = ?").get(driverId) as DriverRow | undefined;
-    if (!row) throw new Error("Driver availability row not found.");
-    const nextCapacity = Math.max(0, row.capacity_remaining - 1);
-    db.prepare("UPDATE driver_availability SET capacity_remaining = ?, updated_at = ? WHERE driver_id = ?").run(nextCapacity, nowIso(), driverId);
-    return db.prepare("SELECT * FROM driver_availability WHERE driver_id = ?").get(driverId) as DriverRow;
-  });
-  return driverFromRow(reserve());
+  const row = await getDatabase().prepare(`
+    UPDATE driver_availability SET capacity_remaining = capacity_remaining - 1, updated_at = ?
+    WHERE driver_id = ? AND capacity_remaining > 0 RETURNING *
+  `).bind(nowIso(), driverId).first<DriverRow>();
+  if (!row) throw new Error("Driver availability row not found or has no capacity.");
+  return driverFromRow(row);
 }
 
-export function reserveAssignmentCapacity(orderId: string, vendorId?: string, driverId?: string) {
-  const db = getAvailabilityDatabase();
+export async function reserveAssignmentCapacity(orderId: string, vendorId?: string, driverId?: string) {
   const normalizedOrderId = orderId.trim();
   if ((vendorId || driverId) && !normalizedOrderId) throw new Error("Order ID is required for a capacity reservation.");
-  const reservationId = vendorId || driverId ? `AR-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}` : undefined;
-  const reserve = db.transaction(() => {
-    let vendor: VendorAvailability | undefined;
-    let driver: DriverAvailability | undefined;
-
-    if (vendorId) {
-      const row = db.prepare("SELECT * FROM vendor_availability WHERE vendor_id = ?").get(vendorId) as VendorRow | undefined;
-      if (!row || row.capacity_remaining <= 0 || /(paused|closed|unavailable|inactive|suspended|tomorrow)/.test(row.availability_status.toLowerCase())) {
-        throw new Error("Vendor capacity is no longer available.");
-      }
-      const updated = db.prepare("UPDATE vendor_availability SET capacity_remaining = capacity_remaining - 1, updated_at = ? WHERE vendor_id = ? AND capacity_remaining > 0")
-        .run(nowIso(), vendorId);
-      if (updated.changes !== 1) throw new Error("Vendor capacity is no longer available.");
-      vendor = vendorFromRow(db.prepare("SELECT * FROM vendor_availability WHERE vendor_id = ?").get(vendorId) as VendorRow);
-    }
-
-    if (driverId) {
-      const row = db.prepare("SELECT * FROM driver_availability WHERE driver_id = ?").get(driverId) as DriverRow | undefined;
-      if (!row || row.capacity_remaining <= 0 || /(inactive|suspended|offboarded|paused|training|tomorrow)/.test(row.availability_status.toLowerCase())) {
-        throw new Error("Driver capacity is no longer available.");
-      }
-      const updated = db.prepare("UPDATE driver_availability SET capacity_remaining = capacity_remaining - 1, updated_at = ? WHERE driver_id = ? AND capacity_remaining > 0")
-        .run(nowIso(), driverId);
-      if (updated.changes !== 1) throw new Error("Driver capacity is no longer available.");
-      driver = driverFromRow(db.prepare("SELECT * FROM driver_availability WHERE driver_id = ?").get(driverId) as DriverRow);
-    }
-
-    if (reservationId) {
-      db.prepare(`
-        INSERT INTO assignment_capacity_reservations
-          (reservation_id, order_id, vendor_id, driver_id, vendor_released_at, driver_released_at, release_reason, created_at)
-        VALUES
-          (@reservationId, @orderId, @vendorId, @driverId, NULL, NULL, NULL, @createdAt)
-      `).run({
-        reservationId,
-        orderId: normalizedOrderId,
-        vendorId: vendorId ?? null,
-        driverId: driverId ?? null,
-        createdAt: nowIso(),
-      });
-    }
-
-    return { vendor, driver, reservationId };
-  });
-  return reserve.immediate();
-}
-
-function releaseReservationRows(
-  db: Database.Database,
-  rows: ReservationRow[],
-  reason: string,
-  components: "vendor" | "driver" | "both" = "both",
-): CapacityReleaseResult {
-  const releasedAt = nowIso();
-  let vendorReleases = 0;
-  let driverReleases = 0;
-
-  for (const row of rows) {
-    if ((components === "vendor" || components === "both") && row.vendor_id && !row.vendor_released_at) {
-      const claimed = db.prepare(`
-        UPDATE assignment_capacity_reservations
-        SET vendor_released_at = ?, release_reason = ?
-        WHERE reservation_id = ? AND vendor_released_at IS NULL
-      `).run(releasedAt, reason, row.reservation_id);
-      if (claimed.changes === 1) {
-        db.prepare("UPDATE vendor_availability SET capacity_remaining = MIN(capacity_remaining + 1, 999), updated_at = ? WHERE vendor_id = ?")
-          .run(releasedAt, row.vendor_id);
-        vendorReleases += 1;
-      }
-    }
-
-    if ((components === "driver" || components === "both") && row.driver_id && !row.driver_released_at) {
-      const claimed = db.prepare(`
-        UPDATE assignment_capacity_reservations
-        SET driver_released_at = ?, release_reason = ?
-        WHERE reservation_id = ? AND driver_released_at IS NULL
-      `).run(releasedAt, reason, row.reservation_id);
-      if (claimed.changes === 1) {
-        db.prepare("UPDATE driver_availability SET capacity_remaining = MIN(capacity_remaining + 1, 999), updated_at = ? WHERE driver_id = ?")
-          .run(releasedAt, row.driver_id);
-        driverReleases += 1;
-      }
-    }
-  }
-
-  return { vendorReleases, driverReleases };
-}
-
-function ensureLegacyReservationComponent(db: Database.Database, orderId: string, component: "vendor" | "driver", componentId?: string) {
-  if (!componentId) return;
-  const idColumn = component === "vendor" ? "vendor_id" : "driver_id";
-  const availabilityTable = component === "vendor" ? "vendor_availability" : "driver_availability";
-  const existing = db.prepare(`
-    SELECT reservation_id
-    FROM assignment_capacity_reservations
-    WHERE order_id = ? COLLATE NOCASE AND ${idColumn} = ?
-    LIMIT 1
-  `).get(orderId, componentId);
-  if (existing) return;
-  const availability = db.prepare(`SELECT 1 AS found FROM ${availabilityTable} WHERE ${idColumn} = ? LIMIT 1`).get(componentId);
-  if (!availability) return;
-  db.prepare(`
-    INSERT OR IGNORE INTO assignment_capacity_reservations
+  if (!vendorId && !driverId) return { vendor: undefined, driver: undefined, reservationId: undefined };
+  const reservationId = `AR-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`;
+  const createdAt = nowIso();
+  await getDatabase().prepare(`
+    INSERT INTO assignment_capacity_reservations
       (reservation_id, order_id, vendor_id, driver_id, vendor_released_at, driver_released_at, release_reason, created_at)
-    VALUES
-      (?, ?, ?, ?, NULL, NULL, NULL, ?)
-  `).run(
-    `AR-LEGACY-${randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`,
-    orderId,
-    component === "vendor" ? componentId : null,
-    component === "driver" ? componentId : null,
-    nowIso(),
-  );
+    VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)
+  `).bind(reservationId, normalizedOrderId, vendorId ?? null, driverId ?? null, createdAt).run();
+  const [vendorRow, driverRow] = await Promise.all([
+    vendorId ? getDatabase().prepare("SELECT * FROM vendor_availability WHERE vendor_id = ?").bind(vendorId).first<VendorRow>() : undefined,
+    driverId ? getDatabase().prepare("SELECT * FROM driver_availability WHERE driver_id = ?").bind(driverId).first<DriverRow>() : undefined,
+  ]);
+  return {
+    vendor: vendorRow ? vendorFromRow(vendorRow) : undefined,
+    driver: driverRow ? driverFromRow(driverRow) : undefined,
+    reservationId,
+  };
 }
 
-export function releaseAssignmentCapacity(reservationId?: string, reason = "workflow-rollback"): CapacityReleaseResult {
+export async function releaseAssignmentCapacity(reservationId?: string, reason = "workflow-rollback"): Promise<CapacityReleaseResult> {
   if (!reservationId) return { vendorReleases: 0, driverReleases: 0 };
-  const db = getAvailabilityDatabase();
-  const release = db.transaction(() => {
-    const row = db.prepare("SELECT * FROM assignment_capacity_reservations WHERE reservation_id = ? LIMIT 1").get(reservationId) as ReservationRow | undefined;
-    return row ? releaseReservationRows(db, [row], reason) : { vendorReleases: 0, driverReleases: 0 };
-  });
-  return release.immediate();
+  const db = getDatabase();
+  const row = await db.prepare("SELECT * FROM assignment_capacity_reservations WHERE reservation_id = ? LIMIT 1")
+    .bind(reservationId).first<ReservationRow>();
+  if (!row) return { vendorReleases: 0, driverReleases: 0 };
+  const releasedAt = nowIso();
+  await db.prepare(`
+    UPDATE assignment_capacity_reservations
+    SET vendor_released_at = CASE WHEN vendor_released_at IS NULL AND vendor_id IS NOT NULL THEN ? ELSE vendor_released_at END,
+        driver_released_at = CASE WHEN driver_released_at IS NULL AND driver_id IS NOT NULL THEN ? ELSE driver_released_at END,
+        release_reason = ?
+    WHERE reservation_id = ?
+  `).bind(releasedAt, releasedAt, reason, reservationId).run();
+  return {
+    vendorReleases: row.vendor_id && !row.vendor_released_at ? 1 : 0,
+    driverReleases: row.driver_id && !row.driver_released_at ? 1 : 0,
+  };
 }
 
-function releaseOrderCapacity(
-  db: Database.Database,
-  orderId: string,
-  vendorId?: string,
-  driverId?: string,
-): CapacityReleaseResult {
-  ensureLegacyReservationComponent(db, orderId, "vendor", vendorId);
-  ensureLegacyReservationComponent(db, orderId, "driver", driverId);
-  const rows = db.prepare(`
-    SELECT *
-    FROM assignment_capacity_reservations
-    WHERE order_id = ? COLLATE NOCASE
-    ORDER BY created_at ASC
-  `).all(orderId) as ReservationRow[];
-  return releaseReservationRows(db, rows, "order-closed");
-}
-
-export function appendSubmissionRecordAndReleaseOrderCapacity(
+export async function appendSubmissionRecordAndReleaseOrderCapacity(
   record: { id: string; createdAt: string; source?: string; data: Record<string, unknown> },
   orderId: string,
   vendorId?: string,
   driverId?: string,
-): CapacityReleaseResult {
-  const db = getAvailabilityDatabase();
-  const finalize = db.transaction(() => {
-    db.prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
-      .run({ id: record.id, createdAt: record.createdAt, source: record.source ?? null, data: JSON.stringify(record.data) });
-    return releaseOrderCapacity(db, orderId.trim(), vendorId, driverId);
-  });
-  return finalize.immediate();
+): Promise<CapacityReleaseResult> {
+  void vendorId;
+  void driverId;
+  const db = getDatabase();
+  const normalizedOrderId = orderId.trim();
+  const counts = await db.prepare(`
+    SELECT SUM(CASE WHEN vendor_id IS NOT NULL AND vendor_released_at IS NULL THEN 1 ELSE 0 END) AS vendorReleases,
+           SUM(CASE WHEN driver_id IS NOT NULL AND driver_released_at IS NULL THEN 1 ELSE 0 END) AS driverReleases
+    FROM assignment_capacity_reservations WHERE order_id = ? COLLATE NOCASE
+  `).bind(normalizedOrderId).first<{ vendorReleases: number | null; driverReleases: number | null }>();
+  await db.batch([
+    db.prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (?, ?, ?, ?)")
+      .bind(record.id, record.createdAt, record.source ?? null, JSON.stringify(record.data)),
+    db.prepare(`
+      UPDATE assignment_capacity_reservations
+      SET vendor_released_at = CASE WHEN vendor_released_at IS NULL AND vendor_id IS NOT NULL THEN ? ELSE vendor_released_at END,
+          driver_released_at = CASE WHEN driver_released_at IS NULL AND driver_id IS NOT NULL THEN ? ELSE driver_released_at END,
+          release_reason = 'order-closed'
+      WHERE order_id = ? COLLATE NOCASE
+    `).bind(record.createdAt, record.createdAt, normalizedOrderId),
+  ]);
+  return { vendorReleases: counts?.vendorReleases ?? 0, driverReleases: counts?.driverReleases ?? 0 };
 }
 
-export function recordVendorDecline(input: VendorDeclineInput): VendorDecline {
+export async function recordVendorDecline(input: VendorDeclineInput): Promise<VendorDecline> {
   const vendorName = input.vendorName.trim() || "Vendor partner";
   const vendorId = input.vendorId?.trim() || `vendor-${slug(vendorName, "partner")}`;
+  const existing = await getDatabase().prepare(
+    "SELECT * FROM vendor_declines WHERE order_id = ? COLLATE NOCASE AND vendor_id = ? LIMIT 1",
+  ).bind(input.orderId.trim(), vendorId).first<DeclineRow>();
+  if (existing) return declineFromRow(existing);
   const record = {
     id: `VD-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`,
     orderId: input.orderId.trim(),
@@ -536,35 +347,36 @@ export function recordVendorDecline(input: VendorDeclineInput): VendorDecline {
     declinedBy: input.declinedBy.trim() || "Vendor user",
     createdAt: nowIso(),
   };
-  const db = getAvailabilityDatabase();
-  const save = db.transaction(() => {
-    const existing = db.prepare("SELECT * FROM vendor_declines WHERE order_id = ? AND vendor_id = ? ORDER BY created_at DESC LIMIT 1")
-      .get(record.orderId, vendorId) as DeclineRow | undefined;
-    if (existing) return declineFromRow(existing);
-    db.prepare("INSERT INTO vendor_declines (id, order_id, vendor_id, vendor_name, reason, declined_by, created_at) VALUES (@id, @orderId, @vendorId, @vendorName, @reason, @declinedBy, @createdAt)").run(record);
-    ensureLegacyReservationComponent(db, record.orderId, "vendor", vendorId);
-    const reservations = db.prepare(`
-      SELECT *
-      FROM assignment_capacity_reservations
-      WHERE order_id = ? COLLATE NOCASE AND vendor_id = ?
-    `).all(record.orderId, vendorId) as ReservationRow[];
-    releaseReservationRows(db, reservations, "vendor-decline", "vendor");
-    return record;
-  });
-  return save.immediate();
+  const db = getDatabase();
+  await db.batch([
+    db.prepare(`
+      INSERT OR IGNORE INTO vendor_declines (id, order_id, vendor_id, vendor_name, reason, declined_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(record.id, record.orderId, record.vendorId, record.vendorName, record.reason, record.declinedBy, record.createdAt),
+    db.prepare(`
+      UPDATE assignment_capacity_reservations
+      SET vendor_released_at = ?, release_reason = 'vendor-decline'
+      WHERE order_id = ? COLLATE NOCASE AND vendor_id = ? AND vendor_released_at IS NULL
+    `).bind(record.createdAt, record.orderId, record.vendorId),
+  ]);
+  const saved = await db.prepare(
+    "SELECT * FROM vendor_declines WHERE order_id = ? COLLATE NOCASE AND vendor_id = ? LIMIT 1",
+  ).bind(record.orderId, record.vendorId).first<DeclineRow>();
+  if (!saved) throw new Error("Vendor decline was not stored.");
+  return declineFromRow(saved);
 }
 
-export function listVendorDeclines(orderId?: string): VendorDecline[] {
-  const rows = orderId
-    ? getAvailabilityDatabase().prepare("SELECT * FROM vendor_declines WHERE order_id = ? ORDER BY created_at DESC").all(orderId)
-    : getAvailabilityDatabase().prepare("SELECT * FROM vendor_declines ORDER BY created_at DESC").all();
-  return (rows as DeclineRow[]).map(declineFromRow);
+export async function listVendorDeclines(orderId?: string): Promise<VendorDecline[]> {
+  const statement = orderId
+    ? getDatabase().prepare("SELECT * FROM vendor_declines WHERE order_id = ? COLLATE NOCASE ORDER BY created_at DESC").bind(orderId)
+    : getDatabase().prepare("SELECT * FROM vendor_declines ORDER BY created_at DESC");
+  const result = await statement.all<DeclineRow>();
+  return result.results.map(declineFromRow);
 }
 
-export function resetDataStoreForTests() {
-  const db = getAvailabilityDatabase();
-  db.prepare("DELETE FROM assignment_capacity_reservations").run();
-  db.prepare("DELETE FROM vendor_declines").run();
-  db.prepare("DELETE FROM vendor_availability").run();
-  db.prepare("DELETE FROM driver_availability").run();
+export async function resetDataStoreForTests() {
+  const db = getDatabase();
+  await db.batch([
+    "assignment_capacity_reservations", "vendor_declines", "vendor_availability", "driver_availability",
+  ].map((table) => db.prepare(`DELETE FROM ${table}`)));
 }

@@ -31,9 +31,9 @@ export function deliveryCodeHash(orderId: string, code: string) {
   return hmac(`delivery:${orderId.toUpperCase()}:${code}`);
 }
 
-export function createDeliveryCode(orderId: string) {
+export async function createDeliveryCode(orderId: string) {
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
-  const stored = storeDeliveryCode(orderId, deliveryCodeHash(orderId, code));
+  const stored = await storeDeliveryCode(orderId, deliveryCodeHash(orderId, code));
   return stored ? code : "";
 }
 

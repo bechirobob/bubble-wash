@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
   }
   const requestGuardError = sameOriginJsonGuard(request.headers, "checkout request");
   if (requestGuardError) return requestGuardError;
-  if (isRateLimited(clientKey(request.headers, "payments-initialize"), 12, 60_000)) {
+  if (await isRateLimited(clientKey(request.headers, "payments-initialize"), 12, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many checkout attempts. Try again shortly." }, { status: 429 });
   }
 
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     if (!/^BW-[A-Z0-9]{8,32}$/.test(orderId)) {
       return NextResponse.json({ ok: false, error: "Enter a valid Bubble Wash booking reference." }, { status: 400 });
     }
-    const booking = findSubmissionRecordById(orderId);
+    const booking = await findSubmissionRecordById(orderId);
     if (!booking || text(booking.data.submissionType) !== "pickup-booking") {
       return NextResponse.json({ ok: false, error: "That reference is not linked to a customer booking." }, { status: 404 });
     }
@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
       },
     };
 
-    appendSubmissionRecord(record);
+    await appendSubmissionRecord(record);
     await dispatchSubmissionNotifications(record);
     return NextResponse.json({
       ok: true,

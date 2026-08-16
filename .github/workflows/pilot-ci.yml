@@ -30,10 +30,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-      - name: Configure CI database
-        run: echo "BUBBLEWASH_DATABASE_PATH=$RUNNER_TEMP/bubblewash-ci.sqlite" >> "$GITHUB_ENV"
       - name: Install locked dependencies
         run: npm ci
+      - name: Verify generated Worker bindings
+        run: npm run cf:types
       - name: Lint
         run: npm run lint
       - name: Unit and integration tests
@@ -46,7 +46,7 @@ jobs:
         run: npm run audit:prod
       - name: Production build
         run: npm run build
-      - name: Verify production image runtime
-        run: npm run verify:image-runtime
+      - name: Validate Worker package
+        run: npm run deploy:dry-run
       - name: Verify required production routes
         run: npm run verify:routes

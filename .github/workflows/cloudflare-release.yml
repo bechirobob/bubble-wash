@@ -1,0 +1,45 @@
+name: Cloudflare Release Gate
+
+on:
+  workflow_run:
+    workflows:
+      - Pilot CI
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bubblewash-cloudflare-release
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.head_repository.full_name == github.repository
+        )
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record Cloudflare deployment handoff
+        env:
+          RELEASE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          {
+            echo "## Cloudflare release ready"
+            echo
+            echo "Verified revision: \`$RELEASE_SHA\`"
+            echo
+            echo "The BeCore Cloudflare deployment broker will reconcile this exact main-branch revision."
+          } >> "$GITHUB_STEP_SUMMARY"

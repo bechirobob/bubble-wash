@@ -40,7 +40,7 @@ export default function StaffAccessPage() {
     <main className="loginPage staffAccessPage">
       <section className="loginShell staffAccessShell">
         <Link className="brand" href="/" aria-label="Bubble Wash home">
-          <span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={58} height={58} priority /></span>
+          <span className="brandCrop"><Image className="brandMark" src="/apple-icon.png" alt="" width={58} height={58} priority /></span>
           <span>Bubble Wash Staff</span>
         </Link>
         <div className="staffAccessHero">

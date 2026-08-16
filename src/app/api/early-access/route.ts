@@ -27,7 +27,7 @@ function normalizeGhanaPhone(value: string) {
 export async function POST(request: NextRequest) {
   const guardError = sameOriginJsonGuard(request.headers, "early-access signup");
   if (guardError) return guardError;
-  if (isRateLimited(clientKey(request.headers, "early-access"), 8, 60_000)) {
+  if (await isRateLimited(clientKey(request.headers, "early-access"), 8, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many signup attempts. Try again shortly." }, { status: 429 });
   }
   try {
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     if (!frequencies.has(frequency)) return NextResponse.json({ ok: false, error: "Select a valid laundry frequency." }, { status: 400 });
     if (input.consent !== true) return NextResponse.json({ ok: false, error: "Consent is required before we can send launch updates." }, { status: 400 });
 
-    const saved = upsertEarlyAccessSignup({
+    const saved = await upsertEarlyAccessSignup({
       id: `EA-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`,
       firstName, phone, email, area, frequency,
       consentAt: new Date().toISOString(),

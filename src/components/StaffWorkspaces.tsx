@@ -108,6 +108,12 @@ type VendorAvailabilityRow = { vendorId: string; vendorName: string; serviceZone
 type DriverAvailabilityRow = { driverId: string; driverName: string; serviceZones: string[]; vehicle?: string; capacityRemaining: number; availabilityStatus: string; updatedAt: string; notes?: string };
 type VendorDeclineRow = { id: string; orderId: string; vendorName: string; reason: string; declinedBy: string; createdAt: string };
 type StaffRosterMember = { id: string; name: string; email: string; phone: string; role: string; status: string; workArea: string; access: "configured" | "roster-only"; updatedAt: string };
+type ApiStatus = { ok: boolean; error?: string };
+type AvailabilityApiResponse = ApiStatus & { vendors: VendorAvailabilityRow[]; drivers: DriverAvailabilityRow[]; declines: VendorDeclineRow[] };
+type SubmissionsApiResponse = ApiStatus & { records: SubmissionRecord[] };
+type OrdersApiResponse = ApiStatus & { orders: OrderSummary[] };
+type StaffRosterApiResponse = ApiStatus & { members: StaffRosterMember[] };
+type DispatchLocationApiResponse = ApiStatus & { locations?: DispatchLiveLocation[]; location?: DispatchLiveLocation };
 
 type AutomationAction = ReturnType<typeof automationActionsForOrder>[number];
 
@@ -461,7 +467,7 @@ function AvailabilityBoard({ role, mode = "all", refreshToken = 0 }: { role: Sta
     if (showLoading) setStatus("Loading availability table…");
     try {
       const response = await fetch("/api/availability");
-      const data = await response.json();
+      const data = await response.json<AvailabilityApiResponse>();
       if (!response.ok || !data.ok) {
         setStatus(data.error ?? "Unable to load availability table.");
         setHasLoaded(true);
@@ -481,7 +487,7 @@ function AvailabilityBoard({ role, mode = "all", refreshToken = 0 }: { role: Sta
   useEffect(() => {
     let active = true;
     fetch("/api/availability")
-      .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+      .then((response) => response.json<AvailabilityApiResponse>().then((data) => ({ ok: response.ok, data })))
       .then(({ ok, data }) => {
         if (!active) return;
         if (!ok || !data.ok) {
@@ -568,7 +574,7 @@ function RecentActivity({ filter, initialSelectedId = "", basePath }: { filter?:
     if (showLoading) setStatus("Loading recent activity…");
     try {
       const response = await fetch("/api/submissions");
-      const data = await response.json();
+      const data = await response.json<SubmissionsApiResponse>();
       if (!response.ok || !data.ok) {
         setStatus(data.error ?? "Unable to load activity.");
         setHasLoaded(true);
@@ -602,7 +608,7 @@ function RecentActivity({ filter, initialSelectedId = "", basePath }: { filter?:
       if (showLoading) setStatus("Loading recent activity…");
       try {
         const response = await fetch("/api/submissions");
-        const data = await response.json();
+        const data = await response.json<SubmissionsApiResponse>();
         if (!active) return;
         if (!response.ok || !data.ok) {
           setStatus(data.error ?? "Unable to load activity.");
@@ -1032,7 +1038,7 @@ function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
       cache: "no-store",
       keepalive,
     });
-    const data = await response.json().catch(() => ({}));
+    const data = await response.json<ApiStatus>().catch((): ApiStatus => ({ ok: false }));
     if (!response.ok || !data.ok) throw new Error(data.error ?? "Dispatch could not confirm the stop.");
   }
 
@@ -1116,7 +1122,7 @@ function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
             }),
             cache: "no-store",
           });
-          const data = await response.json().catch(() => ({}));
+          const data = await response.json<ApiStatus>().catch((): ApiStatus => ({ ok: false }));
           if (!response.ok || !data.ok) throw new Error(data.error ?? "Dispatch could not receive this location.");
           if (watchIdRef.current !== watchId) return;
           lastSentMsRef.current = now;
@@ -1225,7 +1231,7 @@ function AdminDispatchWorkspace() {
     async function refresh() {
       try {
         const response = await fetch("/api/orders");
-        const data = await response.json();
+        const data = await response.json<OrdersApiResponse>();
         if (!active) return;
         if (!response.ok || !data.ok) throw new Error(data.error ?? "Unable to load dispatch.");
         setOrders(data.orders ?? []);
@@ -1247,7 +1253,7 @@ function AdminDispatchWorkspace() {
     async function refreshLocations() {
       try {
         const response = await fetch("/api/dispatch/location", { cache: "no-store" });
-        const data = await response.json().catch(() => ({}));
+        const data = await response.json<DispatchLocationApiResponse>().catch((): DispatchLocationApiResponse => ({ ok: false }));
         if (!active) return;
         if (!response.ok || !data.ok) throw new Error(data.error ?? "Live rider locations are unavailable.");
         setLiveLocations(normalizeLiveLocations(data));
@@ -1280,7 +1286,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
     if (showLoading) setStatus("Loading shared order board…");
     try {
       const response = await fetch("/api/orders");
-      const data = await response.json();
+      const data = await response.json<OrdersApiResponse>();
       if (!response.ok || !data.ok) {
         setStatus(data.error ?? "Unable to load shared orders.");
         setHasLoaded(true);
@@ -1303,7 +1309,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
       if (showLoading) setStatus("Loading shared order board…");
       try {
         const response = await fetch("/api/orders");
-        const data = await response.json();
+        const data = await response.json<OrdersApiResponse>();
         if (!active) return;
         if (!response.ok || !data.ok) {
           setStatus(data.error ?? "Unable to load shared orders.");
@@ -1335,7 +1341,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
     async function refreshLocation() {
       try {
         const response = await fetch("/api/dispatch/location", { cache: "no-store" });
-        const data = await response.json().catch(() => ({}));
+        const data = await response.json<DispatchLocationApiResponse>().catch((): DispatchLocationApiResponse => ({ ok: false }));
         if (!active) return;
         if (!response.ok || !data.ok) throw new Error(data.error ?? "Live rider location is unavailable.");
         setLiveLocations(normalizeLiveLocations(data));
@@ -1420,7 +1426,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
 
 async function postJSON<T>(url: string, payload: unknown): Promise<T> {
   const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-  const data = await response.json();
+  const data = await response.json<T & ApiStatus>();
   if (!response.ok || !data.ok) throw new Error(data.error ?? "Request failed");
   return data;
 }
@@ -1439,7 +1445,7 @@ function PortalShell({ title, role, pageRole = role, userName, currentView, navi
   return (
     <main className="portalPage">
       <header className="staffTopbar">
-        <Link className="brand" href="/" aria-label="Bubble Wash home"><span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={46} height={46} /></span><span>Bubble Wash</span></Link>
+        <Link className="brand" href="/" aria-label="Bubble Wash home"><span className="brandCrop"><Image className="brandMark" src="/apple-icon.png" alt="" width={46} height={46} /></span><span>Bubble Wash</span></Link>
         <div className="staffAccount"><span><strong>{userName}</strong><small>{title}</small></span><button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button></div>
       </header>
       <nav className="staffSectionNav" aria-label={`${pageRole} workspace sections`}>
@@ -1482,7 +1488,7 @@ function StaffAccessRoster({ refreshToken = 0 }: { refreshToken?: number }) {
     setStatus("Loading staff roster…");
     try {
       const response = await fetch("/api/staff/roster");
-      const data = await response.json();
+      const data = await response.json<StaffRosterApiResponse>();
       if (!response.ok || !data.ok) {
         setStatus(data.error ?? "Unable to load staff roster.");
         setHasLoaded(true);
@@ -1500,7 +1506,7 @@ function StaffAccessRoster({ refreshToken = 0 }: { refreshToken?: number }) {
   useEffect(() => {
     let active = true;
     fetch("/api/staff/roster")
-      .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+      .then((response) => response.json<StaffRosterApiResponse>().then((data) => ({ ok: response.ok, data })))
       .then(({ ok, data }) => {
         if (!active) return;
         if (!ok || !data.ok) {
@@ -1587,7 +1593,11 @@ function AdminOverview({ userName }: { userName: string }) {
     setLoadError("");
     try {
       const [orderResponse, availabilityResponse, submissionResponse] = await Promise.all([fetch("/api/orders"), fetch("/api/availability"), fetch("/api/submissions")]);
-      const [orderData, availabilityData, submissionData] = await Promise.all([orderResponse.json(), availabilityResponse.json(), submissionResponse.json()]);
+      const [orderData, availabilityData, submissionData] = await Promise.all([
+        orderResponse.json<OrdersApiResponse>(),
+        availabilityResponse.json<AvailabilityApiResponse>(),
+        submissionResponse.json<SubmissionsApiResponse>(),
+      ]);
       if (!orderResponse.ok || !orderData.ok) throw new Error(orderData.error ?? "Unable to load orders.");
       if (!availabilityResponse.ok || !availabilityData.ok) throw new Error(availabilityData.error ?? "Unable to load capacity.");
       if (!submissionResponse.ok || !submissionData.ok) throw new Error(submissionData.error ?? "Unable to load support activity.");
@@ -1610,7 +1620,11 @@ function AdminOverview({ userName }: { userName: string }) {
     let active = true;
     Promise.all([fetch("/api/orders"), fetch("/api/availability"), fetch("/api/submissions")])
       .then(async ([orderResponse, availabilityResponse, submissionResponse]) => {
-        const [orderData, availabilityData, submissionData] = await Promise.all([orderResponse.json(), availabilityResponse.json(), submissionResponse.json()]);
+        const [orderData, availabilityData, submissionData] = await Promise.all([
+          orderResponse.json<OrdersApiResponse>(),
+          availabilityResponse.json<AvailabilityApiResponse>(),
+          submissionResponse.json<SubmissionsApiResponse>(),
+        ]);
         if (!active) return;
         if (!orderResponse.ok || !orderData.ok) throw new Error(orderData.error ?? "Unable to load orders.");
         if (!availabilityResponse.ok || !availabilityData.ok) throw new Error(availabilityData.error ?? "Unable to load capacity.");
@@ -1674,7 +1688,7 @@ function SupportTicketDesk({ userName, selectedCaseId = "", basePath, refreshTok
     if (showLoading) setStatus("Loading support tickets…");
     try {
       const response = await fetch("/api/submissions");
-      const data = await response.json();
+      const data = await response.json<SubmissionsApiResponse>();
       if (!response.ok || !data.ok) {
         setStatus(data.error ?? "Unable to load support tickets.");
         setHasLoaded(true);
@@ -1824,7 +1838,7 @@ function AdminOperationsHealth() {
   async function load() {
     try {
       const response = await fetch("/api/admin/operations", { cache: "no-store" });
-      const data = await response.json();
+      const data = await response.json<ApiStatus & { metrics: OperationsMetrics; privacyRequests: PrivacyOperationsRequest[] }>();
       if (!response.ok) throw new Error(data.error ?? "Unable to load operations health.");
       setMetrics(data.metrics);
       setPrivacyRequests(data.privacyRequests);
@@ -1851,7 +1865,7 @@ function AdminOperationsHealth() {
     }
   }
 
-  return <section className="staffContentSection" aria-busy={!hasLoaded}><div className="staffSectionHeader"><div><h2>Operations health and privacy queue</h2><p>Delivery retries and retention run through the protected maintenance worker. Privacy cases require an explicit review status.</p></div><button className="button secondary" type="button" onClick={() => void load()}>Refresh</button></div>{!hasLoaded ? <LoadingSkeleton label="Loading operations health metrics" rows={4} variant="metrics" /> : metrics ? <div className="overviewGrid"><article><span className="staffFieldLabel">Order records</span><strong>{metrics.submissions}</strong><small>SQLite submission events</small></article><article><span className="staffFieldLabel">Early access</span><strong>{metrics.earlyAccess.active}</strong><small>{metrics.earlyAccess.total} total consent records</small></article><article><span className="staffFieldLabel">Privacy queue</span><strong>{metrics.privacyRequests.open}</strong><small>{metrics.privacyRequests.total} total requests</small></article><article><span className="staffFieldLabel">Notification outbox</span><strong>{metrics.notifications.pending + metrics.notifications.failed}</strong><small>{metrics.notifications.pending} pending · {metrics.notifications.failed} failed · {metrics.notifications.sent} sent</small></article></div> : null}<p className={noticeClass(status)} role="status">{status}</p><div className="staffSectionHeader"><div><h3>Privacy and data-rights requests</h3><p>Verify identity before disclosure, correction, or deletion. Mark completion only after the requested work is recorded.</p></div></div><div className="staffSimpleList">{!hasLoaded ? <LoadingSkeleton label="Loading privacy requests" rows={4} /> : privacyRequests.length ? privacyRequests.map((request) => <article className="privacyOpsRow" key={request.id}><div><strong>{request.id}</strong><span>{request.requestType.replaceAll("_", " ")}</span></div><div><strong>{request.name}</strong><span>{request.contact}</span><small>{request.orderId || "No order supplied"}</small></div><div><strong>{request.status.replaceAll("_", " ")}</strong><time>{formatActivityTime(request.createdAt)}</time></div><div className="tableActionRow"><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "identity_review")}>Identity review</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "completed")}>Complete</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "declined")}>Decline</button></div></article>) : <p className="staffEmptyState">No privacy requests are waiting.</p>}</div></section>;
+  return <section className="staffContentSection" aria-busy={!hasLoaded}><div className="staffSectionHeader"><div><h2>Operations health and privacy queue</h2><p>Delivery retries and retention run through the protected maintenance worker. Privacy cases require an explicit review status.</p></div><button className="button secondary" type="button" onClick={() => void load()}>Refresh</button></div>{!hasLoaded ? <LoadingSkeleton label="Loading operations health metrics" rows={4} variant="metrics" /> : metrics ? <div className="overviewGrid"><article><span className="staffFieldLabel">Order records</span><strong>{metrics.submissions}</strong><small>D1 submission events</small></article><article><span className="staffFieldLabel">Early access</span><strong>{metrics.earlyAccess.active}</strong><small>{metrics.earlyAccess.total} total consent records</small></article><article><span className="staffFieldLabel">Privacy queue</span><strong>{metrics.privacyRequests.open}</strong><small>{metrics.privacyRequests.total} total requests</small></article><article><span className="staffFieldLabel">Notification outbox</span><strong>{metrics.notifications.pending + metrics.notifications.failed}</strong><small>{metrics.notifications.pending} pending · {metrics.notifications.failed} failed · {metrics.notifications.sent} sent</small></article></div> : null}<p className={noticeClass(status)} role="status">{status}</p><div className="staffSectionHeader"><div><h3>Privacy and data-rights requests</h3><p>Verify identity before disclosure, correction, or deletion. Mark completion only after the requested work is recorded.</p></div></div><div className="staffSimpleList">{!hasLoaded ? <LoadingSkeleton label="Loading privacy requests" rows={4} /> : privacyRequests.length ? privacyRequests.map((request) => <article className="privacyOpsRow" key={request.id}><div><strong>{request.id}</strong><span>{request.requestType.replaceAll("_", " ")}</span></div><div><strong>{request.name}</strong><span>{request.contact}</span><small>{request.orderId || "No order supplied"}</small></div><div><strong>{request.status.replaceAll("_", " ")}</strong><time>{formatActivityTime(request.createdAt)}</time></div><div className="tableActionRow"><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "identity_review")}>Identity review</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "completed")}>Complete</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "declined")}>Decline</button></div></article>) : <p className="staffEmptyState">No privacy requests are waiting.</p>}</div></section>;
 }
 
 export function VendorWorkspace({ userName, role, initialView = "jobs", selectedOrderId, selectedActivityId }: WorkspaceProps) {
