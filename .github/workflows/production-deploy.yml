@@ -66,4 +66,47 @@ jobs:
           echo "Bubble Wash service definitions:"
           grep -RIl -m 1 'bubblewash\|bubble-wash' \
             /etc/systemd/system /home/*/.config/systemd/user 2>/dev/null | sort -u || true
+
+          service_file=/home/ubuntu/.config/systemd/user/bubblewash-local.service
+          echo "Bubble Wash service metadata:"
+          if [[ -f "$service_file" ]]; then
+            grep -E '^(Description|WorkingDirectory|ExecStart|EnvironmentFile|Restart|WantedBy)=' \
+              "$service_file" || true
+          fi
+
+          repo_dir=/home/ubuntu/projects/bubble-wash
+          echo "Bubble Wash repository:"
+          if git -C "$repo_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            git -C "$repo_dir" rev-parse HEAD
+            git -C "$repo_dir" status --short --branch
+            git -C "$repo_dir" remote get-url origin
+            git -C "$repo_dir" rev-parse --show-toplevel
+          fi
+
+          echo "Bubble Wash path metadata:"
+          for path in \
+            "$repo_dir" \
+            /home/ubuntu/bubblewash-runtime \
+            /home/ubuntu/bubblewash-backups \
+            /home/ubuntu/bubblewash-releases \
+            /home/ubuntu/bubblewash-rollbacks \
+            /home/ubuntu/.config/bubblewash; do
+            if [[ -e "$path" ]]; then
+              stat -c '%n|%F|%U:%G|%a' "$path"
+            fi
+          done
+
+          echo "Runtime layout (names and sizes only):"
+          find /home/ubuntu/bubblewash-runtime -maxdepth 2 -mindepth 1 \
+            \( -type d -o -type f -o -type l \) \
+            -printf '%y %p %s bytes\n' 2>/dev/null | sort || true
+
+          echo "Database candidates (names and sizes only):"
+          find \
+            /home/ubuntu/.config/bubblewash \
+            /home/ubuntu/bubblewash-runtime \
+            "$repo_dir" \
+            -maxdepth 4 -type f \
+            \( -name '*.sqlite' -o -name '*.sqlite3' -o -name '*.db' \) \
+            -printf '%p %s bytes\n' 2>/dev/null | sort || true
           REMOTE
