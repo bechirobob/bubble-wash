@@ -61,12 +61,6 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
   if (!env.BUBBLEWASH_SESSION_SECRET || env.BUBBLEWASH_SESSION_SECRET.length < 32) {
     errors.push("Set BUBBLEWASH_SESSION_SECRET to a strong 32+ character value in production.");
   }
-  if (!validTotpSecret(env.BUBBLEWASH_ADMIN_TOTP_SECRET)) {
-    errors.push("Set BUBBLEWASH_ADMIN_TOTP_SECRET to a random base32 secret containing at least 20 bytes.");
-  }
-  if (!env.BUBBLEWASH_MAINTENANCE_TOKEN || env.BUBBLEWASH_MAINTENANCE_TOKEN.length < 32) {
-    errors.push("Set BUBBLEWASH_MAINTENANCE_TOKEN to a random 32+ character value.");
-  }
   let backupKeyValid = false;
   try {
     backupKeyValid = Buffer.from(env.BUBBLEWASH_BACKUP_ENCRYPTION_KEY ?? "", "base64").length === 32;
@@ -82,12 +76,6 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
   }
   if (!env.BUBBLEWASH_DATABASE_PATH || !env.BUBBLEWASH_DATABASE_PATH.startsWith("/")) {
     errors.push("Set BUBBLEWASH_DATABASE_PATH to an absolute path on the mounted persistent volume.");
-  }
-  if (!env.BUBBLEWASH_LEGAL_ENTITY_NAME?.trim()) {
-    errors.push("Set BUBBLEWASH_LEGAL_ENTITY_NAME to the registered entity operating Bubble Wash.");
-  }
-  if (!env.BUBBLEWASH_DPC_REGISTRATION_NUMBER?.trim()) {
-    errors.push("Set BUBBLEWASH_DPC_REGISTRATION_NUMBER after confirming the Ghana Data Protection Commission registration.");
   }
   if (env.BUBBLEWASH_DATABASE_DRIVER !== "sqlite") {
     errors.push("Set BUBBLEWASH_DATABASE_DRIVER=sqlite for the supported single-replica pilot topology.");
@@ -126,17 +114,6 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
   if (env.NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED === "true" && !env.PAYSTACK_SECRET_KEY) {
     errors.push("Set PAYSTACK_SECRET_KEY before enabling online payments.");
   }
-  for (const [name, purpose] of [
-    ["RESEND_API_KEY", "privacy and early-access email confirmations"],
-    ["BUBBLEWASH_EMAIL_FROM", "privacy and early-access email confirmations"],
-    ["WHATSAPP_API_VERSION", "privacy and early-access WhatsApp confirmations"],
-    ["WHATSAPP_ACCESS_TOKEN", "privacy and early-access WhatsApp confirmations"],
-    ["WHATSAPP_PHONE_NUMBER_ID", "privacy and early-access WhatsApp confirmations"],
-    ["WHATSAPP_EARLY_ACCESS_TEMPLATE", "household early-access confirmations"],
-    ["WHATSAPP_PRIVACY_TEMPLATE", "privacy request confirmations"],
-  ]) {
-    if (!env[name]) errors.push(`Set ${name} for ${purpose}.`);
-  }
   if (env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED === "true") {
     if (!env.RESEND_API_KEY) errors.push("Set RESEND_API_KEY before enabling automated updates.");
     if (!env.BUBBLEWASH_EMAIL_FROM) errors.push("Set BUBBLEWASH_EMAIL_FROM before enabling automated updates.");
@@ -169,6 +146,30 @@ export function productionReadinessWarnings(env: NodeJS.ProcessEnv | Record<stri
   }
   if (env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED !== "true") {
     warnings.push("Pilot communication mode is active: operations must follow up with customers manually; automated email and WhatsApp updates are disabled.");
+  }
+  if (!validTotpSecret(env.BUBBLEWASH_ADMIN_TOTP_SECRET)) {
+    warnings.push("Admin sign-in remains fail-closed until MFA enrollment is completed.");
+  }
+  if (!env.BUBBLEWASH_MAINTENANCE_TOKEN || env.BUBBLEWASH_MAINTENANCE_TOKEN.length < 32) {
+    warnings.push("Automated maintenance remains fail-closed until an operations token is installed.");
+  }
+  if (!env.BUBBLEWASH_LEGAL_ENTITY_NAME?.trim()) {
+    warnings.push("The registered legal entity name has not yet been published.");
+  }
+  if (!env.BUBBLEWASH_DPC_REGISTRATION_NUMBER?.trim()) {
+    warnings.push("A Ghana Data Protection Commission registration number will only be published after it is confirmed.");
+  }
+  const confirmationSettings = [
+    "RESEND_API_KEY",
+    "BUBBLEWASH_EMAIL_FROM",
+    "WHATSAPP_API_VERSION",
+    "WHATSAPP_ACCESS_TOKEN",
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "WHATSAPP_EARLY_ACCESS_TEMPLATE",
+    "WHATSAPP_PRIVACY_TEMPLATE",
+  ];
+  if (confirmationSettings.some((name) => !env[name])) {
+    warnings.push("Privacy and early-access confirmations require manual operations follow-up until email and WhatsApp providers are configured.");
   }
   return warnings;
 }

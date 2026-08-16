@@ -151,16 +151,23 @@ test("pilot operations may hide optional public contacts while readiness reports
   assert.ok(warnings.some((item) => item.includes("follow up with customers manually")));
 });
 
-test("manual commercial mode keeps Paystack optional but requires D2C and privacy confirmation providers", () => {
-  const errors = productionReadinessErrors({ NODE_ENV: "production", BUBBLEWASH_DISABLE_DEMO_LOGIN: "true" });
+test("manual pilot mode keeps optional integrations fail-closed without blocking the public site", () => {
+  const env = { NODE_ENV: "production", BUBBLEWASH_DISABLE_DEMO_LOGIN: "true" };
+  const errors = productionReadinessErrors(env);
+  const warnings = productionReadinessWarnings(env);
   assert.equal(errors.some((item) => item.includes("PAYSTACK_SECRET_KEY")), false);
-  assert.ok(errors.some((item) => item.includes("RESEND_API_KEY")));
-  assert.ok(errors.some((item) => item.includes("WHATSAPP_ACCESS_TOKEN")));
+  assert.equal(errors.some((item) => item.includes("RESEND_API_KEY")), false);
+  assert.equal(errors.some((item) => item.includes("WHATSAPP_ACCESS_TOKEN")), false);
   assert.ok(errors.some((item) => item.includes("trusted client-IP mode")));
-  assert.ok(errors.some((item) => item.includes("BUBBLEWASH_ADMIN_TOTP_SECRET")));
-  assert.ok(errors.some((item) => item.includes("BUBBLEWASH_MAINTENANCE_TOKEN")));
+  assert.equal(errors.some((item) => item.includes("BUBBLEWASH_ADMIN_TOTP_SECRET")), false);
+  assert.equal(errors.some((item) => item.includes("BUBBLEWASH_MAINTENANCE_TOKEN")), false);
   assert.ok(errors.some((item) => item.includes("BUBBLEWASH_BACKUP_ENCRYPTION_KEY")));
   assert.ok(errors.some((item) => item.includes("BUBBLEWASH_DATABASE_DRIVER=sqlite")));
+  assert.ok(warnings.some((item) => item.includes("MFA enrollment")));
+  assert.ok(warnings.some((item) => item.includes("operations token")));
+  assert.ok(warnings.some((item) => item.includes("manual operations follow-up")));
+  assert.ok(warnings.some((item) => item.includes("legal entity")));
+  assert.ok(warnings.some((item) => item.includes("Data Protection Commission")));
 });
 
 test("enabling future integrations makes their provider credentials blocking", () => {
