@@ -40,14 +40,6 @@ CREATE TABLE IF NOT EXISTS payment_verifications (
 );
 CREATE INDEX IF NOT EXISTS idx_payment_verifications_verified_at ON payment_verifications(verified_at DESC);
 
-CREATE TRIGGER IF NOT EXISTS payment_verification_submission
-AFTER INSERT ON payment_verifications
-WHEN NEW.submission_created_at IS NOT NULL AND NEW.submission_data IS NOT NULL
-BEGIN
-  INSERT INTO submissions (id, created_at, source, data)
-  VALUES (NEW.record_id, NEW.submission_created_at, NEW.submission_source, NEW.submission_data);
-END;
-
 CREATE TABLE IF NOT EXISTS driver_live_locations (
   driver_id TEXT PRIMARY KEY,
   order_id TEXT NOT NULL,
@@ -177,59 +169,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_capacity_reservations_order_vendor
 CREATE UNIQUE INDEX IF NOT EXISTS idx_capacity_reservations_order_driver
   ON assignment_capacity_reservations(order_id COLLATE NOCASE, driver_id)
   WHERE driver_id IS NOT NULL;
-
-CREATE TRIGGER IF NOT EXISTS assignment_capacity_validate
-BEFORE INSERT ON assignment_capacity_reservations
-BEGIN
-  SELECT CASE
-    WHEN NEW.vendor_id IS NOT NULL AND NOT EXISTS (
-      SELECT 1 FROM vendor_availability
-      WHERE vendor_id = NEW.vendor_id
-        AND capacity_remaining > 0
-        AND lower(availability_status) NOT GLOB '*paused*'
-        AND lower(availability_status) NOT GLOB '*closed*'
-        AND lower(availability_status) NOT GLOB '*unavailable*'
-        AND lower(availability_status) NOT GLOB '*inactive*'
-        AND lower(availability_status) NOT GLOB '*suspended*'
-        AND lower(availability_status) NOT GLOB '*tomorrow*'
-    ) THEN RAISE(ABORT, 'Vendor capacity is no longer available.')
-  END;
-  SELECT CASE
-    WHEN NEW.driver_id IS NOT NULL AND NOT EXISTS (
-      SELECT 1 FROM driver_availability
-      WHERE driver_id = NEW.driver_id
-        AND capacity_remaining > 0
-        AND lower(availability_status) NOT GLOB '*inactive*'
-        AND lower(availability_status) NOT GLOB '*suspended*'
-        AND lower(availability_status) NOT GLOB '*offboarded*'
-        AND lower(availability_status) NOT GLOB '*paused*'
-        AND lower(availability_status) NOT GLOB '*training*'
-        AND lower(availability_status) NOT GLOB '*tomorrow*'
-    ) THEN RAISE(ABORT, 'Driver capacity is no longer available.')
-  END;
-END;
-
-CREATE TRIGGER IF NOT EXISTS assignment_capacity_reserve
-AFTER INSERT ON assignment_capacity_reservations
-BEGIN
-  UPDATE vendor_availability
-  SET capacity_remaining = capacity_remaining - 1, updated_at = NEW.created_at
-  WHERE vendor_id = NEW.vendor_id;
-  UPDATE driver_availability
-  SET capacity_remaining = capacity_remaining - 1, updated_at = NEW.created_at
-  WHERE driver_id = NEW.driver_id;
-END;
-
-CREATE TRIGGER IF NOT EXISTS assignment_capacity_release
-AFTER UPDATE OF vendor_released_at, driver_released_at ON assignment_capacity_reservations
-BEGIN
-  UPDATE vendor_availability
-  SET capacity_remaining = MIN(capacity_remaining + 1, 999), updated_at = NEW.vendor_released_at
-  WHERE vendor_id = NEW.vendor_id AND OLD.vendor_released_at IS NULL AND NEW.vendor_released_at IS NOT NULL;
-  UPDATE driver_availability
-  SET capacity_remaining = MIN(capacity_remaining + 1, 999), updated_at = NEW.driver_released_at
-  WHERE driver_id = NEW.driver_id AND OLD.driver_released_at IS NULL AND NEW.driver_released_at IS NOT NULL;
-END;
 
 CREATE TABLE IF NOT EXISTS staff_credentials (
   email TEXT PRIMARY KEY COLLATE NOCASE,
