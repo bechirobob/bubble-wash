@@ -16,7 +16,7 @@ The deployment broker owns the Cloudflare token. Bubble Wash does not copy or ex
 - `idle`: deploy the Worker to `bubble-wash.becoreops.workers.dev`; do not copy data.
 - `staging`: take a consistent live SQLite snapshot, import it to D1, and verify per-table row counts and SHA-256 parity while the VPS still serves production.
 - `cutover`: stop the VPS service to freeze writes, take the final snapshot, replace D1 from that snapshot, and verify parity. A failed run automatically restarts the VPS.
-- `production`: disable the migration endpoint, attach `bubblewash.co` and `www.bubblewash.co` as Worker custom domains, and smoke production.
+- `production`: disable the migration endpoint, attach Worker routes for `bubblewash.co/*` and `www.bubblewash.co/*` over the existing proxied fallback records, and smoke production. The retained records keep route removal plus VPS restart available as a rollback without serving VPS traffic during normal operation.
 
 Migration authorization is a short-lived GitHub OIDC token restricted to the main branch and `.github/workflows/cloudflare-migrate.yml`. Imported tables and columns are allowlisted. Customer rows are never uploaded as an Actions artifact; only non-sensitive counts and digests are retained. Transient plaintext exports are deleted from the runner and VPS after every attempt.
 

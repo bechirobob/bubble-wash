@@ -7,12 +7,12 @@
   "workers_dev": true,
   "routes": [
     {
-      "pattern": "bubblewash.co",
-      "custom_domain": true
+      "pattern": "bubblewash.co/*",
+      "zone_name": "bubblewash.co"
     },
     {
-      "pattern": "www.bubblewash.co",
-      "custom_domain": true
+      "pattern": "www.bubblewash.co/*",
+      "zone_name": "bubblewash.co"
     }
   ],
   "vars": {
