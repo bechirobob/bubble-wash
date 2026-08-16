@@ -6,6 +6,11 @@ on:
       - main
     paths:
       - migration/cloudflare-phase.json
+      - .github/workflows/cloudflare-migrate.yml
+      - scripts/export-cloudflare-migration.mjs
+      - scripts/import-cloudflare-migration.mjs
+      - src/lib/migration-schema.js
+      - src/lib/migration.ts
   workflow_dispatch:
 
 permissions:
@@ -77,7 +82,7 @@ jobs:
           tar -czf "$local_archive" scripts/export-cloudflare-migration.mjs src/lib/migration-schema.js
           tailscale ssh root@hermes "install -d -o ubuntu -g ubuntu -m 0700 '$tool_root'" 
           tailscale ssh root@hermes "tar -xzf - -C '$tool_root' && chown -R ubuntu:ubuntu '$tool_root'" < "$local_archive"
-          tailscale ssh root@hermes "systemd-run --quiet --wait --collect --pipe --unit='bubblewash-cloudflare-export-${GITHUB_RUN_ID}' --property='User=ubuntu' --property='Group=ubuntu' --property='WorkingDirectory=$tool_root' --property='EnvironmentFile=/home/ubuntu/.config/bubblewash/env' --property='Environment=BUBBLEWASH_SOURCE_SHA=$GITHUB_SHA' --property='Environment=BUBBLEWASH_NODE_ROOT=/home/ubuntu/bubblewash-pilot' /usr/bin/node '$tool_root/scripts/export-cloudflare-migration.mjs' '$export_root'"
+          tailscale ssh root@hermes "systemd-run --quiet --wait --collect --pipe --unit='bubblewash-cloudflare-export-${GITHUB_RUN_ID}' --property='User=ubuntu' --property='Group=ubuntu' --property='WorkingDirectory=$tool_root' --property='EnvironmentFile=/home/ubuntu/.config/bubblewash/env' --property='Environment=BUBBLEWASH_SOURCE_SHA=$GITHUB_SHA' --property='Environment=BUBBLEWASH_NODE_ROOT=/home/ubuntu/bubblewash-pilot' --property='Environment=BUBBLEWASH_ADMIN_TOTP_SECRET_FILE=/home/ubuntu/.config/bubblewash/admin-totp-secret' --property='Environment=BUBBLEWASH_ADMIN_TOTP_ENROLLMENT_FILE=/home/ubuntu/.config/bubblewash/admin-mfa-enrollment.txt' /usr/bin/node '$tool_root/scripts/export-cloudflare-migration.mjs' '$export_root'"
           tailscale ssh root@hermes "tar -czf - -C '$export_root' ." > "$RUNNER_TEMP/migration-export.tgz"
           tar -xzf "$RUNNER_TEMP/migration-export.tgz" -C "$local_export"
           test -s "$local_export/manifest.json"

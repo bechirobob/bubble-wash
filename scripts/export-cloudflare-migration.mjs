@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,13 +28,42 @@ function quoteIdentifier(value) {
   return `"${value}"`;
 }
 
+function base32(bytes) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const byte of bytes) bits += byte.toString(2).padStart(8, "0");
+  let output = "";
+  for (let index = 0; index < bits.length; index += 5) {
+    output += alphabet[Number.parseInt(bits.slice(index, index + 5).padEnd(5, "0"), 2)];
+  }
+  return output;
+}
+
+function adminTotpSecret(email) {
+  const configured = process.env.BUBBLEWASH_ADMIN_TOTP_SECRET?.trim() ?? "";
+  if (configured) return configured;
+  const secretPath = process.env.BUBBLEWASH_ADMIN_TOTP_SECRET_FILE?.trim() ?? "";
+  const enrollmentPath = process.env.BUBBLEWASH_ADMIN_TOTP_ENROLLMENT_FILE?.trim() ?? "";
+  if (!secretPath || !path.isAbsolute(secretPath) || !enrollmentPath || !path.isAbsolute(enrollmentPath)) {
+    throw new Error("Production admin MFA is incomplete.");
+  }
+  const secret = existsSync(secretPath) ? readFileSync(secretPath, "utf8").trim() : base32(randomBytes(20));
+  if (!/^[A-Z2-7]{16,128}$/u.test(secret)) throw new Error("The protected admin MFA seed is invalid.");
+  if (!existsSync(secretPath)) writeFileSync(secretPath, `${secret}\n`, { flag: "wx", mode: 0o600 });
+  const label = encodeURIComponent(`Bubble Wash:${email}`);
+  const issuer = encodeURIComponent("Bubble Wash");
+  const uri = `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`;
+  writeFileSync(enrollmentPath, `${uri}\n`, { mode: 0o600 });
+  return secret;
+}
+
 function staffCredential(role, name) {
   const prefix = `BUBBLEWASH_${role.toUpperCase()}`;
   const email = process.env[`${prefix}_EMAIL`]?.trim() ?? "";
   const passwordHash = process.env[`${prefix}_PASSWORD_HASH`]?.trim() ?? "";
   const entityId = role === "vendor" ? process.env.BUBBLEWASH_VENDOR_ENTITY_ID?.trim() ?? ""
     : role === "driver" ? process.env.BUBBLEWASH_DRIVER_ENTITY_ID?.trim() ?? "" : "";
-  const totpSecret = role === "admin" ? process.env.BUBBLEWASH_ADMIN_TOTP_SECRET?.trim() ?? "" : "";
+  const totpSecret = role === "admin" && email ? adminTotpSecret(email) : "";
   if (!email || !/^scrypt\$[^$]+\$[^$]+$/u.test(passwordHash)) throw new Error(`Production ${role} credentials are incomplete.`);
   if ((role === "vendor" || role === "driver") && !entityId) throw new Error(`Production ${role} entity binding is incomplete.`);
   if (role === "admin" && !totpSecret) throw new Error("Production admin MFA is incomplete.");

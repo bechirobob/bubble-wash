@@ -37,6 +37,8 @@ Verify:
 
 Then verify a real staff login for each configured role, admin MFA, one customer lookup, one no-op-safe availability read, and that cross-role access is denied. Do not create a paid order as a smoke test.
 
+If the legacy VPS did not already have an admin authenticator seed, the migration creates it once and leaves a mode-`0600` enrollment URI at `/home/ubuntu/.config/bubblewash/admin-mfa-enrollment.txt` on `hermes`. The operator must retrieve it through Tailscale SSH, enroll the authenticator, and remove only the enrollment URI after verification. Keep `/home/ubuntu/.config/bubblewash/admin-totp-secret` for migration rollback continuity until the VPS retention window closes.
+
 ## Rollback
 
 ### Before custom-domain cutover
