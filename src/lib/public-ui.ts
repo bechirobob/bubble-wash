@@ -31,7 +31,9 @@ export function formatDate(value?: string) {
 export function statusTone(message?: string) {
   if (!message) return "status";
   if (/unable|failed|missing|invalid|too many|error|required|not configured|enter .*first|did not match/i.test(message)) return "status error";
+  if (/waiting|pending|delayed|attention|warning|overdue/i.test(message)) return "status warning";
   if (/ready|covered|received|reference|selected|loaded|verified|paid|saved|found/i.test(message)) return "status success";
+  if (/loading|checking|saving|updating|opening|starting|stopping|calculating|verifying/i.test(message)) return "status info";
   return "status";
 }
 
