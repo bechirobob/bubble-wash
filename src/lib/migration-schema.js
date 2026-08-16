@@ -27,22 +27,29 @@ export const migrationTriggers = Object.freeze({
       INSERT INTO submissions (id, created_at, source, data)
       VALUES (NEW.record_id, NEW.submission_created_at, NEW.submission_source, NEW.submission_data);
     END`,
-  assignment_capacity_validate: `
-    CREATE TRIGGER assignment_capacity_validate
+  assignment_vendor_capacity_validate: `
+    CREATE TRIGGER assignment_vendor_capacity_validate
     BEFORE INSERT ON assignment_capacity_reservations
+    WHEN NEW.vendor_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM vendor_availability WHERE vendor_id = NEW.vendor_id AND capacity_remaining > 0
+        AND lower(availability_status) NOT GLOB '*paused*' AND lower(availability_status) NOT GLOB '*closed*'
+        AND lower(availability_status) NOT GLOB '*unavailable*' AND lower(availability_status) NOT GLOB '*inactive*'
+        AND lower(availability_status) NOT GLOB '*suspended*' AND lower(availability_status) NOT GLOB '*tomorrow*'
+    )
     BEGIN
-      SELECT CASE WHEN NEW.vendor_id IS NOT NULL AND NOT EXISTS (
-        SELECT 1 FROM vendor_availability WHERE vendor_id = NEW.vendor_id AND capacity_remaining > 0
-          AND lower(availability_status) NOT GLOB '*paused*' AND lower(availability_status) NOT GLOB '*closed*'
-          AND lower(availability_status) NOT GLOB '*unavailable*' AND lower(availability_status) NOT GLOB '*inactive*'
-          AND lower(availability_status) NOT GLOB '*suspended*' AND lower(availability_status) NOT GLOB '*tomorrow*'
-      ) THEN RAISE(ABORT, 'Vendor capacity is no longer available.') END;
-      SELECT CASE WHEN NEW.driver_id IS NOT NULL AND NOT EXISTS (
-        SELECT 1 FROM driver_availability WHERE driver_id = NEW.driver_id AND capacity_remaining > 0
-          AND lower(availability_status) NOT GLOB '*inactive*' AND lower(availability_status) NOT GLOB '*suspended*'
-          AND lower(availability_status) NOT GLOB '*offboarded*' AND lower(availability_status) NOT GLOB '*paused*'
-          AND lower(availability_status) NOT GLOB '*training*' AND lower(availability_status) NOT GLOB '*tomorrow*'
-      ) THEN RAISE(ABORT, 'Driver capacity is no longer available.') END;
+      SELECT RAISE(ABORT, 'Vendor capacity is no longer available.');
+    END`,
+  assignment_driver_capacity_validate: `
+    CREATE TRIGGER assignment_driver_capacity_validate
+    BEFORE INSERT ON assignment_capacity_reservations
+    WHEN NEW.driver_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM driver_availability WHERE driver_id = NEW.driver_id AND capacity_remaining > 0
+        AND lower(availability_status) NOT GLOB '*inactive*' AND lower(availability_status) NOT GLOB '*suspended*'
+        AND lower(availability_status) NOT GLOB '*offboarded*' AND lower(availability_status) NOT GLOB '*paused*'
+        AND lower(availability_status) NOT GLOB '*training*' AND lower(availability_status) NOT GLOB '*tomorrow*'
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Driver capacity is no longer available.');
     END`,
   assignment_capacity_reserve: `
     CREATE TRIGGER assignment_capacity_reserve
