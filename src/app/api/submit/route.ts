@@ -8,6 +8,7 @@ import { plans, zones } from "@/lib/pricing";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { sameOriginJsonGuard, staffWriteGuard } from "@/lib/security";
 import { parseServiceTypes } from "@/lib/service-capabilities";
+import { createDeliveryCode } from "@/lib/chain-of-custody";
 
 const emailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const maxFieldLength = 1200;
@@ -356,6 +357,7 @@ export async function POST(request: NextRequest) {
     };
 
     appendSubmissionRecord(record);
+    const deliveryCode = ["pickup-booking", "checkout-request"].includes(submissionType) ? createDeliveryCode(record.id) : "";
     syncAvailabilityTables(body, submissionType, text(body.name) || text(body.company) || "Bubble Wash team");
     const notifications = await dispatchSubmissionNotifications(record);
     if (publicSubmissionTypes.has(submissionType)) {
@@ -363,6 +365,7 @@ export async function POST(request: NextRequest) {
         ok: true,
         message: "Thanks — your request was received. Keep this reference for tracking.",
         id: record.id,
+        ...(deliveryCode ? { deliveryCode } : {}),
       });
     }
     return NextResponse.json({ ok: true, message: `Thanks — your request was received. ${notificationSummary(notifications)}`, id: record.id, notifications });

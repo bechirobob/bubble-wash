@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 
 import { databaseReadiness } from "@/lib/data-store";
 import { productionReadinessErrors, productionReadinessWarnings } from "@/lib/security";
+import { backupReadiness } from "@/lib/backup-status";
 
 export async function GET() {
   const blockers = productionReadinessErrors();
+  blockers.push(...backupReadiness());
   try {
     if (!databaseReadiness()) blockers.push("The operations database did not pass its integrity/read check.");
   } catch (error) {

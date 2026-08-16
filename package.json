@@ -10,7 +10,7 @@
     "lint": "eslint",
     "test": "npm run test:unit && npm run test:data",
     "test:unit": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/*.test.mjs",
-    "test:data": "node --conditions=react-server --experimental-strip-types tests/data-store.integration.mjs && node --conditions=react-server --experimental-strip-types tests/dispatch-location-store.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/submissions.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth-production.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-defaults-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-roles-http.integration.mjs",
+    "test:data": "node --conditions=react-server --experimental-strip-types tests/data-store.integration.mjs && node --conditions=react-server --experimental-strip-types tests/dispatch-location-store.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/submissions.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth-production.integration.mjs && node --conditions=react-server --experimental-strip-types tests/customer-session.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-defaults-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-roles-http.integration.mjs",
     "typecheck": "tsc --noEmit",
     "audit:full": "npm audit --audit-level=moderate",
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",
@@ -18,14 +18,19 @@
     "verify:image-runtime": "node scripts/verify-image-runtime.mjs",
     "verify:routes": "node scripts/verify-required-routes.mjs",
     "hash-password": "node scripts/hash-password.mjs",
-    "db:backup": "node scripts/backup-database.mjs"
+    "mfa:setup": "node scripts/generate-totp-secret.mjs",
+    "db:backup": "node scripts/backup-database.mjs",
+    "db:export": "node scripts/export-portable-data.mjs",
+    "maintenance:run": "node scripts/run-maintenance.mjs"
   },
   "engines": {
     "node": ">=20.9.0"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
+    "lucide-react": "^1.31.0",
     "next": "16.2.11",
+    "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "server-only": "^0.0.1",
@@ -34,6 +39,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
@@ -41,6 +47,8 @@
     "typescript": "^5"
   },
   "overrides": {
+    "js-yaml": "4.3.1",
+    "nanoid": "3.3.18",
     "postcss": "8.5.23",
     "next@16.2.11": {
       "sharp": "$sharp"

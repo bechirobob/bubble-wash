@@ -43,6 +43,88 @@ type StoredDriverLocationRow = {
   received_at: string;
 };
 
+export type EarlyAccessSignup = {
+  id: string;
+  firstName: string;
+  phone: string;
+  email: string;
+  area: string;
+  frequency: string;
+  consentAt: string;
+  consentVersion: string;
+  marketingStatus: "active" | "opted_out";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PrivacyRequest = {
+  id: string;
+  requestType: "access" | "correction" | "deletion" | "marketing_opt_out";
+  name: string;
+  contact: string;
+  orderId: string;
+  status: "received" | "identity_review" | "completed" | "declined";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NotificationOutboxRecord = {
+  id: string;
+  dedupeKey: string;
+  channel: "email" | "whatsapp";
+  target: "customer" | "operations";
+  payload: Record<string, unknown>;
+  status: "pending" | "sent" | "failed" | "skipped";
+  attempts: number;
+  nextAttemptAt: string;
+  providerId: string;
+  lastError: string;
+  createdAt: string;
+  updatedAt: string;
+  sentAt: string;
+};
+
+type StoredEarlyAccessRow = {
+  id: string;
+  first_name: string;
+  phone: string;
+  email: string | null;
+  area: string;
+  frequency: string;
+  consent_at: string;
+  consent_version: string;
+  marketing_status: "active" | "opted_out";
+  created_at: string;
+  updated_at: string;
+};
+
+type StoredPrivacyRequestRow = {
+  id: string;
+  request_type: PrivacyRequest["requestType"];
+  name: string;
+  contact: string;
+  order_id: string | null;
+  status: PrivacyRequest["status"];
+  created_at: string;
+  updated_at: string;
+};
+
+type StoredOutboxRow = {
+  id: string;
+  dedupe_key: string;
+  channel: NotificationOutboxRecord["channel"];
+  target: NotificationOutboxRecord["target"];
+  payload: string;
+  status: NotificationOutboxRecord["status"];
+  attempts: number;
+  next_attempt_at: string;
+  provider_id: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+  sent_at: string | null;
+};
+
 let database: Database.Database | null = null;
 let migratedLegacyJsonl = false;
 let lastLocationCleanupAt = 0;
@@ -113,6 +195,66 @@ function getDatabase() {
     );
     CREATE INDEX IF NOT EXISTS idx_driver_live_locations_order_id ON driver_live_locations(order_id COLLATE NOCASE);
     CREATE INDEX IF NOT EXISTS idx_driver_live_locations_captured_at ON driver_live_locations(captured_at);
+
+    CREATE TABLE IF NOT EXISTS early_access_signups (
+      id TEXT PRIMARY KEY,
+      first_name TEXT NOT NULL,
+      phone TEXT NOT NULL UNIQUE,
+      email TEXT,
+      area TEXT NOT NULL,
+      frequency TEXT NOT NULL,
+      consent_at TEXT NOT NULL,
+      consent_version TEXT NOT NULL,
+      marketing_status TEXT NOT NULL DEFAULT 'active' CHECK (marketing_status IN ('active', 'opted_out')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_early_access_area ON early_access_signups(area COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_early_access_updated_at ON early_access_signups(updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS privacy_requests (
+      id TEXT PRIMARY KEY,
+      request_type TEXT NOT NULL CHECK (request_type IN ('access', 'correction', 'deletion', 'marketing_opt_out')),
+      name TEXT NOT NULL,
+      contact TEXT NOT NULL,
+      order_id TEXT,
+      status TEXT NOT NULL DEFAULT 'received' CHECK (status IN ('received', 'identity_review', 'completed', 'declined')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_privacy_requests_status ON privacy_requests(status, created_at);
+
+    CREATE TABLE IF NOT EXISTS notification_outbox (
+      id TEXT PRIMARY KEY,
+      dedupe_key TEXT NOT NULL UNIQUE,
+      channel TEXT NOT NULL CHECK (channel IN ('email', 'whatsapp')),
+      target TEXT NOT NULL CHECK (target IN ('customer', 'operations')),
+      payload TEXT NOT NULL CHECK (json_valid(payload)),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed', 'skipped')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TEXT NOT NULL,
+      provider_id TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      sent_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_notification_outbox_due ON notification_outbox(status, next_attempt_at);
+
+    CREATE TABLE IF NOT EXISTS mfa_replay_guard (
+      subject TEXT PRIMARY KEY,
+      timestep INTEGER NOT NULL,
+      accepted_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS delivery_proofs (
+      order_id TEXT PRIMARY KEY,
+      code_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      used_at TEXT,
+      used_by TEXT,
+      recipient_name TEXT
+    );
   `);
   database = db;
   purgeExpiredDriverLocations(db);
@@ -144,6 +286,21 @@ export function appendSubmissionRecord(record: SubmissionRecord) {
   getDatabase()
     .prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
     .run({ id: record.id, createdAt: record.createdAt, source: record.source ?? null, data: JSON.stringify(record.data) });
+}
+
+export function appendSubmissionRecordWithDeliveryProof(record: SubmissionRecord, input: { orderId: string; codeHash: string; usedBy: string; recipientName: string }) {
+  const db = getDatabase();
+  const apply = db.transaction(() => {
+    const proof = db.prepare(`
+      UPDATE delivery_proofs
+      SET used_at = @usedAt, used_by = @usedBy, recipient_name = @recipientName
+      WHERE order_id = @orderId COLLATE NOCASE AND code_hash = @codeHash AND used_at IS NULL
+    `).run({ ...input, usedAt: record.createdAt });
+    if (proof.changes !== 1) throw new Error("Delivery confirmation code is invalid or already used.");
+    db.prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
+      .run({ id: record.id, createdAt: record.createdAt, source: record.source ?? null, data: JSON.stringify(record.data) });
+  });
+  apply();
 }
 
 export function readSubmissionRecords(limit = 200): SubmissionRecord[] {
@@ -297,6 +454,264 @@ export function consumeRateLimit(key: string, limit: number, windowMs: number) {
   };
 }
 
+function earlyAccessFromRow(row: StoredEarlyAccessRow): EarlyAccessSignup {
+  return {
+    id: row.id,
+    firstName: row.first_name,
+    phone: row.phone,
+    email: row.email ?? "",
+    area: row.area,
+    frequency: row.frequency,
+    consentAt: row.consent_at,
+    consentVersion: row.consent_version,
+    marketingStatus: row.marketing_status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function upsertEarlyAccessSignup(input: Omit<EarlyAccessSignup, "createdAt" | "updatedAt" | "marketingStatus">) {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const existing = db.prepare("SELECT id FROM early_access_signups WHERE phone = ? LIMIT 1").get(input.phone) as { id: string } | undefined;
+  const row = db.prepare(`
+    INSERT INTO early_access_signups
+      (id, first_name, phone, email, area, frequency, consent_at, consent_version, marketing_status, created_at, updated_at)
+    VALUES
+      (@id, @firstName, @phone, NULLIF(@email, ''), @area, @frequency, @consentAt, @consentVersion, 'active', @now, @now)
+    ON CONFLICT(phone) DO UPDATE SET
+      first_name = excluded.first_name,
+      email = excluded.email,
+      area = excluded.area,
+      frequency = excluded.frequency,
+      consent_at = excluded.consent_at,
+      consent_version = excluded.consent_version,
+      marketing_status = 'active',
+      updated_at = excluded.updated_at
+    RETURNING *
+  `).get({ ...input, now }) as StoredEarlyAccessRow;
+  return { signup: earlyAccessFromRow(row), updated: Boolean(existing) };
+}
+
+export function optOutEarlyAccess(contact: string) {
+  const normalized = contact.trim().toLowerCase();
+  if (!normalized) return 0;
+  return getDatabase().prepare(`
+    UPDATE early_access_signups
+    SET marketing_status = 'opted_out', updated_at = @updatedAt
+    WHERE lower(phone) = @contact OR lower(COALESCE(email, '')) = @contact
+  `).run({ contact: normalized, updatedAt: new Date().toISOString() }).changes;
+}
+
+function privacyRequestFromRow(row: StoredPrivacyRequestRow): PrivacyRequest {
+  return {
+    id: row.id,
+    requestType: row.request_type,
+    name: row.name,
+    contact: row.contact,
+    orderId: row.order_id ?? "",
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function createPrivacyRequest(input: Omit<PrivacyRequest, "status" | "createdAt" | "updatedAt">) {
+  const now = new Date().toISOString();
+  const row = getDatabase().prepare(`
+    INSERT INTO privacy_requests (id, request_type, name, contact, order_id, status, created_at, updated_at)
+    VALUES (@id, @requestType, @name, @contact, NULLIF(@orderId, ''), 'received', @now, @now)
+    RETURNING *
+  `).get({ ...input, now }) as StoredPrivacyRequestRow;
+  return privacyRequestFromRow(row);
+}
+
+function outboxFromRow(row: StoredOutboxRow): NotificationOutboxRecord {
+  return {
+    id: row.id,
+    dedupeKey: row.dedupe_key,
+    channel: row.channel,
+    target: row.target,
+    payload: JSON.parse(row.payload) as Record<string, unknown>,
+    status: row.status,
+    attempts: row.attempts,
+    nextAttemptAt: row.next_attempt_at,
+    providerId: row.provider_id ?? "",
+    lastError: row.last_error ?? "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    sentAt: row.sent_at ?? "",
+  };
+}
+
+export function enqueueNotification(input: Pick<NotificationOutboxRecord, "id" | "dedupeKey" | "channel" | "target" | "payload">) {
+  const now = new Date().toISOString();
+  const row = getDatabase().prepare(`
+    INSERT INTO notification_outbox
+      (id, dedupe_key, channel, target, payload, status, attempts, next_attempt_at, created_at, updated_at)
+    VALUES
+      (@id, @dedupeKey, @channel, @target, @payload, 'pending', 0, @now, @now, @now)
+    ON CONFLICT(dedupe_key) DO UPDATE SET dedupe_key = excluded.dedupe_key
+    RETURNING *
+  `).get({ ...input, payload: JSON.stringify(input.payload), now }) as StoredOutboxRow;
+  return outboxFromRow(row);
+}
+
+export function readDueNotifications(limit = 20) {
+  const rows = getDatabase().prepare(`
+    SELECT * FROM notification_outbox
+    WHERE status IN ('pending', 'failed') AND next_attempt_at <= @now AND attempts < 8
+    ORDER BY created_at ASC
+    LIMIT @limit
+  `).all({ now: new Date().toISOString(), limit }) as StoredOutboxRow[];
+  return rows.map(outboxFromRow);
+}
+
+export function updateNotificationDelivery(input: {
+  id: string;
+  status: "sent" | "failed" | "skipped";
+  providerId?: string;
+  error?: string;
+  retryAfterMs?: number;
+}) {
+  const now = new Date();
+  const nextAttemptAt = new Date(now.getTime() + (input.retryAfterMs ?? 0)).toISOString();
+  getDatabase().prepare(`
+    UPDATE notification_outbox
+    SET status = @status,
+        attempts = attempts + 1,
+        next_attempt_at = @nextAttemptAt,
+        provider_id = NULLIF(@providerId, ''),
+        last_error = NULLIF(@error, ''),
+        updated_at = @now,
+        sent_at = CASE WHEN @status = 'sent' THEN @now ELSE sent_at END
+    WHERE id = @id
+  `).run({ ...input, providerId: input.providerId ?? "", error: input.error?.slice(0, 500) ?? "", nextAttemptAt, now: now.toISOString() });
+}
+
+export function notificationOutboxMetrics() {
+  return getDatabase().prepare(`
+    SELECT
+      SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+      SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent
+    FROM notification_outbox
+  `).get() as { pending: number | null; failed: number | null; sent: number | null };
+}
+
+export function operationsDataMetrics() {
+  const db = getDatabase();
+  const submissions = db.prepare("SELECT COUNT(*) AS total FROM submissions").get() as { total: number };
+  const earlyAccess = db.prepare(`
+    SELECT COUNT(*) AS total, SUM(CASE WHEN marketing_status = 'active' THEN 1 ELSE 0 END) AS active
+    FROM early_access_signups
+  `).get() as { total: number; active: number | null };
+  const privacy = db.prepare(`
+    SELECT COUNT(*) AS total, SUM(CASE WHEN status IN ('received', 'identity_review') THEN 1 ELSE 0 END) AS open
+    FROM privacy_requests
+  `).get() as { total: number; open: number | null };
+  const outbox = notificationOutboxMetrics();
+  return {
+    submissions: submissions.total,
+    earlyAccess: { total: earlyAccess.total, active: earlyAccess.active ?? 0 },
+    privacyRequests: { total: privacy.total, open: privacy.open ?? 0 },
+    notifications: { pending: outbox.pending ?? 0, failed: outbox.failed ?? 0, sent: outbox.sent ?? 0 },
+  };
+}
+
+export function listPrivacyRequests(limit = 100) {
+  const rows = getDatabase().prepare("SELECT * FROM privacy_requests ORDER BY created_at ASC LIMIT ?").all(Math.max(1, Math.min(limit, 250))) as StoredPrivacyRequestRow[];
+  return rows.map(privacyRequestFromRow);
+}
+
+export function updatePrivacyRequestStatus(id: string, status: PrivacyRequest["status"]) {
+  const row = getDatabase().prepare(`
+    UPDATE privacy_requests SET status = @status, updated_at = @updatedAt
+    WHERE id = @id RETURNING *
+  `).get({ id, status, updatedAt: new Date().toISOString() }) as StoredPrivacyRequestRow | undefined;
+  return row ? privacyRequestFromRow(row) : null;
+}
+
+export function purgeOperationalData(now = Date.now(), householdLaunchDate = process.env.BUBBLEWASH_HOUSEHOLD_LAUNCH_DATE ?? "") {
+  const db = getDatabase();
+  const isoDaysAgo = (days: number) => new Date(now - days * 24 * 60 * 60_000).toISOString();
+  const result: Record<string, number> = {};
+  const purge = db.transaction(() => {
+    result.expiredRateLimits = db.prepare("DELETE FROM rate_limits WHERE reset_at < ?").run(now - 24 * 60 * 60_000).changes;
+    result.mfaReplayGuards = db.prepare("DELETE FROM mfa_replay_guard WHERE accepted_at < ?").run(isoDaysAgo(2)).changes;
+    result.workflowClaims = db.prepare("DELETE FROM workflow_action_claims WHERE claimed_at < ?").run(isoDaysAgo(90)).changes;
+    result.notificationLogs = db.prepare("DELETE FROM notification_outbox WHERE updated_at < ?").run(isoDaysAgo(90)).changes;
+    result.optedOutSignups = db.prepare("DELETE FROM early_access_signups WHERE marketing_status = 'opted_out' AND updated_at < ?").run(isoDaysAgo(30)).changes;
+    const launch = /^\d{4}-\d{2}-\d{2}$/.test(householdLaunchDate) ? new Date(`${householdLaunchDate}T00:00:00.000Z`).getTime() : Number.NaN;
+    if (Number.isFinite(launch) && now >= launch + 365 * 24 * 60 * 60_000) {
+      result.expiredActiveSignups = db.prepare("DELETE FROM early_access_signups WHERE marketing_status = 'active' AND updated_at <= ?").run(new Date(launch + 365 * 24 * 60 * 60_000).toISOString()).changes;
+    } else {
+      result.expiredActiveSignups = 0;
+    }
+    result.privacyRequestLogs = db.prepare("DELETE FROM privacy_requests WHERE status IN ('completed', 'declined') AND updated_at < ?").run(isoDaysAgo(365 * 3)).changes;
+
+    const closedOrders = db.prepare(`
+      SELECT DISTINCT json_extract(data, '$.orderId') AS orderId
+      FROM submissions
+      WHERE json_extract(data, '$.submissionType') = 'admin-operation'
+        AND json_extract(data, '$.actionType') = 'Close order'
+        AND created_at < ?
+    `).all(isoDaysAgo(365 * 2)) as Array<{ orderId: string }>;
+    let deletedOrderRecords = 0;
+    for (const { orderId } of closedOrders) {
+      if (!orderId) continue;
+      db.prepare("DELETE FROM driver_live_locations WHERE order_id = ? COLLATE NOCASE").run(orderId);
+      db.prepare("DELETE FROM workflow_action_claims WHERE order_id = ? COLLATE NOCASE").run(orderId);
+      db.prepare("DELETE FROM delivery_proofs WHERE order_id = ? COLLATE NOCASE").run(orderId);
+      deletedOrderRecords += db.prepare(`
+        DELETE FROM submissions WHERE id = @orderId COLLATE NOCASE OR json_extract(data, '$.orderId') = @orderId COLLATE NOCASE
+      `).run({ orderId }).changes;
+    }
+    result.closedOrderRecords = deletedOrderRecords;
+    result.orphanedPaymentVerifications = db.prepare("DELETE FROM payment_verifications WHERE record_id NOT IN (SELECT id FROM submissions)").run().changes;
+  });
+  purge();
+  return result;
+}
+
+export function claimMfaTimestep(subject: string, timestep: number) {
+  const result = getDatabase().prepare(`
+    INSERT INTO mfa_replay_guard (subject, timestep, accepted_at)
+    VALUES (@subject, @timestep, @acceptedAt)
+    ON CONFLICT(subject) DO UPDATE SET
+      timestep = excluded.timestep,
+      accepted_at = excluded.accepted_at
+    WHERE mfa_replay_guard.timestep < excluded.timestep
+  `).run({ subject, timestep, acceptedAt: new Date().toISOString() });
+  return result.changes === 1;
+}
+
+export function storeDeliveryCode(orderId: string, codeHash: string) {
+  const createdAt = new Date().toISOString();
+  return getDatabase().prepare(`
+    INSERT INTO delivery_proofs (order_id, code_hash, created_at)
+    VALUES (@orderId, @codeHash, @createdAt)
+    ON CONFLICT(order_id) DO NOTHING
+  `).run({ orderId, codeHash, createdAt }).changes === 1;
+}
+
+export function deliveryCodeRecord(orderId: string) {
+  return getDatabase().prepare(`
+    SELECT order_id AS orderId, code_hash AS codeHash, created_at AS createdAt,
+           COALESCE(used_at, '') AS usedAt, COALESCE(used_by, '') AS usedBy,
+           COALESCE(recipient_name, '') AS recipientName
+    FROM delivery_proofs WHERE order_id = ? COLLATE NOCASE LIMIT 1
+  `).get(orderId) as { orderId: string; codeHash: string; createdAt: string; usedAt: string; usedBy: string; recipientName: string } | undefined;
+}
+
+export function consumeDeliveryCode(orderId: string, codeHash: string, usedBy: string, recipientName: string) {
+  return getDatabase().prepare(`
+    UPDATE delivery_proofs
+    SET used_at = @usedAt, used_by = @usedBy, recipient_name = @recipientName
+    WHERE order_id = @orderId COLLATE NOCASE AND code_hash = @codeHash AND used_at IS NULL
+  `).run({ orderId, codeHash, usedBy, recipientName, usedAt: new Date().toISOString() }).changes === 1;
+}
+
 function driverLocationFromRow(row: StoredDriverLocationRow): StoredDriverLocation {
   return {
     driverId: row.driver_id,
@@ -361,5 +776,10 @@ export function resetDataStoreForTests() {
   database.prepare("DELETE FROM workflow_action_claims").run();
   database.prepare("DELETE FROM payment_verifications").run();
   database.prepare("DELETE FROM driver_live_locations").run();
+  database.prepare("DELETE FROM early_access_signups").run();
+  database.prepare("DELETE FROM privacy_requests").run();
+  database.prepare("DELETE FROM notification_outbox").run();
+  database.prepare("DELETE FROM mfa_replay_guard").run();
+  database.prepare("DELETE FROM delivery_proofs").run();
   lastLocationCleanupAt = 0;
 }

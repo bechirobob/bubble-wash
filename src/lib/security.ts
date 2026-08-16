@@ -2,6 +2,7 @@ import { NextResponse } from "next/server.js";
 import type { OrderSummary } from "@/lib/submissions";
 import { privateNoStoreHeaders, securityHeaders } from "./security-headers.js";
 import { matchesKnownDemoPassword } from "./passwords.ts";
+import { validTotpSecret } from "./totp.ts";
 
 export { privateNoStoreHeaders, securityHeaders };
 export type SecurityHeader = ReturnType<typeof securityHeaders>[number];
@@ -60,8 +61,36 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
   if (!env.BUBBLEWASH_SESSION_SECRET || env.BUBBLEWASH_SESSION_SECRET.length < 32) {
     errors.push("Set BUBBLEWASH_SESSION_SECRET to a strong 32+ character value in production.");
   }
+  if (!validTotpSecret(env.BUBBLEWASH_ADMIN_TOTP_SECRET)) {
+    errors.push("Set BUBBLEWASH_ADMIN_TOTP_SECRET to a random base32 secret containing at least 20 bytes.");
+  }
+  if (!env.BUBBLEWASH_MAINTENANCE_TOKEN || env.BUBBLEWASH_MAINTENANCE_TOKEN.length < 32) {
+    errors.push("Set BUBBLEWASH_MAINTENANCE_TOKEN to a random 32+ character value.");
+  }
+  let backupKeyValid = false;
+  try {
+    backupKeyValid = Buffer.from(env.BUBBLEWASH_BACKUP_ENCRYPTION_KEY ?? "", "base64").length === 32;
+  } catch {
+    backupKeyValid = false;
+  }
+  if (!backupKeyValid) errors.push("Set BUBBLEWASH_BACKUP_ENCRYPTION_KEY to a base64-encoded 32-byte key.");
+  for (const name of ["BUBBLEWASH_BACKUP_PRIMARY_DIR", "BUBBLEWASH_BACKUP_OFFSITE_DIR", "BUBBLEWASH_BACKUP_STATUS_PATH"]) {
+    if (!env[name]?.startsWith("/")) errors.push(`Set ${name} to an absolute path.`);
+  }
+  if (env.BUBBLEWASH_BACKUP_PRIMARY_DIR && env.BUBBLEWASH_BACKUP_PRIMARY_DIR === env.BUBBLEWASH_BACKUP_OFFSITE_DIR) {
+    errors.push("Primary and off-site backup directories must be different mounted destinations.");
+  }
   if (!env.BUBBLEWASH_DATABASE_PATH || !env.BUBBLEWASH_DATABASE_PATH.startsWith("/")) {
     errors.push("Set BUBBLEWASH_DATABASE_PATH to an absolute path on the mounted persistent volume.");
+  }
+  if (!env.BUBBLEWASH_LEGAL_ENTITY_NAME?.trim()) {
+    errors.push("Set BUBBLEWASH_LEGAL_ENTITY_NAME to the registered entity operating Bubble Wash.");
+  }
+  if (!env.BUBBLEWASH_DPC_REGISTRATION_NUMBER?.trim()) {
+    errors.push("Set BUBBLEWASH_DPC_REGISTRATION_NUMBER after confirming the Ghana Data Protection Commission registration.");
+  }
+  if (env.BUBBLEWASH_DATABASE_DRIVER !== "sqlite") {
+    errors.push("Set BUBBLEWASH_DATABASE_DRIVER=sqlite for the supported single-replica pilot topology.");
   }
   try {
     const publicUrl = new URL(env.BUBBLEWASH_PUBLIC_URL ?? "");
@@ -97,6 +126,17 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
   if (env.NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED === "true" && !env.PAYSTACK_SECRET_KEY) {
     errors.push("Set PAYSTACK_SECRET_KEY before enabling online payments.");
   }
+  for (const [name, purpose] of [
+    ["RESEND_API_KEY", "privacy and early-access email confirmations"],
+    ["BUBBLEWASH_EMAIL_FROM", "privacy and early-access email confirmations"],
+    ["WHATSAPP_API_VERSION", "privacy and early-access WhatsApp confirmations"],
+    ["WHATSAPP_ACCESS_TOKEN", "privacy and early-access WhatsApp confirmations"],
+    ["WHATSAPP_PHONE_NUMBER_ID", "privacy and early-access WhatsApp confirmations"],
+    ["WHATSAPP_EARLY_ACCESS_TEMPLATE", "household early-access confirmations"],
+    ["WHATSAPP_PRIVACY_TEMPLATE", "privacy request confirmations"],
+  ]) {
+    if (!env[name]) errors.push(`Set ${name} for ${purpose}.`);
+  }
   if (env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED === "true") {
     if (!env.RESEND_API_KEY) errors.push("Set RESEND_API_KEY before enabling automated updates.");
     if (!env.BUBBLEWASH_EMAIL_FROM) errors.push("Set BUBBLEWASH_EMAIL_FROM before enabling automated updates.");
@@ -104,6 +144,8 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
     if (!env.WHATSAPP_ACCESS_TOKEN) errors.push("Set WHATSAPP_ACCESS_TOKEN before enabling automated updates.");
     if (!env.WHATSAPP_PHONE_NUMBER_ID) errors.push("Set WHATSAPP_PHONE_NUMBER_ID before enabling automated updates.");
     if (!env.BUBBLEWASH_OPERATIONS_WHATSAPP) errors.push("Set BUBBLEWASH_OPERATIONS_WHATSAPP before enabling automated updates.");
+    if (!env.WHATSAPP_BOOKING_TEMPLATE) errors.push("Set WHATSAPP_BOOKING_TEMPLATE before enabling automated updates.");
+    if (!env.WHATSAPP_OPERATIONS_TEMPLATE) errors.push("Set WHATSAPP_OPERATIONS_TEMPLATE before enabling automated updates.");
   }
   const trustEdgeHeaders = env.BUBBLEWASH_TRUST_EDGE_HEADERS === "true";
   const trustProxyHeaders = env.BUBBLEWASH_TRUST_PROXY_HEADERS === "true";

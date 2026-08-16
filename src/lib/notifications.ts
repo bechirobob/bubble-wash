@@ -1,21 +1,30 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+import {
+  enqueueNotification,
+  readDueNotifications,
+  updateNotificationDelivery,
+  type NotificationOutboxRecord,
+} from "@/lib/data-store";
 import type { SubmissionRecord } from "@/lib/submissions";
 
-type NotificationChannel = "email" | "whatsapp";
+export type NotificationChannel = "email" | "whatsapp";
 
-type NotificationTarget = "customer" | "operations";
+export type NotificationTarget = "customer" | "operations";
 
-type NotificationMessage = {
+export type NotificationMessage = {
   target: NotificationTarget;
   toEmail?: string;
   toWhatsApp?: string;
   subject: string;
   text: string;
   html?: string;
+  purpose?: "booking" | "early_access" | "operations" | "privacy";
+  whatsappTemplateParameters?: string[];
 };
 
-type NotificationResult = {
+export type NotificationResult = {
   channel: NotificationChannel;
   target: NotificationTarget;
   sent: boolean;
@@ -79,6 +88,7 @@ async function sendEmail(message: NotificationMessage): Promise<NotificationResu
         text: message.text,
         html: message.html ?? `<p>${htmlEscape(message.text).replaceAll("\n", "<br />")}</p>`,
       }),
+      signal: AbortSignal.timeout(10_000),
     });
     const data = (await response.json().catch(() => ({}))) as { id?: string; message?: string; error?: string };
     if (!response.ok) {
@@ -93,10 +103,18 @@ async function sendEmail(message: NotificationMessage): Promise<NotificationResu
 async function sendWhatsApp(message: NotificationMessage): Promise<NotificationResult> {
   const accessToken = envText("WHATSAPP_ACCESS_TOKEN");
   const phoneNumberId = envText("WHATSAPP_PHONE_NUMBER_ID");
-  const apiVersion = envText("WHATSAPP_API_VERSION") || "v23.0";
+  const apiVersion = envText("WHATSAPP_API_VERSION");
+  const templateName = message.purpose === "early_access"
+    ? envText("WHATSAPP_EARLY_ACCESS_TEMPLATE")
+    : message.purpose === "booking"
+      ? envText("WHATSAPP_BOOKING_TEMPLATE")
+      : message.purpose === "privacy"
+        ? envText("WHATSAPP_PRIVACY_TEMPLATE")
+        : envText("WHATSAPP_OPERATIONS_TEMPLATE");
   const to = normalizeGhanaPhone(message.toWhatsApp ?? "");
   if (!to) return { channel: "whatsapp", target: message.target, sent: false, skipped: "No WhatsApp number available." };
-  if (!accessToken || !phoneNumberId) return { channel: "whatsapp", target: message.target, sent: false, skipped: "WhatsApp Cloud API credentials are not configured." };
+  if (!accessToken || !phoneNumberId || !apiVersion) return { channel: "whatsapp", target: message.target, sent: false, error: "WhatsApp Cloud API credentials are not configured." };
+  if (!templateName) return { channel: "whatsapp", target: message.target, sent: false, error: "The approved WhatsApp template is not configured." };
 
   try {
     const response = await fetch(`https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`, {
@@ -109,9 +127,17 @@ async function sendWhatsApp(message: NotificationMessage): Promise<NotificationR
         messaging_product: "whatsapp",
         recipient_type: "individual",
         to,
-        type: "text",
-        text: { preview_url: true, body: message.text },
+        type: "template",
+        template: {
+          name: templateName,
+          language: { code: "en" },
+          components: message.whatsappTemplateParameters?.length ? [{
+            type: "body",
+            parameters: message.whatsappTemplateParameters.map((parameter) => ({ type: "text", text: parameter.slice(0, 1024) })),
+          }] : undefined,
+        },
       }),
+      signal: AbortSignal.timeout(10_000),
     });
     const data = (await response.json().catch(() => ({}))) as { messages?: Array<{ id?: string }>; error?: { message?: string } };
     if (!response.ok) {
@@ -121,6 +147,71 @@ async function sendWhatsApp(message: NotificationMessage): Promise<NotificationR
   } catch (error) {
     return { channel: "whatsapp", target: message.target, sent: false, error: error instanceof Error ? error.message : "WhatsApp send failed." };
   }
+}
+
+function messagePayload(message: NotificationMessage) {
+  return {
+    toEmail: message.toEmail ?? "",
+    toWhatsApp: message.toWhatsApp ?? "",
+    subject: message.subject,
+    text: message.text,
+    html: message.html ?? "",
+    purpose: message.purpose ?? "operations",
+    whatsappTemplateParameters: message.whatsappTemplateParameters ?? [],
+  };
+}
+
+function messageFromOutbox(record: NotificationOutboxRecord): NotificationMessage {
+  const payload = record.payload;
+  return {
+    target: record.target,
+    toEmail: text(payload.toEmail),
+    toWhatsApp: text(payload.toWhatsApp),
+    subject: text(payload.subject),
+    text: text(payload.text),
+    html: text(payload.html),
+    purpose: ["booking", "early_access", "operations", "privacy"].includes(text(payload.purpose))
+      ? text(payload.purpose) as NotificationMessage["purpose"]
+      : "operations",
+    whatsappTemplateParameters: Array.isArray(payload.whatsappTemplateParameters)
+      ? payload.whatsappTemplateParameters.filter((value): value is string => typeof value === "string").slice(0, 10)
+      : [],
+  };
+}
+
+async function deliverOutboxRecord(record: NotificationOutboxRecord): Promise<NotificationResult> {
+  const message = messageFromOutbox(record);
+  const result = record.channel === "email" ? await sendEmail(message) : await sendWhatsApp(message);
+  if (result.sent) {
+    updateNotificationDelivery({ id: record.id, status: "sent", providerId: result.providerId });
+    return result;
+  }
+  if (result.skipped) {
+    updateNotificationDelivery({ id: record.id, status: "skipped", error: result.skipped });
+    return result;
+  }
+  const retryAfterMs = Math.min(24 * 60 * 60_000, 60_000 * (2 ** Math.min(record.attempts, 10)));
+  updateNotificationDelivery({ id: record.id, status: "failed", error: result.error ?? "Provider delivery failed.", retryAfterMs });
+  return result;
+}
+
+async function enqueueAndDeliver(dedupeKey: string, channel: NotificationChannel, message: NotificationMessage) {
+  const queued = enqueueNotification({
+    id: `NQ-${randomUUID().replaceAll("-", "").slice(0, 20).toUpperCase()}`,
+    dedupeKey,
+    channel,
+    target: message.target,
+    payload: messagePayload(message),
+  });
+  if (queued.status === "sent") return { channel, target: message.target, sent: true, providerId: queued.providerId } satisfies NotificationResult;
+  return deliverOutboxRecord(queued);
+}
+
+export async function processNotificationOutbox(limit = 20) {
+  const records = readDueNotifications(Math.max(1, Math.min(limit, 100)));
+  const results: NotificationResult[] = [];
+  for (const record of records) results.push(await deliverOutboxRecord(record));
+  return results;
 }
 
 function customerBookingMessage(record: SubmissionRecord): NotificationMessage {
@@ -135,6 +226,8 @@ function customerBookingMessage(record: SubmissionRecord): NotificationMessage {
     toWhatsApp: text(data.phone),
     subject: `Bubble Wash request received: ${record.id}`,
     text: body,
+    purpose: "booking",
+    whatsappTemplateParameters: [name, record.id, area],
   };
 }
 
@@ -148,7 +241,49 @@ function operationsMessage(record: SubmissionRecord): NotificationMessage {
     toWhatsApp: envText("BUBBLEWASH_OPERATIONS_WHATSAPP"),
     subject: `New Bubble Wash ${type}: ${record.id}`,
     text: body,
+    purpose: "operations",
+    whatsappTemplateParameters: [type, record.id],
   };
+}
+
+export async function dispatchEarlyAccessConfirmation(input: {
+  id: string;
+  firstName: string;
+  phone: string;
+  email: string;
+  area: string;
+}) {
+  const message: NotificationMessage = {
+    target: "customer",
+    toEmail: input.email,
+    toWhatsApp: input.phone,
+    subject: "You are on the Bubble Wash early-access list",
+    text: `Hi ${input.firstName}, you are on the Bubble Wash household early-access list for ${input.area}. We will contact you when residential collection is ready in your area. You can change your communication choice at ${configuredPublicUrl()}/privacy.`,
+    purpose: "early_access",
+    whatsappTemplateParameters: [input.firstName, input.area],
+  };
+  const results = [await enqueueAndDeliver(`${input.id}:early-access:whatsapp`, "whatsapp", message)];
+  if (input.email) results.push(await enqueueAndDeliver(`${input.id}:early-access:email`, "email", message));
+  return results;
+}
+
+export async function dispatchPrivacyRequestConfirmation(input: {
+  id: string;
+  name: string;
+  contact: string;
+  requestType: string;
+}) {
+  const isEmail = input.contact.includes("@");
+  const message: NotificationMessage = {
+    target: "customer",
+    toEmail: isEmail ? input.contact : "",
+    toWhatsApp: isEmail ? "" : input.contact,
+    subject: `Bubble Wash privacy request received: ${input.id}`,
+    text: `Hi ${input.name}, Bubble Wash received your ${input.requestType.replaceAll("_", " ")} request. Reference: ${input.id}. Identity verification may be required before personal information is disclosed, corrected or deleted.`,
+    purpose: "privacy",
+    whatsappTemplateParameters: [input.name, input.id, input.requestType.replaceAll("_", " ")],
+  };
+  return [await enqueueAndDeliver(`${input.id}:privacy:${isEmail ? "email" : "whatsapp"}`, isEmail ? "email" : "whatsapp", message)];
 }
 
 export async function dispatchSubmissionNotifications(record: SubmissionRecord) {
@@ -163,11 +298,11 @@ export async function dispatchSubmissionNotifications(record: SubmissionRecord) 
   const results: NotificationResult[] = [];
   for (const message of messages) {
     if (message.target === "customer") {
-      if (alertAllows("email", preference)) results.push(await sendEmail(message));
-      if (alertAllows("whatsapp", preference)) results.push(await sendWhatsApp(message));
+      if (alertAllows("email", preference)) results.push(await enqueueAndDeliver(`${record.id}:customer:email`, "email", message));
+      if (alertAllows("whatsapp", preference)) results.push(await enqueueAndDeliver(`${record.id}:customer:whatsapp`, "whatsapp", message));
     } else {
-      results.push(await sendEmail(message));
-      results.push(await sendWhatsApp(message));
+      results.push(await enqueueAndDeliver(`${record.id}:operations:email`, "email", message));
+      results.push(await enqueueAndDeliver(`${record.id}:operations:whatsapp`, "whatsapp", message));
     }
   }
   return results;
