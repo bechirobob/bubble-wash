@@ -9,11 +9,17 @@ readonly current_entry="$app_home/bubblewash-pilot"
 readonly releases_dir="$app_home/bubblewash-releases"
 readonly rollbacks_dir="$app_home/bubblewash-rollbacks"
 readonly runtime_dir="$app_home/bubblewash-runtime"
+readonly backup_primary_dir="$app_home/bubblewash-backups/primary"
+readonly backup_staging_dir="$app_home/bubblewash-backups/github-staging"
+readonly backup_status_path="$runtime_dir/backup-status.json"
+readonly backup_name_path="$runtime_dir/latest-backup-name"
+readonly backup_key_file="$app_home/.hermes/secrets/bubblewash-backup-keys/github-actions.key"
 readonly env_file="$app_home/.config/bubblewash/env"
 readonly service_name="bubblewash-local.service"
 
-release_dir="${1:-}"
-deploy_sha="${2:-}"
+operation="${1:-}"
+release_dir="${2:-}"
+deploy_sha="${3:-}"
 
 fail() {
   echo "Deployment failed: $*" >&2
@@ -21,6 +27,7 @@ fail() {
 }
 
 [[ "${EUID:-$(id -u)}" -eq 0 ]] || fail "run this script as root"
+[[ "$operation" == "prepare" || "$operation" == "activate" ]] || fail "choose the prepare or activate operation"
 [[ "$deploy_sha" =~ ^[0-9a-f]{40}$ ]] || fail "the deployment SHA is invalid"
 case "$release_dir" in
   "$releases_dir"/*) ;;
@@ -36,7 +43,8 @@ release_id="$(basename -- "$release_dir")"
 [[ -f "$env_file" ]] || fail "the production environment file is missing"
 
 install -d -o "$app_user" -g "$app_group" -m 0750 "$releases_dir" "$rollbacks_dir"
-install -d -o "$app_user" -g "$app_group" -m 0700 "$runtime_dir"
+install -d -o "$app_user" -g "$app_group" -m 0700 \
+  "$runtime_dir" "$backup_primary_dir" "$backup_staging_dir"
 chown -R "$app_user:$app_group" "$release_dir"
 
 exec 9>"$runtime_dir/deploy.lock"
@@ -67,6 +75,45 @@ run_transient() {
     --property="EnvironmentFile=$env_file" \
     --property="Environment=HOME=$app_home" \
     "$@"
+}
+
+configured_env_value() {
+  local name="$1"
+  awk -v name="$name" '
+    index($0, name "=") == 1 { value = substr($0, length(name) + 2) }
+    END { printf "%s", value }
+  ' "$env_file"
+}
+
+ensure_env_value() {
+  local name="$1"
+  local expected="$2"
+  local configured
+  configured="$(configured_env_value "$name")"
+  if [[ -n "$configured" && "$configured" != "$expected" ]]; then
+    fail "$name is already configured with a different value"
+  fi
+  if [[ -z "$configured" ]]; then
+    printf '%s=%s\n' "$name" "$expected" >> "$env_file"
+  fi
+}
+
+configure_backup_environment() {
+  [[ -f "$backup_key_file" ]] || fail "the GitHub encrypted-backup key is missing"
+  local backup_key
+  backup_key="$(tr -d '\r\n' < "$backup_key_file")"
+  if [[ "$(printf '%s' "$backup_key" | base64 --decode | wc -c)" -ne 32 ]]; then
+    fail "the GitHub encrypted-backup key is invalid"
+  fi
+
+  ensure_env_value "BUBBLEWASH_BACKUP_PRIMARY_DIR" "$backup_primary_dir"
+  ensure_env_value "BUBBLEWASH_BACKUP_OFFSITE_DIR" "$backup_staging_dir"
+  ensure_env_value "BUBBLEWASH_BACKUP_STATUS_PATH" "$backup_status_path"
+  ensure_env_value "BUBBLEWASH_BACKUP_ENCRYPTION_KEY" "$backup_key"
+  ensure_env_value "BUBBLEWASH_DATABASE_DRIVER" "sqlite"
+  chown "$app_user:$app_group" "$env_file"
+  chmod 0600 "$env_file"
+  unset backup_key
 }
 
 wait_for_route() {
@@ -100,26 +147,55 @@ smoke_routes() {
   done
 }
 
+configure_backup_environment
 userctl is-active --quiet "$service_name" || fail "$service_name is not active before deployment"
 
-echo "Building Bubble Wash release ${deploy_sha:0:12}."
-run_transient \
-  "bubblewash-build-$release_id" \
-  "$release_dir" \
-  /bin/bash -c \
-  'export NEXT_TELEMETRY_DISABLED=1; npm ci --no-audit --no-fund; npm run build; npm prune --omit=dev --no-audit --no-fund'
+if [[ "$operation" == "prepare" ]]; then
+  echo "Building Bubble Wash release ${deploy_sha:0:12}."
+  run_transient \
+    "bubblewash-build-$release_id" \
+    "$release_dir" \
+    /bin/bash -c \
+    'export NEXT_TELEMETRY_DISABLED=1; npm ci --no-audit --no-fund; npm run build; npm prune --omit=dev --no-audit --no-fund'
 
-[[ -f "$release_dir/.next/BUILD_ID" ]] || fail "the Next.js build did not produce a BUILD_ID"
-[[ -x "$release_dir/node_modules/.bin/next" ]] || fail "the Next.js runtime is missing"
+  [[ -f "$release_dir/.next/BUILD_ID" ]] || fail "the Next.js build did not produce a BUILD_ID"
+  [[ -x "$release_dir/node_modules/.bin/next" ]] || fail "the Next.js runtime is missing"
+
+  echo "Creating and restore-verifying the encrypted production database backup."
+  run_transient \
+    "bubblewash-backup-$release_id" \
+    "$release_dir" \
+    /usr/bin/npm run db:backup
+
+  backup_name="$(find "$backup_staging_dir" -maxdepth 1 -type f \
+    -name 'bubblewash-*.sqlite.enc' -printf '%f\n' | sort | tail -n 1)"
+  [[ "$backup_name" =~ ^bubblewash-[0-9]{4}-[0-9]{2}-[0-9]{2}T.*\.sqlite\.enc$ ]] || fail "the prepared backup name is invalid"
+
+  temporary_backup_name="$backup_name_path.$$.tmp"
+  printf '%s\n' "$backup_name" > "$temporary_backup_name"
+  chown "$app_user:$app_group" "$temporary_backup_name"
+  chmod 0600 "$temporary_backup_name"
+  mv "$temporary_backup_name" "$backup_name_path"
+
+  prepared_marker="$release_dir/.bubblewash-prepared"
+  printf '%s\n' "$deploy_sha" > "$prepared_marker"
+  chown "$app_user:$app_group" "$prepared_marker"
+  chmod 0600 "$prepared_marker"
+
+  echo "Bubble Wash release $deploy_sha is prepared for off-host backup storage."
+  exit 0
+fi
+
+prepared_marker="$release_dir/.bubblewash-prepared"
+[[ -f "$release_dir/.next/BUILD_ID" ]] || fail "the prepared Next.js build is missing"
+[[ -x "$release_dir/node_modules/.bin/next" ]] || fail "the prepared Next.js runtime is missing"
+[[ -f "$prepared_marker" ]] || fail "the release preparation marker is missing"
+[[ "$(tr -d '\r\n' < "$prepared_marker")" == "$deploy_sha" ]] || fail "the release preparation marker does not match"
+[[ -f "$backup_status_path" ]] || fail "the encrypted-backup status is missing"
+[[ -n "$(find "$backup_status_path" -mmin -10 -print)" ]] || fail "the encrypted backup is older than ten minutes"
 
 current_target="$(readlink -f -- "$current_entry")"
 [[ -d "$current_target" ]] || fail "the current production release is missing"
-
-echo "Creating and restore-verifying the encrypted production database backup."
-run_transient \
-  "bubblewash-backup-$release_id" \
-  "$release_dir" \
-  /usr/bin/npm run db:backup
 
 preflight_unit="bubblewash-preflight-$release_id.service"
 preflight_started=false

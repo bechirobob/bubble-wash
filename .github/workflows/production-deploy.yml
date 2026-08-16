@@ -45,9 +45,10 @@ jobs:
           tags: tag:ci
           ping: hermes
 
-      - name: Package and deploy the release
+      - name: Package, build, and back up the release
         shell: bash
         env:
+          BACKUP_KEY: ${{ secrets.BUBBLEWASH_BACKUP_ENCRYPTION_KEY }}
           TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
@@ -55,10 +56,17 @@ jobs:
             echo "The deployment revision is not a full commit SHA." >&2
             exit 1
           fi
+          if [[ "$(printf '%s' "$BACKUP_KEY" | base64 --decode | wc -c)" -ne 32 ]]; then
+            echo "The encrypted-backup key is invalid." >&2
+            exit 1
+          fi
 
           release_id="$(date -u +%Y%m%dT%H%M%SZ)-${TARGET_SHA:0:12}"
           release_dir="/home/ubuntu/bubblewash-releases/$release_id"
           archive="$RUNNER_TEMP/bubblewash-release.tgz"
+
+          printf 'RELEASE_DIR=%s\n' "$release_dir" >> "$GITHUB_ENV"
+          printf 'DEPLOY_SHA=%s\n' "$TARGET_SHA" >> "$GITHUB_ENV"
 
           tar \
             --exclude-vcs \
@@ -73,8 +81,49 @@ jobs:
           tailscale ssh root@hermes \
             "tar -xzf - -C '$release_dir' && chown -R ubuntu:ubuntu '$release_dir'" \
             < "$archive"
+
+          printf '%s\n' "$BACKUP_KEY" | tailscale ssh root@hermes \
+            "install -d -o root -g root -m 0700 /home/ubuntu/.hermes/secrets/bubblewash-backup-keys && umask 077 && cat > /home/ubuntu/.hermes/secrets/bubblewash-backup-keys/github-actions.key"
+
           tailscale ssh root@hermes \
-            "bash '$release_dir/ops/deploy-production.sh' '$release_dir' '$TARGET_SHA'"
+            "bash '$release_dir/ops/deploy-production.sh' prepare '$release_dir' '$TARGET_SHA'"
+
+      - name: Export the encrypted database backup
+        id: backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          backup_name="$(tailscale ssh root@hermes 'cat /home/ubuntu/bubblewash-runtime/latest-backup-name')"
+          if [[ ! "$backup_name" =~ ^bubblewash-[0-9]{4}-[0-9]{2}-[0-9]{2}T.*\.sqlite\.enc$ ]]; then
+            echo "The prepared backup name is invalid." >&2
+            exit 1
+          fi
+
+          backup_path="$RUNNER_TEMP/$backup_name"
+          tailscale ssh root@hermes \
+            "cat '/home/ubuntu/bubblewash-backups/github-staging/$backup_name'" \
+            > "$backup_path"
+          [[ -s "$backup_path" ]]
+          chmod 0600 "$backup_path"
+
+          printf 'filename=%s\n' "$backup_name" >> "$GITHUB_OUTPUT"
+          printf 'path=%s\n' "$backup_path" >> "$GITHUB_OUTPUT"
+
+      - name: Store the encrypted backup off-host
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bubblewash-database-backup-${{ github.run_id }}
+          path: ${{ steps.backup.outputs.path }}
+          if-no-files-found: error
+          retention-days: 35
+          compression-level: 0
+
+      - name: Activate the prepared release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ssh root@hermes \
+            "bash '$RELEASE_DIR/ops/deploy-production.sh' activate '$RELEASE_DIR' '$DEPLOY_SHA'"
 
       - name: Verify the public release
         shell: bash
