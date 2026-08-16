@@ -39,6 +39,14 @@ jobs:
           systemctl list-units --type=service --state=running --no-pager \
             | grep -Ei 'bubble|caddy|docker|nginx|node|pm2' || true
 
+          echo "Listening web ports:"
+          ss -lntp | grep -E ':(80|443|3000|3001|8080|8100)([[:space:]]|$)' || true
+
+          echo "Web-related processes:"
+          ps -eo user,pid,comm,args \
+            | grep -Ei 'bubble|caddy|next-server|node|pm2' \
+            | grep -v grep || true
+
           if command -v docker >/dev/null 2>&1; then
             echo "Running containers:"
             docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
@@ -49,6 +57,13 @@ jobs:
           fi
 
           echo "Likely Bubble Wash directories:"
-          find /opt /root /srv /var/www -maxdepth 4 -type d \
+          find /home /opt /root /srv /var/www -maxdepth 5 -type d \
             \( -iname '*bubble*wash*' -o -iname 'bubble-wash' \) 2>/dev/null | sort -u || true
+
+          echo "Bubble Wash Caddy routes:"
+          grep -n -i -B 2 -A 12 'bubblewash' /etc/caddy/Caddyfile 2>/dev/null || true
+
+          echo "Bubble Wash service definitions:"
+          grep -RIl -m 1 'bubblewash\|bubble-wash' \
+            /etc/systemd/system /home/*/.config/systemd/user 2>/dev/null | sort -u || true
           REMOTE
