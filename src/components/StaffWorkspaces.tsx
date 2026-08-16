@@ -6,6 +6,7 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import { Activity as ActivityIcon, ClipboardList, Gauge, HeartPulse, History, LayoutDashboard, Map as MapIcon, MessagesSquare, Route as RouteIcon, Users } from "lucide-react";
 import type { StaffRole } from "@/lib/auth";
 import { automationActionsForOrder, paymentReadyForCloseout } from "@/lib/order-workflow";
+import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 
 const supportTypes = ["Pickup delay", "Payment issue", "Missing item", "Quality complaint", "Vendor escalation", "General question"];
 
@@ -133,7 +134,11 @@ type SupportCase = {
 };
 
 function noticeClass(message: string) {
-  return `status ${/(unable|failed|invalid|missing|required|not allowed|not available|too many)/i.test(message) ? "error" : "success"}`;
+  if (/(unable|failed|invalid|missing|required|not allowed|not available|too many|error)/i.test(message)) return "status error";
+  if (/(waiting|pending|delayed|attention|warning|overdue)/i.test(message)) return "status warning";
+  if (/(loading|checking|saving|updating|opening|starting|stopping)/i.test(message)) return "status info";
+  if (/(saved|updated|loaded|received|verified|complete|copied|recorded|ready|success)/i.test(message)) return "status success";
+  return "status";
 }
 
 function rolePromise(role: StaffRole, view: string) {
@@ -503,7 +508,7 @@ function AvailabilityBoard({ role, mode = "all", refreshToken = 0 }: { role: Sta
   const showDrivers = mode !== "vendors" && (role === "admin" || role === "driver");
 
   return (
-    <section className="staffContentSection availabilitySection">
+    <section className="staffContentSection availabilitySection" aria-busy={!hasLoaded}>
       <div className="staffSectionHeader">
         <div><h2>Availability and coverage</h2><p>Current working capacity used by assignment.</p></div>
         <button className="button secondary" type="button" onClick={() => loadAvailability()}>Refresh</button>
@@ -512,26 +517,26 @@ function AvailabilityBoard({ role, mode = "all", refreshToken = 0 }: { role: Sta
       {showVendors ? <div className="staffRosterGroup">
         <div className="staffSubsectionHeader"><h3>Vendor partners</h3><span>{hasLoaded ? `${vendors.length} on roster` : "Loading…"}</span></div>
         <div className="staffRosterList">
-          {vendors.length ? vendors.map((vendor) => <article className="staffRosterRow" key={vendor.vendorId}>
+          {!hasLoaded ? <LoadingSkeleton label="Loading vendor capacity" rows={3} /> : vendors.length ? vendors.map((vendor) => <article className="staffRosterRow" key={vendor.vendorId}>
             <div><strong>{vendor.vendorName}</strong><span>{vendor.serviceTypes.join(", ") || "Services not set"}</span>{role === "admin" ? <small>ID: {vendor.vendorId}</small> : null}</div>
             <div><span className="staffFieldLabel">Status</span><strong>{vendor.availabilityStatus}</strong></div>
             <div><span className="staffFieldLabel">Capacity</span><strong>{vendor.capacityRemaining} order slots</strong></div>
             <div><span className="staffFieldLabel">Coverage</span><strong>{vendor.serviceZones.join(", ") || "Any approved zone"}</strong></div>
             <p>{vendor.notes || "No capacity note."}</p>
-          </article>) : <p className="staffEmptyState">{hasLoaded ? "No vendor capacity rows yet." : "Loading vendor capacity…"}</p>}
+          </article>) : <p className="staffEmptyState">No vendor capacity rows yet.</p>}
         </div>
       </div> : null}
 
       {showDrivers ? <div className="staffRosterGroup">
         <div className="staffSubsectionHeader"><h3>Riders</h3><span>{hasLoaded ? `${drivers.length} on roster` : "Loading…"}</span></div>
         <div className="staffRosterList">
-          {drivers.length ? drivers.map((driver) => <article className="staffRosterRow" key={driver.driverId}>
+          {!hasLoaded ? <LoadingSkeleton label="Loading rider availability" rows={3} /> : drivers.length ? drivers.map((driver) => <article className="staffRosterRow" key={driver.driverId}>
             <div><strong>{driver.driverName}</strong><span>{driver.vehicle || "Vehicle not set"}</span>{role === "admin" ? <small>ID: {driver.driverId}</small> : null}</div>
             <div><span className="staffFieldLabel">Status</span><strong>{driver.availabilityStatus}</strong></div>
             <div><span className="staffFieldLabel">Capacity</span><strong>{driver.capacityRemaining} route slots</strong></div>
             <div><span className="staffFieldLabel">Coverage</span><strong>{driver.serviceZones.join(", ") || "Any approved zone"}</strong></div>
             <p>{driver.notes || "No route note."}</p>
-          </article>) : <p className="staffEmptyState">{hasLoaded ? "No rider availability rows yet." : "Loading rider availability…"}</p>}
+          </article>) : <p className="staffEmptyState">No rider availability rows yet.</p>}
         </div>
       </div> : null}
 
@@ -539,7 +544,7 @@ function AvailabilityBoard({ role, mode = "all", refreshToken = 0 }: { role: Sta
         <div className="staffSubsectionHeader"><h3>Recent vendor declines</h3><span>{declines.length} recorded</span></div>
         <div className="staffSimpleList">{declines.slice(0, 6).map((decline) => <div className="staffSimpleRow" key={decline.id}><strong>{decline.orderId}</strong><span>{decline.vendorName}</span><p>{decline.reason}</p><time>{formatActivityTime(decline.createdAt)}</time></div>)}</div>
       </div> : null}
-      <p className="status" role="status" aria-live="polite">{status}</p>
+      <p className={noticeClass(status)} role="status" aria-live="polite">{status}</p>
     </section>
   );
 }
@@ -728,7 +733,7 @@ function RecentActivity({ filter, initialSelectedId = "", basePath }: { filter?:
   }
 
   return (
-    <section className="staffContentSection activitySection">
+    <section className="staffContentSection activitySection" aria-busy={!hasLoaded}>
       {selectedRecord ? <div className="staffDetailView" aria-live="polite">
         <Link className="staffBackLink" href={basePath}>← Back to activity</Link>
         <div className="staffDetailHeader">
@@ -763,11 +768,11 @@ function RecentActivity({ filter, initialSelectedId = "", basePath }: { filter?:
             <span><strong>{activityTypeLabel(activityType(record))}</strong><small>{changeSummaries.get(record.id)}</small></span>
             <time>{formatActivityTime(record.createdAt)}</time>
             <b>View details</b>
-          </Link></article>) : hasLoaded ? <p className="staffEmptyState">No activity matches these filters.</p> : <p className="staffEmptyState" role="status">Loading activity…</p>}
+          </Link></article>) : hasLoaded ? <p className="staffEmptyState">No activity matches these filters.</p> : <LoadingSkeleton label="Loading recent activity" rows={5} />}
         </div>
         <p className="staffSyncLine">Auto-refreshes every 30 seconds{lastUpdatedAt ? ` · Last synced ${formatMetricTime(lastUpdatedAt)}` : ""}. <button type="button" onClick={() => toggleSort("saved")}>Toggle date order</button></p>
       </>}
-      <p className="status" role="status" aria-live="polite">{status}</p>
+      <p className={noticeClass(status)} role="status" aria-live="polite">{status}</p>
     </section>
   );
 }
@@ -1189,9 +1194,9 @@ function DispatchBoard({ orders, role, basePath, hasLoaded, lastSyncedAt = "", e
   const liveRiderCount = role === "admin" ? new Set(routeOrders.map((order) => liveLocationForOrder(order, liveLocations)?.driverId || "").filter(Boolean)).size : 0;
   const detailHref = selectedOrder ? `${basePath}${basePath.includes("?") ? "&" : "?"}order=${encodeURIComponent(selectedOrder.orderId)}` : basePath;
 
-  return <section className={embedded ? "dispatchEmbedded" : "staffContentSection dispatchSection"} aria-labelledby={`${role}-dispatch-heading`}>
+  return <section className={embedded ? "dispatchEmbedded" : "staffContentSection dispatchSection"} aria-labelledby={`${role}-dispatch-heading`} aria-busy={!hasLoaded}>
     <div className="staffSectionHeader dispatchHeader"><div><h2 id={`${role}-dispatch-heading`}>{role === "admin" ? "Current dispatch board" : "Today’s route map"}</h2><p>{role === "admin" ? "Assigned route work, recorded ETAs, and rider-authorized foreground locations across the pilot." : "Open a stop to see its route estimate, window, directions, and live sharing control."}</p></div>{lastSyncedAt ? <span className="dispatchSync">Board refreshed {formatMetricTime(lastSyncedAt)}</span> : null}</div>
-    {!hasLoaded ? <div className="staffEmptyState" role="status"><h3>Loading dispatch…</h3><p>Checking assigned route work and planning estimates.</p></div> : error && !orders.length ? <div className="staffEmptyState" role="alert"><h3>Dispatch unavailable</h3><p>{error} The board will retry automatically.</p></div> : selectedOrder ? <>
+    {!hasLoaded ? <LoadingSkeleton label="Loading dispatch routes and estimates" rows={2} variant="map" /> : error && !orders.length ? <div className="staffEmptyState" role="alert"><h3>Dispatch unavailable</h3><p>{error} The board will retry automatically.</p></div> : selectedOrder ? <>
       {role === "driver" ? <DriverLiveLocationSharing key={selectedOrder.orderId} order={selectedOrder} /> : null}
       <div className="dispatchSummaryLine" aria-label="Dispatch summary"><span><strong>{assignedOrders.length}</strong> assigned moves</span><span><strong>{activeRiders.size}</strong> {activeRiders.size === 1 ? "rider" : "riders"} assigned</span><span><strong>{needsRider}</strong> awaiting rider</span>{role === "admin" ? <span><strong>{liveRiderCount}</strong> sharing live</span> : null}</div>
       <div className="dispatchBoard">
@@ -1363,7 +1368,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
   const driverGroups = ["Customer pickups", "Vendor handoffs", "Return deliveries", "Other assigned work"].map((label) => ({ label, orders: visibleOrders.filter((order) => driverStopGroup(order) === label) })).filter((group) => group.orders.length);
 
   return (
-    <section className="staffContentSection sharedBoardSection">
+    <section className="staffContentSection sharedBoardSection" aria-busy={!hasLoaded}>
       {role === "driver" && !selectedOrderId ? <DispatchBoard orders={orders} role="driver" basePath={basePath} hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={/unable/i.test(status) ? status : ""} embedded /> : null}
       {selectedOrderId ? selectedOrder ? <article className="staffDetailView orderDetail">
         <Link className="staffBackLink" href={basePath}>← Back to order list</Link>
@@ -1396,7 +1401,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
 
           <section className="staffDetailSection staffTimelineSection"><h3>Order history</h3><p>{compactTimelineLabel(selectedOrder.eventCount)} attached to this order.</p><div className="staffTimeline">{selectedOrder.timeline.map((event) => <div key={`${selectedOrder.orderId}-${event.id}-${event.createdAt}`}><time>{formatShortTime(event.createdAt)}</time><div><strong>{event.status}</strong><span>{event.type} · {event.actor}</span><p>{event.note}</p></div></div>)}</div></section>
         </div>
-      </article> : <div className="staffEmptyState"><h2>{hasLoaded ? "Order not found" : "Loading order…"}</h2><p>{hasLoaded ? "This order is not available to this staff role." : "Checking the latest staff order data."}</p>{hasLoaded ? <Link href={basePath}>Back to the order list</Link> : null}</div> : <>
+      </article> : hasLoaded ? <div className="staffEmptyState"><h2>Order not found</h2><p>This order is not available to this staff role.</p><Link href={basePath}>Back to the order list</Link></div> : <LoadingSkeleton label="Loading order details" rows={4} variant="detail" /> : <>
         <div className="staffSectionHeader"><div><h2>{queueHeading}</h2><p>{stats.riskCount} at risk · {stats.automationCount} verified actions available</p></div><button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh</button></div>
         <div className="staffFilterBar">
           <div className="staffTextFilters" aria-label="Order queue view">{([ ["action", "Needs action"], ["active", "All active"], ["all", "History"] ] as Array<[QueueView, string]>).map(([key, label]) => <button aria-pressed={queueView === key} className={queueView === key ? "active" : ""} key={key} type="button" onClick={() => setQueueView(key)}>{label}</button>)}</div>
@@ -1405,10 +1410,10 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
         <div className="staffOrderList" role="list">
           <div className="staffOrderListHeader" aria-hidden="true"><span>Order</span><span>Stage</span><span>Collection</span><span>Assignment</span><span></span></div>
           {role === "driver" ? driverGroups.map((group) => <section className="staffOrderGroup" key={group.label} aria-labelledby={`driver-group-${group.label.replaceAll(" ", "-").toLowerCase()}`}><h3 className="staffOrderGroupTitle" id={`driver-group-${group.label.replaceAll(" ", "-").toLowerCase()}`}>{group.label}<span>{group.orders.length}</span></h3>{group.orders.map((order) => <OrderQueueRow href={detailHref(order.orderId)} key={order.orderId} order={order} />)}</section>) : visibleOrders.map((order) => <OrderQueueRow href={detailHref(order.orderId)} key={order.orderId} order={order} />)}
-          {!visibleOrders.length ? <p className="staffEmptyState">{!hasLoaded ? "Loading orders…" : normalizedQuery ? "No orders match this search." : queueView === "action" ? "No orders currently need action from this role." : "No orders in this view yet."}</p> : null}
+          {!visibleOrders.length ? !hasLoaded ? <LoadingSkeleton label="Loading order queue" rows={5} /> : <p className="staffEmptyState">{normalizedQuery ? "No orders match this search." : queueView === "action" ? "No orders currently need action from this role." : "No orders in this view yet."}</p> : null}
         </div>
       </>}
-      <p className="status" role="status" aria-live="polite">{status}{lastSyncedAt ? ` Last synced ${formatMetricTime(lastSyncedAt)}. ${selectedOrderId ? "" : `Showing ${visibleOrders.length} of ${matchingOrders.length}.`}` : ""}</p>
+      <p className={noticeClass(status)} role="status" aria-live="polite">{status}{lastSyncedAt ? ` Last synced ${formatMetricTime(lastSyncedAt)}. ${selectedOrderId ? "" : `Showing ${visibleOrders.length} of ${matchingOrders.length}.`}` : ""}</p>
     </section>
   );
 }
@@ -1471,6 +1476,7 @@ function SupportTicketForm({ onSubmit, status, pending = false }: { userName: st
 function StaffAccessRoster({ refreshToken = 0 }: { refreshToken?: number }) {
   const [members, setMembers] = useState<StaffRosterMember[]>([]);
   const [status, setStatus] = useState("Loading staff roster…");
+  const [hasLoaded, setHasLoaded] = useState(false);
 
   async function loadRoster() {
     setStatus("Loading staff roster…");
@@ -1479,12 +1485,15 @@ function StaffAccessRoster({ refreshToken = 0 }: { refreshToken?: number }) {
       const data = await response.json();
       if (!response.ok || !data.ok) {
         setStatus(data.error ?? "Unable to load staff roster.");
+        setHasLoaded(true);
         return;
       }
       setMembers(data.members ?? []);
       setStatus(data.members?.length ? "Staff roster updated." : "No staff roster entries yet.");
+      setHasLoaded(true);
     } catch {
       setStatus("Unable to load staff roster.");
+      setHasLoaded(true);
     }
   }
 
@@ -1496,28 +1505,30 @@ function StaffAccessRoster({ refreshToken = 0 }: { refreshToken?: number }) {
         if (!active) return;
         if (!ok || !data.ok) {
           setStatus(data.error ?? "Unable to load staff roster.");
+          setHasLoaded(true);
           return;
         }
         setMembers(data.members ?? []);
         setStatus(data.members?.length ? "Staff roster updated." : "No staff roster entries yet.");
+        setHasLoaded(true);
       })
-      .catch(() => { if (active) setStatus("Unable to load staff roster."); });
+      .catch(() => { if (active) { setStatus("Unable to load staff roster."); setHasLoaded(true); } });
     return () => { active = false; };
   }, [refreshToken]);
 
-  return <section className="staffContentSection">
+  return <section className="staffContentSection" aria-busy={!hasLoaded}>
     <div className="staffSectionHeader"><div><h2>Bubble Wash staff access</h2><p>Roster status and whether secure sign-in has been configured.</p></div><button className="button secondary" type="button" onClick={() => void loadRoster()}>Refresh</button></div>
     <div className="staffRosterList">
-      {members.map((member) => <article className="staffRosterRow staffAccessRow" key={member.id}>
+      {!hasLoaded ? <LoadingSkeleton label="Loading staff access roster" rows={4} /> : members.map((member) => <article className="staffRosterRow staffAccessRow" key={member.id}>
         <div><strong>{member.name}</strong><span>{member.email}</span></div>
         <div><span className="staffFieldLabel">Role</span><strong>{member.role}</strong></div>
         <div><span className="staffFieldLabel">Status</span><strong>{member.status}</strong></div>
         <div><span className="staffFieldLabel">Access</span><strong>{member.access === "configured" ? "Sign-in configured" : "Roster only"}</strong></div>
         <p>{member.workArea || member.phone || "Work area not recorded."}</p>
       </article>)}
-      {!members.length && !/loading/i.test(status) ? <p className="staffEmptyState">No staff roster entries yet.</p> : null}
+      {hasLoaded && !members.length ? <p className="staffEmptyState">No staff roster entries yet.</p> : null}
     </div>
-    <p className="status" role="status" aria-live="polite">{status}</p>
+    <p className={noticeClass(status)} role="status" aria-live="polite">{status}</p>
   </section>;
 }
 
@@ -1637,7 +1648,7 @@ function AdminOverview({ userName }: { userName: string }) {
   ];
   const priorityOrders = activeOrders.filter((order) => isRiskOrder(order) || order.vendor === "Unassigned" || order.driver === "Unassigned" || automationActionsForOrder(order, "admin", userName).length > 0).sort((left, right) => Number(isRiskOrder(right)) - Number(isRiskOrder(left)) || Number(right.vendor === "Unassigned" || right.driver === "Unassigned") - Number(left.vendor === "Unassigned" || left.driver === "Unassigned") || new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime()).slice(0, 5);
 
-  if (!hasLoaded) return <section className="staffContentSection"><div className="staffEmptyState" role="status"><h2>Loading today’s operations…</h2><p>Checking orders, capacity, routes, and support cases.</p></div></section>;
+  if (!hasLoaded) return <section className="staffContentSection" aria-busy="true"><LoadingSkeleton label="Loading today’s operations overview" rows={4} variant="metrics" /></section>;
   if (loadError) return <section className="staffContentSection"><div className="staffEmptyState" role="alert"><h2>Operations overview unavailable</h2><p>{loadError} No totals are shown until all overview sources load successfully.</p><button className="button secondary" type="button" onClick={() => void loadOverview()}>Try again</button></div></section>;
 
   return <>
@@ -1712,7 +1723,7 @@ function SupportTicketDesk({ userName, selectedCaseId = "", basePath, refreshTok
   const caseHref = (ticketId: string) => `${basePath}${basePath.includes("?") ? "&" : "?"}case=${encodeURIComponent(ticketId)}`;
 
   return (
-    <section className="staffContentSection supportDeskSection">
+    <section className="staffContentSection supportDeskSection" aria-busy={!hasLoaded}>
       {selectedCaseId ? selectedCase ? <article className="staffDetailView caseDetail">
         <Link className="staffBackLink" href={basePath}>← Back to case list</Link>
         <header className="staffDetailHeader"><div><span className="staffFieldLabel">{selectedCase.ticketId}</span><h2>{String(selectedCase.root.data.issueType || "Support ticket")}</h2><p>{selectedCase.orderId || "Not linked to an order"}</p></div><div className="staffDetailReference"><span>Status</span><strong>{selectedCase.status}</strong><small>{selectedCase.priority} priority</small></div></header>
@@ -1727,14 +1738,14 @@ function SupportTicketDesk({ userName, selectedCaseId = "", basePath, refreshTok
             {formStatus[selectedCase.ticketId] ? <p className={noticeClass(formStatus[selectedCase.ticketId])} role="status">{formStatus[selectedCase.ticketId]}</p> : null}
           </form></section>
         </div>
-      </article> : <div className="staffEmptyState"><h2>{hasLoaded ? "Case not found" : "Loading case…"}</h2><p>{hasLoaded ? "This case is unavailable to this staff role." : "Checking the latest case history."}</p>{hasLoaded ? <Link href={basePath}>Back to cases</Link> : null}</div> : <>
+      </article> : hasLoaded ? <div className="staffEmptyState"><h2>Case not found</h2><p>This case is unavailable to this staff role.</p><Link href={basePath}>Back to cases</Link></div> : <LoadingSkeleton label="Loading support case details" rows={4} variant="detail" /> : <>
         <div className="staffSectionHeader"><div><h2>Customer cases</h2><p>Each case appears once. Open it to see history and record an action.</p></div><button className="button secondary" type="button" onClick={() => loadTickets()}>Refresh</button></div>
         <div className="staffCaseList" role="list"><div className="staffCaseListHeader" aria-hidden="true"><span>Case</span><span>Status</span><span>Priority</span><span>Updated</span><span></span></div>
-          {cases.map((supportCase) => <article className="staffCaseRow" key={supportCase.ticketId} role="listitem"><div><strong>{String(supportCase.root.data.issueType || "Support ticket")}</strong><span>{supportCase.ticketId}</span><small>{supportCase.orderId || "Unlinked case"}</small></div><div><strong>{supportCase.status}</strong><span>{String(supportCase.latest.data.message || supportCase.root.data.message || "No note supplied.")}</span></div><strong>{supportCase.priority}</strong><time>{formatActivityTime(supportCase.latest.createdAt)}</time><Link href={caseHref(supportCase.ticketId)}>View case</Link></article>)}
-          {!cases.length ? <p className="staffEmptyState">No customer cases yet.</p> : null}
+          {!hasLoaded ? <LoadingSkeleton label="Loading support tickets" rows={5} /> : cases.map((supportCase) => <article className="staffCaseRow" key={supportCase.ticketId} role="listitem"><div><strong>{String(supportCase.root.data.issueType || "Support ticket")}</strong><span>{supportCase.ticketId}</span><small>{supportCase.orderId || "Unlinked case"}</small></div><div><strong>{supportCase.status}</strong><span>{String(supportCase.latest.data.message || supportCase.root.data.message || "No note supplied.")}</span></div><strong>{supportCase.priority}</strong><time>{formatActivityTime(supportCase.latest.createdAt)}</time><Link href={caseHref(supportCase.ticketId)}>View case</Link></article>)}
+          {hasLoaded && !cases.length ? <p className="staffEmptyState">No customer cases yet.</p> : null}
         </div>
       </>}
-      <p className="status" role="status" aria-live="polite">{status}</p>
+      <p className={noticeClass(status)} role="status" aria-live="polite">{status}</p>
     </section>
   );
 }
@@ -1808,6 +1819,7 @@ function AdminOperationsHealth() {
   const [metrics, setMetrics] = useState<OperationsMetrics | null>(null);
   const [privacyRequests, setPrivacyRequests] = useState<PrivacyOperationsRequest[]>([]);
   const [status, setStatus] = useState("Loading operational controls…");
+  const [hasLoaded, setHasLoaded] = useState(false);
 
   async function load() {
     try {
@@ -1819,6 +1831,8 @@ function AdminOperationsHealth() {
       setStatus("Operational data loaded.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to load operations health.");
+    } finally {
+      setHasLoaded(true);
     }
   }
 
@@ -1837,7 +1851,7 @@ function AdminOperationsHealth() {
     }
   }
 
-  return <section className="staffContentSection"><div className="staffSectionHeader"><div><h2>Operations health and privacy queue</h2><p>Delivery retries and retention run through the protected maintenance worker. Privacy cases require an explicit review status.</p></div><button className="button secondary" type="button" onClick={() => void load()}>Refresh</button></div>{metrics ? <div className="overviewGrid"><article><span className="staffFieldLabel">Order records</span><strong>{metrics.submissions}</strong><small>SQLite submission events</small></article><article><span className="staffFieldLabel">Early access</span><strong>{metrics.earlyAccess.active}</strong><small>{metrics.earlyAccess.total} total consent records</small></article><article><span className="staffFieldLabel">Privacy queue</span><strong>{metrics.privacyRequests.open}</strong><small>{metrics.privacyRequests.total} total requests</small></article><article><span className="staffFieldLabel">Notification outbox</span><strong>{metrics.notifications.pending + metrics.notifications.failed}</strong><small>{metrics.notifications.pending} pending · {metrics.notifications.failed} failed · {metrics.notifications.sent} sent</small></article></div> : null}<p className="status" role="status">{status}</p><div className="staffSectionHeader"><div><h3>Privacy and data-rights requests</h3><p>Verify identity before disclosure, correction, or deletion. Mark completion only after the requested work is recorded.</p></div></div><div className="staffSimpleList">{privacyRequests.length ? privacyRequests.map((request) => <article className="privacyOpsRow" key={request.id}><div><strong>{request.id}</strong><span>{request.requestType.replaceAll("_", " ")}</span></div><div><strong>{request.name}</strong><span>{request.contact}</span><small>{request.orderId || "No order supplied"}</small></div><div><strong>{request.status.replaceAll("_", " ")}</strong><time>{formatActivityTime(request.createdAt)}</time></div><div className="tableActionRow"><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "identity_review")}>Identity review</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "completed")}>Complete</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "declined")}>Decline</button></div></article>) : <p className="staffEmptyState">No privacy requests are waiting.</p>}</div></section>;
+  return <section className="staffContentSection" aria-busy={!hasLoaded}><div className="staffSectionHeader"><div><h2>Operations health and privacy queue</h2><p>Delivery retries and retention run through the protected maintenance worker. Privacy cases require an explicit review status.</p></div><button className="button secondary" type="button" onClick={() => void load()}>Refresh</button></div>{!hasLoaded ? <LoadingSkeleton label="Loading operations health metrics" rows={4} variant="metrics" /> : metrics ? <div className="overviewGrid"><article><span className="staffFieldLabel">Order records</span><strong>{metrics.submissions}</strong><small>SQLite submission events</small></article><article><span className="staffFieldLabel">Early access</span><strong>{metrics.earlyAccess.active}</strong><small>{metrics.earlyAccess.total} total consent records</small></article><article><span className="staffFieldLabel">Privacy queue</span><strong>{metrics.privacyRequests.open}</strong><small>{metrics.privacyRequests.total} total requests</small></article><article><span className="staffFieldLabel">Notification outbox</span><strong>{metrics.notifications.pending + metrics.notifications.failed}</strong><small>{metrics.notifications.pending} pending · {metrics.notifications.failed} failed · {metrics.notifications.sent} sent</small></article></div> : null}<p className={noticeClass(status)} role="status">{status}</p><div className="staffSectionHeader"><div><h3>Privacy and data-rights requests</h3><p>Verify identity before disclosure, correction, or deletion. Mark completion only after the requested work is recorded.</p></div></div><div className="staffSimpleList">{!hasLoaded ? <LoadingSkeleton label="Loading privacy requests" rows={4} /> : privacyRequests.length ? privacyRequests.map((request) => <article className="privacyOpsRow" key={request.id}><div><strong>{request.id}</strong><span>{request.requestType.replaceAll("_", " ")}</span></div><div><strong>{request.name}</strong><span>{request.contact}</span><small>{request.orderId || "No order supplied"}</small></div><div><strong>{request.status.replaceAll("_", " ")}</strong><time>{formatActivityTime(request.createdAt)}</time></div><div className="tableActionRow"><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "identity_review")}>Identity review</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "completed")}>Complete</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "declined")}>Decline</button></div></article>) : <p className="staffEmptyState">No privacy requests are waiting.</p>}</div></section>;
 }
 
 export function VendorWorkspace({ userName, role, initialView = "jobs", selectedOrderId, selectedActivityId }: WorkspaceProps) {
