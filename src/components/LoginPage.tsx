@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { ArrowLeft, Bike, Grid2X2, Headphones, ShieldCheck, WashingMachine, type LucideIcon } from "lucide-react";
 
 const showCredentialCards = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_BUBBLEWASH_SHOW_DEMO_LOGIN === "true";
 
@@ -22,6 +23,7 @@ function LoginForm() {
   }, [searchParams]);
   const [email, setEmail] = useState(showCredentialCards ? "admin@bubblewash.local" : "");
   const [password, setPassword] = useState("");
+  const [totp, setTotp] = useState("");
   const [status, setStatus] = useState("Enter staff credentials to open a separate workspace.");
 
   async function login(event: FormEvent<HTMLFormElement>) {
@@ -30,7 +32,7 @@ function LoginForm() {
     const response = await fetch("/api/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, next: nextPath }),
+      body: JSON.stringify({ email, password, totp, next: nextPath }),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {
@@ -43,14 +45,15 @@ function LoginForm() {
   function fillCredential(emailValue: string) {
     setEmail(emailValue);
     setPassword("");
+    setTotp("");
     setStatus(`Loaded ${emailValue}. Enter the staff password to continue.`);
   }
 
-  const roleRows = [
-    ["Admin", "Orders, partners, staffing, escalations"],
-    ["Vendor", "Washing queue, capacity, ready handoff"],
-    ["Driver", "Pickup route, delivery stops, handoff proof"],
-    ["Support", "Tickets, customer updates, issue closure"],
+  const roleRows: Array<[string, string, LucideIcon]> = [
+    ["Admin", "Orders, partners, staffing, escalations", ShieldCheck],
+    ["Vendor", "Washing queue, capacity, ready handoff", WashingMachine],
+    ["Driver", "Pickup route, delivery stops, handoff proof", Bike],
+    ["Support", "Tickets, customer updates, issue closure", Headphones],
   ];
 
   return (
@@ -60,15 +63,15 @@ function LoginForm() {
           <span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={42} height={42} priority /></span>
           <span>Bubble Wash Staff</span>
         </Link>
-        <nav className="redesignTextNav" aria-label="Staff login links"><Link href="/">Back to site</Link><Link href="/staff">Roles</Link></nav>
+        <nav className="redesignTextNav" aria-label="Staff login links"><Link href="/"><ArrowLeft aria-hidden="true" />Back to site</Link><Link href="/staff"><Grid2X2 aria-hidden="true" />Roles</Link></nav>
       </header>
       <section className="redesignLoginGrid" aria-labelledby="login-title">
         <aside className="redesignRoleList">
           <p className="eyebrow">Staff access</p>
           <h2>Choose the workspace that matches your role.</h2>
           <p>Each staff login opens only the tools that person can act on.</p>
-          {roleRows.map(([role, copy]) => (
-            <div className="redesignRoleRow" key={role}><span aria-hidden="true" /><div><strong>{role}</strong><small>{copy}</small></div></div>
+          {roleRows.map(([role, copy, Icon]) => (
+            <div className="redesignRoleRow" key={role}><Icon aria-hidden="true" /><div><strong>{role}</strong><small>{copy}</small></div></div>
           ))}
           {showCredentialCards ? <div className="credentialList redesignCredentialList">{credentialCards.map(([role, emailValue]) => <button className="credentialCard" type="button" key={role} onClick={() => fillCredential(emailValue)}><strong>{role}</strong><span>{emailValue}</span></button>)}</div> : null}
         </aside>
@@ -78,6 +81,7 @@ function LoginForm() {
           <p>Use staff credentials. The destination is based on the selected role.</p>
           <label>Staff email<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Staff email" autoComplete="username" required /></label>
           <label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" autoComplete="current-password" required /></label>
+          <label>Admin authenticator code <small>(admin only)</small><input value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} type="text" placeholder="6-digit code" inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" /></label>
           <button className="button primary full" type="submit">Sign in</button>
           <div className="destination"><strong>Destination:</strong> {nextPath}<br />Sessions should expire automatically on shared devices.</div>
           <p className="status success" role="status" aria-live="polite">{status}</p>

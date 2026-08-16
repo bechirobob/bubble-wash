@@ -1,6 +1,6 @@
 # Bubble Wash pilot runbook
 
-Target launch: Wednesday, 22 July 2026. This runbook is the go/no-go standard for the controlled commercial-laundry pilot in Accra. The customer and staff interfaces use the approved restrained, role-focused design direction.
+This runbook is the go/no-go standard for the controlled commercial-laundry pilot in Accra and the native household early-access channel on `bubblewash.co`.
 
 ## Pilot operating boundary
 
@@ -9,21 +9,23 @@ Target launch: Wednesday, 22 July 2026. This runbook is the go/no-go standard fo
 - Keep daily order volume controlled until the first full pickup-to-delivery cycle has been reconciled against the database, billing record, and manual customer follow-up log.
 - Pilot payments are bank transfer or approved invoice only. Operations records and reconciles payment outside the online checkout until Paystack is enabled.
 - Support owns manual customer follow-up using the phone and email stored on each booking. The public tracker remains the customer's self-service status channel.
-- Move to PostgreSQL before horizontal application scaling or multi-city operation.
+- Run the notification/retention worker every 10 minutes and the encrypted backup/restore-proof job nightly. Readiness blocks when the latest proof is older than 30 hours.
+- Move to PostgreSQL before horizontal application scaling or multi-city operation. Use `docs/SCALING_PLAN.md`; never point multiple replicas at SQLite.
 
 ## Required production configuration
 
 Use `.env.production.example` as the inventory. Before launch:
 
-1. Set `BUBBLEWASH_DATABASE_PATH` to the mounted volume, for example `/var/lib/bubblewash/bubblewash.sqlite`.
-2. Generate a unique 32+ character session secret and a different strong password hash for each of the four roles. Set `BUBBLEWASH_DISABLE_DEMO_LOGIN=true`. Confirm `Admin123!`, `Vendor123!`, `Driver123!`, and `Support123!` each return HTTP 401 for every production staff account before approving a release.
+1. Set `BUBBLEWASH_DATABASE_DRIVER=sqlite` and `BUBBLEWASH_DATABASE_PATH` to the mounted volume, for example `/var/lib/bubblewash/bubblewash.sqlite`.
+2. Generate a unique 32+ character session secret and a different strong password hash for each of the four current role logins. Set `BUBBLEWASH_DISABLE_DEMO_LOGIN=true`. Generate and enrol `BUBBLEWASH_ADMIN_TOTP_SECRET` with `npm run mfa:setup -- admin@example.com`. Confirm the admin password alone cannot authenticate, a current authenticator code can, and the same code cannot be replayed.
 3. Set `BUBBLEWASH_PUBLIC_URL=https://bubblewash.co`.
 4. Set `BUBBLEWASH_VENDOR_ENTITY_ID` and `BUBBLEWASH_DRIVER_ENTITY_ID` to the exact approved roster IDs. The current pilot has one configured rider login; only that bound rider may share foreground GPS.
 5. Set `NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED=false` and `NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED=false` for the manual operational pilot. The future services appear only as disabled “Coming soon” information.
 6. `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP` and `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL` are optional public contact links and may remain unset during the pilot; the corresponding links stay hidden. Only real, approved public contact values may be added later.
-7. Leave Paystack, Resend, and WhatsApp credentials unset until the business accounts are approved. Do not enable either feature flag until its provider credentials and end-to-end tests are complete.
+7. Leave Paystack unset while online payments remain disabled. Configure Resend plus approved `WHATSAPP_EARLY_ACCESS_TEMPLATE` and `WHATSAPP_PRIVACY_TEMPLATE` credentials before launch; these confirmations are operational even while commercial automated updates remain disabled. Do not enable commercial automated updates until booking/operations templates and end-to-end tests pass.
 8. Enable exactly one trusted IP-header mode appropriate to the deployment edge. Use `BUBBLEWASH_TRUST_EDGE_HEADERS=true` for a controlled Cloudflare/Fly-style edge header, or `BUBBLEWASH_TRUST_PROXY_HEADERS=true` only when the reverse proxy strips public forwarding headers and writes its own.
-9. Restrict the database directory and secret environment values to the application service account. Do not place credentials or provider keys in the repository or client-visible variables.
+9. Set the exact `BUBBLEWASH_LEGAL_ENTITY_NAME` and confirmed `BUBBLEWASH_DPC_REGISTRATION_NUMBER`. The business owner must approve the service terms, privacy notice, retention schedule, and refund policy; placeholders are a release blocker.
+10. Set a random maintenance token, a base64 32-byte backup key, separate primary/off-site mounted directories, and a backup status path. Install the timer units from `ops/` or equivalent provider schedules. Restrict database, backup, and secret paths to the application service account.
 
 ## Release gate
 
@@ -34,7 +36,7 @@ npm ci
 npm run check
 ```
 
-The release is a no-go if lint, tests, or the production build fails. After deployment:
+The release is a no-go if lint, tests, dependency audits, route verification, or the production build fails. Run `npm audit --audit-level=moderate` and `npm audit --omit=dev --audit-level=moderate` again from the exact candidate lockfile; any newly published moderate-or-higher vulnerability blocks deployment. Before traffic moves, run `npm run db:backup` and require its off-site restore proof. After deployment:
 
 ```bash
 curl --fail --silent --show-error https://bubblewash.co/api/health
@@ -47,15 +49,16 @@ curl --fail --silent --show-error https://bubblewash.co/api/ready
 
 Use a fresh test customer and a test bank-transfer/invoice record approved by the business owner.
 
-1. Open the homepage on a phone and laptop. Confirm navigation, coverage, visible add-ons, quote, booking, tracking, and staff login retain the approved design. Confirm card, Mobile Money, WhatsApp automation, and email automation are clearly labeled “Coming soon” and cannot be selected.
-2. Submit one pickup booking. Record the Bubble Wash reference and confirm only one order appears in admin.
+1. Open the landing page, Services, Book, Track, Manage order, Household, and staff login on a phone and laptop. Confirm the shared navigation, iconography, route transitions, pricing calculator, booking, and tracking retain the approved design. Confirm card, Mobile Money, WhatsApp automation, and email automation remain unavailable while their feature flags are off.
+2. Submit one pickup booking. Record the Bubble Wash reference and private six-digit delivery code; confirm only one order appears in admin. Verify `/manage` opens only with the reference plus matching booking contact and creates requests without changing the order stage.
 3. Support uses the booking phone/email, then records the channel, outcome, operator note, and next follow-up time on that order. Confirm no automated email or WhatsApp request is attempted.
 4. On admin, enter a confirmed pickup window, then assign the vendor/driver. The assignment must stop if current capacity does not match the order area, if the vendor is tomorrow-only, or if the rider is training/paused. Double-click once intentionally; the second request must return an already-processed response and must not consume capacity twice.
-5. Complete vendor accept, driver pickup with bag-count/handoff proof, vendor handoff, vendor intake with tag/count/condition, washing, ready quality check, return delivery, and recipient proof using the same Order ID.
+5. Open and print the signed bag QR. Scan it while signed in as each relevant role and confirm it routes to the same order. Complete vendor accept, driver pickup with bag-count/handoff proof, vendor handoff, vendor intake with tag/count/condition, washing, ready quality check, and return delivery. An incorrect delivery code must fail; the correct code must save recipient/count proof once and reject replay.
 6. On the rider's HTTPS mobile route page, confirm location permission is requested only after selecting **Start live sharing**. Admin must see the matching live/recent marker and freshness within about 15 seconds. Vendor, Support, public tracking, and unauthenticated requests must not receive coordinates. Select **Stop sharing** and confirm the marker clears; completing or reassigning the order must also invalidate it.
 7. Record bank-transfer or approved-invoice evidence using its amount, reference, date, and reconciliation note. Closeout must remain unavailable until that evidence is saved. Confirm `/api/payments/initialize` and `/api/payments/verify` return HTTP 503 while online payments are disabled.
 8. Confirm public tracking shows only the customer's first name, area, route window, status, next step, and safe route label. It must not reveal phone, email, payment details, vendor, driver, or location notes.
-9. Sign each role out and verify protected pages and APIs return to login or HTTP 401.
+9. Submit household early access and a privacy request. Confirm native URLs remain on `bubblewash.co`, one confirmation per channel is deduplicated, the admin operations queue can change privacy status, and the maintenance worker retries failed sends.
+10. Check `/privacy`, `/terms`, `/refund-policy`, `/robots.txt`, and `/sitemap.xml`; validate canonical URLs and the production legal identity/registration. Sign each role out and verify protected pages and APIs return to login or HTTP 401.
 
 ## Staff operating flow
 
@@ -67,14 +70,14 @@ Use a fresh test customer and a test bank-transfer/invoice record approved by th
 
 ## Backup and restore
 
-- Take a provider volume snapshot before every deployment and at least daily during the pilot.
-- Run `npm run db:backup -- /separate-mounted-backup-path/bubblewash-YYYY-MM-DD.sqlite` for an application-consistent SQLite backup. The command refuses overwrite and runs `PRAGMA quick_check` on the result.
-- Keep at least 30 daily backups, with a copy outside the application volume. Treat backups as sensitive customer data.
-- Restore only during a declared maintenance window: stop the app, preserve the failed database and WAL/SHM companions, place a verified backup at `BUBBLEWASH_DATABASE_PATH`, start one instance, check `/api/ready`, and run the order/tracking smoke tests before reopening bookings.
+- Take a provider volume snapshot before every deployment. Run `npm run db:backup`; it creates a consistent SQLite snapshot, encrypts it with AES-256-GCM, writes identical non-overwriting copies to the primary and separately mounted off-site directories, decrypts the off-site copy into a temporary restore proof, runs `PRAGMA quick_check`, and then atomically updates the readiness status file.
+- The supplied nightly timer retains 35 days. Treat the key, status path, and encrypted copies as sensitive. Monitor job failure; `/api/ready` becomes blocked after 30 hours without a current restore proof.
+- Restore only during a declared maintenance window: stop the app, preserve the failed database and WAL/SHM companions, decrypt a selected off-site backup with a separately reviewed recovery procedure, verify it away from production, place it at `BUBBLEWASH_DATABASE_PATH`, start exactly one instance, and run readiness/order/customer-access smoke tests before reopening bookings.
 
 ## Monitoring and response
 
-- Alert on `/api/ready` non-200 responses, unexpected readiness warning changes, HTTP 5xx rate, SQLite busy/locked errors, and login 429 spikes.
+- Alert on `/api/ready` non-200 responses, stale/failed timer jobs, protected `/api/internal/metrics` database failure, outbox failed/pending growth, open privacy cases, HTTP 5xx rate, SQLite busy/locked errors, and login 429 spikes. Never put the maintenance token in a browser or public monitoring URL.
+- Retention maintenance removes expired limiter/MFA state, 90-day notification logs, opted-out early-access records after 30 days, active early-access records 12 months after the configured household launch date, completed privacy-case evidence after 36 months, and closed order groups after 24 months. Pause purging under a documented dispute or legal hold.
 - Reconcile bank-transfer and invoice status against the business payment record daily. Do not mark an order paid from a customer statement alone.
 - The admin owns dispatch and closeout, support owns customer communication, and one named technical operator owns deployment, database backup, and rollback.
 - For suspected account compromise: disable the affected role, rotate its password hash and the session secret, restart the service, and review the order event trail.

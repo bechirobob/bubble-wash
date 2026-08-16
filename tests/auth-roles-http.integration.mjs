@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createPasswordHash } from "../src/lib/passwords.ts";
+import { totpCode } from "../src/lib/totp.ts";
 
 const testDirectory = mkdtempSync(join(process.cwd(), ".bubblewash-auth-roles-"));
 
@@ -9,6 +10,7 @@ process.env.NODE_ENV = "production";
 process.env.BUBBLEWASH_DATABASE_PATH = join(testDirectory, "auth.sqlite");
 process.env.BUBBLEWASH_SESSION_SECRET = "production-auth-role-test-secret-32-plus";
 process.env.BUBBLEWASH_DISABLE_DEMO_LOGIN = "true";
+process.env.BUBBLEWASH_ADMIN_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
 
 const credentials = [
   ["ADMIN", "admin", "admin-pilot-unique-password"],
@@ -37,6 +39,7 @@ for (const [role, expectedRole, password] of credentials) {
     body: JSON.stringify({
       email: process.env[`BUBBLEWASH_${role}_EMAIL`],
       password,
+      ...(role === "ADMIN" ? { totp: totpCode(process.env.BUBBLEWASH_ADMIN_TOTP_SECRET) } : {}),
     }),
   }));
   assert.equal(response.status, 200, `${role} unique credential must authenticate`);
@@ -44,5 +47,16 @@ for (const [role, expectedRole, password] of credentials) {
   assert.equal(body.user?.role, expectedRole);
 }
 
+const replay = await POST(new Request("https://bubblewash.co/api/login", {
+  method: "POST",
+  headers: { "content-type": "application/json", host: "bubblewash.co", origin: "https://bubblewash.co" },
+  body: JSON.stringify({
+    email: process.env.BUBBLEWASH_ADMIN_EMAIL,
+    password: credentials[0][2],
+    totp: totpCode(process.env.BUBBLEWASH_ADMIN_TOTP_SECRET),
+  }),
+}));
+assert.equal(replay.status, 401, "an accepted admin TOTP step must not be replayed");
+
 rmSync(testDirectory, { recursive: true, force: true });
-console.log(JSON.stringify({ ok: true, checks: 8 }));
+console.log(JSON.stringify({ ok: true, checks: 9 }));

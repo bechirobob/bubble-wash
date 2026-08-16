@@ -84,7 +84,7 @@ export async function initializePaystackCheckout(input: CheckoutInput) {
       amount,
       currency: "GHS",
       reference,
-      callback_url: `${baseUrl}/?payment_reference=${encodeURIComponent(reference)}#booking`,
+      callback_url: `${baseUrl}/book?payment_reference=${encodeURIComponent(reference)}`,
       channels: ["card", "mobile_money"],
       metadata: {
         order_id: input.orderId,

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { appendSubmissionRecord, claimWorkflowAction, releaseWorkflowActionClaim } from "@/lib/data-store";
+import { appendSubmissionRecord, appendSubmissionRecordWithDeliveryProof, claimWorkflowAction, deliveryCodeRecord, releaseWorkflowActionClaim } from "@/lib/data-store";
 import { assignOrderFromAvailability } from "@/lib/assignment";
 import { appendSubmissionRecordAndReleaseOrderCapacity, recordVendorDecline, releaseAssignmentCapacity } from "@/lib/availability-store";
 import { getCurrentStaffUser } from "@/lib/auth";
@@ -8,6 +8,7 @@ import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/noti
 import { automationActionsForOrder, isValidDriverEtaAt } from "@/lib/order-workflow";
 import { buildOrderSummaries, orderBoardRecords, orderMatchesStaffEntity, readSubmissionsForOrder } from "@/lib/submissions";
 import { staffWriteGuard } from "@/lib/security";
+import { deliveryCodeHash } from "@/lib/chain-of-custody";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -72,6 +73,7 @@ export async function POST(request: NextRequest) {
     const handoffBagCount = text(body.handoffBagCount).slice(0, 40);
     const recipientName = text(body.recipientName).slice(0, 160);
     const bagCount = text(body.bagCount).slice(0, 40);
+    const deliveryCode = text(body.deliveryCode).slice(0, 6);
     const revisedEta = text(body.revisedEta).slice(0, 80);
     const driverEtaAt = text(body.driverEtaAt);
     const rawRouteCheckpoint = text(body.routeCheckpoint);
@@ -104,8 +106,12 @@ export async function POST(request: NextRequest) {
     if (actionKey === "driver-drop-at-vendor" && (!vendorRecipient || !validEvidenceCount(handoffBagCount) || !operatorNote)) {
       return NextResponse.json({ ok: false, error: "Record the vendor recipient, handed-over bag/item count, and handoff note." }, { status: 400 });
     }
-    if (actionKey === "driver-mark-delivered" && (!recipientName || !validEvidenceCount(bagCount) || !operatorNote)) {
-      return NextResponse.json({ ok: false, error: "Record the recipient, returned bag count, and handoff note before delivery." }, { status: 400 });
+    if (actionKey === "driver-mark-delivered" && (!recipientName || !validEvidenceCount(bagCount) || !operatorNote || !/^\d{6}$/.test(deliveryCode))) {
+      return NextResponse.json({ ok: false, error: "Record the recipient, returned bag count, six-digit customer handoff code, and handoff note before delivery." }, { status: 400 });
+    }
+    if (actionKey === "driver-mark-delivered") {
+      const proof = deliveryCodeRecord(order.orderId);
+      if (!proof || proof.usedAt) return NextResponse.json({ ok: false, error: "A valid unused delivery confirmation code is not available for this order." }, { status: 409 });
     }
     if (actionKey === "driver-report-delay" && (!revisedEta || !routeCheckpoint || !operatorNote)) {
       return NextResponse.json({ ok: false, error: "Record the revised ETA, current checkpoint, and delay reason." }, { status: 400 });
@@ -223,7 +229,9 @@ export async function POST(request: NextRequest) {
       data: payload,
     };
 
-    if (actionKey === "admin-close-order") {
+    if (actionKey === "driver-mark-delivered") {
+      appendSubmissionRecordWithDeliveryProof(record, { orderId: order.orderId, codeHash: deliveryCodeHash(order.orderId, deliveryCode), usedBy: user.email, recipientName });
+    } else if (actionKey === "admin-close-order") {
       appendSubmissionRecordAndReleaseOrderCapacity(record, order.orderId, order.vendorId || undefined, order.driverId || undefined);
     } else {
       appendSubmissionRecord(record);
@@ -258,6 +266,9 @@ export async function POST(request: NextRequest) {
       claimKey,
     });
     if (errorMessage.startsWith("No eligible ")) {
+      return NextResponse.json({ ok: false, error: errorMessage }, { status: 409 });
+    }
+    if (errorMessage.startsWith("Delivery confirmation code")) {
       return NextResponse.json({ ok: false, error: errorMessage }, { status: 409 });
     }
     return NextResponse.json({ ok: false, error: "Unable to complete workflow action." }, { status: 500 });

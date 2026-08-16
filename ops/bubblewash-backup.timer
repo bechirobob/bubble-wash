@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly Bubble Wash encrypted backup
+
+[Timer]
+OnCalendar=*-*-* 02:15:00
+Persistent=true
+RandomizedDelaySec=900
+
+[Install]
+WantedBy=timers.target

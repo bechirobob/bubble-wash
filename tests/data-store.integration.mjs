@@ -70,4 +70,24 @@ assert.equal(store.readSubmissionRecordsForOrder(checkout.id.toLowerCase()).leng
 assert.deepEqual(store.readSubmissionRecordsForOrder(""), []);
 assert.equal(store.databaseReadiness(), true);
 
-console.log(JSON.stringify({ ok: true, checks: 19 }));
+const signup = store.upsertEarlyAccessSignup({ id: "EA-TEST12345678", firstName: "Ama", phone: "233550000000", email: "ama@example.com", area: "Osu", frequency: "Weekly", consentAt: new Date().toISOString(), consentVersion: "2026-08-16" });
+assert.equal(signup.updated, false);
+assert.equal(store.upsertEarlyAccessSignup({ ...signup.signup, firstName: "Ama B", consentAt: new Date().toISOString() }).updated, true);
+assert.equal(store.optOutEarlyAccess("ama@example.com"), 1);
+
+const privacyRequest = store.createPrivacyRequest({ id: "PR-TEST12345678", requestType: "access", name: "Ama", contact: "ama@example.com", orderId: checkout.id });
+assert.equal(privacyRequest.status, "received");
+assert.equal(store.updatePrivacyRequestStatus(privacyRequest.id, "identity_review")?.status, "identity_review");
+
+const queued = store.enqueueNotification({ id: "NQ-TEST12345678", dedupeKey: "test:email", channel: "email", target: "customer", payload: { subject: "Test" } });
+assert.equal(queued.status, "pending");
+assert.equal(store.notificationOutboxMetrics().pending, 1);
+assert.equal(store.claimMfaTimestep("admin@example.com", 100), true);
+assert.equal(store.claimMfaTimestep("admin@example.com", 100), false);
+
+assert.equal(store.storeDeliveryCode(checkout.id, "proof-hash"), true);
+const delivered = { id: "BW-DELIVERED-TEST", createdAt: new Date().toISOString(), source: "test", data: { submissionType: "driver-route-log", orderId: checkout.id, orderStatus: "Delivered" } };
+store.appendSubmissionRecordWithDeliveryProof(delivered, { orderId: checkout.id, codeHash: "proof-hash", usedBy: "driver@example.com", recipientName: "Ama" });
+assert.equal(store.deliveryCodeRecord(checkout.id)?.usedBy, "driver@example.com");
+
+console.log(JSON.stringify({ ok: true, checks: 33 }));
