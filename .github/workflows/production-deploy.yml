@@ -1,0 +1,54 @@
+name: Production Deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Inspect production host
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Connect to the production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+
+      - name: Inspect the production runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ssh root@hermes bash -s <<'REMOTE'
+          set -euo pipefail
+
+          echo "Host: $(hostname)"
+          echo "Kernel: $(uname -sr)"
+          echo "Uptime: $(uptime -p)"
+
+          echo "Running web-related services:"
+          systemctl list-units --type=service --state=running --no-pager \
+            | grep -Ei 'bubble|caddy|docker|nginx|node|pm2' || true
+
+          if command -v docker >/dev/null 2>&1; then
+            echo "Running containers:"
+            docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+
+            echo "Compose metadata:"
+            docker ps -q | xargs -r docker inspect \
+              --format '{{.Name}} project={{index .Config.Labels "com.docker.compose.project"}} workdir={{index .Config.Labels "com.docker.compose.project.working_dir"}} config={{index .Config.Labels "com.docker.compose.project.config_files"}}'
+          fi
+
+          echo "Likely Bubble Wash directories:"
+          find /opt /root /srv /var/www -maxdepth 4 -type d \
+            \( -iname '*bubble*wash*' -o -iname 'bubble-wash' \) 2>/dev/null | sort -u || true
+          REMOTE
