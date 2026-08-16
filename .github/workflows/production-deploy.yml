@@ -1,6 +1,11 @@
 name: Production Deploy
 
 on:
+  workflow_run:
+    workflows:
+      - Pilot CI
+    types:
+      - completed
   workflow_dispatch:
 
 permissions:
@@ -11,11 +16,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  inspect:
-    name: Inspect production host
+  deploy:
+    name: Deploy production release
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.head_repository.full_name == github.repository
+        )
+      }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
+      - name: Check out the verified revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+
       - name: Connect to the production tailnet
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
         with:
@@ -24,89 +45,50 @@ jobs:
           tags: tag:ci
           ping: hermes
 
-      - name: Inspect the production runtime
+      - name: Package and deploy the release
+        shell: bash
+        env:
+          TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "The deployment revision is not a full commit SHA." >&2
+            exit 1
+          fi
+
+          release_id="$(date -u +%Y%m%dT%H%M%SZ)-${TARGET_SHA:0:12}"
+          release_dir="/home/ubuntu/bubblewash-releases/$release_id"
+          archive="$RUNNER_TEMP/bubblewash-release.tgz"
+
+          tar \
+            --exclude-vcs \
+            --exclude='.next' \
+            --exclude='node_modules' \
+            --exclude='data' \
+            --exclude='response.tmp' \
+            -czf "$archive" .
+
+          tailscale ssh root@hermes \
+            "install -d -o ubuntu -g ubuntu -m 0750 '$release_dir'"
+          tailscale ssh root@hermes \
+            "tar -xzf - -C '$release_dir' && chown -R ubuntu:ubuntu '$release_dir'" \
+            < "$archive"
+          tailscale ssh root@hermes \
+            "bash '$release_dir/ops/deploy-production.sh' '$release_dir' '$TARGET_SHA'"
+
+      - name: Verify the public release
         shell: bash
         run: |
           set -euo pipefail
-          tailscale ssh root@hermes bash -s <<'REMOTE'
-          set -euo pipefail
-
-          echo "Host: $(hostname)"
-          echo "Kernel: $(uname -sr)"
-          echo "Uptime: $(uptime -p)"
-
-          echo "Running web-related services:"
-          systemctl list-units --type=service --state=running --no-pager \
-            | grep -Ei 'bubble|caddy|docker|nginx|node|pm2' || true
-
-          echo "Listening web ports:"
-          ss -lntp | grep -E ':(80|443|3000|3001|8080|8100)([[:space:]]|$)' || true
-
-          echo "Web-related processes:"
-          ps -eo user,pid,comm,args \
-            | grep -Ei 'bubble|caddy|next-server|node|pm2' \
-            | grep -v grep || true
-
-          if command -v docker >/dev/null 2>&1; then
-            echo "Running containers:"
-            docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
-
-            echo "Compose metadata:"
-            docker ps -q | xargs -r docker inspect \
-              --format '{{.Name}} project={{index .Config.Labels "com.docker.compose.project"}} workdir={{index .Config.Labels "com.docker.compose.project.working_dir"}} config={{index .Config.Labels "com.docker.compose.project.config_files"}}'
-          fi
-
-          echo "Likely Bubble Wash directories:"
-          find /home /opt /root /srv /var/www -maxdepth 5 -type d \
-            \( -iname '*bubble*wash*' -o -iname 'bubble-wash' \) 2>/dev/null | sort -u || true
-
-          echo "Bubble Wash Caddy routes:"
-          grep -n -i -B 2 -A 12 'bubblewash' /etc/caddy/Caddyfile 2>/dev/null || true
-
-          echo "Bubble Wash service definitions:"
-          grep -RIl -m 1 'bubblewash\|bubble-wash' \
-            /etc/systemd/system /home/*/.config/systemd/user 2>/dev/null | sort -u || true
-
-          service_file=/home/ubuntu/.config/systemd/user/bubblewash-local.service
-          echo "Bubble Wash service metadata:"
-          if [[ -f "$service_file" ]]; then
-            grep -E '^(Description|WorkingDirectory|ExecStart|EnvironmentFile|Restart|WantedBy)=' \
-              "$service_file" || true
-          fi
-
-          repo_dir=/home/ubuntu/projects/bubble-wash
-          echo "Bubble Wash repository:"
-          if git -C "$repo_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-            git -C "$repo_dir" rev-parse HEAD
-            git -C "$repo_dir" status --short --branch
-            git -C "$repo_dir" remote get-url origin
-            git -C "$repo_dir" rev-parse --show-toplevel
-          fi
-
-          echo "Bubble Wash path metadata:"
-          for path in \
-            "$repo_dir" \
-            /home/ubuntu/bubblewash-runtime \
-            /home/ubuntu/bubblewash-backups \
-            /home/ubuntu/bubblewash-releases \
-            /home/ubuntu/bubblewash-rollbacks \
-            /home/ubuntu/.config/bubblewash; do
-            if [[ -e "$path" ]]; then
-              stat -c '%n|%F|%U:%G|%a' "$path"
-            fi
+          for path in / /services /book /track /manage /early-access /api/health /api/ready; do
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --location \
+              --retry 5 \
+              --retry-all-errors \
+              --max-time 15 \
+              --output /dev/null \
+              "https://bubblewash.co$path"
           done
-
-          echo "Runtime layout (names and sizes only):"
-          find /home/ubuntu/bubblewash-runtime -maxdepth 2 -mindepth 1 \
-            \( -type d -o -type f -o -type l \) \
-            -printf '%y %p %s bytes\n' 2>/dev/null | sort || true
-
-          echo "Database candidates (names and sizes only):"
-          find \
-            /home/ubuntu/.config/bubblewash \
-            /home/ubuntu/bubblewash-runtime \
-            "$repo_dir" \
-            -maxdepth 4 -type f \
-            \( -name '*.sqlite' -o -name '*.sqlite3' -o -name '*.db' \) \
-            -printf '%p %s bytes\n' 2>/dev/null | sort || true
-          REMOTE
