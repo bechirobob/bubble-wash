@@ -8,30 +8,30 @@ import { validTotpSecret, verifyTotp } from "@/lib/totp";
 export async function POST(request: NextRequest) {
   const staffGuardError = staffWriteGuard(request.headers);
   if (staffGuardError) return staffGuardError;
-  if (isRateLimited(clientKey(request.headers, "login"), 10, 60_000)) {
+  if (await isRateLimited(clientKey(request.headers, "login"), 10, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many login attempts. Try again shortly." }, { status: 429 });
   }
   try {
-    const body = await request.json();
+    const body = await request.json<Record<string, unknown>>();
     const email = typeof body.email === "string" ? body.email : "";
     const password = typeof body.password === "string" ? body.password : "";
     const totp = typeof body.totp === "string" ? body.totp.trim() : "";
     const nextPath = sanitizeNextPath(typeof body.next === "string" ? body.next : undefined);
-    const user = findStaffUser(email, password);
+    const user = await findStaffUser(email, password);
 
     if (!user) {
       return NextResponse.json({ ok: false, error: "Invalid Bubble Wash staff credentials." }, { status: 401 });
     }
 
     if (user.role === "admin") {
-      const secret = process.env.BUBBLEWASH_ADMIN_TOTP_SECRET ?? "";
+      const secret = user.totpSecret ?? "";
       if (!validTotpSecret(secret)) {
         if (process.env.NODE_ENV === "production") {
           return NextResponse.json({ ok: false, error: "Admin sign-in is temporarily unavailable." }, { status: 503 });
         }
       } else {
         const timestep = verifyTotp(totp, secret);
-        if (timestep === null || !claimMfaTimestep(user.email.toLowerCase(), timestep)) {
+        if (timestep === null || !await claimMfaTimestep(user.email.toLowerCase(), timestep)) {
           return NextResponse.json({ ok: false, error: "Invalid Bubble Wash staff credentials." }, { status: 401 });
         }
       }

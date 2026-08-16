@@ -1,0 +1,127 @@
+name: Cloudflare Data Migration
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - migration/cloudflare-phase.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: bubblewash-cloudflare-data-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the migration revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Resolve migration phase
+        id: phase
+        shell: bash
+        run: |
+          set -euo pipefail
+          phase="$(node -e 'const value=require("./migration/cloudflare-phase.json").phase; if(!["idle","staging","cutover","production"].includes(value)) process.exit(1); process.stdout.write(value)')"
+          printf 'phase=%s\n' "$phase" >> "$GITHUB_OUTPUT"
+          if [[ "$phase" == "staging" || "$phase" == "cutover" ]]; then
+            printf 'run=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'run=false\n' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js
+        if: steps.phase.outputs.run == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Connect to the production tailnet
+        if: steps.phase.outputs.run == 'true'
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+
+      - name: Freeze VPS writes for the final snapshot
+        if: steps.phase.outputs.phase == 'cutover'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tailscale ssh root@hermes 'app_uid="$(id -u ubuntu)"; runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user stop bubblewash-local.service; runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user is-active --quiet bubblewash-local.service && exit 1 || exit 0'
+
+      - name: Export a consistent production snapshot
+        if: steps.phase.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tool_root="/home/ubuntu/bubblewash-runtime/cloudflare-migration-tools-${GITHUB_RUN_ID}"
+          export_root="/home/ubuntu/bubblewash-runtime/cloudflare-migration-export-${GITHUB_RUN_ID}"
+          local_archive="$RUNNER_TEMP/migration-tools.tgz"
+          local_export="$RUNNER_TEMP/migration-export"
+          printf 'MIGRATION_EXPORT_DIR=%s\n' "$local_export" >> "$GITHUB_ENV"
+          printf 'MIGRATION_TOOL_ROOT=%s\n' "$tool_root" >> "$GITHUB_ENV"
+          printf 'MIGRATION_REMOTE_EXPORT_ROOT=%s\n' "$export_root" >> "$GITHUB_ENV"
+          mkdir -m 0700 "$local_export"
+          tar -czf "$local_archive" scripts/export-cloudflare-migration.mjs src/lib/migration-schema.js
+          tailscale ssh root@hermes "install -d -o ubuntu -g ubuntu -m 0700 '$tool_root'" 
+          tailscale ssh root@hermes "tar -xzf - -C '$tool_root' && chown -R ubuntu:ubuntu '$tool_root'" < "$local_archive"
+          tailscale ssh root@hermes "systemd-run --quiet --wait --collect --pipe --unit='bubblewash-cloudflare-export-${GITHUB_RUN_ID}' --property='User=ubuntu' --property='Group=ubuntu' --property='WorkingDirectory=$tool_root' --property='EnvironmentFile=/home/ubuntu/.config/bubblewash/env' --property='Environment=BUBBLEWASH_SOURCE_SHA=$GITHUB_SHA' --property='Environment=BUBBLEWASH_NODE_ROOT=/home/ubuntu/bubblewash-pilot' /usr/bin/node '$tool_root/scripts/export-cloudflare-migration.mjs' '$export_root'"
+          tailscale ssh root@hermes "tar -czf - -C '$export_root' ." > "$RUNNER_TEMP/migration-export.tgz"
+          tar -xzf "$RUNNER_TEMP/migration-export.tgz" -C "$local_export"
+          test -s "$local_export/manifest.json"
+
+      - name: Obtain a short-lived GitHub migration identity
+        if: steps.phase.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=bubblewash-migration")"
+          token="$(node -e 'const value=JSON.parse(process.argv[1]).value; if(typeof value!=="string" || !value) process.exit(1); process.stdout.write(value)' "$response")"
+          echo "::add-mask::$token"
+          printf 'BUBBLEWASH_MIGRATION_ID_TOKEN=%s\n' "$token" >> "$GITHUB_ENV"
+
+      - name: Import and verify D1 parity
+        if: steps.phase.outputs.run == 'true'
+        env:
+          BUBBLEWASH_MIGRATION_ENDPOINT: https://bubble-wash.becoreops.workers.dev/api/internal/migration
+          BUBBLEWASH_MIGRATION_RESULT_PATH: ${{ runner.temp }}/migration-result.json
+        run: node scripts/import-cloudflare-migration.mjs "$MIGRATION_EXPORT_DIR"
+
+      - name: Preserve the non-sensitive parity record
+        if: steps.phase.outputs.run == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bubblewash-d1-parity-${{ github.sha }}-${{ steps.phase.outputs.phase }}
+          path: ${{ runner.temp }}/migration-result.json
+          if-no-files-found: error
+          retention-days: 35
+
+      - name: Restart VPS after a failed final migration
+        if: failure() && steps.phase.outputs.phase == 'cutover'
+        shell: bash
+        run: |
+          tailscale ssh root@hermes 'app_uid="$(id -u ubuntu)"; runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user start bubblewash-local.service'
+
+      - name: Remove transient plaintext migration files
+        if: always() && steps.phase.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${MIGRATION_TOOL_ROOT:-}" =~ ^/home/ubuntu/bubblewash-runtime/cloudflare-migration-tools-[0-9]+$ && "${MIGRATION_REMOTE_EXPORT_ROOT:-}" =~ ^/home/ubuntu/bubblewash-runtime/cloudflare-migration-export-[0-9]+$ ]]; then
+            tailscale ssh root@hermes "find '$MIGRATION_TOOL_ROOT' '$MIGRATION_REMOTE_EXPORT_ROOT' -depth -delete"
+          fi
+          if [[ -n "${MIGRATION_EXPORT_DIR:-}" && "$MIGRATION_EXPORT_DIR" == "$RUNNER_TEMP/migration-export" ]]; then
+            find "$MIGRATION_EXPORT_DIR" -depth -delete
+          fi

@@ -10,10 +10,9 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: "Staff roster binding is required." }, { status: 403 });
   }
 
-  const allVendors = listVendorAvailability();
-  const allDrivers = listDriverAvailability();
+  const [allVendors, allDrivers] = await Promise.all([listVendorAvailability(), listDriverAvailability()]);
   if (user.role === "admin") {
-    return NextResponse.json({ ok: true, vendors: allVendors, drivers: allDrivers, declines: listVendorDeclines().slice(0, 50) });
+    return NextResponse.json({ ok: true, vendors: allVendors, drivers: allDrivers, declines: (await listVendorDeclines()).slice(0, 50) });
   }
 
   if (user.role === "support") {

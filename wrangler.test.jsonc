@@ -1,0 +1,35 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "bubble-wash-test",
+  "main": "./tests/worker-entry.ts",
+  "compatibility_date": "2026-08-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ENVIRONMENT": "test",
+    "BUBBLEWASH_DATABASE_DRIVER": "d1",
+    "BUBBLEWASH_PUBLIC_URL": "https://bubblewash.co",
+    "BUBBLEWASH_DISABLE_DEMO_LOGIN": "true",
+    "BUBBLEWASH_TRUST_EDGE_HEADERS": "true",
+    "BUBBLEWASH_MIGRATION_ENABLED": "true",
+    "BUBBLEWASH_RELEASE_SHA": "test",
+    "BUBBLEWASH_DEPLOYMENT_PHASE": "test",
+    "BUBBLEWASH_SESSION_SECRET": "worker-test-session-secret-with-more-than-32-characters",
+    "NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED": "false",
+    "NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED": "false"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bubble-wash-test",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "ratelimits": [
+    { "name": "LOGIN_RATE_LIMITER", "namespace_id": "93201", "simple": { "limit": 1000, "period": 60 } },
+    { "name": "PUBLIC_WRITE_RATE_LIMITER", "namespace_id": "93202", "simple": { "limit": 1000, "period": 60 } },
+    { "name": "PAYMENT_RATE_LIMITER", "namespace_id": "93203", "simple": { "limit": 1000, "period": 60 } },
+    { "name": "PUBLIC_READ_RATE_LIMITER", "namespace_id": "93204", "simple": { "limit": 1000, "period": 60 } },
+    { "name": "DISPATCH_RATE_LIMITER", "namespace_id": "93205", "simple": { "limit": 1000, "period": 60 } }
+  ]
+}

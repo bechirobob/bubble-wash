@@ -27,10 +27,10 @@ export async function POST(request: NextRequest) {
   if (staffGuardError) return staffGuardError;
 
   let claimKey = "";
-  let assignment: ReturnType<typeof assignOrderFromAvailability> | null = null;
+  let assignment: Awaited<ReturnType<typeof assignOrderFromAvailability>> | null = null;
   let recordSaved = false;
   try {
-    const body = await request.json();
+    const body = await request.json<Record<string, unknown>>();
     const orderId = text(body.orderId);
     const actionKey = text(body.actionKey);
     if (!orderId || !actionKey) {
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Record the recipient, returned bag count, six-digit customer handoff code, and handoff note before delivery." }, { status: 400 });
     }
     if (actionKey === "driver-mark-delivered") {
-      const proof = deliveryCodeRecord(order.orderId);
+      const proof = await deliveryCodeRecord(order.orderId);
       if (!proof || proof.usedAt) return NextResponse.json({ ok: false, error: "A valid unused delivery confirmation code is not available for this order." }, { status: 409 });
     }
     if (actionKey === "driver-report-delay" && (!revisedEta || !routeCheckpoint || !operatorNote)) {
@@ -124,11 +124,11 @@ export async function POST(request: NextRequest) {
       && ["admin-operation", "vendor-job-update", "qr-bag-intake", "driver-route-log"].includes(selected.submissionType);
     const version = changesFulfillment ? order.updatedAt : order.activityUpdatedAt;
     claimKey = changesFulfillment ? `${order.orderId}:fulfillment:${version}` : `${order.orderId}:${actionKey}:${version}`;
-    if (!claimWorkflowAction({ claimKey, orderId: order.orderId, actionKey, orderUpdatedAt: version })) {
+    if (!await claimWorkflowAction({ claimKey, orderId: order.orderId, actionKey, orderUpdatedAt: version })) {
       return NextResponse.json({ ok: false, error: "That action was already processed. Refresh the order board." }, { status: 409 });
     }
 
-    assignment = actionKey === "admin-assign-vendor" ? assignOrderFromAvailability({
+    assignment = actionKey === "admin-assign-vendor" ? await assignOrderFromAvailability({
       orderId: order.orderId,
       area: order.area,
       serviceType: order.serviceType,
@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
       driver: order.driver,
     }) : null;
     if (actionKey === "vendor-decline-job") {
-      recordVendorDecline({
+      await recordVendorDecline({
         orderId: order.orderId,
         vendorId: order.vendorId || undefined,
         vendorName: order.vendor,
@@ -230,11 +230,11 @@ export async function POST(request: NextRequest) {
     };
 
     if (actionKey === "driver-mark-delivered") {
-      appendSubmissionRecordWithDeliveryProof(record, { orderId: order.orderId, codeHash: deliveryCodeHash(order.orderId, deliveryCode), usedBy: user.email, recipientName });
+      await appendSubmissionRecordWithDeliveryProof(record, { orderId: order.orderId, codeHash: deliveryCodeHash(order.orderId, deliveryCode), usedBy: user.email, recipientName });
     } else if (actionKey === "admin-close-order") {
-      appendSubmissionRecordAndReleaseOrderCapacity(record, order.orderId, order.vendorId || undefined, order.driverId || undefined);
+      await appendSubmissionRecordAndReleaseOrderCapacity(record, order.orderId, order.vendorId || undefined, order.driverId || undefined);
     } else {
-      appendSubmissionRecord(record);
+      await appendSubmissionRecord(record);
     }
     recordSaved = true;
     const notifications = await dispatchSubmissionNotifications(record);
@@ -242,7 +242,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (!recordSaved && assignment) {
       try {
-        releaseAssignmentCapacity(assignment.reservationId, "workflow-rollback");
+        await releaseAssignmentCapacity(assignment.reservationId, "workflow-rollback");
       } catch (cleanupError) {
         console.error("Bubble Wash capacity rollback failed", {
           message: cleanupError instanceof Error ? cleanupError.message : "Unknown error",
@@ -252,7 +252,7 @@ export async function POST(request: NextRequest) {
     }
     if (!recordSaved && claimKey) {
       try {
-        releaseWorkflowActionClaim(claimKey);
+        await releaseWorkflowActionClaim(claimKey);
       } catch (cleanupError) {
         console.error("Bubble Wash workflow claim rollback failed", {
           message: cleanupError instanceof Error ? cleanupError.message : "Unknown error",

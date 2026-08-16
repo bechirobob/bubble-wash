@@ -30,7 +30,7 @@ export function BookingExperience() {
     const reference = new URLSearchParams(window.location.search).get("payment_reference");
     if (!reference) return;
     fetch(`/api/payments/verify?reference=${encodeURIComponent(reference)}`, { cache: "no-store" })
-      .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+      .then((response) => response.json<{ ok: boolean; error?: string; payment: { paid: boolean; amountGhs: number; status: string } }>().then((data) => ({ ok: response.ok, data })))
       .then(({ ok, data }) => {
         if (!ok || !data.ok) throw new Error(data.error ?? "Unable to verify payment.");
         setPaymentStatus(data.payment.paid ? `Payment verified: ${formatMoney(data.payment.amountGhs)}.` : `Payment status: ${data.payment.status}.`);

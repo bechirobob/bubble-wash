@@ -1,8 +1,11 @@
 import "server-only";
 
+import { env } from "cloudflare:workers";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers.js";
-import { createPasswordHash, matchesKnownDemoPassword, verifyPasswordHash } from "./passwords.ts";
+import { getDatabase } from "./data-store.ts";
+import { matchesKnownDemoPassword, verifyPasswordHash } from "./passwords.ts";
+import { validTotpSecret } from "./totp.ts";
 
 export { createPasswordHash } from "./passwords.ts";
 
@@ -14,6 +17,7 @@ export type StaffUser = {
   passwordHash: string;
   role: StaffRole;
   entityId?: string;
+  totpSecret?: string;
 };
 
 export type StaffSession = Pick<StaffUser, "email" | "role" | "name" | "entityId"> & {
@@ -22,47 +26,21 @@ export type StaffSession = Pick<StaffUser, "email" | "role" | "name" | "entityId
   nonce: string;
 };
 
+type StaffCredentialRow = {
+  email: string;
+  role: StaffRole;
+  name: string;
+  password_hash: string;
+  entity_id: string | null;
+  totp_secret: string | null;
+};
+
 export const sessionCookieName = "bubblewash_staff_session";
 const sessionMaxAgeSeconds = 60 * 60 * 8;
-const demoPassword = "Admin123!";
-
-function demoCredentialFallbackEnabled() {
-  if (process.env.NODE_ENV === "production") return false;
-  return process.env.BUBBLEWASH_DISABLE_DEMO_LOGIN !== "true";
-}
-
-function staffCredential(role: StaffRole, demoEmail: string, displayName: string): StaffUser | null {
-  const prefix = `BUBBLEWASH_${role.toUpperCase()}`;
-  const configuredHash = process.env[`${prefix}_PASSWORD_HASH`];
-  const allowDemoFallback = demoCredentialFallbackEnabled();
-  const email = process.env[`${prefix}_EMAIL`] ?? (allowDemoFallback ? demoEmail : "");
-  const entityId = role === "vendor"
-    ? process.env.BUBBLEWASH_VENDOR_ENTITY_ID?.trim()
-    : role === "driver"
-      ? process.env.BUBBLEWASH_DRIVER_ENTITY_ID?.trim()
-      : undefined;
-  const devPassword = process.env[`${prefix}_PASSWORD`] ?? (role === "admin" ? demoPassword : `${role[0].toUpperCase()}${role.slice(1)}123!`);
-
-  if (!email) return null;
-  if (configuredHash) {
-    if (process.env.NODE_ENV === "production" && matchesKnownDemoPassword(configuredHash)) return null;
-    return { name: displayName, email, passwordHash: configuredHash, role, entityId };
-  }
-  if (process.env.NODE_ENV === "production") return null;
-  return { name: displayName, email, passwordHash: createPasswordHash(devPassword), role, entityId };
-}
-
-export const staffUsers: StaffUser[] = [
-  staffCredential("admin", "admin@bubblewash.local", "Admin Operator"),
-  staffCredential("vendor", "vendor@bubblewash.local", "Vendor Partner"),
-  staffCredential("driver", "driver@bubblewash.local", "Route Driver"),
-  staffCredential("support", "support@bubblewash.local", "Support Agent"),
-].filter((user): user is StaffUser => Boolean(user));
-
 const allowedNextPaths = new Set(["/admin", "/vendors", "/drivers", "/support"]);
 
 function sessionSecret() {
-  const secret = process.env.BUBBLEWASH_SESSION_SECRET;
+  const secret = env.BUBBLEWASH_SESSION_SECRET || process.env.BUBBLEWASH_SESSION_SECRET;
   if (secret) return secret;
   if (process.env.NODE_ENV === "production") throw new Error("BUBBLEWASH_SESSION_SECRET is required in production.");
   return "bubblewash-local-dev-session-secret-change-before-production";
@@ -78,13 +56,50 @@ function safeEqual(left: string, right: string) {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
+function userFromRow(row: StaffCredentialRow): StaffUser {
+  return {
+    name: row.name,
+    email: row.email,
+    passwordHash: row.password_hash,
+    role: row.role,
+    entityId: row.entity_id ?? undefined,
+    totpSecret: row.totp_secret ?? undefined,
+  };
+}
+
 export function sanitizeNextPath(value?: string) {
   if (!value || value.startsWith("//")) return "/admin";
   return allowedNextPaths.has(value) ? value : "/admin";
 }
 
-export function findStaffUser(email: string, password: string) {
-  return staffUsers.find((user) => user.email.toLowerCase() === email.trim().toLowerCase() && verifyPasswordHash(password, user.passwordHash)) ?? null;
+export async function readStaffUsers(): Promise<StaffUser[]> {
+  const result = await getDatabase().prepare(`
+    SELECT email, role, name, password_hash, entity_id, totp_secret
+    FROM staff_credentials WHERE active = 1 ORDER BY role, email
+  `).all<StaffCredentialRow>();
+  return result.results.map(userFromRow);
+}
+
+export async function staffCredentialReadiness() {
+  const users = await readStaffUsers();
+  const errors: string[] = [];
+  for (const role of ["admin", "vendor", "driver", "support"] satisfies StaffRole[]) {
+    const user = users.find((candidate) => candidate.role === role);
+    if (!user) errors.push(`Configure one active ${role} credential in D1.`);
+    if (user && matchesKnownDemoPassword(user.passwordHash)) errors.push(`Rotate the ${role} password; known demo credentials are prohibited.`);
+    if (user && (role === "vendor" || role === "driver") && !user.entityId) errors.push(`Bind the ${role} credential to its approved roster entity.`);
+    if (user && role === "admin" && !validTotpSecret(user.totpSecret)) errors.push("Configure the admin MFA secret in D1.");
+  }
+  return errors;
+}
+
+export async function findStaffUser(email: string, password: string) {
+  const row = await getDatabase().prepare(`
+    SELECT email, role, name, password_hash, entity_id, totp_secret
+    FROM staff_credentials WHERE email = ? COLLATE NOCASE AND active = 1 LIMIT 1
+  `).bind(email.trim()).first<StaffCredentialRow>();
+  if (!row || matchesKnownDemoPassword(row.password_hash) || !verifyPasswordHash(password, row.password_hash)) return null;
+  return userFromRow(row);
 }
 
 export function encodeSession(user: StaffUser) {
@@ -102,16 +117,19 @@ export function encodeSession(user: StaffUser) {
   return `${payload}.${signPayload(payload)}`;
 }
 
-export function decodeSession(value?: string) {
+export async function decodeSession(value?: string) {
   if (!value) return null;
   try {
     const [payload, signature] = value.split(".");
     if (!payload || !signature || !safeEqual(signature, signPayload(payload))) return null;
     const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as StaffSession;
     if (!session.expiresAt || session.expiresAt < Math.floor(Date.now() / 1000)) return null;
-    const user = staffUsers.find((item) => item.email === session.email && item.role === session.role);
-    if (!user || session.entityId !== user.entityId) return null;
-    return { email: session.email, role: session.role, name: user.name, entityId: user.entityId };
+    const row = await getDatabase().prepare(`
+      SELECT email, role, name, password_hash, entity_id, totp_secret
+      FROM staff_credentials WHERE email = ? COLLATE NOCASE AND role = ? AND active = 1 LIMIT 1
+    `).bind(session.email, session.role).first<StaffCredentialRow>();
+    if (!row || session.entityId !== (row.entity_id ?? undefined)) return null;
+    return { email: row.email, role: row.role, name: row.name, entityId: row.entity_id ?? undefined };
   } catch {
     return null;
   }
@@ -119,7 +137,7 @@ export function decodeSession(value?: string) {
 
 export async function getCurrentStaffUser() {
   const store = await cookies();
-  return decodeSession(store.get(sessionCookieName)?.value);
+  return await decodeSession(store.get(sessionCookieName)?.value);
 }
 
 export function canAccess(userRole: StaffRole, pageRole: StaffRole) {

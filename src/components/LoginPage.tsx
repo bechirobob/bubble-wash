@@ -34,7 +34,7 @@ function LoginForm() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, totp, next: nextPath }),
     });
-    const data = await response.json();
+    const data = await response.json<{ ok: boolean; error?: string; next: string }>();
     if (!response.ok || !data.ok) {
       setStatus(data.error ?? "Unable to sign in.");
       return;
@@ -60,7 +60,7 @@ function LoginForm() {
     <main className="loginPage redesignLoginPage">
       <header className="redesignTopbar">
         <Link className="brand" href="/" aria-label="Bubble Wash home">
-          <span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={42} height={42} priority /></span>
+          <span className="brandCrop"><Image className="brandMark" src="/apple-icon.png" alt="" width={42} height={42} priority /></span>
           <span>Bubble Wash Staff</span>
         </Link>
         <nav className="redesignTextNav" aria-label="Staff login links"><Link href="/"><ArrowLeft aria-hidden="true" />Back to site</Link><Link href="/staff"><Grid2X2 aria-hidden="true" />Roles</Link></nav>

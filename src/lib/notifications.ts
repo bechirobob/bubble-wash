@@ -183,20 +183,20 @@ async function deliverOutboxRecord(record: NotificationOutboxRecord): Promise<No
   const message = messageFromOutbox(record);
   const result = record.channel === "email" ? await sendEmail(message) : await sendWhatsApp(message);
   if (result.sent) {
-    updateNotificationDelivery({ id: record.id, status: "sent", providerId: result.providerId });
+    await updateNotificationDelivery({ id: record.id, status: "sent", providerId: result.providerId });
     return result;
   }
   if (result.skipped) {
-    updateNotificationDelivery({ id: record.id, status: "skipped", error: result.skipped });
+    await updateNotificationDelivery({ id: record.id, status: "skipped", error: result.skipped });
     return result;
   }
   const retryAfterMs = Math.min(24 * 60 * 60_000, 60_000 * (2 ** Math.min(record.attempts, 10)));
-  updateNotificationDelivery({ id: record.id, status: "failed", error: result.error ?? "Provider delivery failed.", retryAfterMs });
+  await updateNotificationDelivery({ id: record.id, status: "failed", error: result.error ?? "Provider delivery failed.", retryAfterMs });
   return result;
 }
 
 async function enqueueAndDeliver(dedupeKey: string, channel: NotificationChannel, message: NotificationMessage) {
-  const queued = enqueueNotification({
+  const queued = await enqueueNotification({
     id: `NQ-${randomUUID().replaceAll("-", "").slice(0, 20).toUpperCase()}`,
     dedupeKey,
     channel,
@@ -208,7 +208,7 @@ async function enqueueAndDeliver(dedupeKey: string, channel: NotificationChannel
 }
 
 export async function processNotificationOutbox(limit = 20) {
-  const records = readDueNotifications(Math.max(1, Math.min(limit, 100)));
+  const records = await readDueNotifications(Math.max(1, Math.min(limit, 100)));
   const results: NotificationResult[] = [];
   for (const record of records) results.push(await deliverOutboxRecord(record));
   return results;

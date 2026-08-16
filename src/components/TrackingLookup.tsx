@@ -19,7 +19,7 @@ export function TrackingLookup() {
     setStatus("Checking the order…");
     try {
       const response = await fetch(`/api/track?id=${encodeURIComponent(reference)}`, { cache: "no-store" });
-      const data = await response.json();
+      const data = await response.json<{ ok: boolean; error?: string; tracking: TrackingResult }>();
       if (!response.ok || !data.ok) throw new Error(data.error ?? "Tracking lookup failed.");
       setResult(data.tracking);
       setStatus("Order found.");

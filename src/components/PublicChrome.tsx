@@ -46,7 +46,7 @@ export function PublicHeader() {
   return (
     <header className="siteHeader" id="top">
       <Link className="brand" href="/" aria-label="Bubble Wash home" onClick={() => setMobileOpen(false)}>
-        <span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={58} height={58} priority /></span>
+        <span className="brandCrop"><Image className="brandMark" src="/apple-icon.png" alt="" width={58} height={58} priority /></span>
         <span>Bubble Wash</span>
       </Link>
       <button className="menuButton" type="button" aria-controls="site-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen((current) => !current)}>
@@ -77,7 +77,7 @@ export function PublicFooter() {
   return (
     <footer className="footer pageShell">
       <div>
-        <Link className="brand footerBrand" href="/" aria-label="Bubble Wash home"><span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={58} height={58} /></span><span>Bubble Wash</span></Link>
+        <Link className="brand footerBrand" href="/" aria-label="Bubble Wash home"><span className="brandCrop"><Image className="brandMark" src="/apple-icon.png" alt="" width={58} height={58} /></span><span>Bubble Wash</span></Link>
         <p>Commercial laundry collection and delivery for businesses in Accra.</p>
       </div>
       <div>

@@ -4,7 +4,7 @@ import { publicTrackingView } from "@/lib/security";
 import { findOrderById, readSubmissions } from "@/lib/submissions";
 
 export async function GET(request: NextRequest) {
-  if (isRateLimited(clientKey(request.headers, "track"), 40, 60_000)) {
+  if (await isRateLimited(clientKey(request.headers, "track"), 40, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many tracking requests. Try again shortly." }, { status: 429 });
   }
 

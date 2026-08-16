@@ -39,7 +39,7 @@ export function statusTone(message?: string) {
 
 export async function postJSON<T>(url: string, payload: unknown): Promise<T> {
   const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-  const data = await response.json();
+  const data = await response.json<T & { ok?: boolean; error?: string }>();
   if (!response.ok || !data.ok) throw new Error(data.error ?? "Request failed");
   return data;
 }

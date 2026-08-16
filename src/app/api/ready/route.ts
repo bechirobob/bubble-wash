@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 
+import { staffCredentialReadiness } from "@/lib/auth";
 import { databaseReadiness } from "@/lib/data-store";
 import { productionReadinessErrors, productionReadinessWarnings } from "@/lib/security";
-import { backupReadiness } from "@/lib/backup-status";
 
 export async function GET() {
   const blockers = productionReadinessErrors();
-  blockers.push(...backupReadiness());
   try {
-    if (!databaseReadiness()) blockers.push("The operations database did not pass its integrity/read check.");
+    if (!await databaseReadiness()) blockers.push("The operations database did not pass its read check.");
+    blockers.push(...await staffCredentialReadiness());
   } catch (error) {
     console.error("Bubble Wash readiness database check failed", {
       message: error instanceof Error ? error.message : "Unknown error",
