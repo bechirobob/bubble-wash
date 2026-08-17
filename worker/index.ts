@@ -11,6 +11,7 @@ function secureResponse(response: Response): Response {
   headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=(self), payment=(self), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), fullscreen=(self)");
   headers.set("Cross-Origin-Opener-Policy", "same-origin");
   headers.set("Cross-Origin-Resource-Policy", "same-origin");
+  headers.set("X-BubbleWash-Render", "worker");
   headers.delete("X-Powered-By");
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }

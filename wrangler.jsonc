@@ -5,6 +5,16 @@
   "compatibility_date": "2026-08-16",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "assets": {
+    "run_worker_first": [
+      "/api/*",
+      "/admin*",
+      "/vendors*",
+      "/drivers*",
+      "/support*",
+      "/scan*"
+    ]
+  },
   "routes": [
     {
       "pattern": "bubblewash.co/*",

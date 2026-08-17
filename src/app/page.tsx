@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { ArrowRight, CalendarCheck, PackageCheck, SearchCheck, Shirt, Sparkles, Truck } from "lucide-react";
 import { PublicChrome } from "@/components/PublicChrome";
 
@@ -23,14 +22,14 @@ export default function Home() {
           <p className="sectionLabel">Commercial laundry · Accra</p>
           <h1 id="home-title">Laundry operations your business does not have to chase.</h1>
           <p className="lead">Bubble Wash coordinates collection, professional cleaning, and return delivery on one traceable service record.</p>
-          <div className="heroActions"><Link className="button primary" href="/book">Book a pickup <ArrowRight aria-hidden="true" /></Link><Link className="button secondary" href="/services">Explore services <Sparkles aria-hidden="true" /></Link></div>
+          <div className="heroActions"><a className="button primary" href="/book">Book a pickup <ArrowRight aria-hidden="true" /></a><a className="button secondary" href="/services">Explore services <Sparkles aria-hidden="true" /></a></div>
         </div>
         <aside className="landingPromise" aria-label="Bubble Wash service promise">
           <SearchCheck aria-hidden="true" />
           <p className="sectionLabel">One clear trail</p>
           <h2>From the first request to the final handoff.</h2>
           <p>Customers, riders, laundry partners, and support work from the same order reference.</p>
-          <Link href="/track">Track an existing order <ArrowRight aria-hidden="true" /></Link>
+          <a href="/track">Track an existing order <ArrowRight aria-hidden="true" /></a>
         </aside>
       </section>
 
@@ -44,12 +43,12 @@ export default function Home() {
       <section className="serviceSection pageShell audienceSection" aria-labelledby="choose-service-heading">
         <div className="sectionIntro"><p className="sectionLabel">Choose your service</p><h2 id="choose-service-heading">Built for commercial routines, with household service opening next.</h2></div>
         <div className="audienceGrid">
-          <article><Truck aria-hidden="true" /><h3>Commercial laundry</h3><p>Scheduled collections for offices, hospitality, clinics, restaurants, serviced units, and larger facilities.</p><Link href="/services">View commercial services <ArrowRight aria-hidden="true" /></Link></article>
-          <article><Shirt aria-hidden="true" /><h3>Household laundry</h3><p>Doorstep collection for homes is in early access while Bubble Wash plans the first residential routes.</p><Link href="/early-access">Join household early access <ArrowRight aria-hidden="true" /></Link></article>
+          <article><Truck aria-hidden="true" /><h3>Commercial laundry</h3><p>Scheduled collections for offices, hospitality, clinics, restaurants, serviced units, and larger facilities.</p><a href="/services">View commercial services <ArrowRight aria-hidden="true" /></a></article>
+          <article><Shirt aria-hidden="true" /><h3>Household laundry</h3><p>Doorstep collection for homes is in early access while Bubble Wash plans the first residential routes.</p><a href="/early-access">Join household early access <ArrowRight aria-hidden="true" /></a></article>
         </div>
       </section>
 
-      <section className="landingCta pageShell" aria-labelledby="landing-cta-title"><div><p className="sectionLabel">Ready when you are</p><h2 id="landing-cta-title">Set up the first collection.</h2><p>The booking takes the service details once. Operations confirms the route before a rider is sent.</p></div><Link className="button primary" href="/book">Book a pickup <ArrowRight aria-hidden="true" /></Link></section>
+      <section className="landingCta pageShell" aria-labelledby="landing-cta-title"><div><p className="sectionLabel">Ready when you are</p><h2 id="landing-cta-title">Set up the first collection.</h2><p>The booking takes the service details once. Operations confirms the route before a rider is sent.</p></div><a className="button primary" href="/book">Book a pickup <ArrowRight aria-hidden="true" /></a></section>
     </PublicChrome>
   );
 }

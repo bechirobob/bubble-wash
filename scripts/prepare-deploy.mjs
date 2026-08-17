@@ -13,5 +13,10 @@ generatedConfig.triggers = sourceConfig.triggers;
 generatedConfig.ratelimits = sourceConfig.ratelimits;
 generatedConfig.observability = sourceConfig.observability;
 generatedConfig.workers_dev = sourceConfig.workers_dev;
+generatedConfig.assets = {
+  ...generatedConfig.assets,
+  ...sourceConfig.assets,
+  directory: generatedConfig.assets?.directory ?? "../client",
+};
 
 await writeFile(generatedConfigPath, `${JSON.stringify(generatedConfig)}\n`, "utf8");

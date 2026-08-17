@@ -1,7 +1,7 @@
 "use client";
 
-import Image from "next/image";
-import Link from "next/link";
+/* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-img-element -- The static login shell must not depend on Worker-rendered navigation or image optimization. */
+
 import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, Bike, Grid2X2, Headphones, ShieldCheck, WashingMachine, type LucideIcon } from "lucide-react";
@@ -59,11 +59,11 @@ function LoginForm() {
   return (
     <main className="loginPage redesignLoginPage">
       <header className="redesignTopbar">
-        <Link className="brand" href="/" aria-label="Bubble Wash home">
-          <span className="brandCrop"><Image className="brandMark" src="/apple-icon.png" alt="" width={42} height={42} priority /></span>
+        <a className="brand" href="/" aria-label="Bubble Wash home">
+          <span className="brandCrop"><img className="brandMark" src="/apple-icon.png" alt="" width={42} height={42} /></span>
           <span>Bubble Wash Staff</span>
-        </Link>
-        <nav className="redesignTextNav" aria-label="Staff login links"><Link href="/"><ArrowLeft aria-hidden="true" />Back to site</Link><Link href="/staff"><Grid2X2 aria-hidden="true" />Roles</Link></nav>
+        </a>
+        <nav className="redesignTextNav" aria-label="Staff login links"><a href="/"><ArrowLeft aria-hidden="true" />Back to site</a><a href="/staff"><Grid2X2 aria-hidden="true" />Roles</a></nav>
       </header>
       <section className="redesignLoginGrid" aria-labelledby="login-title">
         <aside className="redesignRoleList">

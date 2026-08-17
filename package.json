@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/clean-build.mjs && vinext build",
+    "build": "node scripts/clean-build.mjs && vinext build && npm run deploy:prepare && node scripts/prerender-public.mjs",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .vinext --ignore-pattern .wrangler --ignore-pattern worker-configuration.d.ts",
     "test": "npm run test:unit && npm run test:worker",
@@ -23,7 +23,7 @@
     "deploy:dry-run": "npm run deploy:prepare && wrangler deploy --config dist/server/wrangler.json --dry-run --outdir dist/worker-dry-run",
     "deploy:built": "npm run deploy:prepare && wrangler deploy --config dist/server/wrangler.json",
     "deploy": "npm run build && npm run db:migrate:remote && npm run deploy:built",
-    "verify:routes": "node scripts/verify-required-routes.mjs",
+    "verify:routes": "node scripts/verify-required-routes.mjs && node scripts/verify-static-shells.mjs",
     "verify:migrations": "node scripts/verify-d1-migrations.mjs",
     "hash-password": "node scripts/hash-password.mjs",
     "mfa:setup": "node scripts/generate-totp-secret.mjs",

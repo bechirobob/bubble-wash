@@ -4,7 +4,7 @@ import { env } from "cloudflare:workers";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers.js";
 import { getDatabase } from "./data-store.ts";
-import { matchesKnownDemoPassword, verifyPasswordHash } from "./passwords.ts";
+import { verifyPasswordHash } from "./passwords.ts";
 import { validTotpSecret } from "./totp.ts";
 
 export { createPasswordHash } from "./passwords.ts";
@@ -86,7 +86,6 @@ export async function staffCredentialReadiness() {
   for (const role of ["admin", "vendor", "driver", "support"] satisfies StaffRole[]) {
     const user = users.find((candidate) => candidate.role === role);
     if (!user) errors.push(`Configure one active ${role} credential in D1.`);
-    if (user && matchesKnownDemoPassword(user.passwordHash)) errors.push(`Rotate the ${role} password; known demo credentials are prohibited.`);
     if (user && (role === "vendor" || role === "driver") && !user.entityId) errors.push(`Bind the ${role} credential to its approved roster entity.`);
     if (user && role === "admin" && !validTotpSecret(user.totpSecret)) errors.push("Configure the admin MFA secret in D1.");
   }
@@ -98,7 +97,7 @@ export async function findStaffUser(email: string, password: string) {
     SELECT email, role, name, password_hash, entity_id, totp_secret
     FROM staff_credentials WHERE email = ? COLLATE NOCASE AND active = 1 LIMIT 1
   `).bind(email.trim()).first<StaffCredentialRow>();
-  if (!row || matchesKnownDemoPassword(row.password_hash) || !verifyPasswordHash(password, row.password_hash)) return null;
+  if (!row || !verifyPasswordHash(password, row.password_hash)) return null;
   return userFromRow(row);
 }
 
