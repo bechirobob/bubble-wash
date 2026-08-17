@@ -71,7 +71,16 @@ async function waitUntilReady(child, logs) {
 const logs = [];
 const child = spawn(
   process.execPath,
-  [resolve(projectRoot, "node_modules/vinext/dist/cli.js"), "start", "--hostname", "127.0.0.1", "--port", "18787"],
+  [
+    "--experimental-loader",
+    resolve(projectRoot, "scripts/cloudflare-node-loader.mjs"),
+    resolve(projectRoot, "node_modules/vinext/dist/cli.js"),
+    "start",
+    "--hostname",
+    "127.0.0.1",
+    "--port",
+    "18787",
+  ],
   { cwd: projectRoot, env: { ...process.env, CI: "true", WRANGLER_SEND_METRICS: "false" }, stdio: ["ignore", "pipe", "pipe"] },
 );
 for (const stream of [child.stdout, child.stderr]) {
