@@ -3,11 +3,9 @@ import "server-only";
 import { env } from "cloudflare:workers";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers.js";
-import { getDatabase } from "./data-store.ts";
-import { verifyPasswordHash } from "./passwords.ts";
+import { claimLoginChallenge, getDatabase, issueLoginChallenge } from "./data-store.ts";
+import { parsePasswordHash } from "./passwords.ts";
 import { validTotpSecret } from "./totp.ts";
-
-export { createPasswordHash } from "./passwords.ts";
 
 export type StaffRole = "admin" | "vendor" | "driver" | "support";
 
@@ -37,6 +35,7 @@ type StaffCredentialRow = {
 
 export const sessionCookieName = "bubblewash_staff_session";
 const sessionMaxAgeSeconds = 60 * 60 * 8;
+const loginChallengeMaxAgeMs = 90_000;
 const allowedNextPaths = new Set(["/admin", "/vendors", "/drivers", "/support"]);
 
 function sessionSecret() {
@@ -48,6 +47,10 @@ function sessionSecret() {
 
 function signPayload(payload: string) {
   return createHmac("sha256", sessionSecret()).update(payload).digest("base64url");
+}
+
+function signLoginChallenge(payload: string) {
+  return createHmac("sha256", sessionSecret()).update("bubblewash-login-challenge\0").update(payload).digest("base64url");
 }
 
 function safeEqual(left: string, right: string) {
@@ -92,13 +95,75 @@ export async function staffCredentialReadiness() {
   return errors;
 }
 
-export async function findStaffUser(email: string, password: string) {
+function normalizedEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function syntheticSalt(email: string) {
+  return createHmac("sha256", sessionSecret()).update("bubblewash-unknown-user-salt\0").update(email).digest("base64url").slice(0, 22);
+}
+
+type LoginChallengePayload = {
+  version: 1;
+  purpose: "staff-login";
+  email: string;
+  nonce: string;
+  expiresAt: number;
+};
+
+export async function createStaffLoginChallenge(email: string) {
+  const normalized = normalizedEmail(email);
+  if (!normalized || normalized.length > 254) return null;
   const row = await getDatabase().prepare(`
     SELECT email, role, name, password_hash, entity_id, totp_secret
     FROM staff_credentials WHERE email = ? COLLATE NOCASE AND active = 1 LIMIT 1
-  `).bind(email.trim()).first<StaffCredentialRow>();
-  if (!row || !verifyPasswordHash(password, row.password_hash)) return null;
-  return userFromRow(row);
+  `).bind(normalized).first<StaffCredentialRow>();
+  const parts = row ? parsePasswordHash(row.password_hash) : null;
+  const nonce = randomUUID();
+  const expiresAt = Date.now() + loginChallengeMaxAgeMs;
+  const challengePayload: LoginChallengePayload = {
+    version: 1,
+    purpose: "staff-login",
+    email: normalized,
+    nonce,
+    expiresAt,
+  };
+  const payload = Buffer.from(JSON.stringify(challengePayload), "utf8").toString("base64url");
+  const challenge = `${payload}.${signLoginChallenge(payload)}`;
+  await issueLoginChallenge(nonce, normalized, expiresAt);
+  return { challenge, salt: parts?.salt ?? syntheticSalt(normalized) };
+}
+
+export async function findStaffUserFromProof(email: string, challenge: string, proof: string) {
+  const normalized = normalizedEmail(email);
+  if (!normalized || normalized.length > 254 || challenge.length > 2_048 || !/^[A-Za-z0-9_-]{43}$/u.test(proof)) return null;
+  try {
+    const segments = challenge.split(".");
+    if (segments.length !== 2) return null;
+    const [payload, signature] = segments;
+    if (!payload || !signature || !safeEqual(signature, signLoginChallenge(payload))) return null;
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<LoginChallengePayload>;
+    const now = Date.now();
+    if (
+      parsed.version !== 1 || parsed.purpose !== "staff-login" || parsed.email !== normalized
+      || typeof parsed.nonce !== "string" || !/^[0-9a-f-]{36}$/iu.test(parsed.nonce)
+      || typeof parsed.expiresAt !== "number" || parsed.expiresAt < now
+      || parsed.expiresAt > now + loginChallengeMaxAgeMs
+    ) return null;
+    if (!await claimLoginChallenge(parsed.nonce, normalized, now)) return null;
+
+    const row = await getDatabase().prepare(`
+      SELECT email, role, name, password_hash, entity_id, totp_secret
+      FROM staff_credentials WHERE email = ? COLLATE NOCASE AND active = 1 LIMIT 1
+    `).bind(normalized).first<StaffCredentialRow>();
+    if (!row) return null;
+    const parts = parsePasswordHash(row.password_hash);
+    if (!parts) return null;
+    const expectedProof = createHmac("sha256", Buffer.from(parts.expected)).update(challenge).digest("base64url");
+    return safeEqual(proof, expectedProof) ? userFromRow(row) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function encodeSession(user: StaffUser) {

@@ -18,6 +18,14 @@ test("staff authentication does not persist session material in browser storage"
   assert.doesNotMatch(clientSources, /\b(?:localStorage|sessionStorage)\b/u);
 });
 
+test("staff authentication derives password proofs in the browser, not the Worker", () => {
+  const clientSource = readFileSync(new URL("../src/components/LoginPage.tsx", import.meta.url), "utf8");
+  const loginRoute = readFileSync(new URL("../src/app/api/login/route.ts", import.meta.url), "utf8");
+  assert.match(clientSource, /createLoginProof\(password,/u);
+  assert.doesNotMatch(loginRoute, /body\.password|verifyPasswordHash|scrypt/u);
+  assert.match(loginRoute, /findStaffUserFromProof/u);
+});
+
 test("securityHeaders includes OWASP baseline browser protections without powered-by leakage", () => {
   const map = new Map(securityHeaders().map((item) => [item.key.toLowerCase(), item.value]));
   const csp = map.get("content-security-policy") ?? "";

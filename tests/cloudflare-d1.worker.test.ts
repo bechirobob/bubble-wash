@@ -26,9 +26,12 @@ import {
   upsertVendorAvailability,
 } from "../src/lib/availability-store.ts";
 import { assignOrderFromAvailability } from "../src/lib/assignment.ts";
-import { createPasswordHash, decodeSession, encodeSession, findStaffUser } from "../src/lib/auth.ts";
+import { decodeSession, encodeSession } from "../src/lib/auth.ts";
+import { createPasswordHash, verifyPasswordHash } from "../src/lib/passwords.ts";
 import { beginMigration, finalizeMigration } from "../src/lib/migration.ts";
 import { migrationTableNames, migrationTables } from "../src/lib/migration-schema.js";
+import { createLoginProof } from "../src/lib/login-proof-client.ts";
+import { POST as beginLogin } from "../src/app/api/login/challenge/route.ts";
 import { POST as login } from "../src/app/api/login/route.ts";
 
 beforeEach(async () => {
@@ -138,12 +141,62 @@ describe("Cloudflare D1 runtime", () => {
     await env.DB.prepare(`INSERT INTO staff_credentials (email, role, name, password_hash, entity_id, totp_secret, active, updated_at)
       VALUES (?, 'vendor', 'Vendor One', ?, 'vendor-one', NULL, 1, ?)`)
       .bind("vendor@example.com", passwordHash, new Date().toISOString()).run();
-    const user = await findStaffUser("vendor@example.com", "A-new-password-44!");
-    expect(user?.entityId).toBe("vendor-one");
-    const session = encodeSession(user!);
+    expect(verifyPasswordHash("A-new-password-44!", passwordHash)).toBe(true);
+    const session = encodeSession({
+      name: "Vendor One",
+      email: "vendor@example.com",
+      passwordHash,
+      role: "vendor",
+      entityId: "vendor-one",
+    });
     expect(await decodeSession(session)).toMatchObject({ role: "vendor", entityId: "vendor-one" });
     await env.DB.prepare("UPDATE staff_credentials SET entity_id = 'vendor-two' WHERE email = 'vendor@example.com'").run();
     expect(await decodeSession(session)).toBeNull();
+  });
+
+  it("signs in with an edge-safe one-use password proof", async () => {
+    const password = "A-new-password-44!";
+    await env.DB.prepare(`INSERT INTO staff_credentials (email, role, name, password_hash, entity_id, totp_secret, active, updated_at)
+      VALUES (?, 'support', 'Support One', ?, NULL, NULL, 1, ?)`)
+      .bind("support@example.com", createPasswordHash(password), new Date().toISOString()).run();
+    const headers = {
+      "content-type": "application/json",
+      origin: "https://bubblewash.co",
+      host: "bubblewash.co",
+      "cf-connecting-ip": "203.0.113.76",
+    };
+    const challengeResponse = await beginLogin(new Request("https://bubblewash.co/api/login/challenge", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ email: "SUPPORT@example.com" }),
+    }) as never);
+    expect(challengeResponse.status).toBe(200);
+    expect(challengeResponse.headers.get("cache-control")).toContain("no-store");
+    const challengeData = await challengeResponse.json<{ ok: boolean; challenge: string; salt: string }>();
+    expect(challengeData.ok).toBe(true);
+    const proof = await createLoginProof(password, challengeData.salt, challengeData.challenge);
+    const requestBody = JSON.stringify({
+      email: "support@example.com",
+      challenge: challengeData.challenge,
+      proof,
+      next: "/support",
+    });
+    const first = await login(new Request("https://bubblewash.co/api/login", {
+      method: "POST",
+      headers,
+      body: requestBody,
+    }) as never);
+    expect(first.status).toBe(200);
+    expect(first.headers.get("cache-control")).toContain("no-store");
+    expect(first.headers.get("set-cookie")).toContain("bubblewash_staff_session=");
+    await expect(first.json()).resolves.toMatchObject({ ok: true, next: "/support", user: { role: "support" } });
+
+    const replay = await login(new Request("https://bubblewash.co/api/login", {
+      method: "POST",
+      headers,
+      body: requestBody,
+    }) as never);
+    expect(replay.status).toBe(401);
   });
 
   it("rate-limits repeated login attempts by Cloudflare client identity", async () => {
@@ -157,7 +210,7 @@ describe("Cloudflare D1 runtime", () => {
           host: "bubblewash.co",
           "cf-connecting-ip": "203.0.113.77",
         },
-        body: JSON.stringify({ email: "unknown@example.com", password: "incorrect" }),
+        body: JSON.stringify({ email: "unknown@example.com", challenge: "invalid", proof: "invalid" }),
       }) as never);
       statuses.push(response.status);
     }

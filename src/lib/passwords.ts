@@ -20,25 +20,33 @@ function decodeBase64Url(value: string) {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+export type PasswordHashParts = {
+  salt: string;
+  expected: Uint8Array;
+};
+
+export function parsePasswordHash(passwordHash: string): PasswordHashParts | null {
+  const [scheme, salt, expectedHash, ...extra] = passwordHash.split("$");
+  if (scheme !== "scrypt" || !salt || salt.length > 256 || !expectedHash || extra.length > 0) return null;
+
+  try {
+    const expected = decodeBase64Url(expectedHash);
+    return expected.length === 64 ? { salt, expected } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createPasswordHash(password: string, salt = encodeBase64Url(randomBytes(16))) {
   const hash = encodeBase64Url(scryptSync(password, salt, 64));
   return `scrypt$${salt}$${hash}`;
 }
 
 export function verifyPasswordHash(password: string, passwordHash: string) {
-  const [scheme, salt, expectedHash, ...extra] = passwordHash.split("$");
-  if (scheme !== "scrypt" || !salt || !expectedHash || extra.length > 0) return false;
-
-  let expected: Uint8Array;
-  try {
-    expected = decodeBase64Url(expectedHash);
-  } catch {
-    return false;
-  }
-  if (expected.length !== 64) return false;
-
-  const actual = scryptSync(password, salt, 64);
-  return timingSafeEqual(actual, expected);
+  const parts = parsePasswordHash(passwordHash);
+  if (!parts) return false;
+  const actual = scryptSync(password, parts.salt, 64);
+  return timingSafeEqual(actual, parts.expected);
 }
 
 export function matchesKnownDemoPassword(passwordHash: string) {

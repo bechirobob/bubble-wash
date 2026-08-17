@@ -235,6 +235,23 @@ export async function consumeRateLimit(key: string, limit: number, windowMs: num
   return { limited: row.count > limit, remaining: Math.max(0, limit - row.count), resetAt: row.reset_at };
 }
 
+export async function issueLoginChallenge(nonce: string, email: string, expiresAt: number, createdAt = Date.now()) {
+  const result = await getDatabase().prepare(`
+    INSERT INTO login_challenges (nonce, email, expires_at, used_at, created_at)
+    VALUES (?, ?, ?, NULL, ?)
+  `).bind(nonce, email, expiresAt, createdAt).run();
+  return (result.meta.changes ?? 0) === 1;
+}
+
+export async function claimLoginChallenge(nonce: string, email: string, now = Date.now()) {
+  const result = await getDatabase().prepare(`
+    UPDATE login_challenges SET used_at = ?
+    WHERE nonce = ? AND email = ? COLLATE NOCASE
+      AND used_at IS NULL AND expires_at >= ?
+  `).bind(now, nonce, email, now).run();
+  return (result.meta.changes ?? 0) === 1;
+}
+
 function earlyAccessFromRow(row: StoredEarlyAccessRow): EarlyAccessSignup {
   return {
     id: row.id,
@@ -413,6 +430,7 @@ export async function purgeOperationalData(now = Date.now(), householdLaunchDate
   const launch = /^\d{4}-\d{2}-\d{2}$/.test(householdLaunchDate) ? new Date(`${householdLaunchDate}T00:00:00.000Z`).getTime() : Number.NaN;
   const baseResults = await db.batch([
     db.prepare("DELETE FROM rate_limits WHERE reset_at < ?").bind(now - 24 * 60 * 60_000),
+    db.prepare("DELETE FROM login_challenges WHERE expires_at < ? OR used_at < ?").bind(now, now - 24 * 60 * 60_000),
     db.prepare("DELETE FROM mfa_replay_guard WHERE accepted_at < ?").bind(isoDaysAgo(2)),
     db.prepare("DELETE FROM workflow_action_claims WHERE claimed_at < ?").bind(isoDaysAgo(90)),
     db.prepare("DELETE FROM notification_outbox WHERE updated_at < ?").bind(isoDaysAgo(90)),
@@ -443,13 +461,14 @@ export async function purgeOperationalData(now = Date.now(), householdLaunchDate
   const orphaned = await db.prepare("DELETE FROM payment_verifications WHERE record_id NOT IN (SELECT id FROM submissions)").run();
   return {
     expiredRateLimits: baseResults[0].meta.changes ?? 0,
-    mfaReplayGuards: baseResults[1].meta.changes ?? 0,
-    workflowClaims: baseResults[2].meta.changes ?? 0,
-    notificationLogs: baseResults[3].meta.changes ?? 0,
-    optedOutSignups: baseResults[4].meta.changes ?? 0,
-    expiredActiveSignups: baseResults[5].meta.changes ?? 0,
-    privacyRequestLogs: baseResults[6].meta.changes ?? 0,
-    expiredDriverLocations: baseResults[7].meta.changes ?? 0,
+    loginChallenges: baseResults[1].meta.changes ?? 0,
+    mfaReplayGuards: baseResults[2].meta.changes ?? 0,
+    workflowClaims: baseResults[3].meta.changes ?? 0,
+    notificationLogs: baseResults[4].meta.changes ?? 0,
+    optedOutSignups: baseResults[5].meta.changes ?? 0,
+    expiredActiveSignups: baseResults[6].meta.changes ?? 0,
+    privacyRequestLogs: baseResults[7].meta.changes ?? 0,
+    expiredDriverLocations: baseResults[8].meta.changes ?? 0,
     closedOrderRecords,
     orphanedPaymentVerifications: orphaned.meta.changes ?? 0,
   };
@@ -546,6 +565,6 @@ export async function resetDataStoreForTests() {
   await db.batch([
     "submissions", "rate_limits", "workflow_action_claims", "payment_verifications",
     "driver_live_locations", "early_access_signups", "privacy_requests", "notification_outbox",
-    "mfa_replay_guard", "delivery_proofs", "migration_imports",
+    "mfa_replay_guard", "delivery_proofs", "migration_imports", "login_challenges",
   ].map((table) => db.prepare(`DELETE FROM ${table}`)));
 }

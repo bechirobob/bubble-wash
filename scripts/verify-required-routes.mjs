@@ -33,6 +33,7 @@ const requiredRoutes = [
   ["/api/internal/maintenance", "src/app/api/internal/maintenance/route.ts"],
   ["/api/internal/metrics", "src/app/api/internal/metrics/route.ts"],
   ["/api/internal/migration", "src/app/api/internal/migration/route.ts"],
+  ["/api/login/challenge", "src/app/api/login/challenge/route.ts"],
   ["/api/login", "src/app/api/login/route.ts"],
   ["/api/logout", "src/app/api/logout/route.ts"],
   ["/api/orders", "src/app/api/orders/route.ts"],
