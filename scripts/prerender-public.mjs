@@ -31,10 +31,17 @@ function htmlPath(route) {
 }
 
 async function fetchRequired(path, expectedType) {
-  const response = await fetch(`${origin}${path}`, {
-    headers: { Accept: expectedType, "User-Agent": "BubbleWash-Prerender/1.0" },
-    redirect: "follow",
-  });
+  console.log(`Prerendering ${path}`);
+  let response;
+  try {
+    response = await fetch(`${origin}${path}`, {
+      headers: { Accept: expectedType, "User-Agent": "BubbleWash-Prerender/1.0" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (error) {
+    throw new Error(`${path} could not be prerendered: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const body = await response.text();
   if (!response.ok) throw new Error(`${path} returned ${response.status}: ${body.slice(0, 300)}`);
   const contentType = response.headers.get("content-type") ?? "";
