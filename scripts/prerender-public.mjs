@@ -55,7 +55,10 @@ async function waitUntilReady(child, logs) {
   for (let attempt = 0; attempt < 120; attempt += 1) {
     if (child.exitCode !== null) break;
     try {
-      const response = await fetch(`${origin}/`, { headers: { Accept: "text/html" } });
+      const response = await fetch(`${origin}/api/health`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(2_000),
+      });
       if (response.ok) return;
     } catch {
       // The local Worker is still starting.
