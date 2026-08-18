@@ -12,7 +12,6 @@ import {
   isActiveMovingDriverAssignment,
   LIVE_LOCATION_EXPIRES_AFTER_MS,
   projectDriverLocation,
-  type DriverLocationView,
   type StoredDriverLocation,
   validateLiveLocationInput,
 } from "@/lib/dispatch-location";
@@ -31,17 +30,17 @@ function privateGuardResponse(response: NextResponse) {
   return response;
 }
 
-async function assignedMovingOrder(orderId: string, driverId: string) {
-  const order = buildOrderSummaries(await readSubmissionRecordsForOrder(orderId))
+function assignedMovingOrder(orderId: string, driverId: string) {
+  const order = buildOrderSummaries(readSubmissionRecordsForOrder(orderId))
     .find((item) => item.orderId.toLowerCase() === orderId.toLowerCase());
   if (!order || !isActiveMovingDriverAssignment(order, driverId)) return null;
   return order;
 }
 
-async function activeLocationView(location: StoredDriverLocation, now: number) {
-  const order = await assignedMovingOrder(location.orderId, location.driverId);
+function activeLocationView(location: StoredDriverLocation, now: number) {
+  const order = assignedMovingOrder(location.orderId, location.driverId);
   if (!order) {
-    await deleteDriverLiveLocation(location.driverId);
+    deleteDriverLiveLocation(location.driverId);
     return null;
   }
   const view = projectDriverLocation(
@@ -49,7 +48,7 @@ async function activeLocationView(location: StoredDriverLocation, now: number) {
     order.driver === "Unassigned" ? "Assigned rider" : order.driver,
     now,
   );
-  if (!view) await deleteDriverLiveLocation(location.driverId);
+  if (!view) deleteDriverLiveLocation(location.driverId);
   return view;
 }
 
@@ -65,15 +64,14 @@ export async function GET() {
 
   try {
     const now = Date.now();
-    await deleteExpiredDriverLiveLocations(new Date(now - LIVE_LOCATION_EXPIRES_AFTER_MS).toISOString());
+    deleteExpiredDriverLiveLocations(new Date(now - LIVE_LOCATION_EXPIRES_AFTER_MS).toISOString());
     const stored = user.role === "admin"
-      ? await readDriverLiveLocations()
-      : [await readDriverLiveLocation(user.entityId ?? "")].filter((item): item is StoredDriverLocation => Boolean(item));
-    const locations: DriverLocationView[] = [];
-    for (const location of stored) {
-      const view = await activeLocationView(location, now);
-      if (view) locations.push(view);
-    }
+      ? readDriverLiveLocations()
+      : [readDriverLiveLocation(user.entityId ?? "")].filter((item): item is StoredDriverLocation => Boolean(item));
+    const locations = stored.flatMap((location) => {
+      const view = activeLocationView(location, now);
+      return view ? [view] : [];
+    });
     return json({
       ok: true,
       locations,
@@ -99,7 +97,7 @@ export async function POST(request: NextRequest) {
 
   const guardError = sameOriginJsonGuard(request.headers, "live location update");
   if (guardError) return privateGuardResponse(guardError);
-  if (await isRateLimited(clientKey(request.headers, `dispatch-location:${driverId.toLowerCase()}`), 90, 60_000)) {
+  if (isRateLimited(clientKey(request.headers, `dispatch-location:${driverId.toLowerCase()}`), 90, 60_000)) {
     return json({ ok: false, error: "Too many location updates. Wait briefly and try again." }, 429);
   }
 
@@ -114,7 +112,7 @@ export async function POST(request: NextRequest) {
     const validation = validateLiveLocationInput(body, now);
     if (!validation.ok) return json({ ok: false, error: validation.error }, 422);
 
-    const order = await assignedMovingOrder(validation.value.orderId, driverId);
+    const order = assignedMovingOrder(validation.value.orderId, driverId);
     if (!order) {
       return json({ ok: false, error: "Live location requires an active moving route assigned to this rider." }, 409);
     }
@@ -124,7 +122,7 @@ export async function POST(request: NextRequest) {
       ...validation.value,
       receivedAt: new Date(now).toISOString(),
     };
-    if (!await upsertDriverLiveLocation(stored)) {
+    if (!upsertDriverLiveLocation(stored)) {
       return json({ ok: false, error: "This GPS reading is older than or equal to the latest accepted update." }, 409);
     }
 
@@ -154,12 +152,12 @@ export async function DELETE(request: NextRequest) {
 
   const guardError = sameOriginJsonGuard(request.headers, "live location clear");
   if (guardError) return privateGuardResponse(guardError);
-  if (await isRateLimited(clientKey(request.headers, `dispatch-location-clear:${driverId.toLowerCase()}`), 20, 60_000)) {
+  if (isRateLimited(clientKey(request.headers, `dispatch-location-clear:${driverId.toLowerCase()}`), 20, 60_000)) {
     return json({ ok: false, error: "Too many location clear requests. Wait briefly and try again." }, 429);
   }
 
   try {
-    const cleared = await deleteDriverLiveLocation(driverId);
+    const cleared = deleteDriverLiveLocation(driverId);
     return json({ ok: true, cleared, location: null });
   } catch (error) {
     console.error("Bubble Wash live location clear failed", {

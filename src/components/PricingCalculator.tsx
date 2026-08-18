@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Calculator, CalendarPlus } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import { addons, plans, zones, type AddonKey, type PlanName, type ZoneKey } from "@/lib/pricing";
@@ -59,7 +60,7 @@ export function PricingCalculator() {
       <aside className="quoteSummary" aria-live="polite">
         <p className="sectionLabel">Your estimate</p>
         <h3>{selectedPlan.name}</h3>
-        {quote ? <><strong className="quoteTotal">{formatMoney(quote.estimatedMonthlyTotal)}</strong><span className="quotePeriod">estimated monthly total</span><dl className="miniFacts"><div><dt>Monthly service fee</dt><dd>{formatMoney(quote.subscription)}</dd></div><div><dt>Processing per pickup</dt><dd>{formatMoney(quote.processingPerPickup)}</dd></div><div><dt>Selected extras per pickup</dt><dd>{formatMoney(quote.addonsPerPickup)}</dd></div><div><dt>Route fee per pickup</dt><dd>{formatMoney(quote.zoneFee)}</dd></div><div><dt>Scheduled pickups</dt><dd>{quote.monthlyPickups} per month</dd></div></dl><small>Final billing uses the verified laundry weight recorded at intake.</small><a className="button primary full" href="/book"><CalendarPlus aria-hidden="true" />Continue to booking</a></> : <><dl className="miniFacts"><div><dt>Monthly service fee</dt><dd>{formatMoney(selectedPlan.subscription)}</dd></div><div><dt>Schedule</dt><dd>{selectedPlan.pickups}</dd></div><div><dt>Suitable for</dt><dd>{selectedPlan.audience}</dd></div></dl><small>Run the estimate to see the full monthly amount.</small></>}
+        {quote ? <><strong className="quoteTotal">{formatMoney(quote.estimatedMonthlyTotal)}</strong><span className="quotePeriod">estimated monthly total</span><dl className="miniFacts"><div><dt>Monthly service fee</dt><dd>{formatMoney(quote.subscription)}</dd></div><div><dt>Processing per pickup</dt><dd>{formatMoney(quote.processingPerPickup)}</dd></div><div><dt>Selected extras per pickup</dt><dd>{formatMoney(quote.addonsPerPickup)}</dd></div><div><dt>Route fee per pickup</dt><dd>{formatMoney(quote.zoneFee)}</dd></div><div><dt>Scheduled pickups</dt><dd>{quote.monthlyPickups} per month</dd></div></dl><small>Final billing uses the verified laundry weight recorded at intake.</small><Link className="button primary full" href="/book"><CalendarPlus aria-hidden="true" />Continue to booking</Link></> : <><dl className="miniFacts"><div><dt>Monthly service fee</dt><dd>{formatMoney(selectedPlan.subscription)}</dd></div><div><dt>Schedule</dt><dd>{selectedPlan.pickups}</dd></div><div><dt>Suitable for</dt><dd>{selectedPlan.audience}</dd></div></dl><small>Run the estimate to see the full monthly amount.</small></>}
       </aside>
     </div>
   );

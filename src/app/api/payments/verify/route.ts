@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
   if (process.env.NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED !== "true") {
     return NextResponse.json({ ok: false, error: "Online payment verification is not enabled for the pilot." }, { status: 503 });
   }
-  if (await isRateLimited(clientKey(request.headers, "payments-verify"), 30, 60_000)) {
+  if (isRateLimited(clientKey(request.headers, "payments-verify"), 30, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many verification requests. Try again shortly." }, { status: 429 });
   }
 
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Invalid payment reference." }, { status: 400 });
   }
 
-  const checkout = await findCheckoutByPaymentReference(reference);
+  const checkout = findCheckoutByPaymentReference(reference);
   if (!checkout) {
     return NextResponse.json({ ok: false, error: "That payment reference is not linked to a Bubble Wash checkout." }, { status: 404 });
   }
@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
         message: `Paystack verification: ${verification.gateway_response ?? verification.status ?? "No gateway response"}`,
       },
     };
-    const recorded = await appendPaymentVerificationOnce({
+    const recorded = appendPaymentVerificationOnce({
       record,
       reference,
       status: providerStatus,

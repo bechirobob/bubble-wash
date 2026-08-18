@@ -18,7 +18,7 @@ export function PrivacyRequestForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(Object.fromEntries(data.entries())),
       });
-      const body = await response.json<{ ok: boolean; error?: string; message: string; id: string }>();
+      const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error ?? "Unable to save the request.");
       setStatus(`${body.message} Reference: ${body.id}`);
       form.reset();

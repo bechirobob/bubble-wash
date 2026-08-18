@@ -8,7 +8,7 @@ function zoneFrom(value: string | null): ZoneKey {
 }
 
 export async function GET(request: NextRequest) {
-  if (await isRateLimited(clientKey(request.headers, "route-preview"), 60, 60_000)) {
+  if (isRateLimited(clientKey(request.headers, "route-preview"), 60, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many route preview requests. Try again shortly." }, { status: 429 });
   }
 

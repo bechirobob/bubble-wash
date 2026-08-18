@@ -1,5 +1,5 @@
-/* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-img-element -- Staff entry is a static shell and deliberately uses full document navigation. */
-
+import Image from "next/image";
+import Link from "next/link";
 import { ArrowRight, Bike, Headphones, ShieldCheck, WashingMachine } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -39,10 +39,10 @@ export default function StaffAccessPage() {
   return (
     <main className="loginPage staffAccessPage">
       <section className="loginShell staffAccessShell">
-        <a className="brand" href="/" aria-label="Bubble Wash home">
-          <span className="brandCrop"><img className="brandMark" src="/apple-icon.png" alt="" width={58} height={58} /></span>
+        <Link className="brand" href="/" aria-label="Bubble Wash home">
+          <span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={58} height={58} priority /></span>
           <span>Bubble Wash Staff</span>
-        </a>
+        </Link>
         <div className="staffAccessHero">
           <p className="eyebrow">Staff access</p>
           <h1>Choose your workspace.</h1>
@@ -52,12 +52,12 @@ export default function StaffAccessPage() {
           {staffPaths.map((path) => {
             const Icon = path.icon;
             return (
-            <a className="staffAccessCard" href={path.href} key={path.role}>
+            <Link className="staffAccessCard" href={path.href} key={path.role}>
               <span><Icon aria-hidden="true" />{path.role}</span>
               <h2>{path.title}</h2>
               <p>{path.copy}</p>
               <b>Continue to login <ArrowRight aria-hidden="true" /></b>
-            </a>
+            </Link>
           )})}
         </div>
       </section>

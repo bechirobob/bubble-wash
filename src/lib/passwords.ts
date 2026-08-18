@@ -7,46 +7,20 @@ export const knownDemoPasswords = [
   "Support123!",
 ] as const;
 
-function encodeBase64Url(bytes: Uint8Array) {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
-}
-
-function decodeBase64Url(value: string) {
-  const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
-  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-  const binary = atob(padded);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-}
-
-export type PasswordHashParts = {
-  salt: string;
-  expected: Uint8Array;
-};
-
-export function parsePasswordHash(passwordHash: string): PasswordHashParts | null {
-  const [scheme, salt, expectedHash, ...extra] = passwordHash.split("$");
-  if (scheme !== "scrypt" || !salt || salt.length > 256 || !expectedHash || extra.length > 0) return null;
-
-  try {
-    const expected = decodeBase64Url(expectedHash);
-    return expected.length === 64 ? { salt, expected } : null;
-  } catch {
-    return null;
-  }
-}
-
-export function createPasswordHash(password: string, salt = encodeBase64Url(randomBytes(16))) {
-  const hash = encodeBase64Url(scryptSync(password, salt, 64));
+export function createPasswordHash(password: string, salt = randomBytes(16).toString("base64url")) {
+  const hash = scryptSync(password, salt, 64).toString("base64url");
   return `scrypt$${salt}$${hash}`;
 }
 
 export function verifyPasswordHash(password: string, passwordHash: string) {
-  const parts = parsePasswordHash(passwordHash);
-  if (!parts) return false;
-  const actual = scryptSync(password, parts.salt, 64);
-  return timingSafeEqual(actual, parts.expected);
+  const [scheme, salt, expectedHash, ...extra] = passwordHash.split("$");
+  if (scheme !== "scrypt" || !salt || !expectedHash || extra.length > 0) return false;
+
+  const expected = Buffer.from(expectedHash, "base64url");
+  if (expected.length !== 64) return false;
+
+  const actual = scryptSync(password, salt, 64);
+  return timingSafeEqual(actual, expected);
 }
 
 export function matchesKnownDemoPassword(passwordHash: string) {

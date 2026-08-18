@@ -23,7 +23,7 @@ function normalizedContact(value: string) {
 export async function POST(request: NextRequest) {
   const guardError = sameOriginJsonGuard(request.headers, "privacy request");
   if (guardError) return guardError;
-  if (await isRateLimited(clientKey(request.headers, "privacy-request"), 5, 60_000)) {
+  if (isRateLimited(clientKey(request.headers, "privacy-request"), 5, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many privacy requests. Try again shortly." }, { status: 429 });
   }
   try {
@@ -39,14 +39,14 @@ export async function POST(request: NextRequest) {
     if (!contact) return NextResponse.json({ ok: false, error: "Enter a valid email address or Ghana phone number." }, { status: 400 });
     if (!requestTypes.has(requestType)) return NextResponse.json({ ok: false, error: "Select a valid request type." }, { status: 400 });
     if (orderId && !/^BW-[A-Z0-9]{8,32}$/.test(orderId)) return NextResponse.json({ ok: false, error: "Enter a valid Bubble Wash order reference or leave it blank." }, { status: 400 });
-    const saved = await createPrivacyRequest({
+    const saved = createPrivacyRequest({
       id: `PR-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`,
       requestType: requestType as "access" | "correction" | "deletion" | "marketing_opt_out",
       name,
       contact,
       orderId,
     });
-    if (saved.requestType === "marketing_opt_out") await optOutEarlyAccess(contact);
+    if (saved.requestType === "marketing_opt_out") optOutEarlyAccess(contact);
     await dispatchPrivacyRequestConfirmation(saved);
     return NextResponse.json({ ok: true, id: saved.id, message: "Your privacy request was received. Keep the reference for follow-up." });
   } catch (error) {

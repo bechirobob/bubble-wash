@@ -9,8 +9,6 @@ export async function GET() {
     ok,
     service: "Bubble Wash operations app",
     version: "next-typescript",
-    release: process.env.BUBBLEWASH_RELEASE_SHA ?? "local",
-    deploymentPhase: process.env.BUBBLEWASH_DEPLOYMENT_PHASE ?? "local",
     time: new Date().toISOString(),
     readiness: ok ? "ready" : "blocked",
     checks: ok ? [] : readinessErrors,

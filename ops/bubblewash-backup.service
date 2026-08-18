@@ -1,0 +1,11 @@
+[Unit]
+Description=Bubble Wash encrypted database backup and restore verification
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/bubble-wash
+EnvironmentFile=/etc/bubblewash/production.env
+ExecStart=/usr/bin/npm run db:backup
+User=bubblewash
+Group=bubblewash

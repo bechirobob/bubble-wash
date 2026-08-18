@@ -1,7 +1,7 @@
 "use client";
 
-/* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-img-element -- Public shells use full document navigation and the local Apple icon so Cloudflare can serve them without invoking the Worker. */
-
+import Image from "next/image";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ComponentType } from "react";
 import {
@@ -45,25 +45,25 @@ export function PublicHeader() {
 
   return (
     <header className="siteHeader" id="top">
-      <a className="brand" href="/" aria-label="Bubble Wash home" onClick={() => setMobileOpen(false)}>
-        <span className="brandCrop"><img className="brandMark" src="/apple-icon.png" alt="" width={58} height={58} /></span>
+      <Link className="brand" href="/" aria-label="Bubble Wash home" onClick={() => setMobileOpen(false)}>
+        <span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={58} height={58} priority /></span>
         <span>Bubble Wash</span>
-      </a>
+      </Link>
       <button className="menuButton" type="button" aria-controls="site-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen((current) => !current)}>
         {mobileOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
         <span>{mobileOpen ? "Close" : "Menu"}</span>
       </button>
       <nav id="site-navigation" className={mobileOpen ? "navLinks open" : "navLinks"} aria-label="Main navigation">
         {navigation.map(({ href, label, icon: Icon, match }) => (
-          <a key={href} href={href} aria-current={match && pathname === match ? "page" : undefined} onClick={() => setMobileOpen(false)}>
+          <Link key={href} href={href} aria-current={match && pathname === match ? "page" : undefined} onClick={() => setMobileOpen(false)}>
             <Icon aria-hidden="true" />
             <span>{label}</span>
-          </a>
+          </Link>
         ))}
-        <a className="navCta" href="/book" aria-current={pathname === "/book" ? "page" : undefined} onClick={() => setMobileOpen(false)}>
+        <Link className="navCta" href="/book" aria-current={pathname === "/book" ? "page" : undefined} onClick={() => setMobileOpen(false)}>
           <CalendarPlus aria-hidden="true" />
           <span>Book pickup</span>
-        </a>
+        </Link>
       </nav>
     </header>
   );
@@ -77,24 +77,24 @@ export function PublicFooter() {
   return (
     <footer className="footer pageShell">
       <div>
-        <a className="brand footerBrand" href="/" aria-label="Bubble Wash home"><span className="brandCrop"><img className="brandMark" src="/apple-icon.png" alt="" width={58} height={58} /></span><span>Bubble Wash</span></a>
+        <Link className="brand footerBrand" href="/" aria-label="Bubble Wash home"><span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={58} height={58} /></span><span>Bubble Wash</span></Link>
         <p>Commercial laundry collection and delivery for businesses in Accra.</p>
       </div>
       <div>
         <h3>Service</h3>
-        <a href="/#how-it-works">How it works</a>
-        <a href="/services">Services & pricing</a>
-        <a href="/book">Book a pickup</a>
-        <a href="/track">Track an order</a>
+        <Link href="/#how-it-works">How it works</Link>
+        <Link href="/services">Services & pricing</Link>
+        <Link href="/book">Book a pickup</Link>
+        <Link href="/track">Track an order</Link>
       </div>
       <div>
         <h3>Order and policies</h3>
-        <a href="/manage">Manage an order</a>
-        <a href="/early-access">Household early access</a>
-        <a href="/privacy">Privacy and data rights</a>
-        <a href="/terms">Service terms</a>
-        <a href="/refund-policy">Cancellations and refunds</a>
-        <a href="/staff">Staff access</a>
+        <Link href="/manage">Manage an order</Link>
+        <Link href="/early-access">Household early access</Link>
+        <Link href="/privacy">Privacy and data rights</Link>
+        <Link href="/terms">Service terms</Link>
+        <Link href="/refund-policy">Cancellations and refunds</Link>
+        <Link href="/staff">Staff access</Link>
       </div>
       <div>
         <h3>Service area</h3>

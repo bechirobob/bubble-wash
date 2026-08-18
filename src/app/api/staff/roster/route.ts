@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCurrentStaffUser, readStaffUsers } from "@/lib/auth";
+import { getCurrentStaffUser, staffUsers } from "@/lib/auth";
 import { readSubmissions, text } from "@/lib/submissions";
 
 type RosterMember = {
@@ -40,7 +40,7 @@ export async function GET() {
     });
   }
 
-  for (const configured of await readStaffUsers()) {
+  for (const configured of staffUsers) {
     const email = configured.email.toLowerCase();
     const roster = rosterByEmail.get(email);
     rosterByEmail.set(email, {
