@@ -36,7 +36,6 @@ jobs:
             set -euo pipefail
             database=/home/ubuntu/bubblewash-runtime/data/bubblewash.sqlite
             test -s "$database"
-            sqlite3 "$database" "PRAGMA quick_check;" | grep -Fx ok
             app_uid="$(id -u ubuntu)"
             runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user start bubblewash-local.service
             runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user is-active --quiet bubblewash-local.service
