@@ -37,8 +37,20 @@ jobs:
             database=/home/ubuntu/bubblewash-runtime/data/bubblewash.sqlite
             test -s "$database"
             app_uid="$(id -u ubuntu)"
+            release_dir="$(readlink -f /home/ubuntu/bubblewash-pilot)"
+            test -x "$release_dir/node_modules/.bin/next"
+            restart_on_error() {
+              status=$?
+              trap - ERR
+              runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user start bubblewash-local.service || true
+              exit "$status"
+            }
+            trap restart_on_error ERR
+            runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user stop bubblewash-local.service
+            systemd-run --quiet --wait --collect --pipe --unit=bubblewash-vps-rollback-backup --property=User=ubuntu --property=Group=ubuntu --property="WorkingDirectory=$release_dir" --property=EnvironmentFile=/home/ubuntu/.config/bubblewash/env --property=Environment=HOME=/home/ubuntu /usr/bin/npm run db:backup
             runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user start bubblewash-local.service
             runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user is-active --quiet bubblewash-local.service
+            trap - ERR
             for attempt in $(seq 1 20); do
               if curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/api/ready >/dev/null; then
                 exit 0
@@ -47,6 +59,31 @@ jobs:
             done
             exit 1
           '
+
+      - name: Export the encrypted rollback backup
+        id: backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          backup_name="$(tailscale ssh root@hermes "find /home/ubuntu/bubblewash-backups/github-staging -maxdepth 1 -type f -name 'bubblewash-*.sqlite.enc' -printf '%f\\n' | sort | tail -n 1")"
+          if [[ ! "$backup_name" =~ ^bubblewash-[0-9]{4}-[0-9]{2}-[0-9]{2}T.*\.sqlite\.enc$ ]]; then
+            echo "The rollback backup name is invalid." >&2
+            exit 1
+          fi
+          backup_path="$RUNNER_TEMP/$backup_name"
+          tailscale ssh root@hermes "cat '/home/ubuntu/bubblewash-backups/github-staging/$backup_name'" > "$backup_path"
+          test -s "$backup_path"
+          chmod 0600 "$backup_path"
+          printf 'path=%s\n' "$backup_path" >> "$GITHUB_OUTPUT"
+
+      - name: Store the encrypted rollback backup off-host
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bubblewash-vps-rollback-backup-${{ github.run_id }}
+          path: ${{ steps.backup.outputs.path }}
+          if-no-files-found: error
+          retention-days: 35
+          compression-level: 0
 
       - name: Verify the retained origin directly
         shell: bash
