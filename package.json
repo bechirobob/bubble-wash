@@ -4,65 +4,54 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "node scripts/clean-build.mjs && vinext build && npm run deploy:prepare && node scripts/prerender-public.mjs",
-    "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .vinext --ignore-pattern .wrangler --ignore-pattern worker-configuration.d.ts",
-    "test": "npm run test:unit && npm run test:worker",
-    "test:unit": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/activity-projection.test.mjs tests/dispatch-location.test.mjs tests/security-hardening.test.mjs tests/totp.test.mjs tests/ui-feedback.test.mjs tests/workflow.test.mjs",
-    "test:worker": "vitest run",
-    "test:data": "npm run test:worker",
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "npm run test:unit && npm run test:data",
+    "test:unit": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/*.test.mjs",
+    "test:data": "node --conditions=react-server --experimental-strip-types tests/data-store.integration.mjs && node --conditions=react-server --experimental-strip-types tests/dispatch-location-store.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/submissions.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth-production.integration.mjs && node --conditions=react-server --experimental-strip-types tests/customer-session.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-defaults-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-roles-http.integration.mjs",
     "typecheck": "tsc --noEmit",
     "audit:full": "npm audit --audit-level=moderate",
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",
-    "check": "npm run lint && npm test && npm run typecheck && npm run verify:migrations && npm run audit:full && npm run audit:prod && npm run build && npm run deploy:dry-run && npm run verify:routes",
-    "cf:types": "wrangler types worker-configuration.d.ts",
-    "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
-    "deploy:prepare": "node scripts/prepare-deploy.mjs",
-    "deploy:dry-run": "npm run deploy:prepare && wrangler deploy --config dist/server/wrangler.json --dry-run --outdir dist/worker-dry-run",
-    "deploy:built": "npm run deploy:prepare && wrangler deploy --config dist/server/wrangler.json",
-    "deploy": "npm run build && npm run db:migrate:remote && npm run deploy:built",
-    "verify:routes": "node scripts/verify-required-routes.mjs && node scripts/verify-static-shells.mjs",
-    "verify:migrations": "node scripts/verify-d1-migrations.mjs",
+    "check": "npm run lint && npm test && npm run typecheck && npm run audit:full && npm run audit:prod && npm run build && npm run verify:image-runtime && npm run verify:routes",
+    "verify:image-runtime": "node scripts/verify-image-runtime.mjs",
+    "verify:routes": "node scripts/verify-required-routes.mjs",
     "hash-password": "node scripts/hash-password.mjs",
     "mfa:setup": "node scripts/generate-totp-secret.mjs",
-    "db:export": "wrangler d1 export DB --remote --output=bubble-wash-d1-export.sql"
+    "db:backup": "node scripts/backup-database.mjs",
+    "db:export": "node scripts/export-portable-data.mjs",
+    "maintenance:run": "node scripts/run-maintenance.mjs"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=20.9.0"
   },
   "dependencies": {
-    "jose": "^6.1.0",
+    "better-sqlite3": "^12.10.0",
     "lucide-react": "^1.31.0",
-    "next": "16.3.0",
+    "next": "16.2.11",
     "qrcode": "^1.5.4",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "scrypt-js": "3.0.1",
-    "server-only": "^0.0.1"
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "server-only": "^0.0.1",
+    "sharp": "0.35.3"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.51.2",
-    "@cloudflare/vitest-pool-workers": "0.21.0",
-    "@cloudflare/workers-types": "5.20260811.1",
-    "@types/node": "22.19.19",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20",
     "@types/qrcode": "^1.5.6",
-    "@types/react": "19.2.14",
-    "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.34",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.0",
-    "typescript": "5.9.3",
-    "vinext": "1.0.0-beta.6",
-    "vite": "8.2.1",
-    "vitest": "4.1.10",
-    "wrangler": "4.120.1"
+    "eslint-config-next": "16.2.11",
+    "typescript": "^5"
   },
   "overrides": {
     "js-yaml": "4.3.1",
     "nanoid": "3.3.18",
-    "postcss": "8.5.23"
+    "postcss": "8.5.23",
+    "next@16.2.11": {
+      "sharp": "$sharp"
+    }
   }
 }

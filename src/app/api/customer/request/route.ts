@@ -18,13 +18,13 @@ function text(value: unknown, max = 600) {
 export async function POST(request: NextRequest) {
   const guard = sameOriginJsonGuard(request.headers, "customer order request");
   if (guard) return guard;
-  if (await isRateLimited(clientKey(request.headers, "customer-request"), 10, 60_000)) {
+  if (isRateLimited(clientKey(request.headers, "customer-request"), 10, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many requests. Try again shortly." }, { status: 429 });
   }
   const session = decodeCustomerSession(request.cookies.get(customerSessionCookieName)?.value);
   if (!session) return NextResponse.json({ ok: false, error: "Verify your booking details to continue." }, { status: 401 });
   try {
-    const body = await request.json<Record<string, unknown>>();
+    const body = await request.json();
     const action = text(body.action, 30);
     const issueType = actions.get(action);
     const requestedDate = text(body.requestedDate, 20);
@@ -33,11 +33,11 @@ export async function POST(request: NextRequest) {
     if (!issueType || !note || (action === "reschedule" && (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate) || requestedDate < new Date().toISOString().slice(0, 10)))) {
       return NextResponse.json({ ok: false, error: "Complete the request details before submitting." }, { status: 400 });
     }
-    const seed = await findSubmissionRecordById(session.orderId);
+    const seed = findSubmissionRecordById(session.orderId);
     if (!seed) return NextResponse.json({ ok: false, error: "This booking is no longer available." }, { status: 404 });
     const createdAt = new Date().toISOString();
     const ticketId = `BWC-${randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
-    await appendSubmissionRecord({
+    appendSubmissionRecord({
       id: ticketId,
       createdAt,
       source: "bubblewash-customer-self-service",

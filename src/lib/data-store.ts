@@ -1,11 +1,38 @@
 import "server-only";
 
-import { env } from "cloudflare:workers";
+import Database from "better-sqlite3";
+import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import path from "node:path";
 import { LIVE_LOCATION_EXPIRES_AFTER_MS, type StoredDriverLocation } from "./dispatch-location.ts";
 import type { SubmissionRecord } from "@/lib/submissions";
 
-type StoredSubmissionRow = { id: string; created_at: string; source: string | null; data: string };
-type RateLimitRow = { key: string; count: number; reset_at: number };
+const dataDir = path.join(process.cwd(), "data");
+const databasePath = process.env.BUBBLEWASH_DATABASE_PATH ?? path.join(dataDir, "bubblewash.sqlite");
+const legacySubmissionsPath = path.join(dataDir, "submissions.jsonl");
+
+type StoredSubmissionRow = {
+  id: string;
+  created_at: string;
+  source: string | null;
+  data: string;
+};
+
+type RateLimitRow = {
+  key: string;
+  count: number;
+  reset_at: number;
+};
+
+type StoredPaymentRow = {
+  reference: string;
+  status: string;
+  transaction_id: string | null;
+  amount_minor: number;
+  currency: string;
+  record_id: string;
+  verified_at: string;
+};
+
 type StoredDriverLocationRow = {
   driver_id: string;
   order_id: string;
@@ -98,11 +125,223 @@ type StoredOutboxRow = {
   sent_at: string | null;
 };
 
-export function getDatabase(): D1Database {
-  return env.DB;
+let database: Database.Database | null = null;
+let migratedLegacyJsonl = false;
+let lastLocationCleanupAt = 0;
+
+function purgeExpiredDriverLocations(db: Database.Database, now = Date.now()) {
+  if (now - lastLocationCleanupAt < 60_000) return;
+  db.prepare("DELETE FROM driver_live_locations WHERE captured_at < ?")
+    .run(new Date(now - LIVE_LOCATION_EXPIRES_AFTER_MS).toISOString());
+  lastLocationCleanupAt = now;
 }
 
-function submissionFromRow(row: StoredSubmissionRow): SubmissionRecord {
+function getDatabase() {
+  if (database) {
+    purgeExpiredDriverLocations(database);
+    return database;
+  }
+  mkdirSync(path.dirname(databasePath), { recursive: true });
+  const db = new Database(databasePath);
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  db.pragma("busy_timeout = 5000");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS submissions (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      source TEXT,
+      data TEXT NOT NULL CHECK (json_valid(data))
+    );
+    CREATE INDEX IF NOT EXISTS idx_submissions_created_at ON submissions(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_submissions_order_id ON submissions(json_extract(data, '$.orderId') COLLATE NOCASE);
+
+    CREATE TABLE IF NOT EXISTS rate_limits (
+      key TEXT PRIMARY KEY,
+      count INTEGER NOT NULL,
+      reset_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_rate_limits_reset_at ON rate_limits(reset_at);
+
+    CREATE TABLE IF NOT EXISTS workflow_action_claims (
+      claim_key TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL,
+      action_key TEXT NOT NULL,
+      order_updated_at TEXT NOT NULL,
+      claimed_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflow_action_claims_claimed_at ON workflow_action_claims(claimed_at);
+
+    CREATE TABLE IF NOT EXISTS payment_verifications (
+      reference TEXT NOT NULL,
+      status TEXT NOT NULL,
+      transaction_id TEXT,
+      amount_minor INTEGER NOT NULL,
+      currency TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      verified_at TEXT NOT NULL,
+      PRIMARY KEY (reference, status)
+    );
+    CREATE INDEX IF NOT EXISTS idx_payment_verifications_verified_at ON payment_verifications(verified_at DESC);
+
+    CREATE TABLE IF NOT EXISTS driver_live_locations (
+      driver_id TEXT PRIMARY KEY,
+      order_id TEXT NOT NULL,
+      latitude REAL NOT NULL CHECK (latitude >= 5.45 AND latitude <= 5.95),
+      longitude REAL NOT NULL CHECK (longitude >= -0.45 AND longitude <= 0.2),
+      accuracy_meters REAL NOT NULL CHECK (accuracy_meters > 0 AND accuracy_meters <= 1000),
+      captured_at TEXT NOT NULL,
+      received_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_driver_live_locations_order_id ON driver_live_locations(order_id COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_driver_live_locations_captured_at ON driver_live_locations(captured_at);
+
+    CREATE TABLE IF NOT EXISTS early_access_signups (
+      id TEXT PRIMARY KEY,
+      first_name TEXT NOT NULL,
+      phone TEXT NOT NULL UNIQUE,
+      email TEXT,
+      area TEXT NOT NULL,
+      frequency TEXT NOT NULL,
+      consent_at TEXT NOT NULL,
+      consent_version TEXT NOT NULL,
+      marketing_status TEXT NOT NULL DEFAULT 'active' CHECK (marketing_status IN ('active', 'opted_out')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_early_access_area ON early_access_signups(area COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_early_access_updated_at ON early_access_signups(updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS privacy_requests (
+      id TEXT PRIMARY KEY,
+      request_type TEXT NOT NULL CHECK (request_type IN ('access', 'correction', 'deletion', 'marketing_opt_out')),
+      name TEXT NOT NULL,
+      contact TEXT NOT NULL,
+      order_id TEXT,
+      status TEXT NOT NULL DEFAULT 'received' CHECK (status IN ('received', 'identity_review', 'completed', 'declined')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_privacy_requests_status ON privacy_requests(status, created_at);
+
+    CREATE TABLE IF NOT EXISTS notification_outbox (
+      id TEXT PRIMARY KEY,
+      dedupe_key TEXT NOT NULL UNIQUE,
+      channel TEXT NOT NULL CHECK (channel IN ('email', 'whatsapp')),
+      target TEXT NOT NULL CHECK (target IN ('customer', 'operations')),
+      payload TEXT NOT NULL CHECK (json_valid(payload)),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed', 'skipped')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TEXT NOT NULL,
+      provider_id TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      sent_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_notification_outbox_due ON notification_outbox(status, next_attempt_at);
+
+    CREATE TABLE IF NOT EXISTS mfa_replay_guard (
+      subject TEXT PRIMARY KEY,
+      timestep INTEGER NOT NULL,
+      accepted_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS delivery_proofs (
+      order_id TEXT PRIMARY KEY,
+      code_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      used_at TEXT,
+      used_by TEXT,
+      recipient_name TEXT
+    );
+  `);
+  database = db;
+  purgeExpiredDriverLocations(db);
+  migrateLegacySubmissions(db);
+  return db;
+}
+
+function migrateLegacySubmissions(db: Database.Database) {
+  if (migratedLegacyJsonl || !existsSync(legacySubmissionsPath)) return;
+  const insert = db.prepare("INSERT OR IGNORE INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)");
+  const migrate = db.transaction(() => {
+    for (const line of readFileSync(legacySubmissionsPath, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const record = JSON.parse(line) as SubmissionRecord;
+        if (!record.id || !record.createdAt || !record.data) continue;
+        insert.run({ id: record.id, createdAt: record.createdAt, source: record.source ?? null, data: JSON.stringify(record.data) });
+      } catch {
+        // Skip malformed legacy pilot records instead of blocking startup.
+      }
+    }
+  });
+  migrate();
+  renameSync(legacySubmissionsPath, `${legacySubmissionsPath}.migrated`);
+  migratedLegacyJsonl = true;
+}
+
+export function appendSubmissionRecord(record: SubmissionRecord) {
+  getDatabase()
+    .prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
+    .run({ id: record.id, createdAt: record.createdAt, source: record.source ?? null, data: JSON.stringify(record.data) });
+}
+
+export function appendSubmissionRecordWithDeliveryProof(record: SubmissionRecord, input: { orderId: string; codeHash: string; usedBy: string; recipientName: string }) {
+  const db = getDatabase();
+  const apply = db.transaction(() => {
+    const proof = db.prepare(`
+      UPDATE delivery_proofs
+      SET used_at = @usedAt, used_by = @usedBy, recipient_name = @recipientName
+      WHERE order_id = @orderId COLLATE NOCASE AND code_hash = @codeHash AND used_at IS NULL
+    `).run({ ...input, usedAt: record.createdAt });
+    if (proof.changes !== 1) throw new Error("Delivery confirmation code is invalid or already used.");
+    db.prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
+      .run({ id: record.id, createdAt: record.createdAt, source: record.source ?? null, data: JSON.stringify(record.data) });
+  });
+  apply();
+}
+
+export function readSubmissionRecords(limit = 200): SubmissionRecord[] {
+  const rows = getDatabase()
+    .prepare("SELECT id, created_at, source, data FROM submissions ORDER BY created_at DESC LIMIT ?")
+    .all(limit) as StoredSubmissionRow[];
+
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    source: row.source ?? undefined,
+    data: JSON.parse(row.data) as Record<string, unknown>,
+  }));
+}
+
+export function readSubmissionRecordsForOrder(orderId: string): SubmissionRecord[] {
+  const normalized = orderId.trim();
+  if (!normalized) return [];
+  const rows = getDatabase()
+    .prepare(`
+      SELECT id, created_at, source, data
+      FROM submissions
+      WHERE id = @orderId COLLATE NOCASE
+         OR json_extract(data, '$.orderId') = @orderId COLLATE NOCASE
+      ORDER BY created_at DESC
+    `)
+    .all({ orderId: normalized }) as StoredSubmissionRow[];
+
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    source: row.source ?? undefined,
+    data: JSON.parse(row.data) as Record<string, unknown>,
+  }));
+}
+
+export function findSubmissionRecordById(id: string): SubmissionRecord | null {
+  const row = getDatabase()
+    .prepare("SELECT id, created_at, source, data FROM submissions WHERE id = ? LIMIT 1")
+    .get(id) as StoredSubmissionRow | undefined;
+  if (!row) return null;
   return {
     id: row.id,
     createdAt: row.created_at,
@@ -111,70 +350,27 @@ function submissionFromRow(row: StoredSubmissionRow): SubmissionRecord {
   };
 }
 
-export async function appendSubmissionRecord(record: SubmissionRecord) {
-  await getDatabase().prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (?, ?, ?, ?)")
-    .bind(record.id, record.createdAt, record.source ?? null, JSON.stringify(record.data)).run();
+export function findCheckoutByPaymentReference(reference: string): SubmissionRecord | null {
+  const row = getDatabase()
+    .prepare(`
+      SELECT id, created_at, source, data
+      FROM submissions
+      WHERE json_extract(data, '$.submissionType') = 'checkout-request'
+        AND json_extract(data, '$.paymentReference') = ?
+      ORDER BY created_at ASC
+      LIMIT 1
+    `)
+    .get(reference) as StoredSubmissionRow | undefined;
+  if (!row) return null;
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    source: row.source ?? undefined,
+    data: JSON.parse(row.data) as Record<string, unknown>,
+  };
 }
 
-export async function appendSubmissionRecordWithDeliveryProof(
-  record: SubmissionRecord,
-  input: { orderId: string; codeHash: string; usedBy: string; recipientName: string },
-) {
-  const db = getDatabase();
-  const results = await db.batch([
-    db.prepare(`
-      UPDATE delivery_proofs SET used_at = ?, used_by = ?, recipient_name = ?
-      WHERE order_id = ? COLLATE NOCASE AND code_hash = ? AND used_at IS NULL
-    `).bind(record.createdAt, input.usedBy, input.recipientName, input.orderId, input.codeHash),
-    db.prepare(`
-      INSERT INTO submissions (id, created_at, source, data)
-      SELECT ?, ?, ?, ? WHERE EXISTS (
-        SELECT 1 FROM delivery_proofs
-        WHERE order_id = ? COLLATE NOCASE AND code_hash = ? AND used_at = ?
-      )
-    `).bind(record.id, record.createdAt, record.source ?? null, JSON.stringify(record.data), input.orderId, input.codeHash, record.createdAt),
-  ]);
-  if ((results[0].meta.changes ?? 0) !== 1 || (results[1].meta.changes ?? 0) !== 1) {
-    throw new Error("Delivery confirmation code is invalid or already used.");
-  }
-}
-
-export async function readSubmissionRecords(limit = 200): Promise<SubmissionRecord[]> {
-  const result = await getDatabase().prepare(
-    "SELECT id, created_at, source, data FROM submissions ORDER BY created_at DESC LIMIT ?",
-  ).bind(Math.max(1, Math.min(limit, 500))).all<StoredSubmissionRow>();
-  return result.results.map(submissionFromRow);
-}
-
-export async function readSubmissionRecordsForOrder(orderId: string): Promise<SubmissionRecord[]> {
-  const normalized = orderId.trim();
-  if (!normalized) return [];
-  const result = await getDatabase().prepare(`
-    SELECT id, created_at, source, data FROM submissions
-    WHERE id = ? COLLATE NOCASE OR json_extract(data, '$.orderId') = ? COLLATE NOCASE
-    ORDER BY created_at DESC
-  `).bind(normalized, normalized).all<StoredSubmissionRow>();
-  return result.results.map(submissionFromRow);
-}
-
-export async function findSubmissionRecordById(id: string): Promise<SubmissionRecord | null> {
-  const row = await getDatabase().prepare(
-    "SELECT id, created_at, source, data FROM submissions WHERE id = ? LIMIT 1",
-  ).bind(id).first<StoredSubmissionRow>();
-  return row ? submissionFromRow(row) : null;
-}
-
-export async function findCheckoutByPaymentReference(reference: string): Promise<SubmissionRecord | null> {
-  const row = await getDatabase().prepare(`
-    SELECT id, created_at, source, data FROM submissions
-    WHERE json_extract(data, '$.submissionType') = 'checkout-request'
-      AND json_extract(data, '$.paymentReference') = ?
-    ORDER BY created_at ASC LIMIT 1
-  `).bind(reference).first<StoredSubmissionRow>();
-  return row ? submissionFromRow(row) : null;
-}
-
-export async function appendPaymentVerificationOnce(input: {
+export function appendPaymentVerificationOnce(input: {
   record: SubmissionRecord;
   reference: string;
   status: string;
@@ -182,74 +378,80 @@ export async function appendPaymentVerificationOnce(input: {
   amountMinor: number;
   currency: string;
 }) {
-  const inserted = await getDatabase().prepare(`
-    INSERT OR IGNORE INTO payment_verifications
-      (reference, status, transaction_id, amount_minor, currency, record_id, verified_at,
-       submission_created_at, submission_source, submission_data)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    RETURNING reference
-  `).bind(
-    input.reference,
-    input.status,
-    input.transactionId ?? null,
-    input.amountMinor,
-    input.currency,
-    input.record.id,
-    input.record.createdAt,
-    input.record.createdAt,
-    input.record.source ?? null,
-    JSON.stringify(input.record.data),
-  ).first<{ reference: string }>();
-  return inserted?.reference === input.reference;
+  const db = getDatabase();
+  const save = db.transaction(() => {
+    const verification: StoredPaymentRow = {
+      reference: input.reference,
+      status: input.status,
+      transaction_id: input.transactionId ?? null,
+      amount_minor: input.amountMinor,
+      currency: input.currency,
+      record_id: input.record.id,
+      verified_at: input.record.createdAt,
+    };
+    const inserted = db.prepare(`
+      INSERT OR IGNORE INTO payment_verifications
+        (reference, status, transaction_id, amount_minor, currency, record_id, verified_at)
+      VALUES
+        (@reference, @status, @transaction_id, @amount_minor, @currency, @record_id, @verified_at)
+    `).run(verification);
+    if (inserted.changes === 0) return false;
+    db.prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
+      .run({
+        id: input.record.id,
+        createdAt: input.record.createdAt,
+        source: input.record.source ?? null,
+        data: JSON.stringify(input.record.data),
+      });
+    return true;
+  });
+  return save.immediate();
 }
 
-export async function claimWorkflowAction(input: { claimKey: string; orderId: string; actionKey: string; orderUpdatedAt: string }) {
-  const result = await getDatabase().prepare(`
+export function claimWorkflowAction(input: {
+  claimKey: string;
+  orderId: string;
+  actionKey: string;
+  orderUpdatedAt: string;
+}) {
+  const claimedAt = new Date().toISOString();
+  const result = getDatabase().prepare(`
     INSERT OR IGNORE INTO workflow_action_claims
       (claim_key, order_id, action_key, order_updated_at, claimed_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).bind(input.claimKey, input.orderId, input.actionKey, input.orderUpdatedAt, new Date().toISOString()).run();
-  return (result.meta.changes ?? 0) === 1;
+    VALUES
+      (@claimKey, @orderId, @actionKey, @orderUpdatedAt, @claimedAt)
+  `).run({ ...input, claimedAt });
+  return result.changes === 1;
 }
 
-export async function releaseWorkflowActionClaim(claimKey: string) {
-  await getDatabase().prepare("DELETE FROM workflow_action_claims WHERE claim_key = ?").bind(claimKey).run();
+export function releaseWorkflowActionClaim(claimKey: string) {
+  getDatabase().prepare("DELETE FROM workflow_action_claims WHERE claim_key = ?").run(claimKey);
 }
 
-export async function databaseReadiness() {
-  const row = await getDatabase().prepare("SELECT 1 AS ok").first<{ ok: number }>();
-  return row?.ok === 1;
+export function databaseReadiness() {
+  const db = getDatabase();
+  const quickCheck = db.pragma("quick_check", { simple: true });
+  const writable = db.prepare("SELECT 1 AS ok").get() as { ok?: number } | undefined;
+  return quickCheck === "ok" && writable?.ok === 1;
 }
 
-export async function consumeRateLimit(key: string, limit: number, windowMs: number) {
+export function consumeRateLimit(key: string, limit: number, windowMs: number) {
   const now = Date.now();
   const resetAt = now + windowMs;
-  const row = await getDatabase().prepare(`
-    INSERT INTO rate_limits (key, count, reset_at) VALUES (?, 1, ?)
+  const db = getDatabase();
+  const current = db.prepare(`
+    INSERT INTO rate_limits (key, count, reset_at)
+    VALUES (@key, 1, @resetAt)
     ON CONFLICT(key) DO UPDATE SET
-      count = CASE WHEN rate_limits.reset_at <= ? THEN 1 ELSE rate_limits.count + 1 END,
-      reset_at = CASE WHEN rate_limits.reset_at <= ? THEN excluded.reset_at ELSE rate_limits.reset_at END
+      count = CASE WHEN rate_limits.reset_at <= @now THEN 1 ELSE rate_limits.count + 1 END,
+      reset_at = CASE WHEN rate_limits.reset_at <= @now THEN @resetAt ELSE rate_limits.reset_at END
     RETURNING key, count, reset_at
-  `).bind(key, resetAt, now, now).first<RateLimitRow>();
-  if (!row) throw new Error("Rate limit state was not returned.");
-  return { limited: row.count > limit, remaining: Math.max(0, limit - row.count), resetAt: row.reset_at };
-}
-
-export async function issueLoginChallenge(nonce: string, email: string, expiresAt: number, createdAt = Date.now()) {
-  const result = await getDatabase().prepare(`
-    INSERT INTO login_challenges (nonce, email, expires_at, used_at, created_at)
-    VALUES (?, ?, ?, NULL, ?)
-  `).bind(nonce, email, expiresAt, createdAt).run();
-  return (result.meta.changes ?? 0) === 1;
-}
-
-export async function claimLoginChallenge(nonce: string, email: string, now = Date.now()) {
-  const result = await getDatabase().prepare(`
-    UPDATE login_challenges SET used_at = ?
-    WHERE nonce = ? AND email = ? COLLATE NOCASE
-      AND used_at IS NULL AND expires_at >= ?
-  `).bind(now, nonce, email, now).run();
-  return (result.meta.changes ?? 0) === 1;
+  `).get({ key, now, resetAt }) as RateLimitRow;
+  return {
+    limited: current.count > limit,
+    remaining: Math.max(0, limit - current.count),
+    resetAt: current.reset_at,
+  };
 }
 
 function earlyAccessFromRow(row: StoredEarlyAccessRow): EarlyAccessSignup {
@@ -268,33 +470,37 @@ function earlyAccessFromRow(row: StoredEarlyAccessRow): EarlyAccessSignup {
   };
 }
 
-export async function upsertEarlyAccessSignup(input: Omit<EarlyAccessSignup, "createdAt" | "updatedAt" | "marketingStatus">) {
+export function upsertEarlyAccessSignup(input: Omit<EarlyAccessSignup, "createdAt" | "updatedAt" | "marketingStatus">) {
   const db = getDatabase();
-  const existing = await db.prepare("SELECT id FROM early_access_signups WHERE phone = ? LIMIT 1")
-    .bind(input.phone).first<{ id: string }>();
   const now = new Date().toISOString();
-  const row = await db.prepare(`
+  const existing = db.prepare("SELECT id FROM early_access_signups WHERE phone = ? LIMIT 1").get(input.phone) as { id: string } | undefined;
+  const row = db.prepare(`
     INSERT INTO early_access_signups
       (id, first_name, phone, email, area, frequency, consent_at, consent_version, marketing_status, created_at, updated_at)
-    VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, 'active', ?, ?)
-    ON CONFLICT(phone) DO UPDATE SET first_name = excluded.first_name, email = excluded.email,
-      area = excluded.area, frequency = excluded.frequency, consent_at = excluded.consent_at,
-      consent_version = excluded.consent_version, marketing_status = 'active', updated_at = excluded.updated_at
+    VALUES
+      (@id, @firstName, @phone, NULLIF(@email, ''), @area, @frequency, @consentAt, @consentVersion, 'active', @now, @now)
+    ON CONFLICT(phone) DO UPDATE SET
+      first_name = excluded.first_name,
+      email = excluded.email,
+      area = excluded.area,
+      frequency = excluded.frequency,
+      consent_at = excluded.consent_at,
+      consent_version = excluded.consent_version,
+      marketing_status = 'active',
+      updated_at = excluded.updated_at
     RETURNING *
-  `).bind(input.id, input.firstName, input.phone, input.email, input.area, input.frequency, input.consentAt, input.consentVersion, now, now)
-    .first<StoredEarlyAccessRow>();
-  if (!row) throw new Error("Early-access signup was not stored.");
+  `).get({ ...input, now }) as StoredEarlyAccessRow;
   return { signup: earlyAccessFromRow(row), updated: Boolean(existing) };
 }
 
-export async function optOutEarlyAccess(contact: string) {
+export function optOutEarlyAccess(contact: string) {
   const normalized = contact.trim().toLowerCase();
   if (!normalized) return 0;
-  const result = await getDatabase().prepare(`
-    UPDATE early_access_signups SET marketing_status = 'opted_out', updated_at = ?
-    WHERE lower(phone) = ? OR lower(COALESCE(email, '')) = ?
-  `).bind(new Date().toISOString(), normalized, normalized).run();
-  return result.meta.changes ?? 0;
+  return getDatabase().prepare(`
+    UPDATE early_access_signups
+    SET marketing_status = 'opted_out', updated_at = @updatedAt
+    WHERE lower(phone) = @contact OR lower(COALESCE(email, '')) = @contact
+  `).run({ contact: normalized, updatedAt: new Date().toISOString() }).changes;
 }
 
 function privacyRequestFromRow(row: StoredPrivacyRequestRow): PrivacyRequest {
@@ -310,13 +516,13 @@ function privacyRequestFromRow(row: StoredPrivacyRequestRow): PrivacyRequest {
   };
 }
 
-export async function createPrivacyRequest(input: Omit<PrivacyRequest, "status" | "createdAt" | "updatedAt">) {
+export function createPrivacyRequest(input: Omit<PrivacyRequest, "status" | "createdAt" | "updatedAt">) {
   const now = new Date().toISOString();
-  const row = await getDatabase().prepare(`
+  const row = getDatabase().prepare(`
     INSERT INTO privacy_requests (id, request_type, name, contact, order_id, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, NULLIF(?, ''), 'received', ?, ?) RETURNING *
-  `).bind(input.id, input.requestType, input.name, input.contact, input.orderId, now, now).first<StoredPrivacyRequestRow>();
-  if (!row) throw new Error("Privacy request was not stored.");
+    VALUES (@id, @requestType, @name, @contact, NULLIF(@orderId, ''), 'received', @now, @now)
+    RETURNING *
+  `).get({ ...input, now }) as StoredPrivacyRequestRow;
   return privacyRequestFromRow(row);
 }
 
@@ -338,28 +544,30 @@ function outboxFromRow(row: StoredOutboxRow): NotificationOutboxRecord {
   };
 }
 
-export async function enqueueNotification(input: Pick<NotificationOutboxRecord, "id" | "dedupeKey" | "channel" | "target" | "payload">) {
+export function enqueueNotification(input: Pick<NotificationOutboxRecord, "id" | "dedupeKey" | "channel" | "target" | "payload">) {
   const now = new Date().toISOString();
-  const row = await getDatabase().prepare(`
+  const row = getDatabase().prepare(`
     INSERT INTO notification_outbox
       (id, dedupe_key, channel, target, payload, status, attempts, next_attempt_at, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
-    ON CONFLICT(dedupe_key) DO UPDATE SET dedupe_key = excluded.dedupe_key RETURNING *
-  `).bind(input.id, input.dedupeKey, input.channel, input.target, JSON.stringify(input.payload), now, now, now).first<StoredOutboxRow>();
-  if (!row) throw new Error("Notification was not queued.");
+    VALUES
+      (@id, @dedupeKey, @channel, @target, @payload, 'pending', 0, @now, @now, @now)
+    ON CONFLICT(dedupe_key) DO UPDATE SET dedupe_key = excluded.dedupe_key
+    RETURNING *
+  `).get({ ...input, payload: JSON.stringify(input.payload), now }) as StoredOutboxRow;
   return outboxFromRow(row);
 }
 
-export async function readDueNotifications(limit = 20) {
-  const result = await getDatabase().prepare(`
+export function readDueNotifications(limit = 20) {
+  const rows = getDatabase().prepare(`
     SELECT * FROM notification_outbox
-    WHERE status IN ('pending', 'failed') AND next_attempt_at <= ? AND attempts < 8
-    ORDER BY created_at ASC LIMIT ?
-  `).bind(new Date().toISOString(), Math.max(1, Math.min(limit, 100))).all<StoredOutboxRow>();
-  return result.results.map(outboxFromRow);
+    WHERE status IN ('pending', 'failed') AND next_attempt_at <= @now AND attempts < 8
+    ORDER BY created_at ASC
+    LIMIT @limit
+  `).all({ now: new Date().toISOString(), limit }) as StoredOutboxRow[];
+  return rows.map(outboxFromRow);
 }
 
-export async function updateNotificationDelivery(input: {
+export function updateNotificationDelivery(input: {
   id: string;
   status: "sent" | "failed" | "skipped";
   providerId?: string;
@@ -367,145 +575,141 @@ export async function updateNotificationDelivery(input: {
   retryAfterMs?: number;
 }) {
   const now = new Date();
-  await getDatabase().prepare(`
+  const nextAttemptAt = new Date(now.getTime() + (input.retryAfterMs ?? 0)).toISOString();
+  getDatabase().prepare(`
     UPDATE notification_outbox
-    SET status = ?, attempts = attempts + 1, next_attempt_at = ?, provider_id = NULLIF(?, ''),
-        last_error = NULLIF(?, ''), updated_at = ?, sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END
-    WHERE id = ?
-  `).bind(
-    input.status,
-    new Date(now.getTime() + (input.retryAfterMs ?? 0)).toISOString(),
-    input.providerId ?? "",
-    input.error?.slice(0, 500) ?? "",
-    now.toISOString(),
-    input.status,
-    now.toISOString(),
-    input.id,
-  ).run();
+    SET status = @status,
+        attempts = attempts + 1,
+        next_attempt_at = @nextAttemptAt,
+        provider_id = NULLIF(@providerId, ''),
+        last_error = NULLIF(@error, ''),
+        updated_at = @now,
+        sent_at = CASE WHEN @status = 'sent' THEN @now ELSE sent_at END
+    WHERE id = @id
+  `).run({ ...input, providerId: input.providerId ?? "", error: input.error?.slice(0, 500) ?? "", nextAttemptAt, now: now.toISOString() });
 }
 
-export async function notificationOutboxMetrics() {
-  return await getDatabase().prepare(`
-    SELECT SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
-           SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
-           SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent
+export function notificationOutboxMetrics() {
+  return getDatabase().prepare(`
+    SELECT
+      SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+      SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent
     FROM notification_outbox
-  `).first<{ pending: number | null; failed: number | null; sent: number | null }>() ?? { pending: 0, failed: 0, sent: 0 };
+  `).get() as { pending: number | null; failed: number | null; sent: number | null };
 }
 
-export async function operationsDataMetrics() {
+export function operationsDataMetrics() {
   const db = getDatabase();
-  const [submissions, earlyAccess, privacy, outbox] = await Promise.all([
-    db.prepare("SELECT COUNT(*) AS total FROM submissions").first<{ total: number }>(),
-    db.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN marketing_status = 'active' THEN 1 ELSE 0 END) AS active FROM early_access_signups")
-      .first<{ total: number; active: number | null }>(),
-    db.prepare("SELECT COUNT(*) AS total, SUM(CASE WHEN status IN ('received', 'identity_review') THEN 1 ELSE 0 END) AS open FROM privacy_requests")
-      .first<{ total: number; open: number | null }>(),
-    notificationOutboxMetrics(),
-  ]);
+  const submissions = db.prepare("SELECT COUNT(*) AS total FROM submissions").get() as { total: number };
+  const earlyAccess = db.prepare(`
+    SELECT COUNT(*) AS total, SUM(CASE WHEN marketing_status = 'active' THEN 1 ELSE 0 END) AS active
+    FROM early_access_signups
+  `).get() as { total: number; active: number | null };
+  const privacy = db.prepare(`
+    SELECT COUNT(*) AS total, SUM(CASE WHEN status IN ('received', 'identity_review') THEN 1 ELSE 0 END) AS open
+    FROM privacy_requests
+  `).get() as { total: number; open: number | null };
+  const outbox = notificationOutboxMetrics();
   return {
-    submissions: submissions?.total ?? 0,
-    earlyAccess: { total: earlyAccess?.total ?? 0, active: earlyAccess?.active ?? 0 },
-    privacyRequests: { total: privacy?.total ?? 0, open: privacy?.open ?? 0 },
+    submissions: submissions.total,
+    earlyAccess: { total: earlyAccess.total, active: earlyAccess.active ?? 0 },
+    privacyRequests: { total: privacy.total, open: privacy.open ?? 0 },
     notifications: { pending: outbox.pending ?? 0, failed: outbox.failed ?? 0, sent: outbox.sent ?? 0 },
   };
 }
 
-export async function listPrivacyRequests(limit = 100) {
-  const result = await getDatabase().prepare("SELECT * FROM privacy_requests ORDER BY created_at ASC LIMIT ?")
-    .bind(Math.max(1, Math.min(limit, 250))).all<StoredPrivacyRequestRow>();
-  return result.results.map(privacyRequestFromRow);
+export function listPrivacyRequests(limit = 100) {
+  const rows = getDatabase().prepare("SELECT * FROM privacy_requests ORDER BY created_at ASC LIMIT ?").all(Math.max(1, Math.min(limit, 250))) as StoredPrivacyRequestRow[];
+  return rows.map(privacyRequestFromRow);
 }
 
-export async function updatePrivacyRequestStatus(id: string, status: PrivacyRequest["status"]) {
-  const row = await getDatabase().prepare(
-    "UPDATE privacy_requests SET status = ?, updated_at = ? WHERE id = ? RETURNING *",
-  ).bind(status, new Date().toISOString(), id).first<StoredPrivacyRequestRow>();
+export function updatePrivacyRequestStatus(id: string, status: PrivacyRequest["status"]) {
+  const row = getDatabase().prepare(`
+    UPDATE privacy_requests SET status = @status, updated_at = @updatedAt
+    WHERE id = @id RETURNING *
+  `).get({ id, status, updatedAt: new Date().toISOString() }) as StoredPrivacyRequestRow | undefined;
   return row ? privacyRequestFromRow(row) : null;
 }
 
-export async function purgeOperationalData(now = Date.now(), householdLaunchDate = process.env.BUBBLEWASH_HOUSEHOLD_LAUNCH_DATE ?? "") {
+export function purgeOperationalData(now = Date.now(), householdLaunchDate = process.env.BUBBLEWASH_HOUSEHOLD_LAUNCH_DATE ?? "") {
   const db = getDatabase();
   const isoDaysAgo = (days: number) => new Date(now - days * 24 * 60 * 60_000).toISOString();
-  const launch = /^\d{4}-\d{2}-\d{2}$/.test(householdLaunchDate) ? new Date(`${householdLaunchDate}T00:00:00.000Z`).getTime() : Number.NaN;
-  const baseResults = await db.batch([
-    db.prepare("DELETE FROM rate_limits WHERE reset_at < ?").bind(now - 24 * 60 * 60_000),
-    db.prepare("DELETE FROM login_challenges WHERE expires_at < ? OR used_at < ?").bind(now, now - 24 * 60 * 60_000),
-    db.prepare("DELETE FROM mfa_replay_guard WHERE accepted_at < ?").bind(isoDaysAgo(2)),
-    db.prepare("DELETE FROM workflow_action_claims WHERE claimed_at < ?").bind(isoDaysAgo(90)),
-    db.prepare("DELETE FROM notification_outbox WHERE updated_at < ?").bind(isoDaysAgo(90)),
-    db.prepare("DELETE FROM early_access_signups WHERE marketing_status = 'opted_out' AND updated_at < ?").bind(isoDaysAgo(30)),
-    Number.isFinite(launch) && now >= launch + 365 * 24 * 60 * 60_000
-      ? db.prepare("DELETE FROM early_access_signups WHERE marketing_status = 'active' AND updated_at <= ?")
-        .bind(new Date(launch + 365 * 24 * 60 * 60_000).toISOString())
-      : db.prepare("DELETE FROM early_access_signups WHERE 0 = 1"),
-    db.prepare("DELETE FROM privacy_requests WHERE status IN ('completed', 'declined') AND updated_at < ?").bind(isoDaysAgo(365 * 3)),
-    db.prepare("DELETE FROM driver_live_locations WHERE captured_at < ?").bind(new Date(now - LIVE_LOCATION_EXPIRES_AFTER_MS).toISOString()),
-  ]);
-  const closed = await db.prepare(`
-    SELECT DISTINCT json_extract(data, '$.orderId') AS orderId FROM submissions
-    WHERE json_extract(data, '$.submissionType') = 'admin-operation'
-      AND json_extract(data, '$.actionType') = 'Close order' AND created_at < ? LIMIT 50
-  `).bind(isoDaysAgo(365 * 2)).all<{ orderId: string }>();
-  let closedOrderRecords = 0;
-  for (const row of closed.results) {
-    if (!row.orderId) continue;
-    const results = await db.batch([
-      db.prepare("DELETE FROM driver_live_locations WHERE order_id = ? COLLATE NOCASE").bind(row.orderId),
-      db.prepare("DELETE FROM workflow_action_claims WHERE order_id = ? COLLATE NOCASE").bind(row.orderId),
-      db.prepare("DELETE FROM delivery_proofs WHERE order_id = ? COLLATE NOCASE").bind(row.orderId),
-      db.prepare("DELETE FROM submissions WHERE id = ? COLLATE NOCASE OR json_extract(data, '$.orderId') = ? COLLATE NOCASE").bind(row.orderId, row.orderId),
-    ]);
-    closedOrderRecords += results[3].meta.changes ?? 0;
-  }
-  const orphaned = await db.prepare("DELETE FROM payment_verifications WHERE record_id NOT IN (SELECT id FROM submissions)").run();
-  return {
-    expiredRateLimits: baseResults[0].meta.changes ?? 0,
-    loginChallenges: baseResults[1].meta.changes ?? 0,
-    mfaReplayGuards: baseResults[2].meta.changes ?? 0,
-    workflowClaims: baseResults[3].meta.changes ?? 0,
-    notificationLogs: baseResults[4].meta.changes ?? 0,
-    optedOutSignups: baseResults[5].meta.changes ?? 0,
-    expiredActiveSignups: baseResults[6].meta.changes ?? 0,
-    privacyRequestLogs: baseResults[7].meta.changes ?? 0,
-    expiredDriverLocations: baseResults[8].meta.changes ?? 0,
-    closedOrderRecords,
-    orphanedPaymentVerifications: orphaned.meta.changes ?? 0,
-  };
+  const result: Record<string, number> = {};
+  const purge = db.transaction(() => {
+    result.expiredRateLimits = db.prepare("DELETE FROM rate_limits WHERE reset_at < ?").run(now - 24 * 60 * 60_000).changes;
+    result.mfaReplayGuards = db.prepare("DELETE FROM mfa_replay_guard WHERE accepted_at < ?").run(isoDaysAgo(2)).changes;
+    result.workflowClaims = db.prepare("DELETE FROM workflow_action_claims WHERE claimed_at < ?").run(isoDaysAgo(90)).changes;
+    result.notificationLogs = db.prepare("DELETE FROM notification_outbox WHERE updated_at < ?").run(isoDaysAgo(90)).changes;
+    result.optedOutSignups = db.prepare("DELETE FROM early_access_signups WHERE marketing_status = 'opted_out' AND updated_at < ?").run(isoDaysAgo(30)).changes;
+    const launch = /^\d{4}-\d{2}-\d{2}$/.test(householdLaunchDate) ? new Date(`${householdLaunchDate}T00:00:00.000Z`).getTime() : Number.NaN;
+    if (Number.isFinite(launch) && now >= launch + 365 * 24 * 60 * 60_000) {
+      result.expiredActiveSignups = db.prepare("DELETE FROM early_access_signups WHERE marketing_status = 'active' AND updated_at <= ?").run(new Date(launch + 365 * 24 * 60 * 60_000).toISOString()).changes;
+    } else {
+      result.expiredActiveSignups = 0;
+    }
+    result.privacyRequestLogs = db.prepare("DELETE FROM privacy_requests WHERE status IN ('completed', 'declined') AND updated_at < ?").run(isoDaysAgo(365 * 3)).changes;
+
+    const closedOrders = db.prepare(`
+      SELECT DISTINCT json_extract(data, '$.orderId') AS orderId
+      FROM submissions
+      WHERE json_extract(data, '$.submissionType') = 'admin-operation'
+        AND json_extract(data, '$.actionType') = 'Close order'
+        AND created_at < ?
+    `).all(isoDaysAgo(365 * 2)) as Array<{ orderId: string }>;
+    let deletedOrderRecords = 0;
+    for (const { orderId } of closedOrders) {
+      if (!orderId) continue;
+      db.prepare("DELETE FROM driver_live_locations WHERE order_id = ? COLLATE NOCASE").run(orderId);
+      db.prepare("DELETE FROM workflow_action_claims WHERE order_id = ? COLLATE NOCASE").run(orderId);
+      db.prepare("DELETE FROM delivery_proofs WHERE order_id = ? COLLATE NOCASE").run(orderId);
+      deletedOrderRecords += db.prepare(`
+        DELETE FROM submissions WHERE id = @orderId COLLATE NOCASE OR json_extract(data, '$.orderId') = @orderId COLLATE NOCASE
+      `).run({ orderId }).changes;
+    }
+    result.closedOrderRecords = deletedOrderRecords;
+    result.orphanedPaymentVerifications = db.prepare("DELETE FROM payment_verifications WHERE record_id NOT IN (SELECT id FROM submissions)").run().changes;
+  });
+  purge();
+  return result;
 }
 
-export async function claimMfaTimestep(subject: string, timestep: number) {
-  const result = await getDatabase().prepare(`
-    INSERT INTO mfa_replay_guard (subject, timestep, accepted_at) VALUES (?, ?, ?)
-    ON CONFLICT(subject) DO UPDATE SET timestep = excluded.timestep, accepted_at = excluded.accepted_at
+export function claimMfaTimestep(subject: string, timestep: number) {
+  const result = getDatabase().prepare(`
+    INSERT INTO mfa_replay_guard (subject, timestep, accepted_at)
+    VALUES (@subject, @timestep, @acceptedAt)
+    ON CONFLICT(subject) DO UPDATE SET
+      timestep = excluded.timestep,
+      accepted_at = excluded.accepted_at
     WHERE mfa_replay_guard.timestep < excluded.timestep
-  `).bind(subject, timestep, new Date().toISOString()).run();
-  return (result.meta.changes ?? 0) === 1;
+  `).run({ subject, timestep, acceptedAt: new Date().toISOString() });
+  return result.changes === 1;
 }
 
-export async function storeDeliveryCode(orderId: string, codeHash: string) {
-  const result = await getDatabase().prepare(`
-    INSERT INTO delivery_proofs (order_id, code_hash, created_at) VALUES (?, ?, ?)
+export function storeDeliveryCode(orderId: string, codeHash: string) {
+  const createdAt = new Date().toISOString();
+  return getDatabase().prepare(`
+    INSERT INTO delivery_proofs (order_id, code_hash, created_at)
+    VALUES (@orderId, @codeHash, @createdAt)
     ON CONFLICT(order_id) DO NOTHING
-  `).bind(orderId, codeHash, new Date().toISOString()).run();
-  return (result.meta.changes ?? 0) === 1;
+  `).run({ orderId, codeHash, createdAt }).changes === 1;
 }
 
-export async function deliveryCodeRecord(orderId: string) {
-  return await getDatabase().prepare(`
+export function deliveryCodeRecord(orderId: string) {
+  return getDatabase().prepare(`
     SELECT order_id AS orderId, code_hash AS codeHash, created_at AS createdAt,
            COALESCE(used_at, '') AS usedAt, COALESCE(used_by, '') AS usedBy,
            COALESCE(recipient_name, '') AS recipientName
     FROM delivery_proofs WHERE order_id = ? COLLATE NOCASE LIMIT 1
-  `).bind(orderId).first<{ orderId: string; codeHash: string; createdAt: string; usedAt: string; usedBy: string; recipientName: string }>();
+  `).get(orderId) as { orderId: string; codeHash: string; createdAt: string; usedAt: string; usedBy: string; recipientName: string } | undefined;
 }
 
-export async function consumeDeliveryCode(orderId: string, codeHash: string, usedBy: string, recipientName: string) {
-  const result = await getDatabase().prepare(`
-    UPDATE delivery_proofs SET used_at = ?, used_by = ?, recipient_name = ?
-    WHERE order_id = ? COLLATE NOCASE AND code_hash = ? AND used_at IS NULL
-  `).bind(new Date().toISOString(), usedBy, recipientName, orderId, codeHash).run();
-  return (result.meta.changes ?? 0) === 1;
+export function consumeDeliveryCode(orderId: string, codeHash: string, usedBy: string, recipientName: string) {
+  return getDatabase().prepare(`
+    UPDATE delivery_proofs
+    SET used_at = @usedAt, used_by = @usedBy, recipient_name = @recipientName
+    WHERE order_id = @orderId COLLATE NOCASE AND code_hash = @codeHash AND used_at IS NULL
+  `).run({ orderId, codeHash, usedBy, recipientName, usedAt: new Date().toISOString() }).changes === 1;
 }
 
 function driverLocationFromRow(row: StoredDriverLocationRow): StoredDriverLocation {
@@ -520,51 +724,62 @@ function driverLocationFromRow(row: StoredDriverLocationRow): StoredDriverLocati
   };
 }
 
-export async function upsertDriverLiveLocation(location: StoredDriverLocation) {
-  const result = await getDatabase().prepare(`
+export function upsertDriverLiveLocation(location: StoredDriverLocation) {
+  const result = getDatabase().prepare(`
     INSERT INTO driver_live_locations
       (driver_id, order_id, latitude, longitude, accuracy_meters, captured_at, received_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(driver_id) DO UPDATE SET order_id = excluded.order_id, latitude = excluded.latitude,
-      longitude = excluded.longitude, accuracy_meters = excluded.accuracy_meters,
-      captured_at = excluded.captured_at, received_at = excluded.received_at
+    VALUES
+      (@driverId, @orderId, @latitude, @longitude, @accuracyMeters, @capturedAt, @receivedAt)
+    ON CONFLICT(driver_id) DO UPDATE SET
+      order_id = excluded.order_id,
+      latitude = excluded.latitude,
+      longitude = excluded.longitude,
+      accuracy_meters = excluded.accuracy_meters,
+      captured_at = excluded.captured_at,
+      received_at = excluded.received_at
     WHERE driver_live_locations.captured_at < excluded.captured_at
-  `).bind(location.driverId, location.orderId, location.latitude, location.longitude, location.accuracyMeters, location.capturedAt, location.receivedAt).run();
-  return (result.meta.changes ?? 0) === 1;
+  `).run(location);
+  return result.changes === 1;
 }
 
-export async function readDriverLiveLocation(driverId: string): Promise<StoredDriverLocation | null> {
-  const row = await getDatabase().prepare(`
+export function readDriverLiveLocation(driverId: string): StoredDriverLocation | null {
+  const row = getDatabase().prepare(`
     SELECT driver_id, order_id, latitude, longitude, accuracy_meters, captured_at, received_at
-    FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE AND captured_at >= ? LIMIT 1
-  `).bind(driverId.trim(), new Date(Date.now() - LIVE_LOCATION_EXPIRES_AFTER_MS).toISOString()).first<StoredDriverLocationRow>();
+    FROM driver_live_locations
+    WHERE driver_id = ? COLLATE NOCASE
+    LIMIT 1
+  `).get(driverId.trim()) as StoredDriverLocationRow | undefined;
   return row ? driverLocationFromRow(row) : null;
 }
 
-export async function readDriverLiveLocations(): Promise<StoredDriverLocation[]> {
-  const result = await getDatabase().prepare(`
+export function readDriverLiveLocations(): StoredDriverLocation[] {
+  const rows = getDatabase().prepare(`
     SELECT driver_id, order_id, latitude, longitude, accuracy_meters, captured_at, received_at
-    FROM driver_live_locations WHERE captured_at >= ? ORDER BY captured_at DESC
-  `).bind(new Date(Date.now() - LIVE_LOCATION_EXPIRES_AFTER_MS).toISOString()).all<StoredDriverLocationRow>();
-  return result.results.map(driverLocationFromRow);
+    FROM driver_live_locations
+    ORDER BY captured_at DESC
+  `).all() as StoredDriverLocationRow[];
+  return rows.map(driverLocationFromRow);
 }
 
-export async function deleteDriverLiveLocation(driverId: string) {
-  const result = await getDatabase().prepare("DELETE FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE")
-    .bind(driverId.trim()).run();
-  return (result.meta.changes ?? 0) === 1;
+export function deleteDriverLiveLocation(driverId: string) {
+  return getDatabase().prepare("DELETE FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE").run(driverId.trim()).changes === 1;
 }
 
-export async function deleteExpiredDriverLiveLocations(capturedBefore: string) {
-  const result = await getDatabase().prepare("DELETE FROM driver_live_locations WHERE captured_at < ?").bind(capturedBefore).run();
-  return result.meta.changes ?? 0;
+export function deleteExpiredDriverLiveLocations(capturedBefore: string) {
+  return getDatabase().prepare("DELETE FROM driver_live_locations WHERE captured_at < ?").run(capturedBefore).changes;
 }
 
-export async function resetDataStoreForTests() {
-  const db = getDatabase();
-  await db.batch([
-    "submissions", "rate_limits", "workflow_action_claims", "payment_verifications",
-    "driver_live_locations", "early_access_signups", "privacy_requests", "notification_outbox",
-    "mfa_replay_guard", "delivery_proofs", "migration_imports", "login_challenges",
-  ].map((table) => db.prepare(`DELETE FROM ${table}`)));
+export function resetDataStoreForTests() {
+  if (!database) return;
+  database.prepare("DELETE FROM submissions").run();
+  database.prepare("DELETE FROM rate_limits").run();
+  database.prepare("DELETE FROM workflow_action_claims").run();
+  database.prepare("DELETE FROM payment_verifications").run();
+  database.prepare("DELETE FROM driver_live_locations").run();
+  database.prepare("DELETE FROM early_access_signups").run();
+  database.prepare("DELETE FROM privacy_requests").run();
+  database.prepare("DELETE FROM notification_outbox").run();
+  database.prepare("DELETE FROM mfa_replay_guard").run();
+  database.prepare("DELETE FROM delivery_proofs").run();
+  lastLocationCleanupAt = 0;
 }

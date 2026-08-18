@@ -97,15 +97,14 @@ function serviceMatches(vendor: VendorAvailability, serviceType?: string) {
   });
 }
 
-async function selectAvailabilityVendor(area: string, serviceType: string | undefined, orderId: string) {
-  const [declines, vendors] = await Promise.all([listVendorDeclines(orderId), listVendorAvailability()]);
-  const declinedVendorIds = new Set(declines.map((decline) => decline.vendorId));
-  const available = vendors.filter((vendor) => statusAllowsVendor(vendor) && serviceMatches(vendor, serviceType) && !declinedVendorIds.has(vendor.vendorId));
+function selectAvailabilityVendor(area: string, serviceType: string | undefined, orderId: string) {
+  const declinedVendorIds = new Set(listVendorDeclines(orderId).map((decline) => decline.vendorId));
+  const available = listVendorAvailability().filter((vendor) => statusAllowsVendor(vendor) && serviceMatches(vendor, serviceType) && !declinedVendorIds.has(vendor.vendorId));
   return available.find((vendor) => listMatches(vendor.serviceZones, area));
 }
 
-async function selectAvailabilityDriver(area: string) {
-  const active = (await listDriverAvailability()).filter(statusAllowsDriver);
+function selectAvailabilityDriver(area: string) {
+  const active = listDriverAvailability().filter(statusAllowsDriver);
   return active.find((driver) => listMatches(driver.serviceZones, area));
 }
 
@@ -133,11 +132,9 @@ export function selectAssignmentPair(records: AssignmentRecord[], order: Assignm
   return { vendorName: vendor, driverName: driver, assignmentNote: notes.join(" ") };
 }
 
-export async function assignOrderFromAvailability(order: AvailabilityAssignmentOrder): Promise<AssignmentPair> {
-  const [vendorRow, driverRow] = await Promise.all([
-    isUnassigned(order.vendor) ? selectAvailabilityVendor(order.area, order.serviceType, order.orderId) : undefined,
-    isUnassigned(order.driver) ? selectAvailabilityDriver(order.area) : undefined,
-  ]);
+export function assignOrderFromAvailability(order: AvailabilityAssignmentOrder): AssignmentPair {
+  const vendorRow = isUnassigned(order.vendor) ? selectAvailabilityVendor(order.area, order.serviceType, order.orderId) : undefined;
+  const driverRow = isUnassigned(order.driver) ? selectAvailabilityDriver(order.area) : undefined;
   const missing = [
     isUnassigned(order.vendor) && !vendorRow ? "vendor" : "",
     isUnassigned(order.driver) && !driverRow ? "driver" : "",
@@ -145,7 +142,7 @@ export async function assignOrderFromAvailability(order: AvailabilityAssignmentO
   if (missing.length) {
     throw new Error(`No eligible ${missing.join(" or ")} matches ${order.area || "this order's route"}. Update approved coverage or capacity before assigning.`);
   }
-  const { vendor: reservedVendor, driver: reservedDriver, reservationId } = await reserveAssignmentCapacity(order.orderId, vendorRow?.vendorId, driverRow?.driverId);
+  const { vendor: reservedVendor, driver: reservedDriver, reservationId } = reserveAssignmentCapacity(order.orderId, vendorRow?.vendorId, driverRow?.driverId);
   const vendorNameValue = isUnassigned(order.vendor) ? (reservedVendor?.vendorName ?? "Needs admin review") : order.vendor;
   const driverNameValue = isUnassigned(order.driver) ? (reservedDriver?.driverName ?? "Needs admin onboarding") : order.driver;
 

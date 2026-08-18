@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server.js";
 import type { OrderSummary } from "@/lib/submissions";
 import { privateNoStoreHeaders, securityHeaders } from "./security-headers.js";
+import { matchesKnownDemoPassword } from "./passwords.ts";
+import { validTotpSecret } from "./totp.ts";
 
 export { privateNoStoreHeaders, securityHeaders };
 export type SecurityHeader = ReturnType<typeof securityHeaders>[number];
@@ -59,8 +61,24 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
   if (!env.BUBBLEWASH_SESSION_SECRET || env.BUBBLEWASH_SESSION_SECRET.length < 32) {
     errors.push("Set BUBBLEWASH_SESSION_SECRET to a strong 32+ character value in production.");
   }
-  if (env.BUBBLEWASH_DATABASE_DRIVER !== "d1") {
-    errors.push("Set BUBBLEWASH_DATABASE_DRIVER=d1 for the Cloudflare production topology.");
+  let backupKeyValid = false;
+  try {
+    backupKeyValid = Buffer.from(env.BUBBLEWASH_BACKUP_ENCRYPTION_KEY ?? "", "base64").length === 32;
+  } catch {
+    backupKeyValid = false;
+  }
+  if (!backupKeyValid) errors.push("Set BUBBLEWASH_BACKUP_ENCRYPTION_KEY to a base64-encoded 32-byte key.");
+  for (const name of ["BUBBLEWASH_BACKUP_PRIMARY_DIR", "BUBBLEWASH_BACKUP_OFFSITE_DIR", "BUBBLEWASH_BACKUP_STATUS_PATH"]) {
+    if (!env[name]?.startsWith("/")) errors.push(`Set ${name} to an absolute path.`);
+  }
+  if (env.BUBBLEWASH_BACKUP_PRIMARY_DIR && env.BUBBLEWASH_BACKUP_PRIMARY_DIR === env.BUBBLEWASH_BACKUP_OFFSITE_DIR) {
+    errors.push("Primary and off-site backup directories must be different mounted destinations.");
+  }
+  if (!env.BUBBLEWASH_DATABASE_PATH || !env.BUBBLEWASH_DATABASE_PATH.startsWith("/")) {
+    errors.push("Set BUBBLEWASH_DATABASE_PATH to an absolute path on the mounted persistent volume.");
+  }
+  if (env.BUBBLEWASH_DATABASE_DRIVER !== "sqlite") {
+    errors.push("Set BUBBLEWASH_DATABASE_DRIVER=sqlite for the supported single-replica pilot topology.");
   }
   try {
     const publicUrl = new URL(env.BUBBLEWASH_PUBLIC_URL ?? "");
@@ -69,6 +87,21 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
     }
   } catch {
     errors.push("Set BUBBLEWASH_PUBLIC_URL to the public HTTPS site origin.");
+  }
+  for (const role of ["ADMIN", "VENDOR", "DRIVER", "SUPPORT"]) {
+    if (!env[`BUBBLEWASH_${role}_EMAIL`]) errors.push(`Set BUBBLEWASH_${role}_EMAIL in production.`);
+    const passwordHash = env[`BUBBLEWASH_${role}_PASSWORD_HASH`];
+    if (!passwordHash) {
+      errors.push(`Set BUBBLEWASH_${role}_PASSWORD_HASH in production.`);
+    } else if (matchesKnownDemoPassword(passwordHash)) {
+      errors.push(`Rotate BUBBLEWASH_${role}_PASSWORD_HASH; known demo credentials are prohibited in production.`);
+    }
+  }
+  if (!env.BUBBLEWASH_VENDOR_ENTITY_ID?.trim()) {
+    errors.push("Set BUBBLEWASH_VENDOR_ENTITY_ID to the exact approved vendor roster ID in production.");
+  }
+  if (!env.BUBBLEWASH_DRIVER_ENTITY_ID?.trim()) {
+    errors.push("Set BUBBLEWASH_DRIVER_ENTITY_ID to the exact approved driver roster ID in production.");
   }
   const publicWhatsApp = (env.NEXT_PUBLIC_BUBBLEWASH_WHATSAPP ?? "").replace(/\D/g, "");
   if (publicWhatsApp && (publicWhatsApp.length < 8 || publicWhatsApp.length > 15 || /000000/.test(publicWhatsApp))) {
@@ -113,6 +146,9 @@ export function productionReadinessWarnings(env: NodeJS.ProcessEnv | Record<stri
   }
   if (env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED !== "true") {
     warnings.push("Pilot communication mode is active: operations must follow up with customers manually; automated email and WhatsApp updates are disabled.");
+  }
+  if (!validTotpSecret(env.BUBBLEWASH_ADMIN_TOTP_SECRET)) {
+    warnings.push("Admin sign-in remains fail-closed until MFA enrollment is completed.");
   }
   if (!env.BUBBLEWASH_MAINTENANCE_TOKEN || env.BUBBLEWASH_MAINTENANCE_TOKEN.length < 32) {
     warnings.push("Automated maintenance remains fail-closed until an operations token is installed.");

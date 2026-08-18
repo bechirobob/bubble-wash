@@ -1,11 +1,10 @@
 "use client";
 
-/* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-img-element -- The static login shell must not depend on Worker-rendered navigation or image optimization. */
-
+import Image from "next/image";
+import Link from "next/link";
 import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, Bike, Grid2X2, Headphones, ShieldCheck, WashingMachine, type LucideIcon } from "lucide-react";
-import { createLoginProof } from "@/lib/login-proof-client";
 
 const showCredentialCards = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_BUBBLEWASH_SHOW_DEMO_LOGIN === "true";
 
@@ -25,42 +24,22 @@ function LoginForm() {
   const [email, setEmail] = useState(showCredentialCards ? "admin@bubblewash.local" : "");
   const [password, setPassword] = useState("");
   const [totp, setTotp] = useState("");
-  const [pending, setPending] = useState(false);
   const [status, setStatus] = useState("Enter staff credentials to open a separate workspace.");
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPending(true);
-    setStatus("Securing credentials…");
-    try {
-      const challengeResponse = await fetch("/api/login/challenge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      const challengeData = await challengeResponse.json<{ ok: boolean; error?: string; challenge?: string; salt?: string }>();
-      if (!challengeResponse.ok || !challengeData.ok || !challengeData.challenge || !challengeData.salt) {
-        setStatus(challengeData.error ?? "Unable to begin sign in.");
-        return;
-      }
-      const proof = await createLoginProof(password, challengeData.salt, challengeData.challenge);
-      const response = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, challenge: challengeData.challenge, proof, totp, next: nextPath }),
-      });
-      const data = await response.json<{ ok: boolean; error?: string; next: string }>();
-      if (!response.ok || !data.ok) {
-        setStatus(data.error ?? "Unable to sign in.");
-        return;
-      }
-      window.location.href = data.next;
-    } catch {
-      setStatus("Unable to sign in. Check your connection and try again.");
-    } finally {
-      setPassword("");
-      setPending(false);
+    setStatus("Checking credentials…");
+    const response = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, totp, next: nextPath }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      setStatus(data.error ?? "Unable to sign in.");
+      return;
     }
+    window.location.href = data.next;
   }
 
   function fillCredential(emailValue: string) {
@@ -80,11 +59,11 @@ function LoginForm() {
   return (
     <main className="loginPage redesignLoginPage">
       <header className="redesignTopbar">
-        <a className="brand" href="/" aria-label="Bubble Wash home">
-          <span className="brandCrop"><img className="brandMark" src="/apple-icon.png" alt="" width={42} height={42} /></span>
+        <Link className="brand" href="/" aria-label="Bubble Wash home">
+          <span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={42} height={42} priority /></span>
           <span>Bubble Wash Staff</span>
-        </a>
-        <nav className="redesignTextNav" aria-label="Staff login links"><a href="/"><ArrowLeft aria-hidden="true" />Back to site</a><a href="/staff"><Grid2X2 aria-hidden="true" />Roles</a></nav>
+        </Link>
+        <nav className="redesignTextNav" aria-label="Staff login links"><Link href="/"><ArrowLeft aria-hidden="true" />Back to site</Link><Link href="/staff"><Grid2X2 aria-hidden="true" />Roles</Link></nav>
       </header>
       <section className="redesignLoginGrid" aria-labelledby="login-title">
         <aside className="redesignRoleList">
@@ -103,9 +82,9 @@ function LoginForm() {
           <label>Staff email<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Staff email" autoComplete="username" required /></label>
           <label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" autoComplete="current-password" required /></label>
           <label>Admin authenticator code <small>(admin only)</small><input value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} type="text" placeholder="6-digit code" inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" /></label>
-          <button className="button primary full" type="submit" disabled={pending}>{pending ? "Securing sign-in…" : "Sign in"}</button>
+          <button className="button primary full" type="submit">Sign in</button>
           <div className="destination"><strong>Destination:</strong> {nextPath}<br />Sessions should expire automatically on shared devices.</div>
-          <p className={/(unable|invalid|too many|expired|connection)/iu.test(status) ? "status error" : "status info"} role="status" aria-live="polite">{status}</p>
+          <p className="status success" role="status" aria-live="polite">{status}</p>
         </form>
       </section>
     </main>

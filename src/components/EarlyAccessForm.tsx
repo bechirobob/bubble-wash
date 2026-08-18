@@ -22,7 +22,7 @@ export function EarlyAccessForm() {
           consent: data.get("consent") === "on",
         }),
       });
-      const body = await response.json<{ ok: boolean; error?: string; message: string; updated: boolean; confirmation: { whatsapp: string; email: string } }>();
+      const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error ?? "Unable to join early access.");
       setResult({ kind: "success", message: body.message, updated: body.updated, confirmation: body.confirmation });
       form.reset();

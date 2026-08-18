@@ -8,8 +8,8 @@ export async function POST(request: NextRequest) {
   if (!maintenanceAuthorized(request.headers)) return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
   try {
     const delivered = await processNotificationOutbox(50);
-    const purged = await purgeOperationalData();
-    const metrics = await operationsDataMetrics();
+    const purged = purgeOperationalData();
+    const metrics = operationsDataMetrics();
     logEvent("info", "maintenance.completed", { deliveryAttempts: delivered.length, purged, metrics });
     return NextResponse.json({ ok: true, deliveryAttempts: delivered.length, purged, metrics, time: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
