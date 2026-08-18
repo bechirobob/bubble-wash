@@ -32,8 +32,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tailscale ssh root@hermes 'app_uid="$(id -u ubuntu)"; runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user start bubblewash-local.service; runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user is-active --quiet bubblewash-local.service'
+          tailscale ssh root@hermes '
+            set -euo pipefail
+            database=/home/ubuntu/bubblewash-runtime/data/bubblewash.sqlite
+            test -s "$database"
+            sqlite3 "$database" "PRAGMA quick_check;" | grep -Fx ok
+            app_uid="$(id -u ubuntu)"
+            runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user start bubblewash-local.service
+            runuser -u ubuntu -- env XDG_RUNTIME_DIR="/run/user/$app_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$app_uid/bus" systemctl --user is-active --quiet bubblewash-local.service
+            for attempt in $(seq 1 20); do
+              if curl --fail --silent --show-error --resolve bubblewash.co:443:127.0.0.1 --max-time 10 https://bubblewash.co/api/ready >/dev/null; then
+                exit 0
+              fi
+              sleep 2
+            done
+            exit 1
+          '
 
-      - name: Verify restored production
+      - name: Verify the retained origin directly
         shell: bash
-        run: curl --fail --silent --show-error --location --retry 12 --retry-all-errors --max-time 15 --output /dev/null https://bubblewash.co/api/health
+        run: |
+          set -euo pipefail
+          for path in / /services /book /track /manage /early-access /api/health /api/ready; do
+            tailscale ssh root@hermes "curl --fail --silent --show-error --resolve bubblewash.co:443:127.0.0.1 --max-time 15 --output /dev/null https://bubblewash.co$path"
+          done
