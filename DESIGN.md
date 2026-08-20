@@ -15,18 +15,19 @@
 
 ## Visual system tokens
 
-- Type: Space Grotesk for display/ops labels and Manrope for UI/body; 16px minimum form text on mobile.
-- Spacing: section padding scales from 54px mobile to 86px desktop; card gaps 14–18px; touch targets at least 44px.
-- Radius: 12px buttons, 18px cards, 22px mobile nav shell.
-- Shadow: soft single-layer shadows for cards; remove heavy effects on mobile.
-- Color roles: navy for authority, blue for actions, cyan for status accents, white cards over pale wash backgrounds, green only for success states.
+- Type: native Apple/system stack; compact headings, 16px-class body copy, and 44px form controls.
+- Spacing: public sections use 32–64px vertical rhythm; staff sections use 28–34px; information density comes from alignment and dividers rather than nested cards.
+- Radius: 4–10px only where a control needs an edge; content regions stay square and unboxed.
+- Shadow: none on content or navigation. Tight rings remain only on functional live-map markers, and the loading shimmer remains a status cue.
+- Brand: the shared Bubble Wash artwork is cropped for legibility but has no border, background tile, radius, or visible container on public, login, or staff surfaces.
+- Color roles: deep blue-green for actions and hierarchy, white surfaces, gray-blue text, and semantic green/amber/red only for status.
 
 ## Staff workspace production correction
 
 - Research notes: Rinse and Hamperapp organize customer flows around pickup, service, tracking/proof, and simple CTAs; Poplin reduces the buying path to “start order” and service facts; Laundry Boss presents operator tools as dashboard/business-intelligence modules, not tutorial cards.
 - User goal and attention model: trained staff should scan queue, SLA, route/customer facts, and action rail. They do not need each tile to explain itself.
 - Principles: remove redundant descriptions, keep manual tools collapsed, and let actions/status/timers carry the workflow. Gestalt grouping becomes `Metrics → Orders → Exceptions`; Fitts favors one strong action rail per order; feedback is concise: saved, failed, refreshed.
-- Visual system tokens: dark command surface, compact ticket rows, monospaced countdown numerals, muted metadata chips, and color only for SLA state/action priority.
+- Visual system tokens: white ledger surface, compact rows, clear countdown numerals, restrained metadata, and color only for SLA state/action priority.
 - Interaction and motion: SLA timers must be real client-side countdowns from persisted stage timestamps/targets, not static labels. Reduced-motion keeps the same information without decorative movement.
 - Component map/data shape: `SharedOrderBoard` shows role metrics, current-stage countdown, customer/order facts, action buttons, and collapsible timeline. `PortalShell` trims role copy. Manual forms collect exceptions only.
 - Critique checklist: if a card reads like onboarding copy, cut it; if the SLA is not counting down, fix it; if staff cannot act without scrolling through explanations, the board failed.
@@ -51,7 +52,7 @@
 
 ## Compact refinement pass
 
-- Mobile menu: treat the menu as a stateful overlay, not a hidden desktop nav. Use explicit open/closed visual state, `aria-expanded`, `aria-hidden`, Escape close, and close after link selection.
+- Mobile menu: use a compact in-flow disclosure beneath the header with explicit open/closed state, `aria-expanded`, Escape close, and close after link selection.
 - Bulky sections: operations, service handling, and assurance should read as compact proof modules. Shorten copy, reduce card padding, and let cards scan like operational receipts instead of essays.
 - Vendor trust: use image-backed cards with opaque overlays so partner cards feel more like real laundry operations while keeping text legible.
 - Payment lanes: use recognizable payment badges/icons for card, mobile money, bank, and invoice lanes. Keep accessible labels for screen readers, but avoid spelling every lane as plain text chips.

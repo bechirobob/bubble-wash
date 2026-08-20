@@ -1,9 +1,9 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ComponentType } from "react";
+import { useEffect, useState, type ComponentType } from "react";
+import { BrandLink } from "@/components/BrandLink";
 import {
   BookOpenCheck,
   CalendarPlus,
@@ -43,12 +43,18 @@ export function PublicHeader() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  useEffect(() => {
+    if (!mobileOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setMobileOpen(false);
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [mobileOpen]);
+
   return (
     <header className="siteHeader" id="top">
-      <Link className="brand" href="/" aria-label="Bubble Wash home" onClick={() => setMobileOpen(false)}>
-        <span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={58} height={58} priority /></span>
-        <span>Bubble Wash</span>
-      </Link>
+      <BrandLink priority onClick={() => setMobileOpen(false)} />
       <button className="menuButton" type="button" aria-controls="site-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen((current) => !current)}>
         {mobileOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
         <span>{mobileOpen ? "Close" : "Menu"}</span>
@@ -77,7 +83,7 @@ export function PublicFooter() {
   return (
     <footer className="footer pageShell">
       <div>
-        <Link className="brand footerBrand" href="/" aria-label="Bubble Wash home"><span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={58} height={58} /></span><span>Bubble Wash</span></Link>
+        <BrandLink className="footerBrand" />
         <p>Commercial laundry collection and delivery for businesses in Accra.</p>
       </div>
       <div>

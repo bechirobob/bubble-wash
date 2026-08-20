@@ -27,3 +27,19 @@ test("semantic tokens cover status roles, reduced motion, and forced colors", as
   assert.match(css, /forced-colors:\s*active/);
   assert.match(css, /\.loadingSkeletonRow > span::after/);
 });
+
+test("brand artwork is unboxed and shared across public and staff surfaces", async () => {
+  const css = await readFile(new URL("../src/app/globals.css", import.meta.url), "utf8");
+  const brand = await readFile(new URL("../src/components/BrandLink.tsx", import.meta.url), "utf8");
+  const artworkRule = css.match(/\.brandArtwork\s*\{([^}]*)\}/)?.[1] ?? "";
+  assert.ok(artworkRule, "brand artwork rule should exist");
+  assert.doesNotMatch(artworkRule, /border|background|border-radius/);
+  assert.match(brand, /className="brandArtwork"/);
+});
+
+test("the mobile menu exposes state and closes with Escape", async () => {
+  const source = await readFile(new URL("../src/components/PublicChrome.tsx", import.meta.url), "utf8");
+  assert.match(source, /aria-expanded=\{mobileOpen\}/);
+  assert.match(source, /event\.key === "Escape"/);
+  assert.match(source, /removeEventListener\("keydown", closeOnEscape\)/);
+});

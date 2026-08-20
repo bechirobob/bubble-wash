@@ -1,6 +1,6 @@
-import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Bike, Headphones, ShieldCheck, WashingMachine } from "lucide-react";
+import { BrandLink } from "@/components/BrandLink";
 
 export const dynamic = "force-dynamic";
 
@@ -39,10 +39,7 @@ export default function StaffAccessPage() {
   return (
     <main className="loginPage staffAccessPage">
       <section className="loginShell staffAccessShell">
-        <Link className="brand" href="/" aria-label="Bubble Wash home">
-          <span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={58} height={58} priority /></span>
-          <span>Bubble Wash Staff</span>
-        </Link>
+        <BrandLink label="Bubble Wash Staff" priority />
         <div className="staffAccessHero">
           <p className="eyebrow">Staff access</p>
           <h1>Choose your workspace.</h1>

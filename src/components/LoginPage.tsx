@@ -1,10 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, Bike, Grid2X2, Headphones, ShieldCheck, WashingMachine, type LucideIcon } from "lucide-react";
+import { BrandLink } from "@/components/BrandLink";
 
 const showCredentialCards = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_BUBBLEWASH_SHOW_DEMO_LOGIN === "true";
 
@@ -59,10 +59,7 @@ function LoginForm() {
   return (
     <main className="loginPage redesignLoginPage">
       <header className="redesignTopbar">
-        <Link className="brand" href="/" aria-label="Bubble Wash home">
-          <span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={42} height={42} priority /></span>
-          <span>Bubble Wash Staff</span>
-        </Link>
+        <BrandLink label="Bubble Wash Staff" priority />
         <nav className="redesignTextNav" aria-label="Staff login links"><Link href="/"><ArrowLeft aria-hidden="true" />Back to site</Link><Link href="/staff"><Grid2X2 aria-hidden="true" />Roles</Link></nav>
       </header>
       <section className="redesignLoginGrid" aria-labelledby="login-title">

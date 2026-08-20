@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Activity as ActivityIcon, ClipboardList, Gauge, HeartPulse, History, LayoutDashboard, Map as MapIcon, MessagesSquare, Route as RouteIcon, Users } from "lucide-react";
 import type { StaffRole } from "@/lib/auth";
 import { automationActionsForOrder, paymentReadyForCloseout } from "@/lib/order-workflow";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
+import { BrandLink } from "@/components/BrandLink";
 
 const supportTypes = ["Pickup delay", "Payment issue", "Missing item", "Quality complaint", "Vendor escalation", "General question"];
 
@@ -1441,7 +1441,7 @@ function PortalShell({ title, role, pageRole = role, userName, currentView, navi
   return (
     <main className="portalPage">
       <header className="staffTopbar">
-        <Link className="brand" href="/" aria-label="Bubble Wash home"><span className="brandCrop"><Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={46} height={46} /></span><span>Bubble Wash</span></Link>
+        <BrandLink />
         <div className="staffAccount"><span><strong>{userName}</strong><small>{title}</small></span><button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button></div>
       </header>
       <nav className="staffSectionNav" aria-label={`${pageRole} workspace sections`}>
