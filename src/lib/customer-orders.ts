@@ -19,6 +19,7 @@ export function customerOrderView(order: OrderSummary, records: SubmissionRecord
     nextStep: order.nextStep,
     area: order.area,
     pickupAddress: order.pickupAddress,
+    plan: order.plan,
     service: order.service,
     pickupDate: text(seed?.data.pickupDate),
     pickupWindow: text(seed?.data.pickupWindow),

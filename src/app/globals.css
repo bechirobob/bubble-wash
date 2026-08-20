@@ -352,6 +352,20 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .quoteTotal { display: block; margin-top: 24px; color: var(--ink-strong); font-size: 2.35rem; line-height: 1; letter-spacing: -.035em; }
 .quotePeriod { display: block; margin: 7px 0 20px; color: var(--muted); }
 .bookingFieldset { display: grid; gap: 14px; margin-top: 6px; }
+.fieldHelp { margin: -3px 0 2px; max-width: 760px; }
+.recommendationPrompt { margin: 2px 0 0; padding: 12px 0; border-block: 1px solid var(--line); color: var(--muted); }
+.planRecommendation { margin-top: 6px; padding: 20px 0 4px; border-top: 2px solid var(--brand-dark); border-bottom: 1px solid var(--line); }
+.planRecommendationHeader { display: flex; align-items: start; justify-content: space-between; gap: 28px; }
+.planRecommendationHeader h3 { font-size: 1.45rem; margin-bottom: 5px; }
+.planRecommendationHeader p:not(.sectionLabel) { margin-bottom: 8px; }
+.planRecommendationHeader > strong { flex: 0 0 auto; color: var(--ink-strong); text-align: right; font-size: 1.2rem; }
+.planRecommendationHeader > strong small { margin-top: 3px; font-size: .78rem; font-weight: 500; }
+.planRecommendation ul { list-style: none; margin: 10px 0 16px; padding: 0; display: grid; gap: 8px; }
+.planRecommendation li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 9px; color: var(--muted); }
+.planRecommendation li svg { width: 17px; height: 17px; margin-top: 3px; color: var(--success); stroke-width: 1.9; }
+.planHighlights { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-block: 1px solid var(--line); margin-bottom: 16px; }
+.planHighlights span { padding: 11px 12px 11px 0; color: var(--ink); font-size: .88rem; font-weight: 600; }
+.planHighlights span + span { padding-left: 12px; border-left: 1px solid var(--line); }
 .termsCheck { grid-template-columns: 20px minmax(0, 1fr) !important; align-items: start; gap: 10px !important; font-weight: 400 !important; }
 .bookingConfirmation { margin-top: 24px; max-width: 720px; }
 .bookingConfirmation .button { margin-top: 8px; }
@@ -1114,6 +1128,11 @@ dd { margin: 4px 0 0; color: var(--muted); }
   .serviceForm { gap: 10px; }
   .quickTextLinks { gap: 4px 10px; }
   .inlineFormRow, .formGrid.two, .two { grid-template-columns: 1fr; }
+  .planRecommendationHeader { display: grid; gap: 8px; }
+  .planRecommendationHeader > strong { text-align: left; }
+  .planHighlights { grid-template-columns: 1fr; }
+  .planHighlights span, .planHighlights span + span { padding: 10px 0; border-left: 0; border-bottom: 1px solid var(--line); }
+  .planHighlights span:last-child { border-bottom: 0; }
   .choiceGrid, .policyGrid, .workflowCards, .planGrid, .zoneGrid, .audienceGrid { grid-template-columns: 1fr; }
   .workflowCards li, .workflowCards li + li, .audienceGrid article, .audienceGrid article + article, .zoneGrid article, .zoneGrid article + article { padding: 22px 0; border-right: 0; border-bottom: 1px solid var(--line); }
   .zoneGrid article:nth-child(3), .zoneGrid article:nth-child(4) { border-top: 0; }

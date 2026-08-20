@@ -50,6 +50,7 @@ type OrderSummary = {
   area: string;
   pickupAddress: string;
   landmark: string;
+  plan: string;
   serviceType: string;
   vendor: string;
   driver: string;
@@ -1382,6 +1383,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
         <div className="staffDetailSections">
           <section className="staffDetailSection"><h3>Customer and collection</h3><dl className="staffDefinitionList">
             <div><dt>Customer</dt><dd>{selectedOrder.customer}</dd></div>
+            <div><dt>Plan</dt><dd>{selectedOrder.plan || "Not recorded"}</dd></div>
             <div><dt>Service</dt><dd>{selectedOrder.serviceType || "Not recorded"}</dd></div>
             <div><dt>Area</dt><dd>{selectedOrder.area}</dd></div>
             <div><dt>Collection window</dt><dd>{selectedOrder.routeWindow}</dd></div>

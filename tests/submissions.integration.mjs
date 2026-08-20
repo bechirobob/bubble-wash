@@ -18,7 +18,8 @@ const booking = {
     area: "Osu",
     pickupAddress: "14 Oxford Street, Osu",
     landmark: "Main reception",
-    pickupWindow: "Morning pickup",
+    plan: "Twice weekly",
+    pickupWindow: "8:00–10:00",
     paymentPreference: "Bank transfer",
   },
 };
@@ -78,11 +79,12 @@ assert.equal(summary.activityUpdatedAt, laterSupport.createdAt);
 assert.equal(summary.email, "ama@example.com");
 assert.equal(summary.phone, "0550000000");
 assert.equal(summary.pickupAddress, "14 Oxford Street, Osu");
+assert.equal(summary.plan, "Twice weekly");
 assert.equal(summary.service, "Wash + fold");
 assert.equal(summary.serviceType, "Wash + fold");
 assert.equal(summary.payment, "success");
-assert.equal(summary.routeWindow, "Morning pickup");
-assert.equal(summary.dispatch.scheduledWindow, "Morning pickup");
+assert.equal(summary.routeWindow, "8:00–10:00");
+assert.equal(summary.dispatch.scheduledWindow, "8:00–10:00");
 assert.equal(summary.dispatch.etaSource, "area-estimate");
 assert.equal(summary.dispatch.etaText, `${summary.route.estimatedDriveMinutes} min`);
 assert.equal(summary.dispatch.checkpointSource, "unavailable");
@@ -186,15 +188,15 @@ const ordinaryRouteStart = {
     vendorId: "vendor-dispatch",
     driverId: "driver-dispatch",
     driverName: "Dispatch Rider",
-    routeWindow: "Morning pickup",
-    driverEta: "Morning pickup",
+    routeWindow: "8:00–10:00",
+    driverEta: "8:00–10:00",
     driverEtaAt: "10:45",
     etaSource: "scheduled-window",
     locationNote: "Route started",
   },
 };
 const preReportDispatch = buildOrderSummaries([booking, dispatchAssignment, ordinaryRouteStart])[0];
-assert.equal(preReportDispatch.routeWindow, "Morning pickup");
+assert.equal(preReportDispatch.routeWindow, "8:00–10:00");
 assert.equal(preReportDispatch.dispatch.etaSource, "area-estimate");
 assert.notEqual(preReportDispatch.dispatch.etaText, ordinaryRouteStart.data.driverEta);
 assert.equal(preReportDispatch.dispatch.checkpoint, "Route started");
@@ -211,7 +213,7 @@ const explicitEtaUpdate = {
     vendorId: "vendor-dispatch",
     driverId: "driver-dispatch",
     driverName: "Dispatch Rider",
-    routeWindow: "Morning pickup",
+    routeWindow: "8:00–10:00",
     driverEtaAt: "11:05",
     driverEta: "11:05",
     etaSource: "rider-reported",
@@ -220,8 +222,8 @@ const explicitEtaUpdate = {
   },
 };
 const explicitEtaSummary = buildOrderSummaries([booking, dispatchAssignment, ordinaryRouteStart, explicitEtaUpdate])[0];
-assert.equal(explicitEtaSummary.routeWindow, "Morning pickup");
-assert.equal(explicitEtaSummary.dispatch.scheduledWindow, "Morning pickup");
+assert.equal(explicitEtaSummary.routeWindow, "8:00–10:00");
+assert.equal(explicitEtaSummary.dispatch.scheduledWindow, "8:00–10:00");
 assert.equal(explicitEtaSummary.dispatch.etaText, "11:05");
 assert.equal(explicitEtaSummary.dispatch.etaSource, "rider-reported");
 assert.equal(explicitEtaSummary.dispatch.etaUpdatedAt, explicitEtaUpdate.createdAt);
@@ -236,14 +238,14 @@ const explicitDelayUpdate = {
     submissionType: "support-ticket",
     orderId: booking.id,
     issueType: "Pickup delay",
-    routeWindow: "Morning pickup",
+    routeWindow: "8:00–10:00",
     driverEta: "11:25",
     locationNote: "Airport roundabout",
     delayReason: "Heavy traffic",
   },
 };
 const revisedEtaSummary = buildOrderSummaries([booking, dispatchAssignment, ordinaryRouteStart, explicitEtaUpdate, explicitDelayUpdate])[0];
-assert.equal(revisedEtaSummary.routeWindow, "Morning pickup");
+assert.equal(revisedEtaSummary.routeWindow, "8:00–10:00");
 assert.equal(revisedEtaSummary.dispatch.etaText, "11:25");
 assert.equal(revisedEtaSummary.dispatch.etaSource, "rider-reported");
 assert.equal(revisedEtaSummary.dispatch.etaUpdatedAt, explicitDelayUpdate.createdAt);

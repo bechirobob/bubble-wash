@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { appendSubmissionRecord, findSubmissionRecordById } from "@/lib/data-store";
 import { dispatchSubmissionNotifications } from "@/lib/notifications";
 import { initializePaystackCheckout, validateCheckoutInput } from "@/lib/payments";
-import { addons, calculateQuote, plans, zones, type AddonKey, type PlanName, type ZoneKey } from "@/lib/pricing";
+import { plans, type PlanName } from "@/lib/pricing";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { sameOriginJsonGuard } from "@/lib/security";
 
@@ -16,14 +16,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 const planNames = new Set(plans.map((plan) => plan.name));
-const zoneNames = new Set(Object.keys(zones));
-const addonNames = new Set(Object.keys(addons));
-
-function addonList(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is AddonKey => typeof item === "string" && addonNames.has(item));
-}
-
 async function readCheckoutPayload(request: NextRequest) {
   try {
     return await request.json();
@@ -55,22 +47,20 @@ export async function POST(request: NextRequest) {
     if (!booking || text(booking.data.submissionType) !== "pickup-booking") {
       return NextResponse.json({ ok: false, error: "That reference is not linked to a customer booking." }, { status: 404 });
     }
-    const plan = text(booking.data.preferredPlan);
-    const zone = text(booking.data.zone);
-    const kg = Number(booking.data.kg);
-    if (!planNames.has(plan as PlanName) || !zoneNames.has(zone) || !Number.isFinite(kg) || kg <= 0) {
-      return NextResponse.json({ ok: false, error: "The booking does not contain a valid price estimate." }, { status: 409 });
+    const plan = text(booking.data.plan);
+    const selectedPlan = plans.find((item) => item.name === plan);
+    if (!planNames.has(plan as PlanName) || !selectedPlan) {
+      return NextResponse.json({ ok: false, error: "The booking does not contain a valid service plan." }, { status: 409 });
     }
-    const quote = calculateQuote(plan as PlanName, kg, addonList(booking.data.addons), zone as ZoneKey, "none");
     const input = {
       orderId,
       name: text(booking.data.name),
       email: text(booking.data.email),
       phone: text(booking.data.phone),
       company: text(booking.data.company),
-      amountGhs: quote.estimatedMonthlyTotal,
+      amountGhs: selectedPlan.subscription,
       paymentMethod: text(body.paymentMethod) || "Card or Mobile Money",
-      message: `Payment for Bubble Wash booking ${orderId}`,
+      message: `${selectedPlan.name} service fee for Bubble Wash booking ${orderId}. Processing is billed from verified intake.`,
     };
     const validationError = validateCheckoutInput(input);
     if (validationError) return NextResponse.json({ ok: false, error: validationError }, { status: 400 });

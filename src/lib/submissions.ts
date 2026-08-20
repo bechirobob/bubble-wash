@@ -39,6 +39,7 @@ export type OrderSummary = {
   area: string;
   pickupAddress: string;
   landmark: string;
+  plan: string;
   service: string;
   serviceType: string;
   vendor: string;
@@ -501,6 +502,7 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
     const area = findLatest("area", "zone", "routeArea") || "Route pending";
     const pickupAddress = findLatestFromTypes(["pickup-booking", "checkout-request"], "pickupAddress");
     const landmark = findLatestFromTypes(["pickup-booking", "checkout-request"], "landmark");
+    const plan = findLatestFromTypes(["pickup-booking", "checkout-request"], "plan", "preferredPlan");
     const route = buildRoutePreview(zoneKeyFrom(findLatest("zone", "routeArea", "area")), pickupAddress || area);
     const dispatch = buildDispatchProjection(chronological, route);
     const routeWindow = dispatch.scheduledWindow || "ETA pending";
@@ -516,6 +518,7 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
       area,
       pickupAddress,
       landmark,
+      plan,
       service,
       serviceType: service,
       vendor: vendor || "Unassigned",

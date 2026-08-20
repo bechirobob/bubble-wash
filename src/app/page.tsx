@@ -10,7 +10,7 @@ const serviceFacts = [
 ];
 
 const serviceSteps = [
-  { title: "Book the collection", copy: "Choose the service, collection address, and preferred time. Operations confirms the route before dispatch.", icon: CalendarCheck },
+  { title: "Book the collection", copy: "Get a plan recommendation, enter the exact collection point, and select a two-hour pickup window.", icon: CalendarCheck },
   { title: "We collect and clean", copy: "The order stays on one service record while an approved partner processes it and each handoff is recorded.", icon: Shirt },
   { title: "Track the return", copy: "Use the same reference for confirmed updates until the clean order reaches the authorised recipient.", icon: PackageCheck },
 ];

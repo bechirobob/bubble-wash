@@ -9,5 +9,5 @@ export const metadata: Metadata = {
 };
 
 export default function BookPage() {
-  return <PublicChrome><PageIntro eyebrow="Book a pickup" title="Give operations the collection details once." summary="Choose the service, business contact, and requested collection window. You receive one reference for every later update." icon="booking" /><BookingExperience /></PublicChrome>;
+  return <PublicChrome><PageIntro eyebrow="Book a pickup" title="Choose your plan and exact collection window." summary="Answer four quick plan-fit questions, add the precise pickup location, and select a two-hour arrival window. You receive one reference for every later update." icon="booking" /><BookingExperience /></PublicChrome>;
 }

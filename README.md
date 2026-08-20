@@ -34,7 +34,9 @@ Pilot operating mode:
 ## Integration behavior
 
 - `/` is the product landing page and owns the commercial overview plus How it works. `/services` owns plans, coverage, service conditions, and estimates; `/book` owns the booking transaction; `/track` owns public status lookup. Public, customer, policy, and staff entry surfaces share one navigation and system-icon language.
-- `/api/payments/initialize` returns HTTP 503 while online payments are disabled. When enabled, it accepts a saved booking reference, recalculates that booking on the server, creates a Paystack checkout in GHS, and returns the secure authorization URL. It does not trust a browser-supplied amount.
+- `/book` recommends a collection plan from a short operational-fit survey, collects the exact pickup point and a two-hour window, and never asks the customer to estimate bag weight or select a broad area.
+- `/api/submit` derives a normalized pickup locality, concentration-cluster key, and route zone from the exact address on the server. Unmatched locations enter the operations mapping queue instead of accepting a browser-supplied area.
+- `/api/payments/initialize` returns HTTP 503 while online payments are disabled. When enabled, it accepts a saved booking reference, recalculates the selected plan service fee on the server, creates a Paystack checkout in GHS, and returns the secure authorization URL. It does not trust a browser-supplied amount; processing remains based on verified intake.
 - `/api/payments/verify?reference=...` verifies Paystack payment status and appends a payment event to the order timeline.
 - `/api/submit` stores bookings, roster updates, and support cases. Direct free-form fulfillment-stage writes are rejected; operational transitions must use the verified order queue.
 - `/api/orders/advance` appends role-scoped workflow events, requires evidence for scheduling/payment/intake/handoffs/delivery, and clearly reminds staff when manual customer follow-up is required.

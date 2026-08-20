@@ -42,8 +42,10 @@
 
 - Public homepage: nav, hero/coverage, proof strip, plans, operations engine, services, vendors, locations, quote, assurance, tracking, booking, onboarding, testimonials, staff teaser, FAQ, payment strip, footer.
 - Forms submit typed intent through `/api/submit`: pickup booking, checkout request, client onboarding.
-- Quote uses `/api/quote` with plan, kg, zone, add-ons, and discount.
-- Payments use `/api/payments/initialize` and `/api/payments/verify` against Paystack transactions in GHS with card/mobile money channels.
+- The booking flow asks four operational-fit questions, recommends a plan with reasons, and lets the customer override it. The supplied bag defines customer-facing load capacity; intake weight remains an operational billing fact rather than a booking question.
+- Exact pickup location is collected once. `/api/submit` derives the locality, concentration-cluster key, and route zone on the server so customers do not select an area and cannot spoof routing analytics.
+- The separate pricing estimator uses `/api/quote` with plan, kg, zone, add-ons, and discount. Booking does not depend on a customer-entered weight estimate.
+- Payments use `/api/payments/initialize` and `/api/payments/verify` against Paystack transactions in GHS with card/mobile money channels. Initial checkout covers the selected plan service fee; processing is billed from verified intake.
 - Notifications use Resend email and WhatsApp Cloud API from server-only provider wrappers; missing credentials must skip safely and report setup status instead of pretending messages were sent.
 - Tracking uses `/api/track?id=` and displays only customer-safe fields.
 
@@ -160,8 +162,8 @@
 - What: tighten Bubble Wash release UX and public API validation without replacing the existing build.
 - Why: frontend standards require every visible action to complete a real user flow, preserve accessible feedback, and avoid stale decorative state; backend standards require typed request bodies, allowlisted public fields, bounded values, and safe JSON errors.
 - Files likely touched: `src/app/page.tsx`, `src/app/globals.css`, `src/app/api/submit/route.ts`, and this blueprint.
-- Expected outcome: vendor request cards carry the chosen vendor into the booking payload, pickup date/weight/payment inputs expose safer client-side constraints, public submit rejects non-object/unknown/staff-only fields instead of silently accepting cursed payloads, and successful bookings keep the same customer/order data contract.
-- Approved sleep-mode scope: preserve the existing public/staff/product flows, add booking weight/window constraints, turn saved pickup references into immediate tracking guidance, reject malformed JSON and oversized public fields with safe `400` responses, and validate phone/window inputs server-side.
+- Expected outcome: vendor request cards carry the chosen vendor into the booking payload, pickup date/window/payment inputs expose safer client-side constraints, public submit rejects non-object/unknown/staff-only fields instead of silently accepting cursed payloads, and successful bookings keep the same customer/order data contract.
+- Approved sleep-mode scope: preserve the existing public/staff/product flows, validate concrete pickup windows, turn saved pickup references into immediate tracking guidance, reject malformed JSON and oversized public fields with safe `400` responses, and validate phone/window inputs server-side.
 - Risks and mitigation: keep changes targeted, preserve current auth/payment/order routes, avoid new dependencies, and verify with lint, tests, build, and API smoke checks.
 - Verification: run `npm run lint`, `npm test`, `npm run build`; smoke `/api/quote`, `/api/submit` valid payload with `requestedVendor`, and `/api/submit` invalid payload with staff-only/public-forbidden fields.
 

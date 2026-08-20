@@ -9,6 +9,16 @@ import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { sameOriginJsonGuard, staffWriteGuard } from "@/lib/security";
 import { parseServiceTypes } from "@/lib/service-capabilities";
 import { createDeliveryCode } from "@/lib/chain-of-custody";
+import {
+  businessTypes,
+  isCompletePlanSurvey,
+  laundryRhythms,
+  locationCounts,
+  recommendPlan,
+  servicePriorities,
+  type PlanSurvey,
+} from "@/lib/plan-recommendation";
+import { classifyPickupLocation } from "@/lib/pickup-location";
 
 const emailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const maxFieldLength = 1200;
@@ -18,7 +28,11 @@ const zoneNames = new Set(Object.keys(zones));
 const paymentPreferences = new Set(["MTN MoMo", "Telecel Cash", "Card", "Bank transfer", "Invoice me"]);
 const paymentMethods = new Set(["MTN MoMo", "Telecel Cash", "Visa / Mastercard", "Bank transfer"]);
 const alertPreferences = new Set(["Order tracking and phone follow-up", "Email + WhatsApp alerts", "WhatsApp only", "Email only", "Call me"]);
-const pickupWindows = new Set(["Any available window", "Morning pickup", "Afternoon pickup", "Evening pickup"]);
+const pickupWindows = new Set(["8:00–10:00", "10:00–12:00", "12:00–14:00", "14:00–16:00", "16:00–18:00"]);
+const businessTypeNames = new Set<string>(businessTypes);
+const laundryRhythmNames = new Set<string>(laundryRhythms);
+const locationCountNames = new Set<string>(locationCounts);
+const servicePriorityNames = new Set<string>(servicePriorities);
 const billingCycles = new Set(["Monthly", "Yearly"]);
 const multiAdminModes = new Set(["Invite team leads", "Single admin only"]);
 const accountGoals = new Set(["Start ordering this week", "Open account this week", "Need vendor coverage check"]);
@@ -42,6 +56,10 @@ const publicAllowedFields = new Set([
   "pickupDate",
   "pickupWindow",
   "kg",
+  "businessType",
+  "laundryRhythm",
+  "locationCount",
+  "servicePriority",
   "addons",
   "paymentPreference",
   "alertPreference",
@@ -162,12 +180,26 @@ function validatePublicPayload(body: Record<string, unknown>, submissionType: st
     validateEnum(body, "paymentMethod", paymentMethods, "payment method"),
     validateEnum(body, "alertPreference", alertPreferences, "alert preference"),
     validateEnum(body, "pickupWindow", pickupWindows, "pickup window"),
+    validateEnum(body, "businessType", businessTypeNames, "business type"),
+    validateEnum(body, "laundryRhythm", laundryRhythmNames, "laundry rhythm"),
+    validateEnum(body, "locationCount", locationCountNames, "location count"),
+    validateEnum(body, "servicePriority", servicePriorityNames, "support priority"),
     validateEnum(body, "billingCycle", billingCycles, "billing cycle"),
     validateEnum(body, "multiAdmin", multiAdminModes, "team access mode"),
     validateEnum(body, "accountGoal", accountGoals, "account goal"),
   ];
   const enumError = enumChecks.find(Boolean);
   if (enumError) return enumError;
+
+  if (submissionType === "pickup-booking") {
+    const clientDerivedField = ["area", "zone", "kg", "preferredPlan"].find((field) => text(body[field]));
+    if (clientDerivedField) {
+      return NextResponse.json({ ok: false, error: `The booking service determines ${clientDerivedField}.` }, { status: 400 });
+    }
+    if (text(body.pickupAddress).length < 8) {
+      return NextResponse.json({ ok: false, error: "Enter a complete pickup location, including the locality." }, { status: 400 });
+    }
+  }
 
   if (submissionType === "pickup-booking" && process.env.NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED !== "true") {
     const paymentPreference = text(body.paymentPreference);
@@ -288,6 +320,28 @@ export async function POST(request: NextRequest) {
     const validationError = validatePublicPayload(body, submissionType);
     if (validationError) return validationError;
 
+    if (submissionType === "pickup-booking") {
+      const survey: PlanSurvey = {
+        businessType: text(body.businessType) as PlanSurvey["businessType"],
+        laundryRhythm: text(body.laundryRhythm) as PlanSurvey["laundryRhythm"],
+        locationCount: text(body.locationCount) as PlanSurvey["locationCount"],
+        servicePriority: text(body.servicePriority) as PlanSurvey["servicePriority"],
+      };
+      if (!isCompletePlanSurvey(survey)) {
+        return NextResponse.json({ ok: false, error: "Complete the plan-fit questions before booking." }, { status: 400 });
+      }
+      const recommendation = recommendPlan(survey);
+      const pickupLocation = classifyPickupLocation(text(body.pickupAddress));
+      body.recommendedPlan = recommendation.name;
+      body.recommendationReasons = recommendation.reasons;
+      body.planRecommendationAccepted = text(body.plan) === recommendation.name;
+      body.area = pickupLocation.locality;
+      body.pickupLocality = pickupLocation.locality;
+      body.localityCluster = pickupLocation.clusterKey;
+      body.localityConfidence = pickupLocation.confidence;
+      body.zone = pickupLocation.zone;
+    }
+
     if (submissionType === "vendor-application" && staffUser?.role === "admin") {
       const vendorName = text(body.company);
       const contactName = text(body.name);
@@ -339,7 +393,9 @@ export async function POST(request: NextRequest) {
     }
 
     const required = publicSubmissionTypes.has(submissionType) ? ["submissionType", "name", "email", "phone", "company"] : ["submissionType"];
-    if (submissionType === "pickup-booking") required.push("pickupAddress");
+    if (submissionType === "pickup-booking") {
+      required.push("pickupAddress", "pickupDate", "pickupWindow", "plan", "businessType", "laundryRhythm", "locationCount", "servicePriority");
+    }
     for (const field of required) {
       if (!text(body[field])) {
         return NextResponse.json({ ok: false, error: `Missing required field: ${field}` }, { status: 400 });

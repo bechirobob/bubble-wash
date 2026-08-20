@@ -10,6 +10,7 @@ const actions = new Map([
   ["cancel", "Customer cancellation request"],
   ["care", "Customer garment-care note"],
 ]);
+const pickupWindows = new Set(["8:00–10:00", "10:00–12:00", "12:00–14:00", "14:00–16:00", "16:00–18:00"]);
 
 function text(value: unknown, max = 600) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -30,7 +31,11 @@ export async function POST(request: NextRequest) {
     const requestedDate = text(body.requestedDate, 20);
     const requestedWindow = text(body.requestedWindow, 80);
     const note = text(body.note);
-    if (!issueType || !note || (action === "reschedule" && (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate) || requestedDate < new Date().toISOString().slice(0, 10)))) {
+    if (!issueType || !note || (action === "reschedule" && (
+      !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)
+      || requestedDate < new Date().toISOString().slice(0, 10)
+      || (requestedWindow && !pickupWindows.has(requestedWindow))
+    ))) {
       return NextResponse.json({ ok: false, error: "Complete the request details before submitting." }, { status: 400 });
     }
     const seed = findSubmissionRecordById(session.orderId);
