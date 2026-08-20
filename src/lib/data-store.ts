@@ -33,6 +33,26 @@ type StoredPaymentRow = {
   verified_at: string;
 };
 
+export type AdminMfaSetting = {
+  adminEmail: string;
+  encryptedSecret: string;
+  status: "pending" | "enrolled";
+  expiresAt: string;
+  recoveryBundleEncrypted: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type StoredAdminMfaRow = {
+  admin_email: string;
+  encrypted_secret: string;
+  status: AdminMfaSetting["status"];
+  expires_at: string | null;
+  recovery_bundle_encrypted: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type StoredDriverLocationRow = {
   driver_id: string;
   order_id: string;
@@ -246,6 +266,26 @@ function getDatabase() {
       timestep INTEGER NOT NULL,
       accepted_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS admin_mfa_settings (
+      admin_email TEXT PRIMARY KEY COLLATE NOCASE,
+      encrypted_secret TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'enrolled')),
+      expires_at TEXT,
+      recovery_bundle_encrypted TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_mfa_recovery_codes (
+      admin_email TEXT NOT NULL COLLATE NOCASE,
+      code_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      used_at TEXT,
+      PRIMARY KEY (admin_email, code_hash),
+      FOREIGN KEY (admin_email) REFERENCES admin_mfa_settings(admin_email) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_admin_mfa_recovery_unused ON admin_mfa_recovery_codes(admin_email, used_at);
 
     CREATE TABLE IF NOT EXISTS delivery_proofs (
       order_id TEXT PRIMARY KEY,
@@ -639,6 +679,11 @@ export function purgeOperationalData(now = Date.now(), householdLaunchDate = pro
   const purge = db.transaction(() => {
     result.expiredRateLimits = db.prepare("DELETE FROM rate_limits WHERE reset_at < ?").run(now - 24 * 60 * 60_000).changes;
     result.mfaReplayGuards = db.prepare("DELETE FROM mfa_replay_guard WHERE accepted_at < ?").run(isoDaysAgo(2)).changes;
+    result.expiredMfaEnrollments = db.prepare("DELETE FROM admin_mfa_settings WHERE status = 'pending' AND expires_at < ?").run(new Date(now).toISOString()).changes;
+    result.expiredMfaRecoveryBundles = db.prepare(`
+      UPDATE admin_mfa_settings SET recovery_bundle_encrypted = NULL
+      WHERE status = 'enrolled' AND recovery_bundle_encrypted IS NOT NULL AND updated_at < ?
+    `).run(isoDaysAgo(1)).changes;
     result.workflowClaims = db.prepare("DELETE FROM workflow_action_claims WHERE claimed_at < ?").run(isoDaysAgo(90)).changes;
     result.notificationLogs = db.prepare("DELETE FROM notification_outbox WHERE updated_at < ?").run(isoDaysAgo(90)).changes;
     result.optedOutSignups = db.prepare("DELETE FROM early_access_signups WHERE marketing_status = 'opted_out' AND updated_at < ?").run(isoDaysAgo(30)).changes;
@@ -684,6 +729,87 @@ export function claimMfaTimestep(subject: string, timestep: number) {
     WHERE mfa_replay_guard.timestep < excluded.timestep
   `).run({ subject, timestep, acceptedAt: new Date().toISOString() });
   return result.changes === 1;
+}
+
+function adminMfaSettingFromRow(row: StoredAdminMfaRow): AdminMfaSetting {
+  return {
+    adminEmail: row.admin_email,
+    encryptedSecret: row.encrypted_secret,
+    status: row.status,
+    expiresAt: row.expires_at ?? "",
+    recoveryBundleEncrypted: row.recovery_bundle_encrypted ?? "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function readAdminMfaSetting(adminEmail: string) {
+  const row = getDatabase().prepare("SELECT * FROM admin_mfa_settings WHERE admin_email = ? COLLATE NOCASE LIMIT 1")
+    .get(adminEmail.trim()) as StoredAdminMfaRow | undefined;
+  return row ? adminMfaSettingFromRow(row) : null;
+}
+
+export function savePendingAdminMfa(input: { adminEmail: string; encryptedSecret: string; expiresAt: string }) {
+  const now = new Date().toISOString();
+  const row = getDatabase().prepare(`
+    INSERT INTO admin_mfa_settings
+      (admin_email, encrypted_secret, status, expires_at, recovery_bundle_encrypted, created_at, updated_at)
+    VALUES
+      (@adminEmail, @encryptedSecret, 'pending', @expiresAt, NULL, @now, @now)
+    ON CONFLICT(admin_email) DO UPDATE SET
+      encrypted_secret = excluded.encrypted_secret,
+      status = 'pending',
+      expires_at = excluded.expires_at,
+      recovery_bundle_encrypted = NULL,
+      updated_at = excluded.updated_at
+    WHERE admin_mfa_settings.status = 'pending'
+    RETURNING *
+  `).get({ ...input, now }) as StoredAdminMfaRow | undefined;
+  return row ? adminMfaSettingFromRow(row) : null;
+}
+
+export function confirmAdminMfa(input: {
+  adminEmail: string;
+  encryptedRecoveryBundle: string;
+  recoveryCodeHashes: string[];
+  now?: string;
+}) {
+  const db = getDatabase();
+  const now = input.now ?? new Date().toISOString();
+  const confirm = db.transaction(() => {
+    const updated = db.prepare(`
+      UPDATE admin_mfa_settings
+      SET status = 'enrolled', expires_at = NULL, recovery_bundle_encrypted = @encryptedRecoveryBundle, updated_at = @now
+      WHERE admin_email = @adminEmail COLLATE NOCASE
+        AND status = 'pending'
+        AND expires_at > @now
+    `).run({ adminEmail: input.adminEmail, encryptedRecoveryBundle: input.encryptedRecoveryBundle, now });
+    if (updated.changes !== 1) return false;
+    db.prepare("DELETE FROM admin_mfa_recovery_codes WHERE admin_email = ? COLLATE NOCASE").run(input.adminEmail);
+    const insert = db.prepare(`
+      INSERT INTO admin_mfa_recovery_codes (admin_email, code_hash, created_at)
+      VALUES (?, ?, ?)
+    `);
+    for (const hash of input.recoveryCodeHashes) insert.run(input.adminEmail, hash, now);
+    return true;
+  });
+  return confirm.immediate();
+}
+
+export function acknowledgeAdminMfaRecoveryCodes(adminEmail: string) {
+  return getDatabase().prepare(`
+    UPDATE admin_mfa_settings
+    SET recovery_bundle_encrypted = NULL, updated_at = @updatedAt
+    WHERE admin_email = @adminEmail COLLATE NOCASE AND status = 'enrolled'
+  `).run({ adminEmail, updatedAt: new Date().toISOString() }).changes === 1;
+}
+
+export function consumeAdminMfaRecoveryCode(adminEmail: string, codeHash: string) {
+  return getDatabase().prepare(`
+    UPDATE admin_mfa_recovery_codes
+    SET used_at = @usedAt
+    WHERE admin_email = @adminEmail COLLATE NOCASE AND code_hash = @codeHash AND used_at IS NULL
+  `).run({ adminEmail, codeHash, usedAt: new Date().toISOString() }).changes === 1;
 }
 
 export function storeDeliveryCode(orderId: string, codeHash: string) {
@@ -780,6 +906,8 @@ export function resetDataStoreForTests() {
   database.prepare("DELETE FROM privacy_requests").run();
   database.prepare("DELETE FROM notification_outbox").run();
   database.prepare("DELETE FROM mfa_replay_guard").run();
+  database.prepare("DELETE FROM admin_mfa_recovery_codes").run();
+  database.prepare("DELETE FROM admin_mfa_settings").run();
   database.prepare("DELETE FROM delivery_proofs").run();
   lastLocationCleanupAt = 0;
 }

@@ -17,7 +17,7 @@ This runbook is the go/no-go standard for the controlled commercial-laundry pilo
 Use `.env.production.example` as the inventory. Before launch:
 
 1. Set `BUBBLEWASH_DATABASE_DRIVER=sqlite` and `BUBBLEWASH_DATABASE_PATH` to the mounted volume, for example `/var/lib/bubblewash/bubblewash.sqlite`.
-2. Generate a unique 32+ character session secret and a different strong password hash for each of the four current role logins. Set `BUBBLEWASH_DISABLE_DEMO_LOGIN=true`. Generate and enrol `BUBBLEWASH_ADMIN_TOTP_SECRET` with `npm run mfa:setup -- admin@example.com`. Confirm the admin password alone cannot authenticate, a current authenticator code can, and the same code cannot be replayed.
+2. Generate a unique 32+ character session secret and a different strong password hash for each of the four current role logins. Set `BUBBLEWASH_DISABLE_DEMO_LOGIN=true`. Open `/admin/mfa/enroll`, verify the production admin password, scan the QR code, confirm one current authenticator code, and save the eight one-use recovery codes. Confirm the admin password alone cannot authenticate, a current authenticator code can, and neither an accepted TOTP step nor a used recovery code can be replayed.
 3. Set `BUBBLEWASH_PUBLIC_URL=https://bubblewash.co`.
 4. Set `BUBBLEWASH_VENDOR_ENTITY_ID` and `BUBBLEWASH_DRIVER_ENTITY_ID` to the exact approved roster IDs. The current pilot has one configured rider login; only that bound rider may share foreground GPS.
 5. Set `NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED=false` and `NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED=false` for the manual operational pilot. The future services appear only as disabled “Coming soon” information.

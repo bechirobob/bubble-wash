@@ -21,8 +21,9 @@ Required for staff auth hardening:
 
 ```bash
 npm run hash-password -- "your-strong-password"
-npm run mfa:setup -- admin@example.com
 ```
+
+After the first production deployment, open `/admin/mfa/enroll`, verify the admin password, scan the QR code, confirm one live code, and save the eight single-use recovery codes. The TOTP seed is encrypted at rest with `BUBBLEWASH_MFA_ENCRYPTION_KEY`; accepted TOTP steps and recovery codes cannot be replayed. `npm run mfa:setup -- admin@example.com` remains available only for legacy environment-secret deployments.
 
 Pilot operating mode:
 
@@ -44,6 +45,7 @@ Pilot operating mode:
 - `/manage` verifies a booking reference plus booking email/phone, opens a 30-minute HttpOnly customer session, and queues reschedule, cancellation, or care requests without silently mutating fulfillment.
 - `/early-access` is the native household signup flow; `/privacy`, `/terms`, and `/refund-policy` are canonical policy pages, and `/api/privacy/requests` records data-rights cases for the admin operations queue.
 - `/api/internal/maintenance` retries the notification outbox and enforces retention behind a bearer secret. `/api/internal/metrics` exposes privacy/outbox/order counts to protected monitoring only.
+- `/admin/mfa/enroll` bootstraps the production admin authenticator only after the admin password is verified. Setup expires after ten minutes and the route closes after enrollment.
 - `/api/availability` exposes staff-authenticated vendor/driver capacity tables and recent vendor declines.
 - Admin assignment uses SQLite-backed capacity rows, fails closed when area/status eligibility does not match, and decrements vendor/rider capacity atomically.
 - Vendors can accept or decline assigned jobs from the shared order board; declines are recorded with reason metadata, release vendor capacity, and move the order into review instead of losing context.

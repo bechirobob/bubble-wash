@@ -68,6 +68,13 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
     backupKeyValid = false;
   }
   if (!backupKeyValid) errors.push("Set BUBBLEWASH_BACKUP_ENCRYPTION_KEY to a base64-encoded 32-byte key.");
+  let mfaKeyValid = false;
+  try {
+    mfaKeyValid = Buffer.from(env.BUBBLEWASH_MFA_ENCRYPTION_KEY ?? "", "base64").length === 32;
+  } catch {
+    mfaKeyValid = false;
+  }
+  if (!mfaKeyValid) errors.push("Set BUBBLEWASH_MFA_ENCRYPTION_KEY to a base64-encoded 32-byte key.");
   for (const name of ["BUBBLEWASH_BACKUP_PRIMARY_DIR", "BUBBLEWASH_BACKUP_OFFSITE_DIR", "BUBBLEWASH_BACKUP_STATUS_PATH"]) {
     if (!env[name]?.startsWith("/")) errors.push(`Set ${name} to an absolute path.`);
   }

@@ -98,6 +98,20 @@ ensure_env_value() {
   fi
 }
 
+ensure_generated_base64_key() {
+  local name="$1"
+  local configured
+  configured="$(configured_env_value "$name")"
+  if [[ -z "$configured" ]]; then
+    configured="$(openssl rand -base64 32 | tr -d '\r\n')"
+    printf '%s=%s\n' "$name" "$configured" >> "$env_file"
+  fi
+  if [[ "$(printf '%s' "$configured" | base64 --decode | wc -c)" -ne 32 ]]; then
+    fail "$name must be a base64-encoded 32-byte key"
+  fi
+  unset configured
+}
+
 configure_backup_environment() {
   [[ -f "$backup_key_file" ]] || fail "the GitHub encrypted-backup key is missing"
   local backup_key
@@ -111,6 +125,7 @@ configure_backup_environment() {
   ensure_env_value "BUBBLEWASH_BACKUP_STATUS_PATH" "$backup_status_path"
   ensure_env_value "BUBBLEWASH_BACKUP_ENCRYPTION_KEY" "$backup_key"
   ensure_env_value "BUBBLEWASH_DATABASE_DRIVER" "sqlite"
+  ensure_generated_base64_key "BUBBLEWASH_MFA_ENCRYPTION_KEY"
   chown "$app_user:$app_group" "$env_file"
   chmod 0600 "$env_file"
   unset backup_key
