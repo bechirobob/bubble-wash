@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 const manifestPath = ".next/server/app-paths-manifest.json";
 const requiredRoutes = [
   "/admin/page",
+  "/admin/mfa/enroll/page",
   "/book/page",
   "/drivers/page",
   "/early-access/page",
@@ -16,6 +17,7 @@ const requiredRoutes = [
   "/sitemap.xml/route",
   "/scan/page",
   "/api/admin/operations/route",
+  "/api/admin/mfa/enroll/route",
   "/api/customer/access/route",
   "/api/customer/order/route",
   "/api/customer/request/route",

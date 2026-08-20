@@ -399,6 +399,22 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .credentialCard { text-align: left; min-height: auto; padding: 10px 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--ink); }
 .destination { border-top: 1px solid var(--line); padding-top: 12px; color: var(--muted); }
 
+.mfaEnrollmentShell { width: min(860px, calc(100% - 40px)); margin: 46px auto 72px; }
+.mfaEnrollmentIntro { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 14px; max-width: 720px; margin-bottom: 30px; }
+.mfaEnrollmentIntro > svg { width: 24px; height: 24px; margin-top: 3px; color: var(--brand); stroke-width: 1.8; }
+.mfaEnrollmentIntro h1 { margin-bottom: 8px; font-size: clamp(2rem, 4vw, 2.65rem); }
+.mfaEnrollmentIntro p:last-child { margin: 0; }
+.mfaEnrollmentForm { max-width: 430px; }
+.mfaEnrollmentForm h2 { margin-bottom: 14px; font-size: 1.3rem; }
+.mfaSetupGrid { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 44px; align-items: start; border-top: 1px solid var(--line); padding-top: 24px; }
+.mfaQrPanel img { width: 100%; max-width: 320px; height: auto; border: 1px solid var(--line); }
+.mfaQrPanel p { margin: 12px 0 0; font-size: .9rem; }
+.mfaManualKey { display: block; padding: 11px 0; border-block: 1px solid var(--line); color: var(--ink-strong); font-size: .95rem; letter-spacing: .12em; overflow-wrap: anywhere; }
+.mfaRecoveryPanel { max-width: 620px; border-top: 2px solid var(--brand-dark); padding-top: 20px; }
+.mfaRecoveryCodes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; margin: 20px 0; border-top: 1px solid var(--line); }
+.mfaRecoveryCodes code { padding: 11px 0; border-bottom: 1px solid var(--line); color: var(--ink-strong); font-size: .92rem; letter-spacing: .05em; }
+.mfaRecoveryPanel > .button.full { max-width: 360px; margin-top: 18px; }
+
 .staffAccessShell { width: var(--space-page); margin: 36px auto 72px; }
 .staffAccessShell > .brand { margin-bottom: 34px; }
 .staffAccessHero { max-width: 760px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
@@ -1155,6 +1171,10 @@ dd { margin: 4px 0 0; color: var(--muted); }
   .redesignLoginGrid { width: var(--space-page); margin: 28px auto 42px; gap: 24px; }
   .redesignLoginForm { order: 1; }
   .redesignRoleList { order: 2; }
+  .mfaEnrollmentShell { width: var(--space-page); margin: 28px auto 48px; }
+  .mfaSetupGrid { grid-template-columns: 1fr; gap: 24px; }
+  .mfaQrPanel img { max-width: 280px; }
+  .mfaRecoveryCodes { grid-template-columns: 1fr; }
 
   .staffAccessShell { margin: 22px auto 48px; }
   .staffAccessShell > .brand { margin-bottom: 24px; }

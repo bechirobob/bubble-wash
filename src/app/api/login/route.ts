@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { encodeSession, findStaffUser, sanitizeNextPath, sessionCookieName, sessionCookieOptions } from "@/lib/auth";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { staffWriteGuard } from "@/lib/security";
-import { claimMfaTimestep } from "@/lib/data-store";
-import { validTotpSecret, verifyTotp } from "@/lib/totp";
+import { adminMfaConfigured, verifyAdminMfaCredential } from "@/lib/admin-mfa";
 
 export async function POST(request: NextRequest) {
   const staffGuardError = staffWriteGuard(request.headers);
@@ -24,16 +23,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (user.role === "admin") {
-      const secret = process.env.BUBBLEWASH_ADMIN_TOTP_SECRET ?? "";
-      if (!validTotpSecret(secret)) {
+      if (!adminMfaConfigured(user.email)) {
         if (process.env.NODE_ENV === "production") {
           return NextResponse.json({ ok: false, error: "Admin sign-in is temporarily unavailable." }, { status: 503 });
         }
-      } else {
-        const timestep = verifyTotp(totp, secret);
-        if (timestep === null || !claimMfaTimestep(user.email.toLowerCase(), timestep)) {
-          return NextResponse.json({ ok: false, error: "Invalid Bubble Wash staff credentials." }, { status: 401 });
-        }
+      } else if (!verifyAdminMfaCredential(user.email, totp)) {
+        return NextResponse.json({ ok: false, error: "Invalid Bubble Wash staff credentials." }, { status: 401 });
       }
     }
 

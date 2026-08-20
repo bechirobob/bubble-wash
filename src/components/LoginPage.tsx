@@ -78,8 +78,9 @@ function LoginForm() {
           <p>Use staff credentials. The destination is based on the selected role.</p>
           <label>Staff email<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="Staff email" autoComplete="username" required /></label>
           <label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" autoComplete="current-password" required /></label>
-          <label>Admin authenticator code <small>(admin only)</small><input value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))} type="text" placeholder="6-digit code" inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" /></label>
+          <label>Admin authenticator or recovery code <small>(admin only)</small><input value={totp} onChange={(event) => setTotp(event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 18))} type="text" placeholder="6 digits or recovery code" inputMode="text" autoComplete="one-time-code" /></label>
           <button className="button primary full" type="submit">Sign in</button>
+          <Link className="inlineIconLink" href="/admin/mfa/enroll">Set up admin authenticator</Link>
           <div className="destination"><strong>Destination:</strong> {nextPath}<br />Sessions should expire automatically on shared devices.</div>
           <p className="status success" role="status" aria-live="polite">{status}</p>
         </form>
