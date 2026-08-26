@@ -163,11 +163,25 @@ test("manual pilot mode keeps optional integrations fail-closed without blocking
   assert.equal(errors.some((item) => item.includes("BUBBLEWASH_MAINTENANCE_TOKEN")), false);
   assert.ok(errors.some((item) => item.includes("BUBBLEWASH_BACKUP_ENCRYPTION_KEY")));
   assert.ok(errors.some((item) => item.includes("BUBBLEWASH_DATABASE_DRIVER=sqlite")));
-  assert.ok(warnings.some((item) => item.includes("MFA enrollment")));
+  assert.equal(warnings.some((item) => item.includes("MFA enrollment")), false);
   assert.ok(warnings.some((item) => item.includes("operations token")));
   assert.ok(warnings.some((item) => item.includes("manual operations follow-up")));
   assert.ok(warnings.some((item) => item.includes("legal entity")));
   assert.ok(warnings.some((item) => item.includes("Data Protection Commission")));
+});
+
+test("admin MFA is checked only when both production flags explicitly enable it", () => {
+  const enabled = {
+    NODE_ENV: "production",
+    BUBBLEWASH_ADMIN_MFA_REQUIRED: "true",
+    NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED: "true",
+  };
+  assert.ok(productionReadinessWarnings(enabled).some((item) => item.includes("MFA enrollment")));
+  assert.equal(productionReadinessErrors(enabled).some((item) => item.includes("aligned")), false);
+  assert.ok(productionReadinessErrors({
+    ...enabled,
+    NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED: "false",
+  }).some((item) => item.includes("aligned")));
 });
 
 test("enabling future integrations makes their provider credentials blocking", () => {

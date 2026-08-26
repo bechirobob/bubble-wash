@@ -10,6 +10,7 @@ process.env.NODE_ENV = "production";
 process.env.BUBBLEWASH_DATABASE_PATH = join(testDirectory, "auth.sqlite");
 process.env.BUBBLEWASH_SESSION_SECRET = "production-auth-role-test-secret-32-plus";
 process.env.BUBBLEWASH_DISABLE_DEMO_LOGIN = "true";
+process.env.BUBBLEWASH_ADMIN_MFA_REQUIRED = "true";
 process.env.BUBBLEWASH_ADMIN_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
 
 const credentials = [
@@ -58,5 +59,16 @@ const replay = await POST(new Request("https://bubblewash.co/api/login", {
 }));
 assert.equal(replay.status, 401, "an accepted admin TOTP step must not be replayed");
 
+process.env.BUBBLEWASH_ADMIN_MFA_REQUIRED = "false";
+const passwordOnlyAdmin = await POST(new Request("https://bubblewash.co/api/login", {
+  method: "POST",
+  headers: { "content-type": "application/json", host: "bubblewash.co", origin: "https://bubblewash.co" },
+  body: JSON.stringify({
+    email: process.env.BUBBLEWASH_ADMIN_EMAIL,
+    password: credentials[0][2],
+  }),
+}));
+assert.equal(passwordOnlyAdmin.status, 200, "password-only admin mode must not request an authenticator code");
+
 rmSync(testDirectory, { recursive: true, force: true });
-console.log(JSON.stringify({ ok: true, checks: 9 }));
+console.log(JSON.stringify({ ok: true, checks: 10 }));

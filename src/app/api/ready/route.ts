@@ -4,7 +4,7 @@ import { databaseReadiness } from "@/lib/data-store";
 import { productionReadinessErrors, productionReadinessWarnings } from "@/lib/security";
 import { backupReadiness } from "@/lib/backup-status";
 import { adminMfaConfigured } from "@/lib/admin-mfa";
-import { staffUsers } from "@/lib/auth";
+import { currentStaffUsers } from "@/lib/auth";
 
 export async function GET() {
   const blockers = productionReadinessErrors();
@@ -19,7 +19,7 @@ export async function GET() {
   }
 
   const ready = blockers.length === 0;
-  const admin = staffUsers.find((user) => user.role === "admin");
+  const admin = currentStaffUsers().find((user) => user.role === "admin");
   let adminMfaReady = false;
   try {
     adminMfaReady = Boolean(admin && adminMfaConfigured(admin.email));

@@ -7,6 +7,10 @@ import { validTotpSecret } from "./totp.ts";
 export { privateNoStoreHeaders, securityHeaders };
 export type SecurityHeader = ReturnType<typeof securityHeaders>[number];
 
+export function adminMfaRequired(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env) {
+  return env.BUBBLEWASH_ADMIN_MFA_REQUIRED === "true";
+}
+
 export function clientScopeKey(headers: Headers, scope: string) {
   const trustEdgeHeaders = process.env.BUBBLEWASH_TRUST_EDGE_HEADERS === "true";
   const cloudflareIp = trustEdgeHeaders ? headers.get("cf-connecting-ip")?.trim() : "";
@@ -131,6 +135,9 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
     if (!env.WHATSAPP_BOOKING_TEMPLATE) errors.push("Set WHATSAPP_BOOKING_TEMPLATE before enabling automated updates.");
     if (!env.WHATSAPP_OPERATIONS_TEMPLATE) errors.push("Set WHATSAPP_OPERATIONS_TEMPLATE before enabling automated updates.");
   }
+  if (adminMfaRequired(env) !== (env.NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED === "true")) {
+    errors.push("Keep BUBBLEWASH_ADMIN_MFA_REQUIRED and NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED aligned.");
+  }
   const trustEdgeHeaders = env.BUBBLEWASH_TRUST_EDGE_HEADERS === "true";
   const trustProxyHeaders = env.BUBBLEWASH_TRUST_PROXY_HEADERS === "true";
   if (trustEdgeHeaders === trustProxyHeaders) {
@@ -154,7 +161,7 @@ export function productionReadinessWarnings(env: NodeJS.ProcessEnv | Record<stri
   if (env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED !== "true") {
     warnings.push("Pilot communication mode is active: operations must follow up with customers manually; automated email and WhatsApp updates are disabled.");
   }
-  if (!validTotpSecret(env.BUBBLEWASH_ADMIN_TOTP_SECRET)) {
+  if (adminMfaRequired(env) && !validTotpSecret(env.BUBBLEWASH_ADMIN_TOTP_SECRET)) {
     warnings.push("Admin sign-in remains fail-closed until MFA enrollment is completed.");
   }
   if (!env.BUBBLEWASH_MAINTENANCE_TOKEN || env.BUBBLEWASH_MAINTENANCE_TOKEN.length < 32) {
