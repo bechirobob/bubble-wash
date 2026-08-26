@@ -10,6 +10,8 @@ process.env.BUBBLEWASH_DATABASE_PATH = path.join(process.cwd(), "data", `admin-m
 process.env.BUBBLEWASH_MFA_ENCRYPTION_KEY = Buffer.alloc(32, 11).toString("base64");
 process.env.BUBBLEWASH_SESSION_SECRET = "admin-mfa-http-session-secret-longer-than-32-characters";
 process.env.BUBBLEWASH_DISABLE_DEMO_LOGIN = "true";
+process.env.BUBBLEWASH_ADMIN_MFA_REQUIRED = "true";
+process.env.NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED = "true";
 process.env.BUBBLEWASH_ADMIN_EMAIL = "admin@bubblewash.co";
 process.env.BUBBLEWASH_ADMIN_PASSWORD_HASH = createPasswordHash("unique-production-admin-password", "admin-mfa-http-salt");
 

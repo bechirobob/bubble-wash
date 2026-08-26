@@ -63,6 +63,22 @@ type StoredDriverLocationRow = {
   received_at: string;
 };
 
+export type StaffCredentialOverride = {
+  role: "admin";
+  login: string;
+  passwordHash: string;
+  credentialVersion: string;
+  updatedAt: string;
+};
+
+type StoredStaffCredentialOverrideRow = {
+  role: "admin";
+  login: string;
+  password_hash: string;
+  credential_version: string;
+  updated_at: string;
+};
+
 export type EarlyAccessSignup = {
   id: string;
   firstName: string;
@@ -286,6 +302,22 @@ function getDatabase() {
       FOREIGN KEY (admin_email) REFERENCES admin_mfa_settings(admin_email) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_admin_mfa_recovery_unused ON admin_mfa_recovery_codes(admin_email, used_at);
+
+    CREATE TABLE IF NOT EXISTS staff_credential_overrides (
+      role TEXT PRIMARY KEY CHECK (role = 'admin'),
+      login TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      password_hash TEXT NOT NULL,
+      credential_version TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_recovery_tokens (
+      token_hash TEXT PRIMARY KEY,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_admin_recovery_tokens_expiry ON admin_recovery_tokens(expires_at, used_at);
 
     CREATE TABLE IF NOT EXISTS delivery_proofs (
       order_id TEXT PRIMARY KEY,
@@ -895,6 +927,64 @@ export function deleteExpiredDriverLiveLocations(capturedBefore: string) {
   return getDatabase().prepare("DELETE FROM driver_live_locations WHERE captured_at < ?").run(capturedBefore).changes;
 }
 
+export function readStaffCredentialOverride(role: "admin" = "admin"): StaffCredentialOverride | null {
+  const row = getDatabase().prepare(`
+    SELECT role, login, password_hash, credential_version, updated_at
+    FROM staff_credential_overrides
+    WHERE role = ?
+  `).get(role) as StoredStaffCredentialOverrideRow | undefined;
+  if (!row) return null;
+  return {
+    role: row.role,
+    login: row.login,
+    passwordHash: row.password_hash,
+    credentialVersion: row.credential_version,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function consumeAdminRecoveryTokenAndSetCredentials(input: {
+  tokenHash: string;
+  configuredTokenHash: string;
+  expiresAt: string;
+  login: string;
+  passwordHash: string;
+  credentialVersion: string;
+  now?: string;
+}) {
+  const db = getDatabase();
+  const now = input.now ?? new Date().toISOString();
+  return db.transaction(() => {
+    db.prepare(`
+      INSERT OR IGNORE INTO admin_recovery_tokens (token_hash, expires_at, used_at, created_at)
+      VALUES (@configuredTokenHash, @expiresAt, NULL, @now)
+    `).run({ configuredTokenHash: input.configuredTokenHash, expiresAt: input.expiresAt, now });
+
+    const consumed = db.prepare(`
+      UPDATE admin_recovery_tokens
+      SET used_at = @now
+      WHERE token_hash = @tokenHash AND used_at IS NULL AND expires_at > @now
+    `).run({ tokenHash: input.tokenHash, now });
+    if (consumed.changes !== 1) return false;
+
+    db.prepare(`
+      INSERT INTO staff_credential_overrides (role, login, password_hash, credential_version, updated_at)
+      VALUES ('admin', @login, @passwordHash, @credentialVersion, @now)
+      ON CONFLICT(role) DO UPDATE SET
+        login = excluded.login,
+        password_hash = excluded.password_hash,
+        credential_version = excluded.credential_version,
+        updated_at = excluded.updated_at
+    `).run({
+      login: input.login,
+      passwordHash: input.passwordHash,
+      credentialVersion: input.credentialVersion,
+      now,
+    });
+    return true;
+  })();
+}
+
 export function resetDataStoreForTests() {
   if (!database) return;
   database.prepare("DELETE FROM submissions").run();
@@ -908,6 +998,8 @@ export function resetDataStoreForTests() {
   database.prepare("DELETE FROM mfa_replay_guard").run();
   database.prepare("DELETE FROM admin_mfa_recovery_codes").run();
   database.prepare("DELETE FROM admin_mfa_settings").run();
+  database.prepare("DELETE FROM admin_recovery_tokens").run();
+  database.prepare("DELETE FROM staff_credential_overrides").run();
   database.prepare("DELETE FROM delivery_proofs").run();
   lastLocationCleanupAt = 0;
 }

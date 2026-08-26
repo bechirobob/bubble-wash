@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { encodeSession, findStaffUser, sanitizeNextPath, sessionCookieName, sessionCookieOptions } from "@/lib/auth";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
-import { staffWriteGuard } from "@/lib/security";
+import { adminMfaRequired, staffWriteGuard } from "@/lib/security";
 import { adminMfaConfigured, verifyAdminMfaCredential } from "@/lib/admin-mfa";
 
 export async function POST(request: NextRequest) {
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Invalid Bubble Wash staff credentials." }, { status: 401 });
     }
 
-    if (user.role === "admin") {
+    if (user.role === "admin" && adminMfaRequired()) {
       if (!adminMfaConfigured(user.email)) {
         if (process.env.NODE_ENV === "production") {
           return NextResponse.json({ ok: false, error: "Admin sign-in is temporarily unavailable." }, { status: 503 });

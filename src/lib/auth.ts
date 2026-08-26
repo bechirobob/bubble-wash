@@ -1,7 +1,8 @@
 import "server-only";
 
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers.js";
+import { readStaffCredentialOverride } from "./data-store.ts";
 import { createPasswordHash, matchesKnownDemoPassword, verifyPasswordHash } from "./passwords.ts";
 
 export { createPasswordHash } from "./passwords.ts";
@@ -12,11 +13,12 @@ export type StaffUser = {
   name: string;
   email: string;
   passwordHash: string;
+  credentialVersion: string;
   role: StaffRole;
   entityId?: string;
 };
 
-export type StaffSession = Pick<StaffUser, "email" | "role" | "name" | "entityId"> & {
+export type StaffSession = Pick<StaffUser, "email" | "role" | "name" | "entityId" | "credentialVersion"> & {
   issuedAt: number;
   expiresAt: number;
   nonce: string;
@@ -29,6 +31,10 @@ const demoPassword = "Admin123!";
 function demoCredentialFallbackEnabled() {
   if (process.env.NODE_ENV === "production") return false;
   return process.env.BUBBLEWASH_DISABLE_DEMO_LOGIN !== "true";
+}
+
+function environmentCredentialVersion(passwordHash: string) {
+  return createHash("sha256").update(passwordHash).digest("base64url");
 }
 
 function staffCredential(role: StaffRole, demoEmail: string, displayName: string): StaffUser | null {
@@ -46,10 +52,11 @@ function staffCredential(role: StaffRole, demoEmail: string, displayName: string
   if (!email) return null;
   if (configuredHash) {
     if (process.env.NODE_ENV === "production" && matchesKnownDemoPassword(configuredHash)) return null;
-    return { name: displayName, email, passwordHash: configuredHash, role, entityId };
+    return { name: displayName, email, passwordHash: configuredHash, credentialVersion: environmentCredentialVersion(configuredHash), role, entityId };
   }
   if (process.env.NODE_ENV === "production") return null;
-  return { name: displayName, email, passwordHash: createPasswordHash(devPassword), role, entityId };
+  const passwordHash = createPasswordHash(devPassword);
+  return { name: displayName, email, passwordHash, credentialVersion: environmentCredentialVersion(passwordHash), role, entityId };
 }
 
 export const staffUsers: StaffUser[] = [
@@ -58,6 +65,20 @@ export const staffUsers: StaffUser[] = [
   staffCredential("driver", "driver@bubblewash.local", "Route Driver"),
   staffCredential("support", "support@bubblewash.local", "Support Agent"),
 ].filter((user): user is StaffUser => Boolean(user));
+
+export function currentStaffUsers(): StaffUser[] {
+  const override = readStaffCredentialOverride();
+  if (!override) return staffUsers;
+  const admin: StaffUser = {
+    name: "Master Administrator",
+    email: override.login,
+    passwordHash: override.passwordHash,
+    credentialVersion: override.credentialVersion,
+    role: "admin",
+  };
+  const nonAdmins = staffUsers.filter((user) => user.role !== "admin");
+  return [admin, ...nonAdmins];
+}
 
 const allowedNextPaths = new Set(["/admin", "/vendors", "/drivers", "/support"]);
 
@@ -83,8 +104,8 @@ export function sanitizeNextPath(value?: string) {
   return allowedNextPaths.has(value) ? value : "/admin";
 }
 
-export function findStaffUser(email: string, password: string) {
-  return staffUsers.find((user) => user.email.toLowerCase() === email.trim().toLowerCase() && verifyPasswordHash(password, user.passwordHash)) ?? null;
+export function findStaffUser(identifier: string, password: string) {
+  return currentStaffUsers().find((user) => user.email.toLowerCase() === identifier.trim().toLowerCase() && verifyPasswordHash(password, user.passwordHash)) ?? null;
 }
 
 export function encodeSession(user: StaffUser) {
@@ -94,6 +115,7 @@ export function encodeSession(user: StaffUser) {
     role: user.role,
     name: user.name,
     entityId: user.entityId,
+    credentialVersion: user.credentialVersion,
     issuedAt: now,
     expiresAt: now + sessionMaxAgeSeconds,
     nonce: randomUUID(),
@@ -109,8 +131,9 @@ export function decodeSession(value?: string) {
     if (!payload || !signature || !safeEqual(signature, signPayload(payload))) return null;
     const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as StaffSession;
     if (!session.expiresAt || session.expiresAt < Math.floor(Date.now() / 1000)) return null;
-    const user = staffUsers.find((item) => item.email === session.email && item.role === session.role);
+    const user = currentStaffUsers().find((item) => item.email.toLowerCase() === session.email.toLowerCase() && item.role === session.role);
     if (!user || session.entityId !== user.entityId) return null;
+    if (user.role === "admin" && session.credentialVersion !== user.credentialVersion) return null;
     return { email: session.email, role: session.role, name: user.name, entityId: user.entityId };
   } catch {
     return null;
