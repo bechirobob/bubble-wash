@@ -9,6 +9,9 @@ const primaryDir = process.env.BUBBLEWASH_BACKUP_PRIMARY_DIR;
 const offsiteDir = process.env.BUBBLEWASH_BACKUP_OFFSITE_DIR;
 const statusPath = process.env.BUBBLEWASH_BACKUP_STATUS_PATH;
 const key = Buffer.from(process.env.BUBBLEWASH_BACKUP_ENCRYPTION_KEY ?? "", "base64");
+const deferStatus = process.env.BUBBLEWASH_BACKUP_DEFER_STATUS === "true";
+const primaryRetentionDays = parseRetentionDays("BUBBLEWASH_BACKUP_PRIMARY_RETENTION_DAYS", 7);
+const stagingRetentionDays = parseRetentionDays("BUBBLEWASH_BACKUP_STAGING_RETENTION_DAYS", 2);
 
 for (const [name, value] of Object.entries({ BUBBLEWASH_DATABASE_PATH: source, BUBBLEWASH_BACKUP_PRIMARY_DIR: primaryDir, BUBBLEWASH_BACKUP_OFFSITE_DIR: offsiteDir, BUBBLEWASH_BACKUP_STATUS_PATH: statusPath })) {
   if (!value || !path.isAbsolute(value)) throw new Error(`${name} must be an absolute path.`);
@@ -23,6 +26,14 @@ const filename = `bubblewash-${stamp}.sqlite.enc`;
 const workDir = mkdtempSync(path.join(tmpdir(), "bubblewash-backup-"));
 const plainPath = path.join(workDir, "snapshot.sqlite");
 const restorePath = path.join(workDir, "restore-proof.sqlite");
+
+function parseRetentionDays(name, fallback) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 365) throw new Error(`${name} must be an integer from 1 to 365.`);
+  return value;
+}
 
 function encrypt(plain) {
   const iv = randomBytes(12);
@@ -80,12 +91,14 @@ try {
   verifyDatabase(restorePath);
   const result = { ok: true, createdAt: new Date().toISOString(), restoreVerifiedAt: new Date().toISOString(), filename, sha256: offsiteHash };
   mkdirSync(path.dirname(statusPath), { recursive: true });
-  const temporaryStatus = `${statusPath}.${process.pid}.tmp`;
+  const destinationStatus = deferStatus ? `${statusPath}.${filename}.pending` : statusPath;
+  const temporaryStatus = `${destinationStatus}.${process.pid}.tmp`;
   writeFileSync(temporaryStatus, JSON.stringify(result), { flag: "wx", mode: 0o600 });
-  renameSync(temporaryStatus, statusPath);
-  prune(primaryDir);
-  prune(offsiteDir);
+  renameSync(temporaryStatus, destinationStatus);
+  prune(primaryDir, primaryRetentionDays);
+  prune(offsiteDir, stagingRetentionDays);
   console.log(JSON.stringify(result));
 } finally {
   rmSync(workDir, { recursive: true, force: true });
 }
+

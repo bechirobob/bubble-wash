@@ -20,6 +20,7 @@
     "hash-password": "node scripts/hash-password.mjs",
     "mfa:setup": "node scripts/generate-totp-secret.mjs",
     "db:backup": "node scripts/backup-database.mjs",
+    "db:backup:finalize": "node scripts/finalize-backup.mjs",
     "db:export": "node scripts/export-portable-data.mjs",
     "maintenance:run": "node scripts/run-maintenance.mjs"
   },
@@ -55,3 +56,4 @@
     }
   }
 }
+

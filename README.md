@@ -15,7 +15,7 @@ Open `http://localhost:3000`.
 
 Use `.env.production.example` as the deployment template. Do not commit real secrets.
 
-The pilot deployment requires one Node.js application instance, a mounted persistent volume for `BUBBLEWASH_DATABASE_PATH`, a separate off-site backup mount, and scheduled maintenance/backup timers. Do not run multiple application replicas against the SQLite file. See `docs/PILOT_RUNBOOK.md` for the release gate, smoke test, backups, and rollback; see `docs/SCALING_PLAN.md` before adding replicas.
+The pilot deployment requires one Node.js application instance, a mounted persistent volume for `BUBBLEWASH_DATABASE_PATH`, the scheduled GitHub off-host backup workflow, and scheduled maintenance. Do not run multiple application replicas against the SQLite file. See `docs/PILOT_RUNBOOK.md` for the release gate, smoke test, backups, and rollback; see `docs/SCALING_PLAN.md` before adding replicas.
 
 Required for staff auth hardening:
 
@@ -62,3 +62,4 @@ npm run check
 The GitHub `Pilot CI` workflow runs the same lint, test, and Webpack production-build gate on pushes and pull requests. Next.js development still uses Turbopack; the release build uses the supported `--webpack` path for deterministic compatibility with the current native SQLite dependency.
 
 Missing staff authentication/MFA, legal controller registration, customer-confirmation providers, public URL, persistent storage, fresh restore-verified encrypted backup, maintenance secret, or trusted-edge configuration blocks `/api/ready`. Manual commercial payment/follow-up mode remains explicit and does not claim that online checkout or commercial automated sends are live.
+

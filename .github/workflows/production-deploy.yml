@@ -118,6 +118,17 @@ jobs:
           retention-days: 35
           compression-level: 0
 
+      - name: Confirm the backup is stored off-host
+        shell: bash
+        run: |
+          set -euo pipefail
+          backup_name="${{ steps.backup.outputs.filename }}"
+          unit_name="bubblewash-backup-finalize-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          tailscale ssh root@hermes \
+            "systemd-run --quiet --wait --collect --pipe --unit='$unit_name' --property='User=ubuntu' --property='Group=ubuntu' --property='WorkingDirectory=$RELEASE_DIR' --property='EnvironmentFile=/home/ubuntu/.config/bubblewash/env' --property='Environment=HOME=/home/ubuntu' /usr/bin/npm run db:backup:finalize -- '$backup_name'"
+          tailscale ssh root@hermes \
+            "rm -- '/home/ubuntu/bubblewash-backups/github-staging/$backup_name'"
+
       - name: Activate the prepared release
         shell: bash
         run: |
@@ -141,3 +152,4 @@ jobs:
               --output /dev/null \
               "https://bubblewash.co$path"
           done
+

@@ -25,7 +25,7 @@ Use `.env.production.example` as the inventory. Before launch:
 7. Leave Paystack unset while online payments remain disabled. Configure Resend plus approved `WHATSAPP_EARLY_ACCESS_TEMPLATE` and `WHATSAPP_PRIVACY_TEMPLATE` credentials before launch; these confirmations are operational even while commercial automated updates remain disabled. Do not enable commercial automated updates until booking/operations templates and end-to-end tests pass.
 8. Enable exactly one trusted IP-header mode appropriate to the deployment edge. Use `BUBBLEWASH_TRUST_EDGE_HEADERS=true` for a controlled Cloudflare/Fly-style edge header, or `BUBBLEWASH_TRUST_PROXY_HEADERS=true` only when the reverse proxy strips public forwarding headers and writes its own.
 9. Set the exact `BUBBLEWASH_LEGAL_ENTITY_NAME` and confirmed `BUBBLEWASH_DPC_REGISTRATION_NUMBER`. The business owner must approve the service terms, privacy notice, retention schedule, and refund policy; placeholders are a release blocker.
-10. Set a random maintenance token, a base64 32-byte backup key, separate primary/off-site mounted directories, and a backup status path. Install the timer units from `ops/` or equivalent provider schedules. Restrict database, backup, and secret paths to the application service account.
+10. Set a random maintenance token, a base64 32-byte backup key, the VPS primary/staging directories, and a backup status path. Keep `Nightly Production Backup` enabled in GitHub Actions; it performs the off-host transfer through Tailscale. Restrict database, backup, and secret paths to the application service account.
 
 ## Release gate
 
@@ -36,7 +36,7 @@ npm ci
 npm run check
 ```
 
-The release is a no-go if lint, tests, dependency audits, route verification, or the production build fails. Run `npm audit --audit-level=moderate` and `npm audit --omit=dev --audit-level=moderate` again from the exact candidate lockfile; any newly published moderate-or-higher vulnerability blocks deployment. Before traffic moves, run `npm run db:backup` and require its off-site restore proof. After deployment:
+The release is a no-go if lint, tests, dependency audits, route verification, or the production build fails. Run `npm audit --audit-level=moderate` and `npm audit --omit=dev --audit-level=moderate` again from the exact candidate lockfile; any newly published moderate-or-higher vulnerability blocks deployment. Before traffic moves, require the production deployment workflow to create, restore-test, and upload its encrypted backup before activation. After deployment:
 
 ```bash
 curl --fail --silent --show-error https://bubblewash.co/api/health
@@ -70,13 +70,13 @@ Use a fresh test customer and a test bank-transfer/invoice record approved by th
 
 ## Backup and restore
 
-- Take a provider volume snapshot before every deployment. Run `npm run db:backup`; it creates a consistent SQLite snapshot, encrypts it with AES-256-GCM, writes identical non-overwriting copies to the primary and separately mounted off-site directories, decrypts the off-site copy into a temporary restore proof, runs `PRAGMA quick_check`, and then atomically updates the readiness status file.
-- The supplied nightly timer retains 35 days. Treat the key, status path, and encrypted copies as sensitive. Monitor job failure; `/api/ready` becomes blocked after 30 hours without a current restore proof.
+- Take a provider volume snapshot before every deployment. The backup job creates a consistent SQLite snapshot, encrypts it with AES-256-GCM, writes non-overwriting primary and transfer-staging copies, decrypts the staging copy into a temporary restore proof, and runs `PRAGMA quick_check`. It does not mark readiness healthy until GitHub confirms the encrypted artifact was stored off-host.
+- `Nightly Production Backup` runs at 01:15 UTC (02:15 Malabo and 01:15 Accra). GitHub retains encrypted artifacts for 35 days. The VPS retains primary copies for seven days by default and removes each staging copy after a successful transfer; failed staging copies are pruned after two days. Treat the key, status path, and encrypted copies as sensitive. Monitor workflow failure; `/api/ready` becomes blocked after 30 hours without a current restore and off-host storage proof.
 - Restore only during a declared maintenance window: stop the app, preserve the failed database and WAL/SHM companions, decrypt a selected off-site backup with a separately reviewed recovery procedure, verify it away from production, place it at `BUBBLEWASH_DATABASE_PATH`, start exactly one instance, and run readiness/order/customer-access smoke tests before reopening bookings.
 
 ## Monitoring and response
 
-- Alert on `/api/ready` non-200 responses, stale/failed timer jobs, protected `/api/internal/metrics` database failure, outbox failed/pending growth, open privacy cases, HTTP 5xx rate, SQLite busy/locked errors, and login 429 spikes. Never put the maintenance token in a browser or public monitoring URL.
+- Alert on `/api/ready` non-200 responses, failed or stale nightly backup workflows, protected `/api/internal/metrics` database failure, outbox failed/pending growth, open privacy cases, HTTP 5xx rate, SQLite busy/locked errors, and login 429 spikes. Never put the maintenance token in a browser or public monitoring URL.
 - Retention maintenance removes expired limiter/MFA state, 90-day notification logs, opted-out early-access records after 30 days, active early-access records 12 months after the configured household launch date, completed privacy-case evidence after 36 months, and closed order groups after 24 months. Pause purging under a documented dispute or legal hold.
 - Reconcile bank-transfer and invoice status against the business payment record daily. Do not mark an order paid from a customer statement alone.
 - The admin owns dispatch and closeout, support owns customer communication, and one named technical operator owns deployment, database backup, and rollback.
