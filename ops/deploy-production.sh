@@ -180,7 +180,7 @@ if [[ "$operation" == "prepare" ]]; then
   run_transient \
     "bubblewash-backup-$release_id" \
     "$release_dir" \
-    /usr/bin/npm run db:backup
+    /usr/bin/env BUBBLEWASH_BACKUP_DEFER_STATUS=true /usr/bin/npm run db:backup
 
   backup_name="$(find "$backup_staging_dir" -maxdepth 1 -type f \
     -name 'bubblewash-*.sqlite.enc' -printf '%f\n' | sort | tail -n 1)"
@@ -328,3 +328,4 @@ mv "$temporary_status" "$status_path"
 
 trap - ERR
 echo "Bubble Wash release $deploy_sha is healthy on production."
+
