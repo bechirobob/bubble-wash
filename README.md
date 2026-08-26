@@ -17,6 +17,8 @@ Use `.env.production.example` as the deployment template. Do not commit real sec
 
 The pilot deployment requires one Node.js application instance, a mounted persistent volume for `BUBBLEWASH_DATABASE_PATH`, the scheduled GitHub off-host backup workflow, and scheduled maintenance. Do not run multiple application replicas against the SQLite file. See `docs/PILOT_RUNBOOK.md` for the release gate, smoke test, backups, and rollback; see `docs/SCALING_PLAN.md` before adding replicas.
 
+`Nightly Production Backup` runs daily at 01:15 UTC, retains seven days of primary VPS copies, clears successful transfer staging, and stores the encrypted off-host artifact in GitHub for 35 days.
+
 Required for staff auth hardening:
 
 ```bash
