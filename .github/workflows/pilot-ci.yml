@@ -8,6 +8,7 @@ on:
     branches:
       - main
   workflow_dispatch:
+  # Temporary exact-head release trigger; remove after production starts.
   schedule:
     - cron: "*/5 * * * *"
 
