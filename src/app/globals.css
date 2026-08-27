@@ -31,6 +31,9 @@
   --status-neutral: var(--muted);
   --skeleton-base: #e5eef1;
   --skeleton-highlight: #f7fafb;
+  --motion-route-duration: 220ms;
+  --motion-route-travel: 8px;
+  --motion-arrival-ease: cubic-bezier(.16, 1, .3, 1);
   --danger: var(--status-danger);
   --warning: var(--status-warning);
   --success: var(--status-success);
@@ -99,6 +102,70 @@ small { display: block; color: var(--soft); line-height: 1.35; }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .pageShell { width: var(--space-page); margin-inline: auto; }
 .siteShell { min-height: 100vh; }
+.routeScene {
+  min-height: 100vh;
+  animation: route-scene-arrival var(--motion-route-duration) var(--motion-arrival-ease) both;
+}
+
+@keyframes route-scene-arrival {
+  from { opacity: .96; transform: translate3d(var(--motion-route-travel), 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+.routeLoadingShell { min-height: 100vh; background: var(--page); }
+.routeLoadingFrame { overflow: hidden; }
+.routeLoadingHeader {
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  border-bottom: 1px solid var(--line);
+}
+.routeLoadingBrand { display: flex; align-items: center; gap: 10px; min-width: 170px; }
+.routeLoadingNav { display: flex; align-items: center; justify-content: flex-end; gap: 24px; width: min(620px, 58%); }
+.routeLoadingNav .routeSkeletonLine { width: 78px; }
+.routeLoadingHero {
+  min-height: 390px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr);
+  gap: 64px;
+  align-items: center;
+  padding-block: 58px;
+  border-bottom: 1px solid var(--line);
+}
+.routeLoadingCopy { display: grid; gap: 15px; align-content: center; }
+.routeLoadingContent { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 30px; padding-block: 42px 70px; }
+.routeLoadingContentRow { min-height: 120px; display: grid; align-content: center; gap: 14px; border-top: 1px solid var(--line-strong); }
+.routeSkeletonLine,
+.routeSkeletonBlock {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  background: var(--skeleton-base);
+}
+.routeSkeletonLine { width: 100%; height: 12px; }
+.routeSkeletonBlock { min-height: 44px; }
+.routeSkeletonLine::after,
+.routeSkeletonBlock::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--skeleton-highlight), transparent);
+  animation: skeleton-sweep 1.35s ease-in-out infinite;
+}
+.routeSkeletonLogo { width: 44px; min-height: 44px; }
+.routeSkeletonBrandName { width: 104px; }
+.routeSkeletonEyebrow { width: 128px; height: 10px; }
+.routeSkeletonTitle { width: min(630px, 92%); height: 34px; }
+.routeSkeletonTitleShort { width: min(460px, 70%); }
+.routeSkeletonSummary { width: min(560px, 88%); }
+.routeSkeletonSummaryShort { width: min(390px, 64%); }
+.routeSkeletonPanel { min-height: 230px; }
+.routeLoadingContentRow .routeSkeletonLine:nth-child(1) { width: 62%; }
+.routeLoadingContentRow .routeSkeletonLine:nth-child(2) { width: 88%; }
+.routeLoadingContentRow .routeSkeletonLine:nth-child(3) { width: 72%; }
 
 .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; font-weight: 700; font-size: 1.08rem; }
 .brandArtwork { width: 44px; height: 40px; display: grid; place-items: center; overflow: hidden; flex: 0 0 auto; }
@@ -1189,6 +1256,19 @@ dd { margin: 4px 0 0; color: var(--muted); }
 }
 
 @media (max-width: 720px) {
+  :root { --motion-route-duration: 190ms; --motion-route-travel: 11px; }
+  .routeLoadingHeader { min-height: 66px; }
+  .routeLoadingNav { width: 44px; }
+  .routeLoadingNav .routeSkeletonLine { display: none; }
+  .routeLoadingNav .routeSkeletonLine:first-child { display: block; width: 44px; height: 16px; }
+  .routeLoadingHero { min-height: 0; grid-template-columns: 1fr; gap: 28px; padding-block: 38px; }
+  .routeSkeletonTitle { height: 26px; }
+  .routeSkeletonTitleShort { width: 82%; }
+  .routeSkeletonSummary { width: 94%; }
+  .routeSkeletonSummaryShort { width: 74%; }
+  .routeSkeletonPanel { min-height: 170px; }
+  .routeLoadingContent { grid-template-columns: 1fr; gap: 0; padding-block: 16px 48px; }
+  .routeLoadingContentRow { min-height: 100px; }
   .portalPage { width: calc(100% - 28px); }
   .portalPage h1 { font-size: 1.5rem; }
   .portalPage h2 { font-size: 1.2rem; }
@@ -1328,6 +1408,9 @@ dd { margin: 4px 0 0; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
   .loadingSkeletonRow > span::after { display: none; }
+  .routeScene { animation: none; transform: none; }
+  .routeSkeletonLine::after,
+  .routeSkeletonBlock::after { display: none; }
 }
 
 @media (forced-colors: active) {
@@ -1339,6 +1422,10 @@ dd { margin: 4px 0 0; color: var(--muted); }
   .loadingSkeletonRow { border-color: CanvasText; }
   .loadingSkeletonRow > span { border: 1px solid CanvasText; background: Canvas; }
   .loadingSkeletonRow > span::after { display: none; }
+  .routeSkeletonLine,
+  .routeSkeletonBlock { border: 1px solid CanvasText; background: Canvas; }
+  .routeSkeletonLine::after,
+  .routeSkeletonBlock::after { display: none; }
 }
 
 /* Native D2C, policy, and customer self-service surfaces */

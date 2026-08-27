@@ -12,10 +12,32 @@ test("public status messages use semantic success, warning, info, and error tone
 
 test("loading skeletons expose busy state while hiding decorative shapes", async () => {
   const source = await readFile(new URL("../src/components/LoadingSkeleton.tsx", import.meta.url), "utf8");
+  const routeSource = await readFile(new URL("../src/components/RouteLoadingSkeleton.tsx", import.meta.url), "utf8");
+  const routeLoading = await readFile(new URL("../src/app/loading.tsx", import.meta.url), "utf8");
   assert.match(source, /role="status"/);
   assert.match(source, /aria-live="polite"/);
   assert.match(source, /aria-busy="true"/);
   assert.match(source, /aria-hidden="true"/);
+  assert.match(routeSource, /role="status"/);
+  assert.match(routeSource, /aria-busy="true"/);
+  assert.match(routeSource, /aria-hidden="true"/);
+  assert.match(routeLoading, /RouteLoadingSkeleton/);
+});
+
+test("public routes warm on capable connections and page transitions respect reduced motion", async () => {
+  const warmup = await readFile(new URL("../src/components/RouteWarmup.tsx", import.meta.url), "utf8");
+  const template = await readFile(new URL("../src/app/template.tsx", import.meta.url), "utf8");
+  const chrome = await readFile(new URL("../src/components/PublicChrome.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../src/app/globals.css", import.meta.url), "utf8");
+  assert.match(warmup, /router\.prefetch/);
+  assert.match(warmup, /saveData/);
+  assert.match(warmup, /effectiveType/);
+  assert.match(chrome, /<RouteWarmup \/>/);
+  assert.match(template, /className="routeScene"/);
+  assert.match(css, /--motion-route-duration/);
+  assert.match(css, /@keyframes route-scene-arrival/);
+  assert.match(css, /@media \(max-width:\s*720px\)[\s\S]*?\.routeLoadingHero\s*\{[^}]*grid-template-columns:\s*1fr/);
+  assert.match(css, /\.routeScene\s*\{\s*animation:\s*none/s);
 });
 
 test("semantic tokens cover status roles, reduced motion, and forced colors", async () => {
