@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
 import { BrandLink } from "@/components/BrandLink";
+import { RouteWarmup } from "@/components/RouteWarmup";
 import {
   BookOpenCheck,
   CalendarPlus,
@@ -116,6 +117,7 @@ export function PublicFooter() {
 export function PublicChrome({ children, skipTo = "main-content", skipLabel = "Skip to content" }: PublicChromeProps) {
   return (
     <main className="siteShell">
+      <RouteWarmup />
       <a className="skipLink" href={`#${skipTo}`}>{skipLabel}</a>
       <PublicHeader />
       {children}
