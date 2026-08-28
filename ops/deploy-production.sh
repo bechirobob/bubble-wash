@@ -150,7 +150,11 @@ wait_for_route() {
 smoke_routes() {
   local origin="$1"
   local path
-  for path in / /services /book /track /manage /early-access /api/health /api/ready; do
+  local response_file
+  local status
+  response_file="$(mktemp)"
+
+  for path in /api/health /api/ready; do
     curl \
       --fail \
       --silent \
@@ -160,6 +164,25 @@ smoke_routes() {
       --output /dev/null \
       "$origin$path"
   done
+
+  for path in / /services /book /track /manage /early-access /admin /api/orders; do
+    status="$(curl \
+      --silent \
+      --show-error \
+      --location \
+      --max-time 10 \
+      --output "$response_file" \
+      --write-out '%{http_code}' \
+      "$origin$path")"
+    [[ "$status" == "503" ]] || fail "$path returned HTTP $status instead of the maintenance response"
+    if [[ "$path" == /api/* ]]; then
+      grep -q '"error":"service_unavailable"' "$response_file" || fail "$path did not return the maintenance API response"
+    else
+      grep -q 'data-bubblewash-maintenance' "$response_file" || fail "$path did not return the maintenance page"
+    fi
+  done
+
+  rm -f -- "$response_file"
 }
 
 configure_backup_environment
@@ -328,4 +351,3 @@ mv "$temporary_status" "$status_path"
 
 trap - ERR
 echo "Bubble Wash release $deploy_sha is healthy on production."
-
