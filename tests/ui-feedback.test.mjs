@@ -68,6 +68,20 @@ test("staff access presents direct role choices without invented workspace descr
   assert.doesNotMatch(source, /Role-specific staff paths|Order review, reassignment|Accept jobs, manage capacity|See route handoffs|Track customer issues/);
 });
 
+test("staff workspaces keep primary actions visible and collapse secondary detail", async () => {
+  const source = await readFile(new URL("../src/components/StaffWorkspaces.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../src/app/globals.css", import.meta.url), "utf8");
+  assert.match(source, /className="staffPrimaryAction"/);
+  assert.match(source, /<details className="staffDetailDisclosure"><summary><span><strong>Customer and collection/);
+  assert.match(source, /<details className="staffDetailDisclosure"><summary><span><strong>Assignment and route/);
+  assert.match(source, /<details className="staffDetailDisclosure"><summary><span><strong>Order history/);
+  assert.match(source, /staffDetailDisclosure staffControlDisclosure/);
+  assert.match(source, /staffRosterEditor staffStandaloneEditor/);
+  assert.match(css, /\.staffDetailDisclosure > summary/);
+  assert.match(css, /\.staffDetailDisclosure\[open\] > summary::after/);
+  assert.match(css, /\.staffDetailDisclosure > summary\s*\{[^}]*min-height:\s*56px/s);
+});
+
 test("the mobile menu exposes state and closes with Escape", async () => {
   const source = await readFile(new URL("../src/components/PublicChrome.tsx", import.meta.url), "utf8");
   assert.match(source, /aria-expanded=\{mobileOpen\}/);
