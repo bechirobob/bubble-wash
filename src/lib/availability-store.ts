@@ -213,6 +213,16 @@ export function getAvailabilityDatabase() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_capacity_reservations_order_driver
       ON assignment_capacity_reservations(order_id COLLATE NOCASE, driver_id)
       WHERE driver_id IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS production_roster_resets (
+      reset_id TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL,
+      backup_filename TEXT NOT NULL,
+      backup_sha256 TEXT NOT NULL,
+      before_counts TEXT NOT NULL CHECK (json_valid(before_counts)),
+      after_counts TEXT NOT NULL CHECK (json_valid(after_counts)),
+      preserved_counts TEXT NOT NULL CHECK (json_valid(preserved_counts))
+    );
   `);
   database = db;
   return db;
@@ -567,4 +577,5 @@ export function resetDataStoreForTests() {
   db.prepare("DELETE FROM vendor_declines").run();
   db.prepare("DELETE FROM vendor_availability").run();
   db.prepare("DELETE FROM driver_availability").run();
+  db.prepare("DELETE FROM production_roster_resets").run();
 }
