@@ -327,6 +327,16 @@ function getDatabase() {
       used_by TEXT,
       recipient_name TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS production_resets (
+      reset_id TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL,
+      backup_filename TEXT NOT NULL,
+      backup_sha256 TEXT NOT NULL,
+      before_counts TEXT NOT NULL CHECK (json_valid(before_counts)),
+      after_counts TEXT NOT NULL CHECK (json_valid(after_counts)),
+      preserved_counts TEXT NOT NULL CHECK (json_valid(preserved_counts))
+    );
   `);
   database = db;
   purgeExpiredDriverLocations(db);
@@ -1001,5 +1011,6 @@ export function resetDataStoreForTests() {
   database.prepare("DELETE FROM admin_recovery_tokens").run();
   database.prepare("DELETE FROM staff_credential_overrides").run();
   database.prepare("DELETE FROM delivery_proofs").run();
+  database.prepare("DELETE FROM production_resets").run();
   lastLocationCleanupAt = 0;
 }
