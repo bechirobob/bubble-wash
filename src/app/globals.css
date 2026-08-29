@@ -485,11 +485,11 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .staffAccessShell { width: var(--space-page); margin: 36px auto 72px; }
 .staffAccessShell > .brand { margin-bottom: 34px; }
 .staffAccessHero { max-width: 760px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
-.staffAccessHero h1 { margin-bottom: .85rem; font-size: clamp(2rem, 3.8vw, 2.65rem); }
+.staffAccessHero h1 { margin-bottom: 0; font-size: clamp(2rem, 3.8vw, 2.65rem); }
 .staffAccessGrid { display: grid; gap: 0; margin-top: 12px; border-top: 1px solid var(--line); }
 .staffAccessCard {
   display: grid;
-  grid-template-columns: 100px 230px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 18px;
   align-items: center;
   padding: 18px 0;
@@ -499,11 +499,10 @@ dd { margin: 4px 0 0; color: var(--muted); }
 }
 .staffAccessCard:hover h2,
 .staffAccessCard:focus-visible h2 { text-decoration: underline; text-underline-offset: 4px; }
-.staffAccessCard span { display: inline-flex; align-items: center; gap: 7px; color: var(--brand); font-weight: 700; }
-.staffAccessCard span svg, .staffAccessCard b svg { width: 17px; height: 17px; stroke-width: 1.8; }
-.staffAccessCard h2 { margin: 0; font-size: 1.2rem; line-height: 1.2; letter-spacing: -.02em; }
-.staffAccessCard p { margin: 0; font-size: .98rem; }
-.staffAccessCard b { display: inline-flex; align-items: center; gap: 6px; color: var(--brand); font-size: .95rem; white-space: nowrap; }
+.staffAccessCard h2 { display: inline-flex; align-items: center; gap: 10px; margin: 0; font-size: 1.2rem; line-height: 1.2; letter-spacing: -.02em; }
+.staffAccessCard h2 svg { width: 19px; height: 19px; color: var(--brand); stroke-width: 1.8; }
+.staffAccessCard span { display: inline-flex; align-items: center; gap: 6px; color: var(--brand); font-size: .95rem; font-weight: 700; white-space: nowrap; }
+.staffAccessCard span svg { width: 17px; height: 17px; stroke-width: 1.8; }
 
 .portalPage {
   width: min(1120px, calc(100% - 48px));
@@ -1248,10 +1247,9 @@ dd { margin: 4px 0 0; color: var(--muted); }
   .staffAccessHero { padding-bottom: 18px; }
   .staffAccessHero h1 { font-size: clamp(1.9rem, 9vw, 2.5rem); }
   .staffAccessGrid { margin-top: 4px; }
-  .staffAccessCard { grid-template-columns: 1fr; gap: 6px; padding: 16px 0; }
+  .staffAccessCard { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 16px 0; }
   .staffAccessCard h2 { font-size: 1.12rem; }
-  .staffAccessCard p { font-size: .95rem; }
-  .staffAccessCard b { font-size: .92rem; }
+  .staffAccessCard span { font-size: .92rem; }
 
 }
 

@@ -59,6 +59,15 @@ test("brand artwork is unboxed and shared across public and staff surfaces", asy
   assert.match(brand, /className="brandArtwork"/);
 });
 
+test("staff access presents direct role choices without invented workspace descriptions", async () => {
+  const source = await readFile(new URL("../src/app/staff/page.tsx", import.meta.url), "utf8");
+  for (const role of ["Admin", "Vendor", "Driver", "Support"]) assert.match(source, new RegExp(`role: "${role}"`));
+  assert.match(source, /<h1>Staff access<\/h1>/);
+  assert.match(source, /<h2><Icon aria-hidden="true" \/>\{path\.role\}<\/h2>/);
+  assert.doesNotMatch(source, /Operations queue|Laundry partner queue|Pickup and delivery board|Customer resolution desk/);
+  assert.doesNotMatch(source, /Role-specific staff paths|Order review, reassignment|Accept jobs, manage capacity|See route handoffs|Track customer issues/);
+});
+
 test("the mobile menu exposes state and closes with Escape", async () => {
   const source = await readFile(new URL("../src/components/PublicChrome.tsx", import.meta.url), "utf8");
   assert.match(source, /aria-expanded=\{mobileOpen\}/);
