@@ -21,7 +21,7 @@ const { POST: enrollMfa } = await import("../src/app/api/admin/mfa/enroll/route.
 
 const configuredAdmin = staffUsers.find((user) => user.role === "admin");
 assert.ok(configuredAdmin);
-assert.equal(decodeSession(encodeSession(configuredAdmin)), null, "existing staff sessions must be rejected while access is disabled");
+assert.equal(decodeSession(encodeSession(configuredAdmin)), null, "existing staff sessions must be rejected while the login lock is active");
 
 function request(url, body) {
   return new NextRequest(url, {
@@ -37,6 +37,7 @@ const loginResponse = await login(request("https://bubblewash.co/api/login", {
   next: "/admin",
 }));
 assert.equal(loginResponse.status, 503);
+assert.equal((await loginResponse.clone().json()).error, "Login access cannot be reached.");
 assert.match(loginResponse.headers.get("set-cookie") ?? "", /bubblewash_staff_session=/);
 
 const recoveryResponse = await recover(request("https://bubblewash.co/api/admin/recover", {
@@ -54,4 +55,4 @@ const mfaResponse = await enrollMfa(request("https://bubblewash.co/api/admin/mfa
 }));
 assert.equal(mfaResponse.status, 503);
 
-console.log(JSON.stringify({ ok: true, checks: 6 }));
+console.log(JSON.stringify({ ok: true, checks: 7 }));

@@ -34,8 +34,7 @@ export default function StaffAccessPage() {
       <main className="loginPage staffAccessPage">
         <section className="loginShell staffAccessShell">
           <BrandLink label="Bubble Wash Staff" priority />
-          <div className="staffAccessHero"><h1>Staff access disabled</h1></div>
-          <p>All Bubble Wash staff sign-ins are currently unavailable.</p>
+          <div className="staffAccessHero"><h1>Login access cannot be reached</h1></div>
           <Link className="button primary full" href="/">Back to site</Link>
         </section>
       </main>

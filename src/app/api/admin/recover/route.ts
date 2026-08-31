@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   const guardError = sameOriginJsonGuard(request.headers, "admin recovery request");
   if (guardError) return guardError;
   if (staffAccessDisabled()) {
-    return NextResponse.json({ ok: false, error: "Bubble Wash staff access is disabled." }, { status: 503 });
+    return NextResponse.json({ ok: false, error: "Login access cannot be reached." }, { status: 503 });
   }
   if (isRateLimited(clientKey(request.headers, "admin-recovery"), 5, 15 * 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many recovery attempts. Try again later." }, { status: 429 });
