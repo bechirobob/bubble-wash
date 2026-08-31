@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { encodeSession, findStaffUser, sanitizeNextPath, sessionCookieName, sessionCookieOptions } from "@/lib/auth";
+import { encodeSession, findStaffUser, sanitizeNextPath, sessionCookieName, sessionCookieOptions, staffAccessDisabled } from "@/lib/auth";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { adminMfaRequired, staffWriteGuard } from "@/lib/security";
 import { adminMfaConfigured, verifyAdminMfaCredential } from "@/lib/admin-mfa";
@@ -7,6 +7,12 @@ import { adminMfaConfigured, verifyAdminMfaCredential } from "@/lib/admin-mfa";
 export async function POST(request: NextRequest) {
   const staffGuardError = staffWriteGuard(request.headers);
   if (staffGuardError) return staffGuardError;
+  if (staffAccessDisabled()) {
+    const response = NextResponse.json({ ok: false, error: "Bubble Wash staff access is disabled." }, { status: 503 });
+    response.cookies.set({ name: sessionCookieName, value: "", ...sessionCookieOptions(), maxAge: 0, expires: new Date(0) });
+    response.cookies.delete(sessionCookieName);
+    return response;
+  }
   if (isRateLimited(clientKey(request.headers, "login"), 10, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many login attempts. Try again shortly." }, { status: 429 });
   }

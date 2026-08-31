@@ -11,6 +11,7 @@ import {
   findStaffUser,
   sessionCookieName,
   sessionCookieOptions,
+  staffAccessDisabled,
 } from "@/lib/auth";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { staffWriteGuard } from "@/lib/security";
@@ -22,6 +23,12 @@ function text(value: unknown, max = 320) {
 export async function POST(request: NextRequest) {
   const guardError = staffWriteGuard(request.headers);
   if (guardError) return guardError;
+  if (staffAccessDisabled()) {
+    const response = NextResponse.json({ ok: false, error: "Bubble Wash staff access is disabled." }, { status: 503 });
+    response.cookies.set({ name: sessionCookieName, value: "", ...sessionCookieOptions(), maxAge: 0, expires: new Date(0) });
+    response.cookies.delete(sessionCookieName);
+    return response;
+  }
 
   try {
     const body = await request.json();

@@ -98,6 +98,26 @@ ensure_env_value() {
   fi
 }
 
+set_env_value() {
+  local name="$1"
+  local expected="$2"
+  local temporary
+  temporary="$(mktemp "$runtime_dir/environment.XXXXXX")"
+  awk -v name="$name" -v expected="$expected" '
+    BEGIN { replaced = 0 }
+    index($0, name "=") == 1 {
+      if (!replaced) print name "=" expected
+      replaced = 1
+      next
+    }
+    { print }
+    END { if (!replaced) print name "=" expected }
+  ' "$env_file" > "$temporary"
+  chown "$app_user:$app_group" "$temporary"
+  chmod 0600 "$temporary"
+  mv "$temporary" "$env_file"
+}
+
 ensure_generated_base64_key() {
   local name="$1"
   local configured
@@ -126,6 +146,7 @@ configure_backup_environment() {
   ensure_env_value "BUBBLEWASH_BACKUP_ENCRYPTION_KEY" "$backup_key"
   ensure_env_value "BUBBLEWASH_DATABASE_DRIVER" "sqlite"
   ensure_generated_base64_key "BUBBLEWASH_MFA_ENCRYPTION_KEY"
+  set_env_value "BUBBLEWASH_STAFF_AUTH_DISABLED" "true"
   chown "$app_user:$app_group" "$env_file"
   chmod 0600 "$env_file"
   unset backup_key
@@ -328,4 +349,3 @@ mv "$temporary_status" "$status_path"
 
 trap - ERR
 echo "Bubble Wash release $deploy_sha is healthy on production."
-

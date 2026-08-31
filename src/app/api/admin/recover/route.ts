@@ -6,6 +6,7 @@ import { consumeAdminRecoveryTokenAndSetCredentials } from "@/lib/data-store";
 import { createPasswordHash, matchesKnownDemoPassword } from "@/lib/passwords";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { sameOriginJsonGuard } from "@/lib/security";
+import { staffAccessDisabled } from "@/lib/auth";
 
 const genericRecoveryError = "This recovery link is invalid, expired, or already used.";
 
@@ -18,6 +19,9 @@ function safeEqual(left: string, right: string) {
 export async function POST(request: NextRequest) {
   const guardError = sameOriginJsonGuard(request.headers, "admin recovery request");
   if (guardError) return guardError;
+  if (staffAccessDisabled()) {
+    return NextResponse.json({ ok: false, error: "Bubble Wash staff access is disabled." }, { status: 503 });
+  }
   if (isRateLimited(clientKey(request.headers, "admin-recovery"), 5, 15 * 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many recovery attempts. Try again later." }, { status: 429 });
   }

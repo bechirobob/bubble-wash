@@ -26,7 +26,12 @@ export type StaffSession = Pick<StaffUser, "email" | "role" | "name" | "entityId
 
 export const sessionCookieName = "bubblewash_staff_session";
 const sessionMaxAgeSeconds = 60 * 60 * 8;
+const staffSessionVersion = "v2";
 const demoPassword = "Admin123!";
+
+export function staffAccessDisabled(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env) {
+  return env.BUBBLEWASH_STAFF_AUTH_DISABLED === "true";
+}
 
 function demoCredentialFallbackEnabled() {
   if (process.env.NODE_ENV === "production") return false;
@@ -67,6 +72,7 @@ export const staffUsers: StaffUser[] = [
 ].filter((user): user is StaffUser => Boolean(user));
 
 export function currentStaffUsers(): StaffUser[] {
+  if (staffAccessDisabled()) return [];
   const override = readStaffCredentialOverride();
   if (!override) return staffUsers;
   const admin: StaffUser = {
@@ -90,7 +96,7 @@ function sessionSecret() {
 }
 
 function signPayload(payload: string) {
-  return createHmac("sha256", sessionSecret()).update(payload).digest("base64url");
+  return createHmac("sha256", sessionSecret()).update(`${staffSessionVersion}:${payload}`).digest("base64url");
 }
 
 function safeEqual(left: string, right: string) {
@@ -125,6 +131,7 @@ export function encodeSession(user: StaffUser) {
 }
 
 export function decodeSession(value?: string) {
+  if (staffAccessDisabled()) return null;
   if (!value) return null;
   try {
     const [payload, signature] = value.split(".");

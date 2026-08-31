@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Bike, Headphones, ShieldCheck, WashingMachine } from "lucide-react";
 import { BrandLink } from "@/components/BrandLink";
+import { staffAccessDisabled } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,18 @@ const staffPaths = [
 ];
 
 export default function StaffAccessPage() {
+  if (staffAccessDisabled()) {
+    return (
+      <main className="loginPage staffAccessPage">
+        <section className="loginShell staffAccessShell">
+          <BrandLink label="Bubble Wash Staff" priority />
+          <div className="staffAccessHero"><h1>Staff access disabled</h1></div>
+          <p>All Bubble Wash staff sign-ins are currently unavailable.</p>
+          <Link className="button primary full" href="/">Back to site</Link>
+        </section>
+      </main>
+    );
+  }
   return (
     <main className="loginPage staffAccessPage">
       <section className="loginShell staffAccessShell">

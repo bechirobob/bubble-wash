@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { AdminRecoveryPageClient } from "@/components/AdminRecoveryPage";
+import { redirect } from "next/navigation";
+import { staffAccessDisabled } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -9,5 +11,6 @@ export const metadata: Metadata = {
 };
 
 export default function AdminRecoveryPage() {
+  if (staffAccessDisabled()) redirect("/login");
   return <AdminRecoveryPageClient />;
 }

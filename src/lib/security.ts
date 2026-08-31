@@ -149,6 +149,9 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
 export function productionReadinessWarnings(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env) {
   if (env.NODE_ENV !== "production") return [];
   const warnings: string[] = [];
+  if (env.BUBBLEWASH_STAFF_AUTH_DISABLED === "true") {
+    warnings.push("All Bubble Wash staff sign-ins are disabled.");
+  }
   if (!env.NEXT_PUBLIC_BUBBLEWASH_WHATSAPP) {
     warnings.push("The optional public WhatsApp contact link is intentionally hidden.");
   }
