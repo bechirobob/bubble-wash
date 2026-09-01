@@ -37,7 +37,7 @@ const loginResponse = await login(request("https://bubblewash.co/api/login", {
   next: "/admin",
 }));
 assert.equal(loginResponse.status, 503);
-assert.equal((await loginResponse.clone().json()).error, "Login access cannot be reached.");
+assert.equal((await loginResponse.clone().json()).error, "Login cannot be reached.");
 assert.match(loginResponse.headers.get("set-cookie") ?? "", /bubblewash_staff_session=/);
 
 const recoveryResponse = await recover(request("https://bubblewash.co/api/admin/recover", {

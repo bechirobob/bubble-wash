@@ -26,21 +26,29 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [totp, setTotp] = useState("");
   const [status, setStatus] = useState("Enter staff credentials to open a separate workspace.");
+  const [statusTone, setStatusTone] = useState<"info" | "error">("info");
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setStatus("Checking credentials…");
-    const response = await fetch("/api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, totp, next: nextPath }),
-    });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      setStatus(data.error ?? "Unable to sign in.");
-      return;
+    setStatusTone("info");
+    try {
+      const response = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, totp, next: nextPath }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        setStatus(data.error ?? "Login cannot be reached.");
+        setStatusTone("error");
+        return;
+      }
+      window.location.href = data.next;
+    } catch {
+      setStatus("Login cannot be reached.");
+      setStatusTone("error");
     }
-    window.location.href = data.next;
   }
 
   function fillCredential(emailValue: string) {
@@ -48,6 +56,7 @@ function LoginForm() {
     setPassword("");
     setTotp("");
     setStatus(`Loaded ${emailValue}. Enter the staff password to continue.`);
+    setStatusTone("info");
   }
 
   const roleRows: Array<[string, string, LucideIcon]> = [
@@ -83,7 +92,7 @@ function LoginForm() {
           <button className="button primary full" type="submit">Sign in</button>
           {adminMfaRequired ? <Link className="inlineIconLink" href="/admin/mfa/enroll">Set up admin authenticator</Link> : null}
           <div className="destination"><strong>Destination:</strong> {nextPath}<br />Sessions should expire automatically on shared devices.</div>
-          <p className="status success" role="status" aria-live="polite">{status}</p>
+          <p className={`status ${statusTone}`} role={statusTone === "error" ? "alert" : "status"} aria-live={statusTone === "error" ? "assertive" : "polite"}>{status}</p>
         </form>
       </section>
     </main>

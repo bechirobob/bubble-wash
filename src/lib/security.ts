@@ -150,7 +150,7 @@ export function productionReadinessWarnings(env: NodeJS.ProcessEnv | Record<stri
   if (env.NODE_ENV !== "production") return [];
   const warnings: string[] = [];
   if (env.BUBBLEWASH_STAFF_AUTH_DISABLED === "true") {
-    warnings.push("Login access cannot be reached.");
+    warnings.push("Login cannot be reached.");
   }
   if (!env.NEXT_PUBLIC_BUBBLEWASH_WHATSAPP) {
     warnings.push("The optional public WhatsApp contact link is intentionally hidden.");

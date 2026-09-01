@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
   const staffGuardError = staffWriteGuard(request.headers);
   if (staffGuardError) return staffGuardError;
   if (staffAccessDisabled()) {
-    const response = NextResponse.json({ ok: false, error: "Login access cannot be reached." }, { status: 503 });
+    const response = NextResponse.json({ ok: false, error: "Login cannot be reached." }, { status: 503 });
     response.cookies.set({ name: sessionCookieName, value: "", ...sessionCookieOptions(), maxAge: 0, expires: new Date(0) });
     response.cookies.delete(sessionCookieName);
     return response;

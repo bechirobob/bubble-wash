@@ -68,6 +68,16 @@ test("staff access presents direct role choices without invented workspace descr
   assert.doesNotMatch(source, /Role-specific staff paths|Order review, reassignment|Accept jobs, manage capacity|See route handoffs|Track customer issues/);
 });
 
+test("login remains visible and reports the locked response as an accessible error", async () => {
+  const page = await readFile(new URL("../src/app/login/page.tsx", import.meta.url), "utf8");
+  const form = await readFile(new URL("../src/components/LoginPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /return <LoginPageClient \/>/);
+  assert.doesNotMatch(page, /staffAccessDisabled/);
+  assert.match(form, /Login cannot be reached\./);
+  assert.match(form, /statusTone === "error" \? "alert" : "status"/);
+  assert.match(form, /statusTone === "error" \? "assertive" : "polite"/);
+});
+
 test("staff workspaces keep primary actions visible and collapse secondary detail", async () => {
   const source = await readFile(new URL("../src/components/StaffWorkspaces.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../src/app/globals.css", import.meta.url), "utf8");
