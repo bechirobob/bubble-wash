@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: new URL("https://bubblewash.co"),
   title: "Bubble Wash — Commercial laundry collection in Accra",
-  description: "Schedule commercial laundry collection, review transparent service estimates, and track each order in Accra.",
+  description: "Laundry pickup, cleaning and delivery for businesses across Accra. Explore laundry plans and follow your order with Bubble Wash.",
   alternates: { canonical: "/" },
   applicationName: "Bubble Wash",
   manifest: "/site.webmanifest",
@@ -22,13 +22,13 @@ export const metadata: Metadata = {
     siteName: "Bubble Wash",
     title: "Bubble Wash",
     description: "Commercial laundry collection, cleaning, delivery, and order tracking for Accra businesses.",
-    images: [{ url: "/icon-512.png", width: 512, height: 512, alt: "Bubble Wash icon" }],
+    images: [{ url: "/laundry-care-hero.webp", width: 1200, height: 1200, alt: "Fresh towels and a laundry bag with the Bubble Wash icon" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "Bubble Wash",
     description: "Commercial laundry collection and order tracking for Accra businesses.",
-    images: ["/icon-512.png"],
+    images: ["/laundry-care-hero.webp"],
   },
   verification: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION ? { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION } : undefined,
 };

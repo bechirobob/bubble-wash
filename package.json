@@ -25,7 +25,7 @@
     "db:production-roster-reset": "node scripts/reset-production-roster.mjs",
     "db:export": "node scripts/export-portable-data.mjs",
     "maintenance:run": "node scripts/run-maintenance.mjs",
-    "test:workflow": "node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/workflow-http.integration.mjs"
+    "test:workflow": "node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/workflow-http.integration.mjs && node tests/public-availability.integration.mjs"
   },
   "engines": {
     "node": ">=20.9.0"

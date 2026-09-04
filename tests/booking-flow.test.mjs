@@ -66,5 +66,5 @@ test("booking UI removes customer weight and area questions and uses exact picku
   assert.match(source, /Select your laundry pickup/);
   assert.match(source, /Exact pickup location/);
   assert.match(source, /8:00–10:00/);
-  assert.match(source, /Recommended for your operation/);
+  assert.match(source, /Recommended for your business/);
 });

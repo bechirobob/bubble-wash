@@ -93,7 +93,7 @@ test("staff workspaces keep primary actions visible and collapse secondary detai
 });
 
 test("the mobile menu exposes state and closes with Escape", async () => {
-  const source = await readFile(new URL("../src/components/PublicChrome.tsx", import.meta.url), "utf8");
+  const source = await readFile(new URL("../src/components/PublicHeader.tsx", import.meta.url), "utf8");
   assert.match(source, /aria-expanded=\{mobileOpen\}/);
   assert.match(source, /event\.key === "Escape"/);
   assert.match(source, /removeEventListener\("keydown", closeOnEscape\)/);

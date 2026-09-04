@@ -13,9 +13,9 @@ export function BrandLink({ className = "", label = "Bubble Wash", onClick, prio
   return (
     <Link className={["brand", className].filter(Boolean).join(" ")} href="/" aria-label="Bubble Wash home" onClick={onClick}>
       <span className="brandArtwork" aria-hidden="true">
-        <Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={58} height={58} priority={priority} />
+        <Image className="brandMark" src="/bubble-wash-icon.jpg" alt="" width={166} height={166} sizes="166px" priority={priority} />
       </span>
-      <span>{label}</span>
+      <span className={label === "Bubble Wash" ? "srOnly" : undefined}>{label}</span>
     </Link>
   );
 }

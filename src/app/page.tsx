@@ -1,55 +1,52 @@
+import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, CalendarCheck, PackageCheck, SearchCheck, Shirt, Sparkles, Truck } from "lucide-react";
+import { ArrowRight, CalendarCheck, House, PackageCheck, Search, Shirt, Sparkles, Truck } from "lucide-react";
 import { PublicChrome } from "@/components/PublicChrome";
+import { bookingAvailable } from "@/lib/booking-policy";
 
-const serviceFacts = [
-  ["24h", "standard turnaround target"],
-  ["Pickup", "from your business"],
-  ["Care", "verified intake and finishing"],
-  ["Return", "secure recipient handoff"],
-];
+export const dynamic = "force-dynamic";
 
 const serviceSteps = [
-  { title: "Book the collection", copy: "Get a plan recommendation, enter the exact collection point, and select a two-hour pickup window.", icon: CalendarCheck },
-  { title: "We collect and clean", copy: "Your laundry is counted and weighed, then cleaned and finished by your assigned laundry partner.", icon: Shirt },
-  { title: "Track the return", copy: "Use the same reference for confirmed updates until the clean order reaches the authorised recipient.", icon: PackageCheck },
+  { title: "Pick your pickup", copy: "Choose your plan and preferred time. We’ll confirm the details before we arrive.", icon: CalendarCheck },
+  { title: "Leave the laundry to us", copy: "We collect, check and weigh your laundry, then clean and finish it with care.", icon: Shirt },
+  { title: "Welcome back, fresh", copy: "Follow your order online. Share your delivery code when your clean laundry arrives.", icon: PackageCheck },
 ];
 
 export default function Home() {
+  const available = bookingAvailable();
+  const action = { href: available ? "/book" : "/services", label: available ? "Request a pickup" : "Explore laundry plans" };
   return (
-    <PublicChrome skipTo="main-content">
-      <section className="landingHero pageShell" id="main-content" aria-labelledby="home-title">
-        <div className="landingHeroCopy">
-          <p className="sectionLabel">Commercial laundry · Accra</p>
-          <h1 id="home-title">Laundry operations your business does not have to chase.</h1>
-          <p className="lead">Reliable collection, professional cleaning, and clean laundry returned to your business.</p>
-          <div className="heroActions"><Link className="button primary" href="/book">Book a pickup <ArrowRight aria-hidden="true" /></Link><Link className="button secondary" href="/services">Explore services <Sparkles aria-hidden="true" /></Link></div>
+    <PublicChrome>
+      <section className="freshHero pageShell" id="main-content" aria-labelledby="home-title">
+        <div className="freshHeroCopy">
+          <p className="sectionLabel"><span className="freshDot" /> Commercial laundry · Accra</p>
+          <h1 id="home-title">Fresh laundry.<br /><span>One less thing</span><br />to manage.</h1>
+          <p className="lead">Laundry pickup, cleaning and delivery for your business. We take care of the wash, so you can get on with your day.</p>
+          <div className="heroActions"><Link className="button primary" href={action.href}>{action.label} <ArrowRight aria-hidden="true" /></Link><Link className="heroTrack" href="/track"><Search aria-hidden="true" /> Track an order</Link></div>
+          <p className="heroAvailability">{available ? "Choose a pickup time. We’ll confirm it with you." : "New pickups are paused. Existing orders can still be tracked and managed."}</p>
         </div>
-        <aside className="landingPromise" aria-label="Bubble Wash service promise">
-          <SearchCheck aria-hidden="true" />
-          <p className="sectionLabel">Follow your laundry</p>
-          <h2>From the first request to the final handoff.</h2>
-          <p>Check collection, cleaning and delivery updates with your booking reference.</p>
-          <Link href="/track">Track an existing order <ArrowRight aria-hidden="true" /></Link>
-        </aside>
+        <figure className="laundryHeroVisual">
+          <Image src="/laundry-care-hero.webp" alt="Freshly folded white towels, a blue shirt and a Bubble Wash laundry bag" width={1200} height={1200} sizes="(max-width: 780px) calc(100vw - 40px), (max-width: 1100px) 45vw, 560px" priority />
+          <figcaption className="careLabel"><Sparkles aria-hidden="true" /><span>Freshly cleaned.<strong>Ready for your day.</strong></span></figcaption>
+          <span className="washOrbit" aria-hidden="true" />
+        </figure>
       </section>
 
-      <section className="serviceFacts pageShell" aria-label="Service facts">{serviceFacts.map(([number, label]) => <div key={label}><strong>{number}</strong><span>{label}</span></div>)}</section>
+      <section className="careStrip pageShell" aria-label="Our laundry service"><div><Truck aria-hidden="true" /><span>Picked up from your business</span></div><div><Shirt aria-hidden="true" /><span>Cleaned and finished with care</span></div><div><PackageCheck aria-hidden="true" /><span>Delivered back to your door</span></div></section>
 
-      <section id="how-it-works" className="serviceSection pageShell landingHow" aria-labelledby="how-heading">
-        <div className="sectionIntro"><p className="sectionLabel">How it works</p><h2 id="how-heading">From your door to clean laundry, delivered.</h2><p>Request a pickup, follow its progress, and receive your clean laundry with a secure handoff.</p></div>
-        <ol className="workflowCards">{serviceSteps.map(({ title, copy, icon: Icon }, index) => <li key={title}><span className="workflowIcon"><Icon aria-hidden="true" /></span><small>Step {index + 1}</small><h3>{title}</h3><p>{copy}</p></li>)}</ol>
+      <section id="how-it-works" className="freshHow pageShell" aria-labelledby="how-heading">
+        <div className="sectionIntro"><p className="sectionLabel">A lighter laundry day</p><h2 id="how-heading">You fill the bag.<br />We’ll take it from there.</h2><p>Three simple steps, from your next pickup to fresh laundry back at your door.</p></div>
+        <ol className="freshSteps">{serviceSteps.map(({ title, copy, icon: Icon }, index) => <li key={title}><div className="stepTop"><span className="careIcon"><Icon aria-hidden="true" /></span><span className="stepNumber">0{index + 1}</span></div><h3>{title}</h3><p>{copy}</p></li>)}</ol>
       </section>
 
-      <section className="serviceSection pageShell audienceSection" aria-labelledby="choose-service-heading">
-        <div className="sectionIntro"><p className="sectionLabel">Choose your service</p><h2 id="choose-service-heading">Built for commercial routines, with household service opening next.</h2></div>
-        <div className="audienceGrid">
-          <article><Truck aria-hidden="true" /><h3>Commercial laundry</h3><p>Scheduled collections for offices, hospitality, clinics, restaurants, serviced units, and larger facilities.</p><Link href="/services">View commercial services <ArrowRight aria-hidden="true" /></Link></article>
-          <article><Shirt aria-hidden="true" /><h3>Household laundry</h3><p>Doorstep collection for homes is in early access while Bubble Wash plans the first residential routes.</p><Link href="/early-access">Join household early access <ArrowRight aria-hidden="true" /></Link></article>
-        </div>
+      <section className="businessCare pageShell" aria-labelledby="business-heading">
+        <div className="businessCareCopy"><p className="sectionLabel">Made for your working week</p><h2 id="business-heading">Fresh linen.<br />A good impression.</h2><p>From guest towels to team uniforms, make laundry one less job on the list. Choose a pickup plan that fits your business.</p><Link className="inlineIconLink" href="/services">Find your laundry plan <ArrowRight aria-hidden="true" /></Link></div>
+        <div className="linenLabels" aria-label="Businesses we serve"><span><House aria-hidden="true" /> Guest stays & hospitality</span><span><Shirt aria-hidden="true" /> Offices & team uniforms</span><span><Sparkles aria-hidden="true" /> Restaurants & facilities</span><p>Pickup plans, clear estimates, and one reference to follow your laundry.</p></div>
       </section>
 
-      <section className="landingCta pageShell" aria-labelledby="landing-cta-title"><div><p className="sectionLabel">Ready when you are</p><h2 id="landing-cta-title">Set up the first collection.</h2><p>The booking takes the service details once. Operations confirms the route before a rider is sent.</p></div><Link className="button primary" href="/book">Book a pickup <ArrowRight aria-hidden="true" /></Link></section>
+      <section className="homeLaundryNote pageShell" aria-labelledby="household-heading"><span className="careIcon"><House aria-hidden="true" /></span><div><p className="sectionLabel">Something fresh for home</p><h2 id="household-heading">Your laundry day is next.</h2><p>Household pickups are coming to Accra. Join early access to help shape our first routes.</p></div><Link className="button secondary" href="/early-access">Join household early access <ArrowRight aria-hidden="true" /></Link></section>
+
+      <section className="freshCta pageShell" aria-labelledby="cta-heading"><div><p className="sectionLabel">A fresh start</p><h2 id="cta-heading">Let’s take laundry<br />off your list.</h2><p>{available ? "Find your plan and request your first pickup." : "Explore our services while new pickups are paused."}</p></div><Link className="button primary" href={action.href}>{action.label} <ArrowRight aria-hidden="true" /></Link></section>
     </PublicChrome>
   );
 }

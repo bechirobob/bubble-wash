@@ -1,82 +1,13 @@
-"use client";
-
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useState, type ComponentType } from "react";
+import { connection } from "next/server";
+import { CalendarPlus, ClipboardCheck, FileText, Search, Shirt, UserRoundCog } from "lucide-react";
 import { BrandLink } from "@/components/BrandLink";
 import { RouteWarmup } from "@/components/RouteWarmup";
-import {
-  BookOpenCheck,
-  CalendarPlus,
-  ClipboardCheck,
-  FileText,
-  House,
-  Menu,
-  Search,
-  Shirt,
-  UserRoundCog,
-  X,
-  type LucideProps,
-} from "lucide-react";
+import { PublicHeader } from "@/components/PublicHeader";
+import { bookingAvailable } from "@/lib/booking-policy";
+type PublicChromeProps = { children: React.ReactNode; skipTo?: string; skipLabel?: string };
 
-type PublicChromeProps = {
-  children: React.ReactNode;
-  skipTo?: string;
-  skipLabel?: string;
-};
-
-type NavItem = {
-  href: string;
-  label: string;
-  icon: ComponentType<LucideProps>;
-  match?: string;
-};
-
-const navigation: NavItem[] = [
-  { href: "/#how-it-works", label: "How it works", icon: BookOpenCheck },
-  { href: "/services", label: "Services & pricing", icon: Shirt, match: "/services" },
-  { href: "/track", label: "Track", icon: Search, match: "/track" },
-  { href: "/manage", label: "Manage order", icon: UserRoundCog, match: "/manage" },
-  { href: "/early-access", label: "Household", icon: House, match: "/early-access" },
-];
-
-export function PublicHeader() {
-  const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  useEffect(() => {
-    if (!mobileOpen) return;
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setMobileOpen(false);
-    }
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [mobileOpen]);
-
-  return (
-    <header className="siteHeader" id="top">
-      <BrandLink priority onClick={() => setMobileOpen(false)} />
-      <button className="menuButton" type="button" aria-controls="site-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen((current) => !current)}>
-        {mobileOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
-        <span>{mobileOpen ? "Close" : "Menu"}</span>
-      </button>
-      <nav id="site-navigation" className={mobileOpen ? "navLinks open" : "navLinks"} aria-label="Main navigation">
-        {navigation.map(({ href, label, icon: Icon, match }) => (
-          <Link key={href} href={href} aria-current={match && pathname === match ? "page" : undefined} onClick={() => setMobileOpen(false)}>
-            <Icon aria-hidden="true" />
-            <span>{label}</span>
-          </Link>
-        ))}
-        <Link className="navCta" href="/book" aria-current={pathname === "/book" ? "page" : undefined} onClick={() => setMobileOpen(false)}>
-          <CalendarPlus aria-hidden="true" />
-          <span>Book pickup</span>
-        </Link>
-      </nav>
-    </header>
-  );
-}
-
-export function PublicFooter() {
+export function PublicFooter({ available }: { available: boolean }) {
   const whatsappNumber = process.env.NEXT_PUBLIC_BUBBLEWASH_WHATSAPP?.replace(/\D/g, "") ?? "";
   const contactEmail = process.env.NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL?.trim() ?? "";
   const whatsappUrl = whatsappNumber ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent("Hi Bubble Wash, I want to discuss a commercial laundry pickup.")}` : "";
@@ -91,7 +22,7 @@ export function PublicFooter() {
         <h3>Service</h3>
         <Link href="/#how-it-works">How it works</Link>
         <Link href="/services">Services & pricing</Link>
-        <Link href="/book">Book a pickup</Link>
+        <Link href={available ? "/book" : "/services"}>{available ? "Request a pickup" : "Explore laundry plans"}</Link>
         <Link href="/track">Track an order</Link>
       </div>
       <div>
@@ -106,7 +37,7 @@ export function PublicFooter() {
       <div>
         <h3>Service area</h3>
         <p>Accra, Ghana</p>
-        <p>Routes outside the core area are confirmed before dispatch.</p>
+        <p>Outside central Accra? We confirm coverage and any extra pickup charge before your laundry is collected.</p>
         {whatsappUrl ? <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">WhatsApp</a> : null}
         {contactEmail ? <a href={`mailto:${contactEmail}`}>{contactEmail}</a> : null}
       </div>
@@ -114,14 +45,16 @@ export function PublicFooter() {
   );
 }
 
-export function PublicChrome({ children, skipTo = "main-content", skipLabel = "Skip to content" }: PublicChromeProps) {
+export async function PublicChrome({ children, skipTo = "main-content", skipLabel = "Skip to content" }: PublicChromeProps) {
+  await connection();
+  const available = bookingAvailable();
   return (
-    <main className="siteShell">
+    <main className="siteShell publicSite">
       <RouteWarmup />
       <a className="skipLink" href={`#${skipTo}`}>{skipLabel}</a>
-      <PublicHeader />
+      <PublicHeader available={available} />
       {children}
-      <PublicFooter />
+      <PublicFooter available={available} />
     </main>
   );
 }

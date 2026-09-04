@@ -9,5 +9,5 @@ export const metadata: Metadata = {
 };
 
 export default function TrackPage() {
-  return <PublicChrome><PageIntro eyebrow="Order tracking" title="Check the latest confirmed update." summary="Use the reference issued after booking. Tracking shows service progress without exposing private contact or delivery details." icon="tracking" /><TrackingLookup /></PublicChrome>;
+  return <PublicChrome><PageIntro eyebrow="Order tracking" title="Follow your laundry." summary="Enter your booking reference to see the latest pickup, cleaning and delivery updates." icon="tracking" /><TrackingLookup /></PublicChrome>;
 }
