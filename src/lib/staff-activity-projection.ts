@@ -10,6 +10,10 @@ export type StaffActivityRecord = {
 const supportFields = new Set([
   "submissionType",
   "ticketId",
+  "customerAction",
+  "requestedDate",
+  "requestedWindow",
+  "decision",
   "orderId",
   "name",
   "company",

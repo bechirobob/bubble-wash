@@ -19,7 +19,7 @@ export type Quote = {
 };
 
 export function formatMoney(value: number) {
-  return new Intl.NumberFormat("en-GH", { style: "currency", currency: "GHS", maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat("en-GH", { style: "currency", currency: "GHS", minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value);
 }
 
 export function formatDate(value?: string) {
@@ -30,7 +30,7 @@ export function formatDate(value?: string) {
 
 export function statusTone(message?: string) {
   if (!message) return "status";
-  if (/unable|failed|missing|invalid|too many|error|required|not configured|enter .*first|did not match/i.test(message)) return "status error";
+  if (/no .*found|unavailable|paused|cannot|expired|choose |unable|failed|missing|invalid|too many|error|required|not configured|enter .*first|did not match/i.test(message)) return "status error";
   if (/waiting|pending|delayed|attention|warning|overdue/i.test(message)) return "status warning";
   if (/ready|covered|received|reference|selected|loaded|verified|paid|saved|found/i.test(message)) return "status success";
   if (/loading|checking|saving|updating|opening|starting|stopping|calculating|verifying/i.test(message)) return "status info";
@@ -38,7 +38,7 @@ export function statusTone(message?: string) {
 }
 
 export async function postJSON<T>(url: string, payload: unknown): Promise<T> {
-  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(15000) });
   const data = await response.json();
   if (!response.ok || !data.ok) throw new Error(data.error ?? "Request failed");
   return data;

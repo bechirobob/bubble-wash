@@ -1,10 +1,6 @@
 import { randomUUID } from "node:crypto";
-import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import path from "node:path";
-
-const dataDir = path.join(process.cwd(), "data");
-const databasePath = process.env.BUBBLEWASH_DATABASE_PATH ?? path.join(dataDir, "bubblewash.sqlite");
+import type Database from "better-sqlite3";
+import { getDatabase } from "./data-store.ts";
 
 export type AvailabilityStatus = "available" | "limited" | "paused" | "inactive" | "active" | "training" | "suspended";
 
@@ -144,8 +140,7 @@ function clampCapacity(value: number) {
 
 export function getAvailabilityDatabase() {
   if (database) return database;
-  mkdirSync(path.dirname(databasePath), { recursive: true });
-  const db = new Database(databasePath);
+  const db = getDatabase();
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");

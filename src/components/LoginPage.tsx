@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, Bike, Grid2X2, Headphones, ShieldCheck, WashingMachine, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Grid2X2 } from "lucide-react";
 import { BrandLink } from "@/components/BrandLink";
 
 const showCredentialCards = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_BUBBLEWASH_SHOW_DEMO_LOGIN === "true";
@@ -59,12 +59,6 @@ function LoginForm() {
     setStatusTone("info");
   }
 
-  const roleRows: Array<[string, string, LucideIcon]> = [
-    ["Admin", "Orders, partners, staffing, escalations", ShieldCheck],
-    ["Vendor", "Washing queue, capacity, ready handoff", WashingMachine],
-    ["Driver", "Pickup route, delivery stops, handoff proof", Bike],
-    ["Support", "Tickets, customer updates, issue closure", Headphones],
-  ];
 
   return (
     <main className="loginPage redesignLoginPage">
@@ -75,23 +69,20 @@ function LoginForm() {
       <section className="redesignLoginGrid" aria-labelledby="login-title">
         <aside className="redesignRoleList">
           <p className="eyebrow">Staff access</p>
-          <h2>Choose the workspace that matches your role.</h2>
-          <p>Each staff login opens only the tools that person can act on.</p>
-          {roleRows.map(([role, copy, Icon]) => (
-            <div className="redesignRoleRow" key={role}><Icon aria-hidden="true" /><div><strong>{role}</strong><small>{copy}</small></div></div>
-          ))}
+          <h2>Staff sign-in</h2>
+          <p>Use your individual work account to open your assigned workspace.</p>
           {showCredentialCards ? <div className="credentialList redesignCredentialList">{credentialCards.map(([role, emailValue]) => <button className="credentialCard" type="button" key={role} onClick={() => fillCredential(emailValue)}><strong>{role}</strong><span>{emailValue}</span></button>)}</div> : null}
         </aside>
         <form className="redesignLoginForm" onSubmit={login}>
           <p className="eyebrow">Sign in</p>
           <h1 id="login-title">Open your workspace</h1>
-          <p>Use staff credentials. The destination is based on the selected role.</p>
+          <p>Enter your staff username or work email.</p>
           <label>Staff username or email<input value={email} onChange={(event) => setEmail(event.target.value)} type="text" placeholder="Staff username or email" autoComplete="username" required /></label>
           <label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" autoComplete="current-password" required /></label>
           {adminMfaRequired ? <label>Admin authenticator or recovery code <small>(admin only)</small><input value={totp} onChange={(event) => setTotp(event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 18))} type="text" placeholder="6 digits or recovery code" inputMode="text" autoComplete="one-time-code" /></label> : null}
           <button className="button primary full" type="submit">Sign in</button>
           {adminMfaRequired ? <Link className="inlineIconLink" href="/admin/mfa/enroll">Set up admin authenticator</Link> : null}
-          <div className="destination"><strong>Destination:</strong> {nextPath}<br />Sessions should expire automatically on shared devices.</div>
+          <p className="destination">Sessions expire after eight hours. Sign out when using a shared device.</p>
           <p className={`status ${statusTone}`} role={statusTone === "error" ? "alert" : "status"} aria-live={statusTone === "error" ? "assertive" : "polite"}>{status}</p>
         </form>
       </section>

@@ -66,14 +66,15 @@ export function validateCheckoutInput(input: CheckoutInput) {
   return null;
 }
 
-export async function initializePaystackCheckout(input: CheckoutInput) {
+export async function initializePaystackCheckout(input: CheckoutInput, requestedReference?: string) {
   const secret = envText("PAYSTACK_SECRET_KEY");
   if (!secret) throw new Error("PAYSTACK_SECRET_KEY is not configured.");
 
-  const reference = `BW-PAY-${randomUUID().replaceAll("-", "").slice(0, 18).toUpperCase()}`;
+  const reference = requestedReference || `BW-PAY-${randomUUID().replaceAll("-", "").slice(0, 18).toUpperCase()}`;
   const amount = Math.round(input.amountGhs * 100);
   const baseUrl = publicBaseUrl();
   const response = await fetch("https://api.paystack.co/transaction/initialize", {
+    signal: AbortSignal.timeout(15000),
     method: "POST",
     headers: {
       Authorization: `Bearer ${secret}`,
@@ -119,6 +120,7 @@ export async function verifyPaystackCheckout(reference: string) {
   const secret = envText("PAYSTACK_SECRET_KEY");
   if (!secret) throw new Error("PAYSTACK_SECRET_KEY is not configured.");
   const response = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+    signal: AbortSignal.timeout(15000),
     headers: { Authorization: `Bearer ${secret}` },
   });
   const data = (await response.json().catch(() => ({}))) as PaystackVerifyResponse;

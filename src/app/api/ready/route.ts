@@ -1,12 +1,14 @@
-import { NextResponse } from "next/server";
+import { maintenanceAuthorized } from "@/lib/maintenance-auth";
+import { bookingAvailable } from "@/lib/booking-policy";
+import { NextRequest, NextResponse } from "next/server";
 
 import { databaseReadiness } from "@/lib/data-store";
 import { productionReadinessErrors, productionReadinessWarnings } from "@/lib/security";
 import { backupReadiness } from "@/lib/backup-status";
 import { adminMfaConfigured } from "@/lib/admin-mfa";
-import { currentStaffUsers } from "@/lib/auth";
+import { decodeSession, sessionCookieName, currentStaffUsers } from "@/lib/auth";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const blockers = productionReadinessErrors();
   blockers.push(...backupReadiness());
   try {
@@ -19,9 +21,9 @@ export async function GET() {
   }
 
   const ready = blockers.length === 0;
-  const admin = currentStaffUsers().find((user) => user.role === "admin");
   let adminMfaReady = false;
   try {
+    const admin = currentStaffUsers().find((user) => user.role === "admin");
     adminMfaReady = Boolean(admin && adminMfaConfigured(admin.email));
   } catch {
     adminMfaReady = false;
@@ -30,12 +32,13 @@ export async function GET() {
     if (!warning.includes("MFA enrollment")) return true;
     return !adminMfaReady;
   });
+  const detailed = maintenanceAuthorized(request.headers) || decodeSession(request.cookies.get(sessionCookieName)?.value)?.role === "admin";
   return NextResponse.json({
     ok: ready,
     service: "Bubble Wash operations app",
     readiness: ready ? "ready" : "blocked",
-    checks: ready ? [] : blockers,
-    warnings,
+    bookings: bookingAvailable() ? "accepting requests" : "paused",
+    ...(detailed ? { checks: ready ? [] : blockers, warnings } : {}),
     time: new Date().toISOString(),
   }, {
     status: ready ? 200 : 503,

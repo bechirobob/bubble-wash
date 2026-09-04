@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const response = NextResponse.json({ ok: true, user: { name: user.name, email: user.email, role: user.role }, next: nextPath });
+    const response = NextResponse.json({ ok: true, user: { name: user.name, email: user.email, role: user.role }, next: user.role === "admin" ? nextPath : ({ vendor: "/vendors", driver: "/drivers", support: "/support" }[user.role]) });
     response.cookies.set({
       name: sessionCookieName,
       value: encodeSession(user),

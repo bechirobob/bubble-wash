@@ -46,6 +46,8 @@ jobs:
         run: npm run audit:prod
       - name: Production build
         run: npm run build
+      - name: Verify complete HTTP order workflow
+        run: npm run test:workflow
       - name: Verify production image runtime
         run: npm run verify:image-runtime
       - name: Verify required production routes

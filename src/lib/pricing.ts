@@ -105,12 +105,15 @@ export function calculateQuote(
   if (!plan) throw new Error("Select a valid plan.");
   if (!Number.isFinite(kg) || kg <= 0) throw new Error("Laundry weight must be greater than zero.");
 
-  const band = plan.bands.find((item) => kg >= item.min && (item.max === null || kg <= item.max));
+  const band = plan.bands.find((item) => kg >= item.min && (plan.bands[plan.bands.indexOf(item) + 1] === undefined || kg < plan.bands[plan.bands.indexOf(item) + 1].min));
   if (!band) {
     const minimum = plan.bands[0]?.min ?? 1;
     throw new Error(`${plan.name} starts at ${minimum}kg per pickup. Increase the weight or choose another plan.`);
   }
 
+  if (selectedAddons.some((key) => !Object.hasOwn(addons, key))) throw new Error("Select valid optional services.");
+  if (selectedAddons.includes("premium") && selectedAddons.includes("ironing")) throw new Error("Premium already includes ironing. Choose one service.");
+  selectedAddons = [...new Set(selectedAddons)];
   const zone = zones[zoneKey] ?? zones.core;
   const discount = discounts[discountKey] ?? discounts.none;
   const processingPerPickup = kg * band.rate;
@@ -145,6 +148,7 @@ export function calculateQuote(
     processingPerPickup: Math.round(processingPerPickup * 100) / 100,
     addonsPerPickup: Math.round(addonsPerPickup * 100) / 100,
     addonLines,
+    minimumAdjustment: Math.round((perPickupTotal - perPickupBeforeMinimum) * 100) / 100,
     minimumApplied: perPickupBeforeMinimum < 450,
     perPickupTotal: Math.round(perPickupTotal * 100) / 100,
     grossMonthlyTotal: Math.round(grossMonthlyTotal * 100) / 100,

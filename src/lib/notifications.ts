@@ -3,11 +3,12 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import {
   enqueueNotification,
+  readSubmissionRecordsForOrder,
   readDueNotifications,
   updateNotificationDelivery,
   type NotificationOutboxRecord,
 } from "@/lib/data-store";
-import type { SubmissionRecord } from "@/lib/submissions";
+import { buildOrderSummaries, type SubmissionRecord } from "@/lib/submissions";
 
 export type NotificationChannel = "email" | "whatsapp";
 
@@ -31,6 +32,7 @@ export type NotificationResult = {
   providerId?: string;
   skipped?: string;
   error?: string;
+  queued?: boolean;
 };
 
 function text(value: unknown) {
@@ -61,7 +63,7 @@ function normalizeGhanaPhone(value: string) {
 function alertAllows(channel: NotificationChannel, preference: string) {
   const normalized = preference.toLowerCase();
   if (!normalized) return true;
-  if (normalized.includes("call")) return channel === "whatsapp";
+  if (normalized.includes("call")) return false;
   if (normalized.includes("whatsapp only")) return channel === "whatsapp";
   if (normalized.includes("email only")) return channel === "email";
   return normalized.includes(channel) || normalized.includes("email + whatsapp") || normalized.includes("both");
@@ -219,7 +221,7 @@ function customerBookingMessage(record: SubmissionRecord): NotificationMessage {
   const name = text(data.name) || "there";
   const area = text(data.area) || text(data.zone) || "your area";
   const publicUrl = configuredPublicUrl();
-  const body = `Hi ${name}, Bubble Wash received your request ${record.id}.\n\nArea: ${area}\nPayment: ${text(data.paymentPreference) || text(data.paymentMethod) || "To be confirmed"}\n\nTrack it here: ${publicUrl}/#track\nUse reference: ${record.id}`;
+  const body = `Hi ${name}, Bubble Wash received your request ${record.id}.\n\nArea: ${area}\nPayment: ${text(data.paymentPreference) || text(data.paymentMethod) || "To be confirmed"}\n\nTrack it here: ${publicUrl}/track?id=${encodeURIComponent(record.id)}\nUse reference: ${record.id}`;
   return {
     target: "customer",
     toEmail: text(data.email),
@@ -286,29 +288,32 @@ export async function dispatchPrivacyRequestConfirmation(input: {
   return [await enqueueAndDeliver(`${input.id}:privacy:${isEmail ? "email" : "whatsapp"}`, isEmail ? "email" : "whatsapp", message)];
 }
 
-export async function dispatchSubmissionNotifications(record: SubmissionRecord) {
-  if (process.env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED !== "true") {
-    return [{ channel: "email", target: "operations", sent: false, skipped: "Manual customer follow-up is required during the pilot." }] satisfies NotificationResult[];
-  }
+export function queueSubmissionNotifications(record: SubmissionRecord): NotificationResult[] {
+  if (process.env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED !== "true") return [{ channel: "email", target: "operations", sent: false, skipped: "Manual customer follow-up is required during the pilot." }];
   const type = text(record.data.submissionType);
-  const preference = text(record.data.alertPreference);
+  const orderRecords = text(record.data.orderId) ? readSubmissionRecordsForOrder(text(record.data.orderId)) : [];
+  const seed = orderRecords.find((item) => text(item.data.submissionType) === "pickup-booking");
+  const preference = text(seed?.data.alertPreference) || text(record.data.alertPreference);
   const messages = [operationsMessage(record)];
-  if (["pickup-booking", "checkout-request", "client-onboarding"].includes(type)) messages.push(customerBookingMessage(record));
-
+  if (["pickup-booking", "client-onboarding"].includes(type)) messages.push(customerBookingMessage(record));
+  else if (seed && ["admin-operation", "vendor-job-update", "driver-route-log", "qr-bag-intake", "payment-update"].includes(type)) {
+    const order = buildOrderSummaries(orderRecords)[0];
+    messages.push({ target: "customer", toEmail: text(seed.data.email), toWhatsApp: text(seed.data.phone), subject: `Bubble Wash ${seed.id}: ${order.status}`, text: `Your order ${seed.id}: ${order.status}. View your current schedule and invoice at ${configuredPublicUrl()}/manage.`, purpose: "operations" });
+  }
   const results: NotificationResult[] = [];
-  for (const message of messages) {
-    if (message.target === "customer") {
-      if (alertAllows("email", preference)) results.push(await enqueueAndDeliver(`${record.id}:customer:email`, "email", message));
-      if (alertAllows("whatsapp", preference)) results.push(await enqueueAndDeliver(`${record.id}:customer:whatsapp`, "whatsapp", message));
-    } else {
-      results.push(await enqueueAndDeliver(`${record.id}:operations:email`, "email", message));
-      results.push(await enqueueAndDeliver(`${record.id}:operations:whatsapp`, "whatsapp", message));
-    }
+  for (const message of messages) for (const channel of ["email", "whatsapp"] as const) {
+    if (message.target === "customer" && !alertAllows(channel, preference)) continue;
+    const queued = enqueueNotification({ id: `NQ-${randomUUID()}`, dedupeKey: `${record.id}:${message.target}:${channel}`, channel, target: message.target, payload: messagePayload(message) });
+    results.push({ channel, target: message.target, sent: queued.status === "sent", queued: queued.status === "pending" || queued.status === "failed" });
   }
   return results;
 }
+export async function dispatchSubmissionNotifications(record: SubmissionRecord) {
+  return queueSubmissionNotifications(record);
+}
 
 export function notificationSummary(results: NotificationResult[]) {
+  if (results.some((result) => result.queued)) return "Updates are queued for delivery.";
   const sent = results.filter((result) => result.sent).length;
   const skipped = results.filter((result) => result.skipped).length;
   const failed = results.filter((result) => result.error).length;

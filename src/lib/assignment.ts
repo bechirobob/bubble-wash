@@ -86,7 +86,8 @@ function statusAllowsDriver(driver: DriverAvailability) {
   return driver.capacityRemaining > 0 && !/(inactive|suspended|offboarded|paused|training|tomorrow)/.test(driver.availabilityStatus.toLowerCase());
 }
 
-function serviceMatches(vendor: VendorAvailability, serviceType?: string) {
+function serviceMatches(vendor: VendorAvailability, serviceType?: string): boolean {
+  if (serviceType?.includes(";")) return serviceType.split(";").every((part) => serviceMatches(vendor, part.trim()));
   const wanted = serviceCapability(serviceType ?? "");
   if (!wanted) return true;
   if (vendor.serviceTypes.length === 0) return false;

@@ -1,10 +1,14 @@
+import { issueIntakeInvoice, invoiceForOrder, recordBillingEntry } from "@/lib/billing";
+import { operationalDatabase } from "@/lib/operational-store";
+import { validatePickupSlot } from "@/lib/booking-policy";
+import { isRateLimited } from "@/lib/rate-limit";
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { appendSubmissionRecord, appendSubmissionRecordWithDeliveryProof, claimWorkflowAction, deliveryCodeRecord, releaseWorkflowActionClaim } from "@/lib/data-store";
 import { assignOrderFromAvailability } from "@/lib/assignment";
 import { appendSubmissionRecordAndReleaseOrderCapacity, recordVendorDecline, releaseAssignmentCapacity } from "@/lib/availability-store";
 import { getCurrentStaffUser } from "@/lib/auth";
-import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
+import { dispatchSubmissionNotifications, notificationSummary, queueSubmissionNotifications } from "@/lib/notifications";
 import { automationActionsForOrder, isValidDriverEtaAt } from "@/lib/order-workflow";
 import { buildOrderSummaries, orderBoardRecords, orderMatchesStaffEntity, readSubmissionsForOrder } from "@/lib/submissions";
 import { staffWriteGuard } from "@/lib/security";
@@ -55,6 +59,7 @@ export async function POST(request: NextRequest) {
 
     const rawOperatorNote = text(body.operatorNote);
     const operatorNote = rawOperatorNote.slice(0, 600);
+    const confirmedPickupDate = text(body.confirmedPickupDate);
     const confirmedPickupWindow = text(body.confirmedPickupWindow).slice(0, 120);
     const contactChannel = text(body.contactChannel).slice(0, 80);
     const contactOutcome = text(body.contactOutcome).slice(0, 160);
@@ -79,7 +84,7 @@ export async function POST(request: NextRequest) {
     const rawRouteCheckpoint = text(body.routeCheckpoint);
     const routeCheckpoint = rawRouteCheckpoint.slice(0, 240);
 
-    if (actionKey === "admin-schedule-pickup" && (!confirmedPickupWindow || !operatorNote)) {
+    if (actionKey === "admin-schedule-pickup" && (!confirmedPickupWindow || !operatorNote || validatePickupSlot(confirmedPickupDate, confirmedPickupWindow))) {
       return NextResponse.json({ ok: false, error: "Record the confirmed pickup window and scheduling note." }, { status: 400 });
     }
     if (actionKey === "support-log-customer-contact" && (!contactChannel || !contactOutcome || !nextFollowUpAt || !operatorNote)) {
@@ -93,8 +98,8 @@ export async function POST(request: NextRequest) {
     }
     if (actionKey === "vendor-log-intake") {
       const weight = receivedWeightKg ? Number(receivedWeightKg) : 0;
-      if (!bagTag || !validEvidenceCount(intakeBagCount) || !intakeCondition || !operatorNote || (receivedWeightKg && (!Number.isFinite(weight) || weight <= 0 || weight > 10000))) {
-        return NextResponse.json({ ok: false, error: "Record the bag tag, bag/item count, intake condition, note, and a valid received weight if supplied." }, { status: 400 });
+      if (!bagTag || !validEvidenceCount(intakeBagCount) || !intakeCondition || !operatorNote || (!Number.isFinite(weight) || weight <= 0 || weight > 10000)) {
+        return NextResponse.json({ ok: false, error: "Record the bag tag, bag/item count, intake condition, note, and the verified received weight." }, { status: 400 });
       }
     }
     if (actionKey === "vendor-mark-ready" && (!validEvidenceCount(readyBagCount) || !qualityCheck || !operatorNote)) {
@@ -110,6 +115,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Record the recipient, returned bag count, six-digit customer handoff code, and handoff note before delivery." }, { status: 400 });
     }
     if (actionKey === "driver-mark-delivered") {
+      if (isRateLimited(`delivery-attempt:${order.orderId}`, 6, 3600000)) return NextResponse.json({ ok: false, error: "Too many handoff attempts for this order. Contact operations." }, { status: 429 });
       const proof = deliveryCodeRecord(order.orderId);
       if (!proof || proof.usedAt) return NextResponse.json({ ok: false, error: "A valid unused delivery confirmation code is not available for this order." }, { status: 409 });
     }
@@ -159,6 +165,8 @@ export async function POST(request: NextRequest) {
     const payload = actionKey === "admin-schedule-pickup" ? {
       ...basePayload,
       routeWindow: confirmedPickupWindow,
+      confirmedPickupDate,
+      pickupConfirmation: "confirmed",
       scheduleNote: operatorNote,
       message: `${basePayload.message} Confirmed window: ${confirmedPickupWindow}. Scheduling note: ${operatorNote}`,
     } : actionKey === "support-log-customer-contact" ? {
@@ -229,6 +237,16 @@ export async function POST(request: NextRequest) {
       data: payload,
     };
 
+    operationalDatabase().transaction(() => {
+    if (actionKey === "vendor-log-intake") issueIntakeInvoice(order.orderId, Number(receivedWeightKg));
+    if (["admin-confirm-bank-transfer", "admin-approve-invoice", "admin-close-order"].includes(actionKey)) {
+      const invoice = invoiceForOrder(order.orderId);
+      if (!invoice) throw new Error("Billing: verified intake invoice is required.");
+      if (actionKey === "admin-confirm-bank-transfer") recordBillingEntry(order.orderId, "payment", Math.round(Number(paymentAmount) * 100), `bank:${paymentReference}`, user.email);
+      if (actionKey === "admin-approve-invoice" && (paymentReference !== invoice.invoiceId || Math.round(Number(paymentAmount) * 100) !== invoice.balanceMinor)) throw new Error("Billing: approval must match the invoice ID and outstanding balance.");
+      if (actionKey === "admin-close-order" && invoice.balanceMinor > 0 && order.payment !== "Invoice approved") throw new Error("Billing: settle the balance or approve the invoice receivable before closeout.");
+      if (actionKey === "admin-close-order" && operationalDatabase().prepare("SELECT 1 FROM order_holds WHERE order_id = ?").get(order.orderId)) throw new Error("Billing: resolve the open dispute before closeout.");
+    }
     if (actionKey === "driver-mark-delivered") {
       appendSubmissionRecordWithDeliveryProof(record, { orderId: order.orderId, codeHash: deliveryCodeHash(order.orderId, deliveryCode), usedBy: user.email, recipientName });
     } else if (actionKey === "admin-close-order") {
@@ -236,6 +254,8 @@ export async function POST(request: NextRequest) {
     } else {
       appendSubmissionRecord(record);
     }
+    queueSubmissionNotifications(record);
+    }).immediate();
     recordSaved = true;
     const notifications = await dispatchSubmissionNotifications(record);
     return NextResponse.json({ ok: true, message: `${selected.label} saved. ${notificationSummary(notifications)}`, id: record.id, nextStatus: selected.nextStatus, notifications });
@@ -265,6 +285,7 @@ export async function POST(request: NextRequest) {
       message: errorMessage,
       claimKey,
     });
+    if (errorMessage.startsWith("Billing:") || /invoice|balance|Verified intake|custom route|Billing reference/.test(errorMessage)) return NextResponse.json({ ok: false, error: errorMessage }, { status: 409 });
     if (errorMessage.startsWith("No eligible ")) {
       return NextResponse.json({ ok: false, error: errorMessage }, { status: 409 });
     }

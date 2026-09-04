@@ -1,16 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { productionReadinessErrors } from "@/lib/security";
-
+// Liveness confirms the HTTP process is serving; /api/ready checks dependencies.
 export async function GET() {
-  const readinessErrors = productionReadinessErrors();
-  const ok = readinessErrors.length === 0;
-  return NextResponse.json({
-    ok,
-    service: "Bubble Wash operations app",
-    version: "next-typescript",
-    time: new Date().toISOString(),
-    readiness: ok ? "ready" : "blocked",
-    checks: ok ? [] : readinessErrors,
-  }, { status: 200, headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ok: true, service: "Bubble Wash", status: "alive", time: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
 }

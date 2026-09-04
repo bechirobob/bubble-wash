@@ -4,14 +4,14 @@ import { PublicChrome } from "@/components/PublicChrome";
 
 const serviceFacts = [
   ["24h", "standard turnaround target"],
-  ["4", "commercial service plans"],
-  ["GHS", "estimates before booking"],
-  ["1", "reference from pickup to return"],
+  ["Pickup", "from your business"],
+  ["Care", "verified intake and finishing"],
+  ["Return", "secure recipient handoff"],
 ];
 
 const serviceSteps = [
   { title: "Book the collection", copy: "Get a plan recommendation, enter the exact collection point, and select a two-hour pickup window.", icon: CalendarCheck },
-  { title: "We collect and clean", copy: "The order stays on one service record while an approved partner processes it and each handoff is recorded.", icon: Shirt },
+  { title: "We collect and clean", copy: "Your laundry is counted and weighed, then cleaned and finished by your assigned laundry partner.", icon: Shirt },
   { title: "Track the return", copy: "Use the same reference for confirmed updates until the clean order reaches the authorised recipient.", icon: PackageCheck },
 ];
 
@@ -22,14 +22,14 @@ export default function Home() {
         <div className="landingHeroCopy">
           <p className="sectionLabel">Commercial laundry · Accra</p>
           <h1 id="home-title">Laundry operations your business does not have to chase.</h1>
-          <p className="lead">Bubble Wash coordinates collection, professional cleaning, and return delivery on one traceable service record.</p>
+          <p className="lead">Reliable collection, professional cleaning, and clean laundry returned to your business.</p>
           <div className="heroActions"><Link className="button primary" href="/book">Book a pickup <ArrowRight aria-hidden="true" /></Link><Link className="button secondary" href="/services">Explore services <Sparkles aria-hidden="true" /></Link></div>
         </div>
         <aside className="landingPromise" aria-label="Bubble Wash service promise">
           <SearchCheck aria-hidden="true" />
-          <p className="sectionLabel">One clear trail</p>
+          <p className="sectionLabel">Follow your laundry</p>
           <h2>From the first request to the final handoff.</h2>
-          <p>Customers, riders, laundry partners, and support work from the same order reference.</p>
+          <p>Check collection, cleaning and delivery updates with your booking reference.</p>
           <Link href="/track">Track an existing order <ArrowRight aria-hidden="true" /></Link>
         </aside>
       </section>
@@ -37,7 +37,7 @@ export default function Home() {
       <section className="serviceFacts pageShell" aria-label="Service facts">{serviceFacts.map(([number, label]) => <div key={label}><strong>{number}</strong><span>{label}</span></div>)}</section>
 
       <section id="how-it-works" className="serviceSection pageShell landingHow" aria-labelledby="how-heading">
-        <div className="sectionIntro"><p className="sectionLabel">How it works</p><h2 id="how-heading">Collection, cleaning, and return—without fragmented updates.</h2><p>The product is the operating trail: one booking becomes one record that moves through every stage.</p></div>
+        <div className="sectionIntro"><p className="sectionLabel">How it works</p><h2 id="how-heading">From your door to clean laundry, delivered.</h2><p>Request a pickup, follow its progress, and receive your clean laundry with a secure handoff.</p></div>
         <ol className="workflowCards">{serviceSteps.map(({ title, copy, icon: Icon }, index) => <li key={title}><span className="workflowIcon"><Icon aria-hidden="true" /></span><small>Step {index + 1}</small><h3>{title}</h3><p>{copy}</p></li>)}</ol>
       </section>
 

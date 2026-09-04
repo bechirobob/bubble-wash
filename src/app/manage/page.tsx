@@ -9,5 +9,5 @@ export const metadata: Metadata = {
 };
 
 export default function ManageOrderPage() {
-  return <PublicChrome><PageIntro eyebrow="Customer order desk" title="View your booking and request changes." summary="Verify the order reference with the booking email or phone to open a private 30-minute session on this device." icon="manage" /><section className="policyContent manageOrderContent pageShell"><CustomerOrderManager /></section></PublicChrome>;
+  return <PublicChrome><PageIntro eyebrow="Customer order desk" title="View your booking and request changes." summary="Check your collection, view your invoice, or ask for a change using your booking reference and contact details." icon="manage" /><section className="policyContent manageOrderContent pageShell"><CustomerOrderManager /></section></PublicChrome>;
 }

@@ -1,3 +1,5 @@
+import { operationalDatabase } from "@/lib/operational-store";
+import { validatePickupSlot } from "@/lib/booking-policy";
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { customerSessionCookieName, decodeCustomerSession } from "@/lib/customer-session";
@@ -8,9 +10,12 @@ import { sameOriginJsonGuard } from "@/lib/security";
 const actions = new Map([
   ["reschedule", "Customer reschedule request"],
   ["cancel", "Customer cancellation request"],
+  ["quality", "Customer quality complaint"],
+  ["damage", "Customer loss or damage claim"],
+  ["refund", "Customer refund request"],
   ["care", "Customer garment-care note"],
 ]);
-const pickupWindows = new Set(["8:00–10:00", "10:00–12:00", "12:00–14:00", "14:00–16:00", "16:00–18:00"]);
+
 
 function text(value: unknown, max = 600) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -32,9 +37,7 @@ export async function POST(request: NextRequest) {
     const requestedWindow = text(body.requestedWindow, 80);
     const note = text(body.note);
     if (!issueType || !note || (action === "reschedule" && (
-      !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)
-      || requestedDate < new Date().toISOString().slice(0, 10)
-      || (requestedWindow && !pickupWindows.has(requestedWindow))
+      validatePickupSlot(requestedDate, requestedWindow)
     ))) {
       return NextResponse.json({ ok: false, error: "Complete the request details before submitting." }, { status: 400 });
     }
@@ -42,6 +45,7 @@ export async function POST(request: NextRequest) {
     if (!seed) return NextResponse.json({ ok: false, error: "This booking is no longer available." }, { status: 404 });
     const createdAt = new Date().toISOString();
     const ticketId = `BWC-${randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase()}`;
+    operationalDatabase().transaction(() => {
     appendSubmissionRecord({
       id: ticketId,
       createdAt,
@@ -57,12 +61,15 @@ export async function POST(request: NextRequest) {
         issueType,
         ticketStatus: "Open — customer request",
         priority: action === "cancel" ? "High" : "Normal",
+        customerAction: action,
         requestedDate,
         requestedWindow,
         message: note,
         submittedByRole: "customer",
       },
     });
+    if (["quality", "damage", "refund"].includes(action)) operationalDatabase().prepare("INSERT INTO order_holds VALUES (?, ?, ?) ON CONFLICT(order_id) DO UPDATE SET reason = excluded.reason, updated_at = excluded.updated_at").run(session.orderId, issueType, createdAt);
+    }).immediate();
     return NextResponse.json({ ok: true, ticketId, message: "Your request is on the operations queue. The current order status remains in place until Bubble Wash confirms the change." });
   } catch {
     return NextResponse.json({ ok: false, error: "Unable to save this request right now." }, { status: 500 });

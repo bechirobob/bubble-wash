@@ -493,7 +493,7 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
       : [];
     const service = explicitService
       || (bookingAddons.includes("express")
-        ? "Express capable"
+        ? `${bookingAddons.includes("premium") || bookingAddons.includes("ironing") ? "Wash + iron + fold" : "Wash + fold"}; Express capable`
         : bookingAddons.includes("premium") || bookingAddons.includes("ironing")
           ? "Wash + iron + fold"
           : "Wash + fold");

@@ -1,9 +1,13 @@
+import { bookingAvailable, validatePickupSlot, validateAddons } from "@/lib/booking-policy";
+import { saveBookingOnce } from "@/lib/operational-store";
+import { freezePricing } from "@/lib/billing";
+import { customerSessionCookieName, customerSessionCookieOptions, encodeCustomerSession } from "@/lib/customer-session";
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { canAccess, getCurrentStaffUser, type StaffRole } from "@/lib/auth";
 import { listVendorAvailability, upsertDriverAvailability, upsertVendorAvailability } from "@/lib/availability-store";
-import { appendSubmissionRecord } from "@/lib/data-store";
-import { dispatchSubmissionNotifications, notificationSummary } from "@/lib/notifications";
+import { appendSubmissionRecord, findSubmissionRecordById } from "@/lib/data-store";
+import { dispatchSubmissionNotifications, notificationSummary, queueSubmissionNotifications } from "@/lib/notifications";
 import { plans, zones } from "@/lib/pricing";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { sameOriginJsonGuard, staffWriteGuard } from "@/lib/security";
@@ -40,6 +44,7 @@ const staffRosterRoles = new Set(["Support", "Admin", "Operations"]);
 const staffRosterStatuses = new Set(["Active", "Training", "Pending checks", "Inactive"]);
 const publicSubmissionTypes = new Set(["pickup-booking", "checkout-request", "client-onboarding"]);
 const publicAllowedFields = new Set([
+  "idempotencyKey",
   "submissionType",
   "name",
   "email",
@@ -281,7 +286,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: false, error: `Unsupported public field: ${forbiddenField}` }, { status: 400 });
       }
     }
+    if (["pickup-booking", "checkout-request"].includes(submissionType) && !bookingAvailable()) return NextResponse.json({ ok: false, error: "Pickup booking is temporarily paused. Join early access or check an existing order." }, { status: 503 });
     const body = cleanPayload(rawBody, submissionType);
+    if (publicSubmissionTypes.has(submissionType)) {
+      const complexField = Object.entries(body).find(([key, value]) => key !== "addons" && typeof value !== "string");
+      const addonError = validateAddons(body.addons);
+      if (complexField || addonError) return NextResponse.json({ ok: false, error: addonError || "Submission fields must be text." }, { status: 400 });
+    }
     if (!publicSubmissionTypes.has(submissionType)) {
       const staffGuardError = staffWriteGuard(request.headers);
       if (staffGuardError) return staffGuardError;
@@ -316,6 +327,10 @@ export async function POST(request: NextRequest) {
         body.email = staffUser.email;
         body.company = text(body.company) || (staffUser.role === "vendor" ? "Vendor partner" : staffUser.role === "driver" ? "Bubble Wash Route Team" : staffUser.role === "support" ? "Bubble Wash Support" : "Bubble Wash Operations");
       }
+    }
+    if (submissionType === "support-ticket-action" && ["Resolved", "Closed"].includes(text(body.ticketStatus))) {
+      const root = findSubmissionRecordById(text(body.ticketId));
+      if (root?.data.customerAction) return NextResponse.json({ ok: false, error: "Use the customer decision control to approve or decline this request." }, { status: 409 });
     }
     const validationError = validatePublicPayload(body, submissionType);
     if (validationError) return validationError;
@@ -405,6 +420,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Enter a valid email address." }, { status: 400 });
     }
 
+    if (submissionType === "pickup-booking") {
+      const slotError = validatePickupSlot(text(body.pickupDate), text(body.pickupWindow));
+      if (slotError) return NextResponse.json({ ok: false, error: slotError }, { status: 400 });
+      body.pricingSnapshot = freezePricing(text(body.plan), text(body.zone));
+      body.pickupConfirmation = "requested";
+    }
     const record = {
       id: `BW-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`,
       createdAt: new Date().toISOString(),
@@ -412,6 +433,14 @@ export async function POST(request: NextRequest) {
       data: body,
     };
 
+    if (submissionType === "pickup-booking") {
+      const key = text(body.idempotencyKey);
+      if (!/^[a-zA-Z0-9_-]{16,100}$/.test(key)) return NextResponse.json({ ok: false, error: "Refresh the booking form before submitting." }, { status: 400 });
+      const result = saveBookingOnce(record, key, queueSubmissionNotifications);
+      const response = NextResponse.json({ ok: true, message: "Pickup requested. Operations will confirm your window.", ...result });
+      response.cookies.set(customerSessionCookieName, encodeCustomerSession(result.id, text(body.email), true), customerSessionCookieOptions());
+      return response;
+    }
     appendSubmissionRecord(record);
     const deliveryCode = ["pickup-booking", "checkout-request"].includes(submissionType) ? createDeliveryCode(record.id) : "";
     syncAvailabilityTables(body, submissionType, text(body.name) || text(body.company) || "Bubble Wash team");
@@ -426,6 +455,7 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ ok: true, message: `Thanks — your request was received. ${notificationSummary(notifications)}`, id: record.id, notifications });
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith("This request changed")) return NextResponse.json({ ok: false, error: error.message }, { status: 409 });
     console.error("Bubble Wash submission failed", {
       message: error instanceof Error ? error.message : "Unknown error",
     });

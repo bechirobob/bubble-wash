@@ -10,6 +10,7 @@ export type WorkflowStageKey =
   | "ready"
   | "out-for-delivery"
   | "delivered"
+  | "cancelled"
   | "closed"
   | "exception";
 
@@ -50,6 +51,7 @@ export type WorkflowAutomationAction = {
 };
 
 export const workflowStages: WorkflowStage[] = [
+  { key: "cancelled", label: "Cancelled", targetMinutes: 0, customerNext: "Your collection was cancelled. Any billing adjustment appears on your invoice.", staffNext: "Collection cancelled. Review any outstanding refund separately." },
   { key: "received", label: "Received", targetMinutes: 20, customerNext: "We received the order and are confirming pickup.", staffNext: "Admin confirms pickup details, payment preference, route area, and customer notes." },
   { key: "pickup-scheduled", label: "Pickup Scheduled", targetMinutes: 60, customerNext: "Pickup window is scheduled.", staffNext: "Admin assigns a vendor and keeps the customer window attached to the order." },
   { key: "vendor-assigned", label: "Vendor Assigned", targetMinutes: 60, customerNext: "A laundry partner has been assigned.", staffNext: "Vendor accepts the job from the inherited order context." },
@@ -69,6 +71,7 @@ const stageByKey = new Map(workflowStages.map((stage) => [stage.key, stage]));
 
 export function workflowStageFromStatus(status: string, lastEventType = "") {
   const normalized = `${status} ${lastEventType}`.toLowerCase();
+  if (/cancelled/.test(normalized)) return stageByKey.get("cancelled")!;
   if (/closed|resolved/.test(normalized)) return stageByKey.get("closed")!;
   if (/declined|delayed|issue|missing|quality|escalated|needs attention|waiting/.test(normalized)) return stageByKey.get("exception")!;
   if (/delivered|completed/.test(normalized)) return stageByKey.get("delivered")!;
@@ -113,7 +116,7 @@ export function workflowNextStep(order: WorkflowOrderSnapshot) {
 }
 
 export function paymentReadyForCloseout(payment: string) {
-  return /bank transfer confirmed|invoice approved|paid|payment success|settled/i.test(payment.trim());
+  return new Set(["bank transfer confirmed", "invoice approved", "paid", "payment success", "success", "settled"]).has(payment.trim().toLowerCase());
 }
 
 export function isValidDriverEtaAt(value: string) {
@@ -152,6 +155,7 @@ function action(key: string, label: string, description: string, submissionType:
 
 export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: WorkflowRole, userName: string): WorkflowAutomationAction[] {
   const stage = workflowStageFromStatus(order.status, order.lastEventType);
+  if (stage.key === "cancelled") return [];
   const base = basePayload(order, role, userName);
   const customer = customerLine(order);
   const urgent = order.priority === "Urgent" || order.stageTimer?.tone === "breached";

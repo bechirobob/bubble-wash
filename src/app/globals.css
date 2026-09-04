@@ -11,7 +11,7 @@
   --muted: #526573;
   --soft: #62737e;
   --line: #dbe8ec;
-  --line-strong: #bfd3da;
+  --line-strong: #7c929b;
   --brand: #0b4960;
   --brand-dark: #083545;
   --brand-soft: #e8f3f5;
@@ -48,7 +48,7 @@ html { background: #fff; }
 html, body { margin: 0; min-height: 100%; }
 body {
   font-family: var(--font-sans);
-  font-size: 15.5px;
+  font-size: 16px;
   line-height: 1.5;
   font-weight: 400;
   color: var(--ink);
@@ -77,7 +77,7 @@ input, select, textarea {
 }
 textarea { min-height: 120px; resize: vertical; }
 input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible, summary:focus-visible {
-  outline: 3px solid rgba(11, 73, 96, .22);
+  outline: 3px solid #0b4960;
   outline-offset: 2px;
 }
 h1, h2, h3, h4, p { margin-top: 0; }
@@ -1349,7 +1349,7 @@ dd { margin: 4px 0 0; color: var(--muted); }
   .dispatchMap figcaption p { grid-column: 1; }
   .dispatchMapDetail { grid-template-rows: 240px auto; }
   .dispatchMapDetail .dispatchMapCanvas { min-height: 240px; }
-  .dispatchMarker b { max-width: 112px; font-size: .68rem; }
+  .dispatchMarker b { max-width: 112px; font-size: .8rem; }
   .dispatchStopList { max-height: none; }
   .dispatchStopRow { min-height: 72px; padding-inline: 14px; }
   .dispatchStopRow[aria-pressed="true"] { padding-left: 10px; }
@@ -1501,3 +1501,9 @@ dd { margin: 4px 0 0; color: var(--muted); }
   .customerTimeline > div { grid-template-columns: 1fr; gap: 3px; }
   .privacyOpsRow { grid-template-columns: 1fr; }
 }
+
+.staffAccountPanel, .invoicePanel { padding: 1.25rem; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); margin-block: 1.25rem; }
+.staffAccountPanel form, .invoicePanel form { display: grid; gap: 1rem; }
+.staffAccountPanel code { overflow-wrap: anywhere; }
+input, select, textarea { font-size: 1rem; }
+.textButton { min-height: 44px; padding: .5rem; }

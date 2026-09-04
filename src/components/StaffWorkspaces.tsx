@@ -1,4 +1,5 @@
 "use client";
+import { StaffAccountPanel, StaffInvoicePanel, CustomerDecisionPanel } from "./StaffAdminControls";
 
 import Link from "next/link";
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -175,7 +176,7 @@ function isRiskOrder(order: OrderSummary) {
 }
 
 function isClosedOrder(order: OrderSummary) {
-  return order.workflowStage.key === "closed";
+  return ["closed", "cancelled"].includes(order.workflowStage.key);
 }
 
 function supportCases(records: SubmissionRecord[]) {
@@ -599,7 +600,7 @@ function RecentActivity({ filter, initialSelectedId = "", basePath }: { filter?:
     let active = true;
 
     async function refresh(showLoading = true) {
-      if (!active) return;
+      if (!active || (!showLoading && document.hidden)) return;
       if (showLoading) setStatus("Loading recent activity…");
       try {
         const response = await fetch("/api/submissions");
@@ -829,10 +830,10 @@ function AutomatedOrderActions({ order, role, userName, onSaved }: { order: Orde
         {actions.length ? actions.map((action, index) => <button className={`button ${index === 0 ? "primary" : "secondary"}`} disabled={Boolean(pendingLabel)} key={action.label} onClick={() => action.key === "vendor-decline-job" ? setDeclineOpen(true) : ["admin-schedule-pickup", "support-log-customer-contact", "admin-confirm-bank-transfer", "admin-approve-invoice", "vendor-log-intake", "vendor-mark-ready", "driver-mark-picked-up", "driver-drop-at-vendor", "driver-mark-delivered", "driver-update-eta", "driver-report-delay"].includes(action.key) ? setStructuredAction(action.key) : void run(action)} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>) : <span className="status">Waiting</span>}
       </div>
       {declineOpen ? <form className="declineReasonForm" onSubmit={(event) => { event.preventDefault(); const decline = actions.find((action) => action.key === "vendor-decline-job"); if (decline && declineReason.trim()) void run(decline, { reason: declineReason.trim() }); }}><label>Reason for admin reassignment<textarea value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} maxLength={300} placeholder="Capacity, machine issue, service mismatch, or timing conflict" required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={!declineReason.trim() || Boolean(pendingLabel)}>Confirm decline</button><button className="button secondary" type="button" onClick={() => { setDeclineOpen(false); setDeclineReason(""); }}>Cancel</button></div></form> : null}
-      {structuredAction === "admin-schedule-pickup" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Confirmed pickup window<input name="confirmedPickupWindow" placeholder="Tuesday, 10:00–12:00" maxLength={120} required /></label><label>Scheduling note<textarea name="operatorNote" placeholder="Who confirmed the window and any access or collection instructions" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save pickup window</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "admin-schedule-pickup" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Confirmed pickup date<input type="date" name="confirmedPickupDate" required /></label><label>Confirmed pickup window<select name="confirmedPickupWindow" required>{["8:00–10:00", "10:00–12:00", "12:00–14:00", "14:00–16:00", "16:00–18:00"].map((window) => <option key={window}>{window}</option>)}</select></label><label>Scheduling note<textarea name="operatorNote" placeholder="Who confirmed the window and any access or collection instructions" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save pickup window</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "support-log-customer-contact" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Contact channel<select name="contactChannel" required><option>Phone call</option><option>Email</option></select></label><label>Outcome<select name="contactOutcome" required><option>Reached customer</option><option>No answer</option><option>Message left</option><option>Email sent</option><option>Follow-up required</option></select></label></div><label>Next follow-up<input name="nextFollowUpAt" type="datetime-local" required /></label><label>Operator note<textarea name="operatorNote" placeholder="What was discussed, promised, or left unresolved" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save contact log</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {["admin-confirm-bank-transfer", "admin-approve-invoice"].includes(structuredAction) ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>{structuredAction === "admin-approve-invoice" ? "Invoice number" : "Transfer reference"}<input name="paymentReference" maxLength={120} required /></label><label>Amount (GHS)<input name="paymentAmount" type="number" min="0.01" max="250000" step="0.01" inputMode="decimal" required /></label></div><label>{structuredAction === "admin-approve-invoice" ? "Approval date" : "Received date"}<input name="paymentReceivedAt" type="date" required /></label><label>Reconciliation note<textarea name="operatorNote" placeholder="Account checked, approver, payer name, or exception reviewed" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>{structuredAction === "admin-approve-invoice" ? "Save invoice approval" : "Confirm bank transfer"}</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
-      {structuredAction === "vendor-log-intake" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Bag tag<input name="bagTag" defaultValue={`${order.orderId}-BAG`} maxLength={120} required /></label><label>Bag/item count<input name="intakeBagCount" type="number" min="1" max="10000" step="1" required /></label></div><div className="two"><label>Received weight (kg, optional)<input name="receivedWeightKg" type="number" min="0.01" max="10000" step="0.01" inputMode="decimal" /></label><label>Intake condition<select name="intakeCondition" required><option>Count and condition matched</option><option>Stain or special care flagged</option><option>Count mismatch</option><option>Damage risk flagged</option></select></label></div><label>Intake note<textarea name="operatorNote" placeholder="Count check, visible condition, special care, or discrepancy" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm intake</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "vendor-log-intake" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Bag tag<input name="bagTag" defaultValue={`${order.orderId}-BAG`} maxLength={120} required /></label><label>Bag/item count<input name="intakeBagCount" type="number" min="1" max="10000" step="1" required /></label></div><div className="two"><label>Verified received weight (kg)<input name="receivedWeightKg" required type="number" min="0.01" max="10000" step="0.01" inputMode="decimal" /></label><label>Intake condition<select name="intakeCondition" required><option>Count and condition matched</option><option>Stain or special care flagged</option><option>Count mismatch</option><option>Damage risk flagged</option></select></label></div><label>Intake note<textarea name="operatorNote" placeholder="Count check, visible condition, special care, or discrepancy" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm intake</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "vendor-mark-ready" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Ready bag/item count<input name="readyBagCount" type="number" min="1" max="10000" step="1" required /></label><label>Quality check<select name="qualityCheck" required><option>Count, finish, and packaging checked</option><option>Ready with noted exception</option></select></label></div><label>Dispatch note<textarea name="operatorNote" placeholder="Packaging, storage point, collection instructions, or exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Mark ready</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "driver-mark-picked-up" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Collected bag/item count<input name="pickupBagCount" type="number" min="1" max="10000" step="1" required /></label><label>Customer handoff note<textarea name="operatorNote" placeholder="Who released the order, collection point, and any count or access exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm pickup</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "driver-drop-at-vendor" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Vendor recipient<input name="vendorRecipient" maxLength={160} required /></label><label>Handed-over bag/item count<input name="handoffBagCount" type="number" min="1" max="10000" step="1" required /></label></div><label>Vendor handoff note<textarea name="operatorNote" placeholder="Handoff point, time, recipient confirmation, or discrepancy" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm vendor handoff</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
@@ -1246,6 +1247,7 @@ function AdminDispatchWorkspace() {
   useEffect(() => {
     let active = true;
     async function refreshLocations() {
+      if (document.hidden) return;
       try {
         const response = await fetch("/api/dispatch/location", { cache: "no-store" });
         const data = await response.json().catch(() => ({}));
@@ -1276,18 +1278,24 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
   const [hasLoaded, setHasLoaded] = useState(false);
   const [queueView, setQueueView] = useState<QueueView>("action");
   const [query, setQuery] = useState("");
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [visibleCount, setVisibleCount] = useState(12);
+  const olderPagesLoaded = useRef(false);
 
-  async function loadOrders(showLoading = true) {
+  async function loadOrders(showLoading = true, offset = 0) {
     if (showLoading) setStatus("Loading shared order board…");
+    olderPagesLoaded.current = offset > 0;
     try {
-      const response = await fetch("/api/orders");
+      const response = await fetch(`/api/orders?${new URLSearchParams({ offset: String(offset), q: selectedOrderId || query })}`);
       const data = await response.json();
       if (!response.ok || !data.ok) {
         setStatus(data.error ?? "Unable to load shared orders.");
         setHasLoaded(true);
         return;
       }
-      setOrders(data.orders);
+      setOrders((current) => offset ? [...current, ...data.orders.filter((order: OrderSummary) => !current.some((existing) => existing.orderId === order.orderId))] : data.orders);
+      setNextOffset(data.nextOffset);
+      if (offset) setVisibleCount((count) => count + 100);
       setHasLoaded(true);
       setLastSyncedAt(new Date().toISOString());
       setStatus(data.orders.length ? "Updated." : "No shared orders yet.");
@@ -1300,10 +1308,10 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
   useEffect(() => {
     let active = true;
     async function refresh(showLoading = false) {
-      if (!active) return;
+      if (!active || (!showLoading && (document.hidden || olderPagesLoaded.current))) return;
       if (showLoading) setStatus("Loading shared order board…");
       try {
-        const response = await fetch("/api/orders");
+        const response = await fetch(`/api/orders?${new URLSearchParams({ q: selectedOrderId || query })}`);
         const data = await response.json();
         if (!active) return;
         if (!response.ok || !data.ok) {
@@ -1312,6 +1320,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
           return;
         }
         setOrders(data.orders);
+        setNextOffset(data.nextOffset);
         setHasLoaded(true);
         setLastSyncedAt(new Date().toISOString());
         setStatus(data.orders.length ? "Updated." : "No shared orders yet.");
@@ -1323,17 +1332,18 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
       }
     }
     refresh(true);
-    const interval = window.setInterval(() => refresh(false), 30_000);
+    const interval = window.setInterval(() => void refresh(false), 30_000);
     return () => {
       active = false;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [selectedOrderId, query]);
 
   useEffect(() => {
     if (role !== "admin" || !selectedOrderId) return;
     let active = true;
     async function refreshLocation() {
+      if (document.hidden) return;
       try {
         const response = await fetch("/api/dispatch/location", { cache: "no-store" });
         const data = await response.json().catch(() => ({}));
@@ -1357,7 +1367,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
   const sourceOrders = queueView === "action" ? focusOrders : queueView === "active" ? activeOrders : orders;
   const normalizedQuery = query.trim().toLowerCase();
   const matchingOrders = normalizedQuery ? sourceOrders.filter((order) => [order.orderId, order.customer, order.phone, order.email, order.area, order.vendor, order.driver, order.status, order.payment].join(" ").toLowerCase().includes(normalizedQuery)) : sourceOrders;
-  const visibleOrders = matchingOrders.slice(0, 12);
+  const visibleOrders = matchingOrders.slice(0, visibleCount);
   const stats = queueStats(activeOrders, role, userName);
   const queueHeading = !hasLoaded ? "Loading order queue…" : queueView === "action" ? (stats.focusCount ? `${stats.focusCount} ${stats.focusLabel}` : "No work needs this role right now") : queueView === "active" ? `${activeOrders.length} active orders` : `${orders.length} total orders`;
   const selectedOrder = selectedOrderId ? orders.find((order) => order.orderId.toLowerCase() === selectedOrderId.toLowerCase()) : null;
@@ -1399,6 +1409,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
             {role === "support" ? <p className="dispatchDetailDisclosure">{hasCustomerRoutePreview(selectedOrder) ? "Planning information only. Support cannot access live rider GPS, and live traffic is not available." : "Vendor location not recorded; route directions are unavailable for this leg. Support cannot access live rider GPS."}</p> : null}
           </div></details>
 
+          {canSeePayment ? <StaffInvoicePanel key={`${selectedOrder.orderId}-${selectedOrder.activityUpdatedAt}`} orderId={selectedOrder.orderId} admin={role === "admin"} /> : null}
           {canSeePayment ? <details className="staffDetailDisclosure"><summary><span><strong>Payment</strong><small>{selectedOrder.payment}</small></span></summary><div className="staffDisclosureBody"><dl className="staffDefinitionList"><div><dt>Status</dt><dd>{selectedOrder.payment}</dd></div><div><dt>Customer email</dt><dd>{selectedOrder.email || "Not recorded"}</dd></div></dl></div></details> : null}
 
           <details className="staffDetailDisclosure"><summary><span><strong>Order history</strong><small>{compactTimelineLabel(selectedOrder.eventCount)}</small></span></summary><div className="staffDisclosureBody"><div className="staffTimeline">{selectedOrder.timeline.map((event) => <div key={`${selectedOrder.orderId}-${event.id}-${event.createdAt}`}><time>{formatShortTime(event.createdAt)}</time><div><strong>{event.status}</strong><span>{event.type} · {event.actor}</span><p>{event.note}</p></div></div>)}</div></div></details>
@@ -1407,13 +1418,14 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
         <div className="staffSectionHeader"><div><h2>{queueHeading}</h2><p>{stats.riskCount} at risk · {stats.automationCount} verified actions available</p></div><button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh</button></div>
         <div className="staffFilterBar">
           <div className="staffTextFilters" aria-label="Order queue view">{([ ["action", "Needs action"], ["active", "All active"], ["all", "History"] ] as Array<[QueueView, string]>).map(([key, label]) => <button aria-pressed={queueView === key} className={queueView === key ? "active" : ""} key={key} type="button" onClick={() => setQueueView(key)}>{label}</button>)}</div>
-          <label className="staffSearch"><span>Find an order</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Reference, customer, area, assignment…" /></label>
+          <label className="staffSearch"><span>Find an order</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setVisibleCount(12); }} placeholder="Reference or customer name…" /></label>
         </div>
         <div className="staffOrderList" role="list">
           <div className="staffOrderListHeader" aria-hidden="true"><span>Order</span><span>Stage</span><span>Collection</span><span>Assignment</span><span></span></div>
           {role === "driver" ? driverGroups.map((group) => <section className="staffOrderGroup" key={group.label} aria-labelledby={`driver-group-${group.label.replaceAll(" ", "-").toLowerCase()}`}><h3 className="staffOrderGroupTitle" id={`driver-group-${group.label.replaceAll(" ", "-").toLowerCase()}`}>{group.label}<span>{group.orders.length}</span></h3>{group.orders.map((order) => <OrderQueueRow href={detailHref(order.orderId)} key={order.orderId} order={order} />)}</section>) : visibleOrders.map((order) => <OrderQueueRow href={detailHref(order.orderId)} key={order.orderId} order={order} />)}
           {!visibleOrders.length ? !hasLoaded ? <LoadingSkeleton label="Loading order queue" rows={5} /> : <p className="staffEmptyState">{normalizedQuery ? "No orders match this search." : queueView === "action" ? "No orders currently need action from this role." : "No orders in this view yet."}</p> : null}
         </div>
+        <div className="tableActionRow">{matchingOrders.length > visibleCount ? <button className="button secondary" onClick={() => setVisibleCount((count) => count + 24)}>Show more orders</button> : nextOffset !== null ? <button className="button secondary" onClick={() => loadOrders(false, nextOffset)}>Load older orders</button> : null}</div>
       </>}
       <p className={noticeClass(status)} role="status" aria-live="polite">{status}{lastSyncedAt ? ` Last synced ${formatMetricTime(lastSyncedAt)}. ${selectedOrderId ? "" : `Showing ${visibleOrders.length} of ${matchingOrders.length}.`}` : ""}</p>
     </section>
@@ -1732,6 +1744,7 @@ function SupportTicketDesk({ userName, selectedCaseId = "", basePath, refreshTok
         <div className="staffDetailSections">
           <details className="staffDetailDisclosure"><summary><span><strong>Case context</strong><small>{selectedCase.orderId || "Unlinked case"}</small></span></summary><div className="staffDisclosureBody"><dl className="staffDefinitionList"><div><dt>Order</dt><dd>{selectedCase.orderId || "Unlinked case"}</dd></div><div><dt>Raised by</dt><dd>{String(selectedCase.root.data.name || "Team member")}</dd></div><div><dt>Customer/team</dt><dd>{String(selectedCase.root.data.company || "Bubble Wash")}</dd></div><div><dt>Last updated</dt><dd>{formatActivityTime(selectedCase.latest.createdAt)}</dd></div></dl></div></details>
           <details className="staffDetailDisclosure"><summary><span><strong>Case history</strong><small>{selectedCase.events.length} updates</small></span></summary><div className="staffDisclosureBody"><div className="staffTimeline">{[...selectedCase.events].reverse().map((event) => <div key={event.id}><time>{formatActivityTime(event.createdAt)}</time><div><strong>{String(event.data.ticketStatus || event.data.issueType || "Open")}</strong><span>{String(event.data.name || "Staff")}</span><p>{String(event.data.message || "No note supplied.")}</p></div></div>)}</div></div></details>
+          {selectedCase.root.data.customerAction ? <CustomerDecisionPanel ticketId={selectedCase.ticketId} action={String(selectedCase.root.data.customerAction)} onSaved={() => loadTickets(false)} /> : null}
           <details className="staffDetailDisclosure staffControlDisclosure"><summary><span><strong>Record next case action</strong><small>{selectedCase.status} · {selectedCase.priority} priority</small></span></summary><div className="staffDisclosureBody"><form className="staffForm" onSubmit={(event) => action(event, selectedCase)}>
             <div className="two"><label>Case status<select name="ticketStatus" defaultValue={selectedCase.status}><option>Open</option><option>In Review</option><option>Assigned</option><option>Waiting on Customer</option><option>Waiting on Vendor</option><option>Waiting on Driver</option><option>Escalated</option><option>Resolved</option><option>Closed</option><option>Reopened</option></select></label><label>Priority<select name="priority" defaultValue={selectedCase.priority}><option>Normal</option><option>High</option><option>Urgent</option></select></label></div>
             <div className="two"><label>Assigned desk<select name="assignedRole" defaultValue={selectedCase.assignedRole}><option>Support</option><option>Admin</option><option>Vendor</option><option>Driver</option></select></label><label>Escalation level<select name="escalationLevel" defaultValue={selectedCase.escalationLevel}><option>Level 0</option><option>Level 1</option><option>Level 2</option><option>Level 3</option></select></label></div>
@@ -1798,7 +1811,7 @@ export function AdminWorkspace({ userName, role, initialView = "overview", selec
       {initialView === "overview" ? <AdminOverview userName={userName} /> : null}
       {initialView === "dispatch" ? <AdminDispatchWorkspace /> : null}
       {initialView === "orders" ? <SharedOrderBoard role="admin" userName={userName} selectedOrderId={selectedOrderId} basePath="/admin?view=orders" /> : null}
-      {initialView === "people" ? <><AvailabilityBoard role="admin" refreshToken={availabilityVersion} /><StaffAccessRoster refreshToken={rosterVersion} /><AdminOnboardingCenter onSubmit={submitLead} status={formStatus} pendingType={pendingType} /></> : null}
+      {initialView === "people" ? <><AvailabilityBoard role="admin" refreshToken={availabilityVersion} /><StaffAccessRoster refreshToken={rosterVersion} /><StaffAccountPanel /><AdminOnboardingCenter onSubmit={submitLead} status={formStatus} pendingType={pendingType} /></> : null}
       {initialView === "cases" ? <><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Open a new case</strong><small>Use when an existing case does not cover the issue</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="admin" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section><SupportTicketDesk userName={userName} selectedCaseId={selectedCaseId} basePath="/admin?view=cases" refreshToken={casesVersion} /></> : null}
       {initialView === "operations" ? <AdminOperationsHealth /> : null}
       {initialView === "activity" ? <RecentActivity initialSelectedId={selectedActivityId} basePath="/admin?view=activity" /> : null}

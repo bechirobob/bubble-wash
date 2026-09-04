@@ -1,4 +1,5 @@
 import "server-only";
+import { listStaffAccounts } from "./staff-accounts.ts";
 
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers.js";
@@ -74,7 +75,9 @@ export const staffUsers: StaffUser[] = [
 export function currentStaffUsers(): StaffUser[] {
   if (staffAccessDisabled()) return [];
   const override = readStaffCredentialOverride();
-  if (!override) return staffUsers;
+  const managed = listStaffAccounts();
+  const merge = (users: StaffUser[]) => [...users.filter((user) => !managed.some((account) => account.email.toLowerCase() === user.email.toLowerCase())), ...managed.filter((account) => account.status === "active").map((account) => ({ ...account, entityId: account.entityId || undefined }))];
+  if (!override) return merge(staffUsers);
   const admin: StaffUser = {
     name: "Master Administrator",
     email: override.login,
@@ -83,7 +86,7 @@ export function currentStaffUsers(): StaffUser[] {
     role: "admin",
   };
   const nonAdmins = staffUsers.filter((user) => user.role !== "admin");
-  return [admin, ...nonAdmins];
+  return merge([admin, ...nonAdmins]);
 }
 
 const allowedNextPaths = new Set(["/admin", "/vendors", "/drivers", "/support"]);
@@ -140,7 +143,7 @@ export function decodeSession(value?: string) {
     if (!session.expiresAt || session.expiresAt < Math.floor(Date.now() / 1000)) return null;
     const user = currentStaffUsers().find((item) => item.email.toLowerCase() === session.email.toLowerCase() && item.role === session.role);
     if (!user || session.entityId !== user.entityId) return null;
-    if (user.role === "admin" && session.credentialVersion !== user.credentialVersion) return null;
+    if (session.credentialVersion !== user.credentialVersion) return null;
     return { email: session.email, role: session.role, name: user.name, entityId: user.entityId };
   } catch {
     return null;

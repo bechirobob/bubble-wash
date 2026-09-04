@@ -172,7 +172,7 @@ function purgeExpiredDriverLocations(db: Database.Database, now = Date.now()) {
   lastLocationCleanupAt = now;
 }
 
-function getDatabase() {
+export function getDatabase() {
   if (database) {
     purgeExpiredDriverLocations(database);
     return database;
@@ -737,6 +737,7 @@ export function purgeOperationalData(now = Date.now(), householdLaunchDate = pro
     }
     result.privacyRequestLogs = db.prepare("DELETE FROM privacy_requests WHERE status IN ('completed', 'declined') AND updated_at < ?").run(isoDaysAgo(365 * 3)).changes;
 
+    db.exec("CREATE TABLE IF NOT EXISTS order_holds (order_id TEXT PRIMARY KEY COLLATE NOCASE, reason TEXT NOT NULL, updated_at TEXT NOT NULL)");
     const closedOrders = db.prepare(`
       SELECT DISTINCT json_extract(data, '$.orderId') AS orderId
       FROM submissions
@@ -747,6 +748,8 @@ export function purgeOperationalData(now = Date.now(), householdLaunchDate = pro
     let deletedOrderRecords = 0;
     for (const { orderId } of closedOrders) {
       if (!orderId) continue;
+      if (db.prepare("SELECT 1 FROM order_holds WHERE order_id = ?").get(orderId)) continue;
+      if (db.prepare("SELECT 1 FROM submissions WHERE (id = ? OR json_extract(data, '$.orderId') = ?) AND created_at >= ?").get(orderId, orderId, isoDaysAgo(365 * 2))) continue;
       db.prepare("DELETE FROM driver_live_locations WHERE order_id = ? COLLATE NOCASE").run(orderId);
       db.prepare("DELETE FROM workflow_action_claims WHERE order_id = ? COLLATE NOCASE").run(orderId);
       db.prepare("DELETE FROM delivery_proofs WHERE order_id = ? COLLATE NOCASE").run(orderId);

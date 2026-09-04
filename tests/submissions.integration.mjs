@@ -161,8 +161,8 @@ const expressSummary = buildOrderSummaries([{
   id: "BW-EXPRESS-SERVICE",
   data: { ...booking.data, addons: ["express"] },
 }])[0];
-assert.equal(expressSummary.service, "Express capable");
-assert.equal(expressSummary.serviceType, "Express capable");
+assert.equal(expressSummary.service, "Wash + fold; Express capable");
+assert.equal(expressSummary.serviceType, "Wash + fold; Express capable");
 
 const dispatchAssignment = {
   id: "BW-DISPATCH-ASSIGN",

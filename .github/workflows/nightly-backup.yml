@@ -1,6 +1,12 @@
 name: Nightly Production Backup
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/nightly-backup.yml
+      - scripts/backup-database.mjs
+      - scripts/finalize-backup.mjs
   schedule:
     - cron: "15 1 * * *"
   workflow_dispatch:
@@ -31,10 +37,10 @@ jobs:
         run: |
           set -euo pipefail
           unit_name="bubblewash-nightly-backup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          tailscale ssh root@hermes \
-            "systemd-run --quiet --wait --collect --pipe --unit='$unit_name' --property='User=ubuntu' --property='Group=ubuntu' --property='WorkingDirectory=/home/ubuntu/bubblewash-pilot' --property='EnvironmentFile=/home/ubuntu/.config/bubblewash/env' --property='Environment=HOME=/home/ubuntu' /usr/bin/env BUBBLEWASH_BACKUP_DEFER_STATUS=true /usr/bin/npm run db:backup"
+          backup_output="$(tailscale ssh root@hermes \
+            "systemd-run --quiet --wait --collect --pipe --unit='$unit_name' --property='User=ubuntu' --property='Group=ubuntu' --property='WorkingDirectory=/home/ubuntu/bubblewash-pilot' --property='EnvironmentFile=/home/ubuntu/.config/bubblewash/env' --property='Environment=HOME=/home/ubuntu' /usr/bin/env BUBBLEWASH_BACKUP_DEFER_STATUS=true /usr/bin/npm run db:backup")"
 
-          backup_name="$(tailscale ssh root@hermes 'find /home/ubuntu/bubblewash-backups/github-staging -maxdepth 1 -type f -name '\''bubblewash-*.sqlite.enc'\'' -printf '\''%f\\n'\'' | sort | tail -n 1')"
+          backup_name="$(printf '%s\n' "$backup_output" | python3 -c 'import json,sys; text=sys.stdin.read(); value=json.loads(text[text.index("{"):]); assert value["ok"]; print(value["filename"])')"
           if [[ ! "$backup_name" =~ ^bubblewash-[0-9]{4}-[0-9]{2}-[0-9]{2}T.*\.sqlite\.enc$ ]]; then
             echo "The nightly backup name is invalid." >&2
             exit 1

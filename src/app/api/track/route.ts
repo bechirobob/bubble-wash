@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { publicTrackingView } from "@/lib/security";
-import { findOrderById, readSubmissions } from "@/lib/submissions";
+import { findOrderById, readSubmissionsForOrder } from "@/lib/submissions";
 
 export async function GET(request: NextRequest) {
   if (isRateLimited(clientKey(request.headers, "track"), 40, 60_000)) {
@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   const id = request.nextUrl.searchParams.get("id")?.trim();
   if (!id) return NextResponse.json({ ok: false, error: "Enter a Bubble Wash reference ID." }, { status: 400 });
 
-  const records = await readSubmissions(250);
+  const records = await readSubmissionsForOrder(id);
   const order = findOrderById(records, id);
 
   if (!order) {

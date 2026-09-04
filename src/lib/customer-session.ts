@@ -7,6 +7,7 @@ const maxAgeSeconds = 60 * 30;
 
 type CustomerSession = {
   orderId: string;
+  verifiedContact?: boolean;
   contactFingerprint: string;
   issuedAt: number;
   expiresAt: number;
@@ -48,10 +49,11 @@ export function customerContactMatches(candidate: string, expectedEmail: string,
     .some((value) => safeEqual(candidateFingerprint, customerContactFingerprint(value)));
 }
 
-export function encodeCustomerSession(orderId: string, contact: string) {
+export function encodeCustomerSession(orderId: string, contact: string, verifiedContact = false) {
   const now = Math.floor(Date.now() / 1000);
   const session: CustomerSession = {
     orderId,
+    verifiedContact,
     contactFingerprint: customerContactFingerprint(contact),
     issuedAt: now,
     expiresAt: now + maxAgeSeconds,

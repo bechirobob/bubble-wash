@@ -146,6 +146,9 @@ configure_backup_environment() {
   ensure_env_value "BUBBLEWASH_BACKUP_ENCRYPTION_KEY" "$backup_key"
   ensure_env_value "BUBBLEWASH_DATABASE_DRIVER" "sqlite"
   ensure_generated_base64_key "BUBBLEWASH_MFA_ENCRYPTION_KEY"
+  if [[ -z "$(configured_env_value BUBBLEWASH_MAINTENANCE_TOKEN)" ]]; then
+    set_env_value BUBBLEWASH_MAINTENANCE_TOKEN "$(openssl rand -hex 32)"
+  fi
   set_env_value "BUBBLEWASH_STAFF_AUTH_DISABLED" "true"
   chown "$app_user:$app_group" "$env_file"
   chmod 0600 "$env_file"
@@ -349,3 +352,9 @@ mv "$temporary_status" "$status_path"
 
 trap - ERR
 echo "Bubble Wash release $deploy_sha is healthy on production."
+
+# Keep retries and retention attached to the active release.
+install -m 0644 "$release_dir/ops/bubblewash-maintenance.service" /etc/systemd/system/bubblewash-maintenance.service
+install -m 0644 "$release_dir/ops/bubblewash-maintenance.timer" /etc/systemd/system/bubblewash-maintenance.timer
+systemctl daemon-reload
+systemctl enable --now bubblewash-maintenance.timer

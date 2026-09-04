@@ -7,6 +7,7 @@ const appHtmlHeaders = [
 
 const nextConfig = {
   poweredByHeader: false,
+  experimental: { cpus: 1 },
   allowedDevOrigins: [
     "127.0.0.1",
     "localhost",

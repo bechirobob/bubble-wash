@@ -4,8 +4,10 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/srv/bubble-wash
-EnvironmentFile=/etc/bubblewash/production.env
+WorkingDirectory=/home/ubuntu/bubblewash-pilot
+Environment=BUBBLEWASH_MAINTENANCE_ORIGIN=http://127.0.0.1:3000
+TimeoutStartSec=600
+EnvironmentFile=/home/ubuntu/.config/bubblewash/env
 ExecStart=/usr/bin/npm run maintenance:run
-User=bubblewash
-Group=bubblewash
+User=ubuntu
+Group=ubuntu

@@ -9,12 +9,12 @@
     "start": "next start",
     "lint": "eslint",
     "test": "npm run test:unit && npm run test:data",
-    "test:unit": "node --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/*.test.mjs",
-    "test:data": "node --conditions=react-server --experimental-strip-types tests/data-store.integration.mjs && node tests/production-reset.integration.mjs && node tests/production-roster-reset.integration.mjs && node --conditions=react-server --experimental-strip-types tests/dispatch-location-store.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/submissions.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth-production.integration.mjs && node --conditions=react-server --experimental-strip-types tests/customer-session.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-defaults-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-roles-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/admin-mfa.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/admin-mfa-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/admin-recovery-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-disabled-http.integration.mjs",
+    "test:unit": "node --conditions=react-server --test --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tests/*.test.mjs",
+    "test:data": "node --conditions=react-server --experimental-strip-types tests/data-store.integration.mjs && node tests/production-reset.integration.mjs && node tests/production-roster-reset.integration.mjs && node --conditions=react-server --experimental-strip-types tests/dispatch-location-store.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/submissions.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth.integration.mjs && node --conditions=react-server --experimental-strip-types tests/auth-production.integration.mjs && node --conditions=react-server --experimental-strip-types tests/customer-session.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-defaults-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-roles-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/admin-mfa.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/admin-mfa-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/admin-recovery-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/auth-disabled-http.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/audit-remediation.integration.mjs",
     "typecheck": "tsc --noEmit",
     "audit:full": "npm audit --audit-level=moderate",
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",
-    "check": "npm run lint && npm test && npm run typecheck && npm run audit:full && npm run audit:prod && npm run build && npm run verify:image-runtime && npm run verify:routes",
+    "check": "npm run lint && npm test && npm run typecheck && npm run audit:full && npm run audit:prod && npm run build && npm run test:workflow && npm run verify:image-runtime && npm run verify:routes",
     "verify:image-runtime": "node scripts/verify-image-runtime.mjs",
     "verify:routes": "node scripts/verify-required-routes.mjs",
     "hash-password": "node scripts/hash-password.mjs",
@@ -24,7 +24,8 @@
     "db:production-reset": "node scripts/reset-production-data.mjs",
     "db:production-roster-reset": "node scripts/reset-production-roster.mjs",
     "db:export": "node scripts/export-portable-data.mjs",
-    "maintenance:run": "node scripts/run-maintenance.mjs"
+    "maintenance:run": "node scripts/run-maintenance.mjs",
+    "test:workflow": "node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/workflow-http.integration.mjs"
   },
   "engines": {
     "node": ">=20.9.0"
@@ -45,6 +46,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "browserslist": "^4.28.9",
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
     "typescript": "^5"

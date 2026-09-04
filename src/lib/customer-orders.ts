@@ -1,4 +1,6 @@
 import "server-only";
+import { invoiceForOrder } from "@/lib/billing";
+import { workflowStageFromStatus } from "@/lib/order-workflow";
 
 import type { OrderSummary, SubmissionRecord } from "@/lib/submissions";
 
@@ -12,17 +14,18 @@ export function customerOrderView(order: OrderSummary, records: SubmissionRecord
     .find((record) => ["pickup-booking", "checkout-request"].includes(text(record.data.submissionType)));
   return {
     orderId: order.orderId,
+    invoice: invoiceForOrder(order.orderId),
     customer: order.customer.split(/\s+/)[0] || "Customer",
     createdAt: order.createdAt,
     updatedAt: order.activityUpdatedAt,
     status: order.status,
-    nextStep: order.nextStep,
+    nextStep: workflowStageFromStatus(order.status, order.lastEventType).customerNext,
     area: order.area,
     pickupAddress: order.pickupAddress,
     plan: order.plan,
     service: order.service,
-    pickupDate: text(seed?.data.pickupDate),
-    pickupWindow: text(seed?.data.pickupWindow),
+    pickupDate: text([...records].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).find((record) => text(record.data.confirmedPickupDate))?.data.confirmedPickupDate) || text(seed?.data.pickupDate),
+    pickupWindow: order.dispatch.scheduledWindow || text(seed?.data.pickupWindow),
     timeline: order.timeline.map((event) => ({
       createdAt: event.createdAt,
       status: event.status,
