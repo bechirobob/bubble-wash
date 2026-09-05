@@ -1,5 +1,7 @@
 # Bubble Wash visual refresh
 
+Historical release notes. The layout is superseded by `design-review-2026-09-05.md`.
+
 The public experience now uses a cotton-white, aqua and blue palette, laundry photography, rounded service panels, fabric-label details and shorter customer-facing copy. The homepage focuses on business laundry; household early access remains clearly separate.
 
 ## Brand and imagery
@@ -7,8 +9,6 @@ The public experience now uses a cotton-white, aqua and blue palette, laundry ph
 The original `public/bubble-wash-icon.jpg` remains the brand artwork in the shared header/footer component and staff surfaces. The icon is displayed larger, with its surrounding whitespace cropped in CSS and multiply blending to integrate its white canvas. The accessible brand name remains available to screen readers. No replacement logo was introduced.
 
 `public/laundry-care-hero.webp` is an optimized 1200 × 1200 concept image, approximately 116 KB. It uses the original icon as a reference for the printed laundry bag. The image is conceptual marketing artwork, not evidence of a real facility or actual packaging. Next Image provides responsive delivery and prioritizes the hero. The social sharing preview uses the same image.
-
-Built-in image generation was used. Initial prompt: “Premium editorial square laundry still life: freshly folded white towels, a pale blue folded shirt and natural cotton collection bag, pale aqua studio backdrop, tactile cotton, soft morning light, no people or unrelated props.” Final edit prompt: “Replace the bag’s plain text label with the exact official Bubble Wash bubble-and-sparkles icon from the supplied original, naturally printed on the fabric. Preserve the rest of the scene.”
 
 ## Customer experience
 

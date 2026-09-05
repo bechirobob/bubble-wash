@@ -8,9 +8,11 @@ const appHtmlHeaders = [
 const nextConfig = {
   poweredByHeader: false,
   experimental: { cpus: 1 },
+  // Keep local HTTP previews compatible with the development asset server.
   allowedDevOrigins: [
     "127.0.0.1",
     "localhost",
+    "terminal.local",
     "*.lhr.life",
     "86d8b14ff63eb9.lhr.life",
     "9ce8c3a9b889e2.lhr.life",

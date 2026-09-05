@@ -23,6 +23,26 @@ test("securityHeaders includes OWASP baseline browser protections without powere
   assert.equal(map.has("x-powered-by"), false);
 });
 
+test("development browser policy leaves production protections intact", () => {
+  const previous = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = "development";
+    const dev = new Map(securityHeaders().map(item => [item.key, item.value]));
+    assert.doesNotMatch(dev.get("Content-Security-Policy"), /upgrade-insecure-requests/);
+    assert.match(dev.get("Content-Security-Policy"), /'unsafe-eval'/);
+    assert.equal(dev.get("X-Frame-Options"), "SAMEORIGIN");
+    process.env.NODE_ENV = "production";
+    const prod = new Map(securityHeaders().map(item => [item.key, item.value]));
+    assert.match(prod.get("Content-Security-Policy"), /upgrade-insecure-requests/);
+    assert.doesNotMatch(prod.get("Content-Security-Policy"), /'unsafe-eval'/);
+    assert.equal(prod.get("X-Frame-Options"), "DENY");
+    assert.ok(prod.has("Strict-Transport-Security"));
+  } finally {
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
+  }
+});
+
 test("live dispatch location responses are explicitly private and non-cacheable", () => {
   const map = new Map(privateNoStoreHeaders().map((item) => [item.key.toLowerCase(), item.value]));
   const cacheControl = map.get("cache-control") ?? "";

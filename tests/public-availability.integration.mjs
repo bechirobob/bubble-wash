@@ -42,7 +42,7 @@ try {
         }
         checks++;
         if (path === '/') {
-          assert.match(html, /Fresh laundry\./);
+          assert.match(html, /Laundry pickup/);
           assert.match(html, /laundry-care-hero/);
           assert.match(html, /bubble-wash-icon/);
           if (paused) assert.match(html, /New pickups are paused/);
