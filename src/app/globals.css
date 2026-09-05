@@ -1652,15 +1652,26 @@ input, select, textarea { font-size: 1rem; }
 /* Pricing reads as a service catalogue; only the estimate asks for input. */
 .pricingHeading { display: flex; justify-content: space-between; align-items: end; gap: 36px; margin-bottom: 28px; }
 .pricingHeading > p { max-width: 420px; margin: 0; font-size: .94rem; }
-.publicSite .catalogueGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 30px; border-top: 0; }
-.publicSite .catalogueGrid > article { padding: 22px 0 0; border-top: 1px solid var(--line-strong); border-bottom: 0; }
-.publicSite .catalogueHeading h3 { font-size: 1.16rem; margin-bottom: 4px; }
-.catalogueHeading > p { font-size: .85rem; margin: 0; }
-.cataloguePrice { margin: 20px 0; }
-.cataloguePrice strong { display: block; font-size: clamp(1.7rem, 2.6vw, 2.15rem); line-height: 1.15; font-weight: 650; letter-spacing: -.04em; color: var(--brand); font-variant-numeric: tabular-nums; }
-.cataloguePrice > span { display: block; margin-top: 6px; font-size: .8rem; }
-.catalogueGrid .planEssentials { display: grid; gap: 14px; }
-.catalogueGrid .planEssentials small { font-size: .76rem; font-weight: 400; margin-top: 4px; }
+/* Native radio choices keep touch and keyboard selection in sync with the estimate. */
+.planChoices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.planChoice { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 16px 0; border-block: 2px solid transparent; border-top-color: var(--line-strong); cursor: pointer; }
+.planChoice:has(input:checked) { border-bottom-color: var(--brand); }
+.planChoice:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 4px; }
+.planChoiceName { display: flex; align-items: baseline; gap: 8px; color: var(--ink-strong); line-height: 1.35; }
+.planChoiceName input { flex: 0 0 auto; width: 16px; height: 16px; min-height: 16px; padding: 0; margin: 0; accent-color: var(--brand); }
+.planChoiceSchedule { font-size: .85rem; color: var(--muted); }
+.cataloguePrice { display: block; margin-top: auto; padding-top: 12px; }
+.cataloguePrice strong { display: block; font-size: clamp(1.5rem, 2.6vw, 2.15rem); line-height: 1.15; font-weight: 650; letter-spacing: -.04em; color: var(--brand); font-variant-numeric: tabular-nums; }
+.cataloguePrice > span { display: block; margin-top: 6px; font-size: .8rem; font-weight: 400; color: var(--muted); }
+.planChoiceHelp { margin: 12px 0 24px; font-size: .82rem; }
+.selectedPlanDetails { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; padding-top: 22px; border-top: 1px solid var(--line); }
+.selectedPlanDetails h3 { font-size: 1.1rem; }
+.selectedPlanDetails h4 { margin: 0; font-size: .9rem; }
+.selectedPlanDetails p { font-size: .88rem; margin-block: 8px; }
+.planBenefits { list-style: none; padding: 0; }
+.planBenefits li { display: flex; align-items: start; gap: 8px; margin-block: 8px; font-size: .85rem; color: var(--muted); }
+.planBenefits svg { flex: 0 0 18px; width: 18px; height: 18px; color: var(--brand); }
+.selectedPlanDetails .planRateNote { font-size: .78rem; }
 .planRateList { margin: 16px 0; }
 .planRateList > div { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; padding-block: 6px; font-size: .8rem; border-bottom: 1px solid var(--line); }
 .planRateList dd { margin: 0; font-weight: 600; }
@@ -1679,23 +1690,21 @@ input, select, textarea { font-size: 1rem; }
 .estimateSection .quoteSummary { padding-top: 0; border-top: 0; }
 .estimateSection .quoteTotal { font-variant-numeric: tabular-nums; font-size: clamp(2rem, 3vw, 2.65rem); }
 @media (max-width: 1100px) {
-  .publicSite .catalogueGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 36px; }
   .estimateSection .pricingLayout { gap: 36px; }
 }
 @media (max-width: 780px) {
+  .planChoices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pricingHeading { display: block; }
   .pricingHeading > p { margin-top: 14px; }
   .estimateSection .pricingLayout { grid-template-columns: 1fr; gap: 26px; }
   .estimateSection .quoteSummary { border-top: 1px solid var(--line-strong); padding-top: 24px; }
 }
 @media (max-width: 600px) {
-  .publicSite .catalogueGrid { grid-template-columns: 1fr; gap: 24px; }
-  .publicSite .catalogueGrid > article { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; padding-top: 20px; }
-  .cataloguePrice { margin: 0; text-align: right; }
-  .cataloguePrice strong { font-size: 1.65rem; }
-  .catalogueGrid .planEssentials { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; gap: 14px; }
-  .catalogueGrid .planDetails { grid-column: 1 / -1; margin-top: 0; }
-  .catalogueGrid > article > .textAction { grid-column: 1 / -1; }
+  .planChoices { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 20px; }
+  .planChoice { padding-block: 12px; }
+  .planChoiceName { min-height: 2.7em; font-size: .92rem; }
+  .planChoiceSchedule { font-size: .8rem; }
+  .selectedPlanDetails { grid-template-columns: 1fr; gap: 18px; }
   .estimateInputs { grid-template-columns: 1fr; gap: 18px; }
   .estimateWeight { max-width: 280px; }
 }

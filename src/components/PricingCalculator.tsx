@@ -5,10 +5,11 @@ import { Calculator, CalendarPlus } from "lucide-react";
 import { FormEvent, useMemo, useRef, useState } from "react";
 import { addons, plans, zones, type AddonKey, type PlanName, type ZoneKey } from "@/lib/pricing";
 import { formatMoney, postJSON, type Quote } from "@/lib/public-ui";
+import { PlanCatalogue } from "@/components/PlanCatalogue";
 
 const addonEntries = Object.entries(addons) as Array<[AddonKey, (typeof addons)[AddonKey]]>;
 
-export function PricingCalculator({ initialPlan = "Twice weekly", available = true }: { initialPlan?: PlanName; available?: boolean }) {
+export function PricingCalculator({ initialPlan = "Twice weekly", available = true, showCatalogue = false }: { initialPlan?: PlanName; available?: boolean; showCatalogue?: boolean }) {
   const [plan, setPlan] = useState<PlanName>(initialPlan);
   const [zone, setZone] = useState<ZoneKey>("core");
   const [kg, setKg] = useState("60");
@@ -30,6 +31,11 @@ export function PricingCalculator({ initialPlan = "Twice weekly", available = tr
 
   function toggleAddon(addon: AddonKey) {
     setSelectedAddons((current) => current.includes(addon) ? current.filter((item) => item !== addon) : [...current.filter((key) => !(addon === "premium" && key === "ironing") && !(addon === "ironing" && key === "premium")), addon]);
+    invalidate();
+  }
+
+  function selectPlan(nextPlan: PlanName) {
+    setPlan(nextPlan);
     invalidate();
   }
 
@@ -57,11 +63,11 @@ export function PricingCalculator({ initialPlan = "Twice weekly", available = tr
     }
   }
 
-  return (
+  const calculator = (
     <div className="pricingLayout">
       <form className="serviceForm quoteForm" onSubmit={calculate}>
         <div className="estimateInputs">
-          <label>Collection plan<select value={plan} onChange={(event) => { setPlan(event.target.value as PlanName); invalidate(); }}>{plans.map((item) => <option key={item.name}>{item.name}</option>)}</select></label>
+          <label>Collection plan<select value={plan} onChange={(event) => selectPlan(event.target.value as PlanName)}>{plans.map((item) => <option key={item.name}>{item.name}</option>)}</select></label>
           <label className="estimateWeight">Expected weight per pickup<span className="weightInput"><input aria-describedby="estimate-weight-help" type="number" required min={1} max={10000} step={0.01} inputMode="decimal" value={kg} onChange={(event) => { setKg(event.target.value); invalidate(); }} /><span aria-hidden="true">kg</span></span><small id="estimate-weight-help">{selectedPlan.name} starts at {selectedPlan.bands[0].min} kg per pickup.</small></label>
         </div>
         <label>Service area<select value={zone} onChange={(event) => { setZone(event.target.value as ZoneKey); invalidate(); }}>{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
@@ -76,4 +82,10 @@ export function PricingCalculator({ initialPlan = "Twice weekly", available = tr
       </aside>
     </div>
   );
+
+  if (!showCatalogue) return calculator;
+  return <>
+    <PlanCatalogue selected={plan} onSelect={selectPlan} />
+    <section className="publicBand publicBandSage" aria-labelledby="estimate-heading"><div className="serviceSection pageShell estimateSection"><div className="sectionIntro"><p className="sectionLabel">Estimate</p><h2 id="estimate-heading">Estimate your monthly cost.</h2><p>Adjust the weight and pickup area to see your monthly total. Final billing uses the weight recorded at intake.</p></div>{calculator}</div></section>
+  </>;
 }
