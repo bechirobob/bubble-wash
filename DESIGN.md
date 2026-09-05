@@ -230,3 +230,9 @@
 - Keep the live palette: pale blue `#edf5fc`, sage `#f2f6f0`, aqua `#e5f3f7`, teal `#086584` and headline accent `#157e9d`.
 - Use full-width colour bands for pickup coverage and service choices, with aqua introductions on the other public pages. The content remains aligned to the shared page width, without rounded cards, borders or shadows. Keep the introduction white for seamless artwork integration and the process on white for visual breathing room.
 - Retain the phone image removal, readable contrast, original branding and existing availability controls.
+
+## Services catalogue and estimator
+
+- Present plans as an open four-column catalogue on wide screens, two columns on tablets and compact name/price rows on phones. Show the fee, pickup count and qualifying processing weight without requiring a click. Full rate bands and benefits remain in a disclosure.
+- Place the estimate immediately after plans on a sage section. Keep weight prominent, extras collapsed and the monthly result distinct from the input controls. Never imply the service fee alone is a total.
+- Numeric fields preserve their raw string while being edited; convert and validate only when calculating so an empty field never becomes a forced zero.
