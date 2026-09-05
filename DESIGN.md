@@ -223,4 +223,4 @@
 ## Hero integration and design references
 
 - Start design and copy work with the relevant installed skills and this blueprint. Read the actual instructions; report a missing reference clearly rather than assuming its contents. Current user directions take precedence.
-- Hero artwork sits directly on the white canvas. Use a seamless white background, preserve the original brand mark, and show complete objects on phones and desktops. No rectangular blue backdrop, container, decorative frame or forced crop.
+- Hero artwork sits directly on the white canvas on tablet and desktop. Use a seamless white background, preserve the original brand mark, and show complete objects. Hide the figure at 600px and below so the phone introduction leads directly into pickup coverage without an image section or reserved space. No rectangular blue backdrop, container, decorative frame or forced crop.

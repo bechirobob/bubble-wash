@@ -1612,7 +1612,7 @@ input, select, textarea { font-size: 1rem; }
   .laundryIntro .heroActions { display: grid; grid-template-columns: 1fr; gap: 4px; margin-block: 20px 10px; }
   .laundryIntro .heroActions .button { width: 100%; }
   .laundryIntro .textAction { justify-content: center; }
-  .laundryPhoto img { max-width: 340px; margin-inline: auto; }
+  .laundryPhoto { display: none; }
   .pickupSection { grid-template-columns: 1fr; gap: 22px; padding-block: 26px; }
   .pickupSection h2 br { display: none; }
   .pickupSection h2 { font-size: 1.55rem; }
