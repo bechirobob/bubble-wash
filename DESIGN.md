@@ -233,6 +233,7 @@
 
 ## Services catalogue and estimator
 
-- Present plans as an open four-column catalogue on wide screens, two columns on tablets and compact name/price rows on phones. Show the fee, pickup count and qualifying processing weight without requiring a click. Full rate bands and benefits remain in a disclosure.
+- Present plans as four unboxed radio choices on wide screens and a compact 2×2 selector on tablets and phones. Each choice shows the name, pickup frequency and monthly service fee. One shared area below shows the selected plan’s pickup count, audience and all processing rates; benefits expand on request. Native radio behavior supplies keyboard selection and a visible checked state.
+- Plan selection and the calculator share state. Changing either selector preserves entered weight, area and extras, clears the previous estimate and rejects any stale response.
 - Place the estimate immediately after plans on a sage section. Keep weight prominent, extras collapsed and the monthly result distinct from the input controls. Never imply the service fee alone is a total.
 - Numeric fields preserve their raw string while being edited; convert and validate only when calculating so an empty field never becomes a forced zero.

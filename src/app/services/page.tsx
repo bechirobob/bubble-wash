@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, BadgeCheck } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { PricingCalculator } from "@/components/PricingCalculator";
 import { PageIntro, PublicChrome } from "@/components/PublicChrome";
 import { plans, zones } from "@/lib/pricing";
@@ -19,20 +19,7 @@ export default async function ServicesPage({ searchParams }: { searchParams: Pro
   return (
     <PublicChrome>
       <PageIntro eyebrow="Services & pricing" title="Laundry plans & pricing." summary="Find the right pickup plan for your business, see where we collect, and estimate your laundry costs." icon="services" />
-      <section className="serviceSection pageShell planCatalogue" aria-labelledby="plans-heading">
-        <div className="pricingHeading"><div><p className="sectionLabel">Commercial plans</p><h2 id="plans-heading">Choose your pickup rhythm.</h2></div><p>Each plan combines a monthly service fee with processing by weight. A GHS 450 minimum applies per pickup.</p></div>
-        <div className="planGrid catalogueGrid">{plans.map((plan) => {
-          const lowestBand = plan.bands[plan.bands.length - 1];
-          return <article key={plan.name}>
-            <div className="catalogueHeading"><h3>{plan.name}</h3><p>{plan.pickups}</p></div>
-            <p className="cataloguePrice"><strong>{formatMoney(plan.subscription)}</strong><span>service fee / month</span></p>
-            <dl className="planEssentials"><div><dt>Included pickups</dt><dd>{plan.monthlyPickups} / month</dd></div><div><dt>Processing from</dt><dd>{formatMoney(lowestBand.rate)} / kg<small>at {lowestBand.min} kg or more per pickup</small></dd></div></dl>
-            <Link className="textAction" href={`/services?plan=${encodeURIComponent(plan.name)}#estimate-heading`}>Estimate this plan <ArrowRight aria-hidden="true" /></Link>
-            <details className="planDetails"><summary>Rates &amp; what’s included</summary><p>{plan.audience}</p><dl className="planRateList">{plan.bands.map((band, index) => <div key={band.min}><dt>{band.min}{index + 1 < plan.bands.length ? `–under ${plan.bands[index + 1].min}` : "+"} kg</dt><dd>{formatMoney(band.rate)} / kg</dd></div>)}</dl><ul>{plan.features.map((feature) => <li key={feature}><BadgeCheck aria-hidden="true" />{feature}</li>)}</ul></details>
-          </article>;
-        })}</div>
-      </section>
-      <section className="publicBand publicBandSage" aria-labelledby="estimate-heading"><div className="serviceSection pageShell estimateSection"><div className="sectionIntro"><p className="sectionLabel">Estimate</p><h2 id="estimate-heading">Estimate your monthly cost.</h2><p>Adjust the weight and pickup area to see your monthly total. Final billing uses the weight recorded at intake.</p></div><PricingCalculator key={selectedPlan} initialPlan={selectedPlan} available={bookingAvailable()} /></div></section>
+      <PricingCalculator key={selectedPlan} initialPlan={selectedPlan} available={bookingAvailable()} showCatalogue />
       <section className="serviceSection pageShell" aria-labelledby="coverage-heading"><div className="sectionIntro"><p className="sectionLabel">Pickup areas</p><h2 id="coverage-heading">Where we pick up.</h2></div><div className="zoneGrid">{Object.entries(zones).map(([key, zone]) => <article key={key}><h3>{zone.label}</h3><strong>{zone.fee ? `${formatMoney(zone.fee)} / pickup` : key === "custom" ? "Confirmed first" : "Included"}</strong><p>{zone.note}</p></article>)}</div></section>
       <section className="serviceSection pageShell serviceConditions" aria-labelledby="conditions-heading"><div className="sectionIntro"><p className="sectionLabel">Service conditions</p><h2 id="conditions-heading">A few things to know before pickup.</h2></div><div className="policyGrid"><article><h3>Final weight</h3><p>Your online price is an estimate. Your final bill is based on the weight we record when your laundry arrives.</p></article><article><h3>Collection window</h3><p>Choose your preferred pickup time. We’ll confirm it with you before a rider sets off.</p></article><article><h3>Care and item issues</h3><p>Declare special-care items before collection and report missing or damaged items within 24 hours of delivery.</p></article><article><h3>Payment</h3><p>Bank transfer and approved invoicing are active during the pilot. Card and Mobile Money checkout remain unavailable.</p></article></div><Link className="inlineIconLink" href="/terms">Read the complete service terms <ArrowRight aria-hidden="true" /></Link></section>
     </PublicChrome>
