@@ -219,3 +219,8 @@
 - Motion: short image entry, subtle press feedback, and a one-time line reveal for the three-step explanation. Use transform/opacity only; keep content readable before scripts load and under reduced motion.
 - Components: revise public homepage, public CSS, and customer copy. Reuse route-preview and pricing APIs. Preserve original brand artwork, login lock, booking rules, pricing values and staff workflows.
 - Verification: inspect 375px, 390px, 768px and desktop layouts, menu open/close, coverage feedback, pricing interaction, reduced-motion CSS and production build. Reject overflow, repeated boxed content, excessive first-screen height, tiny controls or decorative actions.
+
+## Hero integration and design references
+
+- Start design and copy work with the relevant installed skills and this blueprint. Read the actual instructions; report a missing reference clearly rather than assuming its contents. Current user directions take precedence.
+- Hero artwork sits directly on the white canvas. Use a seamless white background, preserve the original brand mark, and show complete objects on phones and desktops. No rectangular blue backdrop, container, decorative frame or forced crop.

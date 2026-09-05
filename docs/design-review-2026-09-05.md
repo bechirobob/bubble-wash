@@ -18,3 +18,7 @@ Browser inspection covered 375px and 390px phone layouts, 768px tablet and deskt
 Lint, type checks, production build, unit and isolated data/workflow suites, image-runtime and required-route verification passed. Public HTTP checks cover six routes with staff-locked, booking-paused and open configurations. Production security headers have a regression check against accidental development-policy leakage.
 
 Phone layouts were checked in browser frames, not on native iOS or Android devices. Screenshots show the paused production availability configuration. This revision is prepared for visual review before production deployment.
+
+## Hero follow-up
+
+The hero now uses `public/laundry-care-hero-blended.webp` (1200 × 960, approximately 119 KB). Its white background integrates with the page, and the complete laundry arrangement remains visible at all breakpoints. Browser review covered 390px, 768px and 1280px. The original square artwork remains available for existing social previews.

@@ -57,7 +57,7 @@ try {
           checks++;
         }
       }
-      const image = await fetch(`${origin}/laundry-care-hero.webp`);
+      const image = await fetch(`${origin}/laundry-care-hero-blended.webp`);
       assert.equal(image.status, 200);
       assert.match(image.headers.get('content-type'), /image\/webp/); checks++;
     } finally {

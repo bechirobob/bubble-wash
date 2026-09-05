@@ -20,7 +20,7 @@ export default function Home() {
           <div className="heroActions"><Link className="button primary" href={available ? "/book" : "/services"}>{available ? "Request a pickup" : "View plans & pricing"}<ArrowRight aria-hidden="true" /></Link><Link className="textAction" href="/track">Track an order <ArrowRight aria-hidden="true" /></Link></div>
           {!available && <p className="availabilityNote">New pickups are paused. You can still <Link href="/manage">manage an existing order</Link>.</p>}
         </div>
-        <figure className="laundryPhoto"><Image src="/laundry-care-hero.webp" alt="Folded towels and a shirt beside a bag with the original Bubble Wash icon" width={1200} height={1200} sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 980px) 38vw, 480px" priority /></figure>
+        <figure className="laundryPhoto"><Image src="/laundry-care-hero-blended.webp" alt="Folded towels and a shirt beside a bag with the original Bubble Wash icon" width={1200} height={960} sizes="(max-width: 600px) 340px, (max-width: 980px) 42vw, 540px" priority /></figure>
       </section>
       <section className="pickupSection pageShell" aria-labelledby="pickup-heading"><div><p className="sectionLabel">Pickup coverage</p><h2 id="pickup-heading">Around Accra.<br /> Back to your door.</h2><p>Check your area and any pickup charge before choosing a plan.</p></div><PickupCoverage available={available} /></section>
       <section className="laundryProcess pageShell" id="how-it-works" aria-labelledby="process-heading"><div className="processHeading"><p className="sectionLabel">How it works</p><h2 id="process-heading">From pickup to return.</h2></div><LaundrySteps /></section>

@@ -1529,8 +1529,8 @@ input, select, textarea { font-size: 1rem; }
 .textAction { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; font-size: .93rem; font-weight: 600; }
 .textAction svg { width: 16px; height: 16px; }
 .availabilityNote { font-size: .84rem; margin: 0; max-width: 440px; }
-.laundryPhoto { margin: 0; overflow: hidden; }
-.laundryPhoto img { width: 100%; height: auto; aspect-ratio: 1.25; object-fit: cover; object-position: center 56%; animation: laundry-arrival 600ms cubic-bezier(.16,1,.3,1) both; }
+.laundryPhoto { margin: 0; mix-blend-mode: multiply; }
+.laundryPhoto img { width: 100%; height: auto; aspect-ratio: 1.25; object-fit: contain; animation: laundry-arrival 600ms cubic-bezier(.16,1,.3,1) both; }
 @keyframes laundry-arrival { from { opacity: .7; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 .pickupSection { display: grid; grid-template-columns: 1fr 1fr; gap: 80px; padding-block: 34px; border-block: 1px solid var(--line); align-items: center; }
 .pickupSection > div:first-child > p:last-child { max-width: 380px; margin-bottom: 0; }
@@ -1612,7 +1612,7 @@ input, select, textarea { font-size: 1rem; }
   .laundryIntro .heroActions { display: grid; grid-template-columns: 1fr; gap: 4px; margin-block: 20px 10px; }
   .laundryIntro .heroActions .button { width: 100%; }
   .laundryIntro .textAction { justify-content: center; }
-  .laundryPhoto img { aspect-ratio: 1.7; object-position: center 50%; }
+  .laundryPhoto img { max-width: 340px; margin-inline: auto; }
   .pickupSection { grid-template-columns: 1fr; gap: 22px; padding-block: 26px; }
   .pickupSection h2 br { display: none; }
   .pickupSection h2 { font-size: 1.55rem; }
