@@ -27,7 +27,7 @@ export const plans: Plan[] = [
       { min: 40, max: 59, rate: 16.5 },
       { min: 60, max: null, rate: 15.5 },
     ],
-    features: ["4 scheduled pickups / month", "Basic order updates", "One invoice trail", "Operations support", "Assigned laundry partner"],
+    features: ["4 scheduled pickups / month", "Basic order updates", "Itemized invoices", "Help with your order", "Assigned laundry partner"],
   },
   {
     name: "Twice weekly",
@@ -41,7 +41,7 @@ export const plans: Plan[] = [
       { min: 60, max: 99, rate: 15.5 },
       { min: 100, max: null, rate: 14.5 },
     ],
-    features: ["8 scheduled pickups / month", "Priority route planning", "Issue escalation", "Packaging notes", "Monthly service summary"],
+    features: ["8 scheduled pickups / month", "Priority route planning", "Help resolving issues", "Packaging notes", "Monthly service summary"],
   },
   {
     name: "Three times weekly",
@@ -55,7 +55,7 @@ export const plans: Plan[] = [
       { min: 100, max: 149, rate: 14.5 },
       { min: 150, max: null, rate: 13.5 },
     ],
-    features: ["12 scheduled pickups / month", "Multi-order visibility", "Preferred vendor routing", "Manager support workflow", "Operational reporting"],
+    features: ["12 scheduled pickups / month", "View all your orders", "Preferred laundry partner", "Manager support", "Service reports"],
   },
   {
     name: "Contract",
@@ -65,7 +65,7 @@ export const plans: Plan[] = [
     monthlyPickups: 22,
     audience: "Medical groups, large facilities, and custom accounts",
     bands: [{ min: 1, max: null, rate: 13.5 }],
-    features: ["Custom routing", "Custom SLAs", "Dedicated support", "Contracted pricing", "Account review cadence"],
+    features: ["Custom routing", "Agreed turnaround times", "Dedicated support", "Contracted pricing", "Regular account reviews"],
   },
 ];
 

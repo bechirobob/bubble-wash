@@ -85,7 +85,7 @@ export function BookingExperience({ available = true, initialPlan = "", initialA
   }
 
 
-  if (!available) return <section className="serviceSection pageShell"><div className="servicePanel"><p className="sectionLabel">Bookings paused</p><h2>New collections are temporarily unavailable.</h2><p>You can still track or manage an existing order. Household laundry has a separate early-access list.</p><div className="heroActions"><Link className="button primary" href="/early-access">Household early access</Link><Link className="button secondary" href="/manage">Manage an order</Link></div></div></section>;
+  if (!available) return <section className="serviceSection pageShell"><div className="servicePanel"><p className="sectionLabel">Bookings paused</p><h2>New collections are temporarily unavailable.</h2><p>You can still track or manage an existing order. Household laundry has a separate early-access list.</p><div className="heroActions"><Link className="button primary" href="/manage">Manage an order</Link><Link className="button secondary" href="/track">Track your laundry</Link></div></div></section>;
   const selectedDetails = plans.find((p) => p.name === selectedPlan)!;
   return (
     <section className="serviceSection pageShell bookingPageSection" aria-labelledby="booking-form-heading">

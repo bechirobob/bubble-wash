@@ -1508,138 +1508,143 @@ dd { margin: 4px 0 0; color: var(--muted); }
 input, select, textarea { font-size: 1rem; }
 .textButton { min-height: 44px; padding: .5rem; }
 
-/* Cotton, water and care: the public laundry identity. Staff layouts stay independent. */
-.brandArtwork { position: relative; width: 104px; height: 76px; overflow: hidden; mix-blend-mode: multiply; }
-.brandArtwork .brandMark { position: absolute; width: 166px; height: 166px; left: 50%; top: 50%; transform: translate(-51%, -48%); object-fit: contain; }
-.publicSite { --brand: #086584; --brand-dark: #064b64; --brand-soft: #eaf6fa; --ink-strong: #123e50; --muted: #506671; --line: #dce9ed; background: #fcfefd; }
-.publicSite .siteHeader { min-height: 88px; margin-top: 0; padding-bottom: 0; border-bottom: 0; gap: 28px; }
-.publicSite .navLinks { gap: 24px; }
-.publicSite .navLinks a { font-size: .88rem; font-weight: 600; }
-.publicSite .button, .publicSite .navCta { border-radius: 100px; padding: 16px 23px; min-height: 50px; }
-.publicSite .navCta { padding: 13px 20px; }
-.publicSite .sectionLabel { color: #126680; font-size: .72rem; letter-spacing: .11em; }
-.publicSite h2 { font-size: clamp(1.85rem, 3.4vw, 2.8rem); letter-spacing: -.045em; line-height: 1.12; }
-.publicSite .lead { font-size: 1.08rem; line-height: 1.7; }
-.freshHero { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; padding-block: 38px 54px; }
-.freshHeroCopy { padding-block: 12px; }
-.freshHero .sectionLabel { display: flex; align-items: center; gap: 9px; margin-bottom: 24px; }
-.freshDot { width: 7px; height: 7px; border-radius: 50%; background: #1182a3; flex: 0 0 auto; }
-.freshHero h1 { font-size: clamp(2.9rem, 4.7vw, 4.25rem); line-height: 1.06; letter-spacing: -.058em; font-weight: 650; margin-bottom: 24px; }
-.freshHero h1 > span { color: #157e9d; }
-.freshHero .lead { max-width: 460px; }
-.freshHero .heroActions { align-items: center; gap: 22px; margin-block: 30px 18px; }
-.heroTrack { display: inline-flex; align-items: center; gap: 7px; font-size: .9rem; font-weight: 600; min-height: 44px; }
-.heroTrack svg { width: 17px; height: 17px; }
-.heroAvailability { font-size: .81rem; line-height: 1.55; max-width: 370px; margin: 0; }
-.laundryHeroVisual { margin: 0; position: relative; min-width: 0; isolation: isolate; }
-.laundryHeroVisual > img { width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; border-radius: 32px 100px 32px 32px; }
-.careLabel { position: absolute; bottom: 24px; left: -22px; display: flex; gap: 12px; align-items: center; padding: 17px 24px; border: 1px solid #fff; background: #ffffffed; border-radius: 16px; box-shadow: 0 10px 30px #123e5010; }
-.careLabel > svg { width: 23px; height: 23px; color: #137b97; }
-.careLabel span { color: var(--muted); font-size: .78rem; }
-.careLabel strong { display: block; color: var(--ink-strong); font-size: .95rem; margin-top: 2px; }
-.washOrbit { position: absolute; z-index: -1; width: 95px; height: 95px; border: 1px solid #9ccddc; border-radius: 50%; left: -28px; top: 40px; }
-.careStrip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; border-block: 1px solid var(--line); padding-block: 22px; }
-.careStrip > div { display: flex; gap: 11px; justify-content: center; align-items: center; font-size: .88rem; font-weight: 600; color: #315d6e; }
-.careStrip svg { width: 21px; height: 21px; color: #187897; flex: 0 0 auto; stroke-width: 1.6; }
-.freshHow { padding-block: 78px; }
-.freshHow .sectionIntro { margin-bottom: 34px; }
-.freshHow .sectionIntro > p:last-child { max-width: 450px; }
-.freshSteps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
-.freshSteps > li { border-radius: 22px; padding: 28px; background: #f0f7f8; min-width: 0; }
-.freshSteps > li:nth-child(2) { background: #edf5fc; }
-.freshSteps > li:nth-child(3) { background: #f2f6f0; }
-.stepTop { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
-.careIcon { display: grid; place-items: center; width: 48px; height: 48px; background: #fff; color: #17738e; border-radius: 15px; flex: 0 0 auto; }
-.careIcon svg { width: 24px; height: 24px; stroke-width: 1.5; }
-.stepNumber { font-size: .83rem; letter-spacing: .12em; color: #517483; }
-.freshSteps h3 { font-size: 1.15rem; margin-bottom: 12px; }
-.freshSteps p { font-size: .94rem; margin-bottom: 0; }
-.businessCare { border-radius: 28px; background: #e5f3f7; padding: 56px; display: grid; grid-template-columns: 1.1fr 1fr; gap: 72px; align-items: center; }
-.businessCareCopy > p:not(.sectionLabel) { max-width: 410px; }
-.businessCare .inlineIconLink { margin-top: 10px; }
-.linenLabels { display: grid; gap: 13px; }
-.linenLabels > span { display: flex; align-items: center; gap: 12px; border: 1px dashed #9dc4d0; border-radius: 12px; padding: 18px 20px; color: #264f5f; background: #f8fcfd; font-size: .93rem; font-weight: 600; }
-.linenLabels svg { height: 21px; width: 21px; color: #157391; flex: 0 0 auto; }
-.linenLabels > p { margin: 5px 5px 0; font-size: .82rem; }
-.homeLaundryNote { display: flex; align-items: center; gap: 24px; padding-block: 64px; }
-.homeLaundryNote > .careIcon { background: #edf5f8; width: 60px; height: 60px; }
-.homeLaundryNote > div { flex: 1; }
-.homeLaundryNote .sectionLabel { margin-bottom: 8px; }
-.homeLaundryNote h2 { font-size: 1.6rem; margin-bottom: 8px; }
-.homeLaundryNote p:last-child { margin: 0; max-width: 510px; font-size: .93rem; }
-.homeLaundryNote .button { font-size: .9rem; flex-shrink: 0; }
-.freshCta { padding: 50px 56px; border-radius: 28px; background: #124e65; display: flex; align-items: center; justify-content: space-between; gap: 30px; }
-.freshCta h2, .freshCta .sectionLabel { color: #fff; }
-.freshCta p { color: #d1e7ed; margin-bottom: 0; }
-.freshCta .sectionLabel { margin-bottom: 15px; }
-.freshCta .button { background: #fff; color: #104a61; flex-shrink: 0; }
-.freshCta .button:hover { background: #e7f4f8; }
-.publicSite .footer { padding-block: 60px 32px; margin-top: 32px; border-top: 0; gap: 38px; }
-.publicSite .footer .brand { margin-top: -12px; margin-bottom: 8px; }
-.publicSite .footer p, .publicSite .footer a { font-size: .86rem; }
-.publicSite .footer h3 { font-size: .85rem; margin-bottom: 16px; }
-.publicSite .pageIntro { margin-top: 22px; padding: 40px; border: 0; border-radius: 24px; background: #eaf5f8; grid-template-columns: 52px minmax(0, 1fr); align-items: start; }
-.publicSite .pageIntroIcon { width: 30px; height: 30px; }
-.publicSite .pageIntro h1 { font-size: clamp(2rem, 3.8vw, 3.2rem); line-height: 1.12; }
-.publicSite .serviceSection { border-bottom: 0; padding-block: 42px; }
-.publicSite .planGrid { gap: 24px; border: 0; }
-.publicSite .planGrid > article { border: 1px solid var(--line); padding: 28px; border-radius: 20px; background: #fff; }
-.publicSite .planTitle h3 { font-size: 1.4rem; }
-.publicSite .zoneGrid { border: 0; gap: 20px; }
-.publicSite .zoneGrid article, .publicSite .zoneGrid article + article { border: 0; padding: 22px; background: #f0f6f7; border-radius: 16px; }
-.publicSite .zoneGrid article h3 { font-size: 1rem; }
-.publicSite .zoneGrid article p { font-size: .9rem; margin-bottom: 0; }
-.publicSite .bookingFieldset { background: #fff; border: 1px solid var(--line); padding: 24px; border-radius: 16px; }
-.publicSite .bookingFieldset legend { padding-inline: 8px; }
-.publicSite .quoteSummary, .publicSite .bookingConfirmation { padding: 24px; background: #ecf6f8; border: 0; border-radius: 16px; }
-.publicSite .serviceForm input:not([type="checkbox"]), .publicSite .serviceForm select, .publicSite .serviceForm textarea { border-radius: 10px; }
-.publicSite .earlyAccessHero { padding-block: 48px; gap: 56px; }
-.publicSite .earlyAccessPanel { padding: 28px; border: 1px solid var(--line); border-radius: 22px; background: #f0f7f9; }
-.publicSite .earlyAccessHero h1 { font-size: clamp(2.5rem, 4.4vw, 3.8rem); line-height: 1.08; }
-.publicSite .policyContent h2, .publicSite .servicePanel h2, .publicSite .trackingLayout h2 { font-size: 1.55rem; }
-@media (max-width: 1100px) {
-  .publicSite .navLinks { gap: 15px; }
-  .freshHero { gap: 32px; }
-  .freshHero .heroActions { gap: 12px; }
-  .freshHero .button { font-size: .9rem; padding-inline: 18px; }
-  .businessCare { gap: 35px; padding: 40px; }
-  .homeLaundryNote { flex-wrap: wrap; }
-  .homeLaundryNote > div { flex-basis: calc(100% - 90px); }
-  .homeLaundryNote > .button { margin-left: 84px; }
+/* Public layout: open sections, compact scale and original brand artwork. */
+.brandArtwork { position: relative; width: 84px; height: 60px; overflow: hidden; mix-blend-mode: multiply; }
+.brandArtwork .brandMark { position: absolute; width: 134px; height: 134px; left: 50%; top: 50%; transform: translate(-51%, -48%); object-fit: contain; }
+.publicSite { --brand: #086584; --brand-dark: #064b64; --brand-soft: #eaf6fa; --ink-strong: #123e50; --muted: #506671; --line: #dce9ed; --wash-blue: #edf5fc; --wash-sage: #f2f6f0; --wash-aqua: #e5f3f7; background: #fff; }
+.publicBand { width: 100%; }
+.publicBandBlue { background: var(--wash-blue); }
+.publicBandSage { background: var(--wash-sage); }
+.publicBandAqua { background: var(--wash-aqua); }
+.publicBand .pickupSection, .publicBand .laundryServices { border: 0; }
+.publicSite .sectionLabel { color: #126680; }
+.laundryIntro h1 span { color: #157e9d; }
+.publicSite .siteHeader { margin-top: 0; min-height: 84px; padding: 8px 0; gap: 24px; }
+.publicSite .navLinks { gap: 22px; }
+.publicSite .navLinks a { font-size: .88rem; }
+.publicSite .button, .publicSite .navCta { border-radius: 5px; min-height: 46px; padding: 13px 18px; transition: transform 140ms ease, opacity 140ms ease; }
+.publicSite .button:active, .publicSite .navCta:active { transform: scale(.98); }
+.publicSite .sectionLabel { font-size: .72rem; letter-spacing: .09em; }
+.publicSite h2 { font-size: clamp(1.6rem, 2.5vw, 2rem); line-height: 1.16; letter-spacing: -.035em; }
+.publicSite h3 { font-size: 1.08rem; }
+.publicSite .lead { font-size: 1rem; line-height: 1.65; }
+.laundryIntro { display: grid; grid-template-columns: 1.1fr 1fr; gap: 64px; align-items: center; padding-block: 42px; }
+.laundryIntroCopy { max-width: 530px; }
+.laundryIntro h1 { font-size: clamp(2.25rem, 3.9vw, 3rem); line-height: 1.09; letter-spacing: -.045em; margin-block: 20px; }
+.laundryIntro .lead { max-width: 440px; }
+.laundryIntro .heroActions { align-items: center; gap: 24px; margin-block: 24px 16px; }
+.textAction { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; font-size: .93rem; font-weight: 600; }
+.textAction svg { width: 16px; height: 16px; }
+.availabilityNote { font-size: .84rem; margin: 0; max-width: 440px; }
+.laundryPhoto { margin: 0; mix-blend-mode: multiply; }
+.laundryPhoto img { width: 100%; height: auto; aspect-ratio: 1.25; object-fit: contain; animation: laundry-arrival 600ms cubic-bezier(.16,1,.3,1) both; }
+@keyframes laundry-arrival { from { opacity: .7; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.pickupSection { display: grid; grid-template-columns: 1fr 1fr; gap: 80px; padding-block: 34px; border-block: 1px solid var(--line); align-items: center; }
+.pickupSection > div:first-child > p:last-child { max-width: 380px; margin-bottom: 0; }
+.pickupCoverage form > label { display: block; margin-bottom: 9px; font-weight: 600; }
+.coverageControls { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; }
+.pickupCoverage > a { display: inline-block; margin-top: 12px; min-height: 44px; padding-block: 9px; font-size: .9rem; font-weight: 600; }
+.coverageResult { margin: 12px 0 0; font-size: .9rem; }
+.coverageResult.error { color: var(--danger); }
+.laundryProcess { padding-block: 42px; }
+.processHeading { margin-bottom: 25px; }
+.laundrySteps { position: relative; list-style: none; margin: 0; padding: 22px 0 0; display: grid; grid-template-columns: repeat(3,1fr); gap: 36px; }
+.laundrySteps::before { content: ""; position: absolute; inset: 0 0 auto; height: 1px; background: var(--line-strong); transform-origin: left; }
+.laundrySteps.motionArmed::before { transform: scaleX(0); }
+.laundrySteps.motionPlayed::before { animation: laundry-line 800ms cubic-bezier(.16,1,.3,1) forwards; }
+@keyframes laundry-line { to { transform: scaleX(1); } }
+.laundrySteps li { display: grid; grid-template-columns: 30px 1fr; gap: 12px; min-width: 0; }
+.stepIndex { color: var(--brand); font-size: .75rem; line-height: 1.9; font-variant-numeric: tabular-nums; }
+.laundrySteps p { margin: 8px 0 0; font-size: .94rem; }
+.laundryServices { display: grid; grid-template-columns: .8fr 1.2fr; gap: 70px; padding-block: 36px 44px; border-block: 1px solid var(--line); }
+.serviceRows article { display: flex; gap: 24px; align-items: start; justify-content: space-between; }
+.serviceRows article + article { margin-top: 22px; padding-top: 22px; border-top: 1px solid var(--line); }
+.serviceRows article > div { max-width: 370px; }
+.serviceRows article p { font-size: .94rem; margin-bottom: 0; }
+.serviceRows .textAction { flex-shrink: 0; padding-top: 0; }
+.publicSite .footer { padding-block: 32px; gap: 36px; }
+.publicSite .footer .brand { margin-top: -8px; margin-bottom: 8px; }
+.publicSite .footer p, .publicSite .footer a { font-size: .87rem; }
+.publicSite .footer a { min-height: 30px; }
+.publicSite .footer h3 { font-size: .9rem; }
+.publicSite .pageIntro { padding-block: 36px 28px; grid-template-columns: 30px minmax(0,1fr); gap: 16px; }
+.publicSite .pageIntro h1 { font-size: clamp(2rem, 3.5vw, 2.6rem); line-height: 1.12; }
+.publicSite .pageIntroIcon { width: 24px; height: 24px; }
+.publicSite .serviceSection { padding-block: 32px; }
+.publicSite .planGrid { gap: 0 36px; border-top: 1px solid var(--line-strong); }
+.publicSite .planGrid > article { padding-block: 24px; }
+.planEssentials { margin: 16px 0; display: flex; flex-wrap: wrap; gap: 14px 30px; }
+.planEssentials dt { font-size: .8rem; font-weight: 400; color: var(--muted); }
+.planEssentials dd { margin-top: 3px; font-weight: 600; color: var(--ink); }
+.planDetails { margin-top: 12px; }
+.planDetails summary { cursor: pointer; min-height: 44px; padding-block: 11px; color: var(--brand); font-size: .9rem; }
+.planDetails ul { margin-top: 6px; padding-bottom: 12px; }
+.publicSite .planTitle { gap: 16px; }
+.publicSite .planTitle > strong { font-size: 1.04rem; }
+.publicSite .planTitle > strong small { font-size: .75rem; }
+.publicSite .zoneGrid { grid-template-columns: repeat(2,minmax(0,1fr)); border-top: 1px solid var(--line); gap: 0 36px; }
+.publicSite .zoneGrid article, .publicSite .zoneGrid article + article { border: 0; border-bottom: 1px solid var(--line); padding: 20px 0; }
+.publicSite .quoteSummary { background: transparent; padding: 20px 0 0; border-top: 2px solid var(--brand); }
+.publicSite .quoteTotal { font-size: clamp(1.8rem,3vw,2.3rem); }
+.publicSite .earlyAccessHero { padding-block: 36px; gap: 48px; }
+.publicSite .earlyAccessHero h1 { font-size: clamp(2rem,3.5vw,2.7rem); }
+@media (max-width: 980px) {
+  .publicSite .navLinks { gap: 14px; }
+  .laundryIntro { gap: 30px; grid-template-columns: 1.15fr 1fr; }
+  .laundryIntro .heroActions { gap: 12px; }
+  .laundryIntro h1 { font-size: 2.3rem; }
+  .pickupSection { gap: 35px; }
+  .laundrySteps { gap: 22px; }
+  .laundryServices { gap: 28px; grid-template-columns: 1fr 1.3fr; }
+  .serviceRows article { display: block; }
+  .serviceRows .textAction { margin-top: 5px; }
 }
 @media (max-width: 780px) {
-  .publicSite .siteHeader { min-height: 82px; gap: 0; padding-block: 4px; }
-  .publicSite .navLinks { gap: 0; padding-bottom: 14px; }
-  .publicSite .navLinks a { min-height: 48px; }
-  .publicSite .navLinks .navCta { padding-inline: 20px; }
-  .freshHero { grid-template-columns: 1fr; gap: 30px; padding-block: 26px 32px; }
-  .freshHero h1 { font-size: clamp(2.8rem, 10.5vw, 4.4rem); }
-  .freshHero .sectionLabel { margin-bottom: 20px; }
-  .freshHero .lead { max-width: 530px; font-size: 1rem; }
-  .freshHero .heroActions { margin-block: 24px 12px; gap: 18px; }
-  .laundryHeroVisual { margin-inline: 6px; }
-  .laundryHeroVisual > img { border-radius: 24px 70px 24px 24px; }
-  .careLabel { left: -6px; bottom: 18px; padding: 12px 17px; }
-  .washOrbit { display: none; }
-  .careStrip { grid-template-columns: 1fr; gap: 14px; padding-block: 24px; }
-  .careStrip > div { justify-content: flex-start; padding-left: 8px; }
-  .freshHow { padding-block: 48px; }
-  .freshSteps { grid-template-columns: 1fr; gap: 14px; }
-  .freshSteps > li { padding: 24px; }
-  .stepTop { margin-bottom: 22px; }
-  .businessCare { grid-template-columns: 1fr; padding: 28px 24px; gap: 28px; border-radius: 22px; }
-  .homeLaundryNote { padding-block: 40px; gap: 18px; align-items: flex-start; }
-  .homeLaundryNote > .careIcon { width: 44px; height: 44px; border-radius: 12px; }
-  .homeLaundryNote > div { flex-basis: calc(100% - 64px); }
-  .homeLaundryNote > .button { margin-left: 0; max-width: 100%; white-space: normal; }
-  .freshCta { padding: 32px 26px; display: grid; gap: 24px; border-radius: 22px; }
-  .freshCta .button { justify-self: start; }
-  .publicSite .footer { margin-top: 10px; padding-top: 36px; gap: 28px; }
-  .publicSite .pageIntro { padding: 28px 22px; margin-top: 16px; grid-template-columns: 1fr; gap: 12px; }
-  .publicSite .pageIntro h1 { font-size: 2.2rem; }
-  .publicSite .pageIntro .lead { font-size: 1rem; }
-  .publicSite .planGrid > article { padding: 22px; }
-  .publicSite .bookingFieldset { padding: 20px 16px; }
-  .publicSite .earlyAccessHero { gap: 28px; padding-block: 28px; }
-  .publicSite .earlyAccessPanel { padding: 22px; }
+  .publicSite .siteHeader { min-height: 72px; padding-block: 5px; gap: 0; }
+  .publicSite .navLinks { padding-bottom: 12px; }
+  .publicSite .navLinks a { min-height: 44px; }
+  .publicSite .navLinks .navCta { padding-inline: 16px; }
+  .publicSite .pageIntro { grid-template-columns: 1fr; gap: 6px; padding-block: 26px 22px; }
+  .publicSite .pageIntro h1 { font-size: 2rem; }
+  .publicSite .footer { gap: 22px; }
+  .publicSite .footer a { min-height: 44px; margin-block: 0; padding-block: 10px; }
+  .publicSite .footer h3 { margin-bottom: 6px; }
+  .publicSite .planTitle { display: flex; justify-content: space-between; }
+  .publicSite .planTitle > strong { text-align: right; }
+}
+@media (max-width: 600px) {
+  .publicSite { --space-page: calc(100% - 40px); }
+  .laundryIntro { grid-template-columns: 1fr; gap: 22px; padding-block: 24px; }
+  .laundryIntro h1 { font-size: clamp(2rem,8.7vw,2.35rem); margin-block: 14px 16px; }
+  .laundryIntro .heroActions { display: grid; grid-template-columns: 1fr; gap: 4px; margin-block: 20px 10px; }
+  .laundryIntro .heroActions .button { width: 100%; }
+  .laundryIntro .textAction { justify-content: center; }
+  .laundryPhoto { display: none; }
+  .pickupSection { grid-template-columns: 1fr; gap: 22px; padding-block: 26px; }
+  .pickupSection h2 br { display: none; }
+  .pickupSection h2 { font-size: 1.55rem; }
+  .coverageControls { grid-template-columns: 1fr; }
+  .laundryProcess { padding-block: 30px; }
+  .processHeading { margin-bottom: 20px; }
+  .laundrySteps { grid-template-columns: 1fr; gap: 19px; padding: 0 0 0 18px; }
+  .laundrySteps::before { inset: 0 auto 0 0; width: 1px; height: auto; transform-origin: top; }
+  .laundrySteps.motionArmed::before { transform: scaleY(0); }
+  .laundrySteps.motionPlayed::before { animation-name: laundry-line-mobile; }
+  @keyframes laundry-line-mobile { to { transform: scaleY(1); } }
+  .laundrySteps li { grid-template-columns: 23px 1fr; gap: 9px; }
+  .laundrySteps p { margin-top: 5px; }
+  .laundryServices { grid-template-columns: 1fr; gap: 20px; padding-block: 28px; }
+  .laundryServices h2 { font-size: 1.55rem; }
+  .publicSite .footer { grid-template-columns: 1fr 1fr; gap: 24px 20px; }
+  .publicSite .footer > div:first-child, .publicSite .footer > div:last-child { grid-column: 1 / -1; }
+  .publicSite .footer p { margin-bottom: 8px; }
+  .publicSite .planGrid { gap: 0; }
+  .publicSite .planGrid > article { padding-block: 20px; }
+  .publicSite .zoneGrid { grid-template-columns: 1fr; }
+  .publicSite .heroActions > .button, .publicSite .serviceForm > .button { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .laundryPhoto img, .laundrySteps.motionPlayed::before { animation: none; }
+  .laundrySteps.motionArmed::before { transform: none; }
+  .publicSite .button:active, .publicSite .navCta:active { transform: none; }
 }

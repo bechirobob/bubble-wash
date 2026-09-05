@@ -42,7 +42,7 @@ try {
         }
         checks++;
         if (path === '/') {
-          assert.match(html, /Fresh laundry\./);
+          assert.match(html, /Laundry pickup/);
           assert.match(html, /laundry-care-hero/);
           assert.match(html, /bubble-wash-icon/);
           if (paused) assert.match(html, /New pickups are paused/);
@@ -57,7 +57,7 @@ try {
           checks++;
         }
       }
-      const image = await fetch(`${origin}/laundry-care-hero.webp`);
+      const image = await fetch(`${origin}/laundry-care-hero-blended.webp`);
       assert.equal(image.status, 200);
       assert.match(image.headers.get('content-type'), /image\/webp/); checks++;
     } finally {

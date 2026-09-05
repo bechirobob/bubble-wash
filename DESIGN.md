@@ -209,3 +209,24 @@
 - Opacity rule: text-bearing cards, forms, plan metrics, booking summaries, and estimate rows use near-opaque surfaces. Transparency is reserved for decorative background bubbles/trails.
 - Motion rule: foam orbs and trails move diagonally/across the viewport using transform/background-position only; `prefers-reduced-motion` disables the motion. Bubbles stay behind content and must not cover forms or estimates.
 - Verification: local lint/build pass, desktop 1366px and mobile 390px visual checks confirm the page loads, keeps the font, and does not block text with colors, opacity, or bubble effects.
+
+## 2026-09-05 public layout correction
+
+- Goal: customers on phones, tablets and desktops can identify the laundry service, check pickup coverage, compare costs and track an order quickly.
+- Composition: compact introduction and one laundry image; a working coverage check; three unboxed service steps; concise business/home service links. Remove repeated slogan sections, pastel card grids, floating badges and decorative image frames.
+- Tokens: white canvas, existing navy/teal actions and original icon; 32–38px phone heading, up to 48px desktop heading; 16px body; 32–56px section spacing; 4–6px control radii; no content rounding or shadows.
+- Grouping: use proximity, aligned columns, numbered steps and dividers. Phone actions fill the available width; desktop actions stay near their context. Keep forms labelled and feedback adjacent.
+- Motion: short image entry, subtle press feedback, and a one-time line reveal for the three-step explanation. Use transform/opacity only; keep content readable before scripts load and under reduced motion.
+- Components: revise public homepage, public CSS, and customer copy. Reuse route-preview and pricing APIs. Preserve original brand artwork, login lock, booking rules, pricing values and staff workflows.
+- Verification: inspect 375px, 390px, 768px and desktop layouts, menu open/close, coverage feedback, pricing interaction, reduced-motion CSS and production build. Reject overflow, repeated boxed content, excessive first-screen height, tiny controls or decorative actions.
+
+## Hero integration and design references
+
+- Start design and copy work with the relevant installed skills and this blueprint. Read the actual instructions; report a missing reference clearly rather than assuming its contents. Current user directions take precedence.
+- Hero artwork sits directly on the white canvas on tablet and desktop. Use a seamless white background, preserve the original brand mark, and show complete objects. Hide the figure at 600px and below so the phone introduction leads directly into pickup coverage without an image section or reserved space. No rectangular blue backdrop, container, decorative frame or forced crop.
+
+## Colour without containers
+
+- Keep the live palette: pale blue `#edf5fc`, sage `#f2f6f0`, aqua `#e5f3f7`, teal `#086584` and headline accent `#157e9d`.
+- Use full-width colour bands for pickup coverage and service choices, with aqua introductions on the other public pages. The content remains aligned to the shared page width, without rounded cards, borders or shadows. Keep the introduction white for seamless artwork integration and the process on white for visual breathing room.
+- Retain the phone image removal, readable contrast, original branding and existing availability controls.

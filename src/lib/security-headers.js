@@ -14,10 +14,18 @@ const cspDirectives = [
 ];
 
 export function securityHeaders() {
+  const development = process.env.NODE_ENV === "development";
+  const directives = development ? cspDirectives
+    .filter(value => value !== "upgrade-insecure-requests")
+    .map(value => value === "script-src 'self' 'unsafe-inline'" ? `${value} 'unsafe-eval'` :
+      value === "connect-src 'self' https://api.paystack.co" ? `${value} ws: wss:` :
+      value === "frame-ancestors 'none'" ? "frame-ancestors 'self'" :
+      value === "frame-src https://checkout.paystack.com" ? "frame-src 'self' https://checkout.paystack.com" : value)
+    : cspDirectives;
   return [
-    { key: "Content-Security-Policy", value: cspDirectives.join("; ") },
-    { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains; preload" },
-    { key: "X-Frame-Options", value: "DENY" },
+    { key: "Content-Security-Policy", value: directives.join("; ") },
+    ...(!development ? [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains; preload" }] : []),
+    { key: "X-Frame-Options", value: development ? "SAMEORIGIN" : "DENY" },
     { key: "X-Content-Type-Options", value: "nosniff" },
     { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
     { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(self), payment=(self), usb=(), accelerometer=(), gyroscope=(), magnetometer=(), fullscreen=(self)" },
