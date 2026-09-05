@@ -1511,7 +1511,14 @@ input, select, textarea { font-size: 1rem; }
 /* Public layout: open sections, compact scale and original brand artwork. */
 .brandArtwork { position: relative; width: 84px; height: 60px; overflow: hidden; mix-blend-mode: multiply; }
 .brandArtwork .brandMark { position: absolute; width: 134px; height: 134px; left: 50%; top: 50%; transform: translate(-51%, -48%); object-fit: contain; }
-.publicSite { --brand: #0b536d; --brand-dark: #073c50; --ink-strong: #123b4b; --muted: #506471; background: #fff; }
+.publicSite { --brand: #086584; --brand-dark: #064b64; --brand-soft: #eaf6fa; --ink-strong: #123e50; --muted: #506671; --line: #dce9ed; --wash-blue: #edf5fc; --wash-sage: #f2f6f0; --wash-aqua: #e5f3f7; background: #fff; }
+.publicBand { width: 100%; }
+.publicBandBlue { background: var(--wash-blue); }
+.publicBandSage { background: var(--wash-sage); }
+.publicBandAqua { background: var(--wash-aqua); }
+.publicBand .pickupSection, .publicBand .laundryServices { border: 0; }
+.publicSite .sectionLabel { color: #126680; }
+.laundryIntro h1 span { color: #157e9d; }
 .publicSite .siteHeader { margin-top: 0; min-height: 84px; padding: 8px 0; gap: 24px; }
 .publicSite .navLinks { gap: 22px; }
 .publicSite .navLinks a { font-size: .88rem; }

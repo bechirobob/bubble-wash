@@ -64,9 +64,9 @@ const pageIcons = { default: ClipboardCheck, booking: CalendarPlus, services: Sh
 export function PageIntro({ eyebrow, title, summary, icon = "default" }: { eyebrow: string; title: string; summary: string; icon?: keyof typeof pageIcons }) {
   const Icon = pageIcons[icon];
   return (
-    <section className="pageIntro pageShell" id="main-content" aria-labelledby="page-title">
+    <div className="publicBand publicBandAqua"><section className="pageIntro pageShell" id="main-content" aria-labelledby="page-title">
       <Icon className="pageIntroIcon" aria-hidden="true" />
       <div><p className="sectionLabel">{eyebrow}</p><h1 id="page-title">{title}</h1><p className="lead">{summary}</p></div>
-    </section>
+    </section></div>
   );
 }
