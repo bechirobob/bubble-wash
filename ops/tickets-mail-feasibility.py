@@ -9,6 +9,7 @@ import ssl
 import subprocess
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 
 def dns(name, kind):
@@ -95,6 +96,33 @@ for line in processes.stdout.splitlines():
             report['smtp_processes'].append({'name': name, 'pid': pid})
 units = subprocess.run(['systemctl', 'list-units', '--all', '--type=service', '--no-legend', '--plain'], capture_output=True, text=True, timeout=5)
 report['mail_service_units'] = [line.split()[0] for line in units.stdout.splitlines() if line.split() and any(word in line.split()[0].lower() for word in ['mail', 'smtp', 'relay'])]
+report['existing_relays'] = []
+for unit in report['mail_service_units']:
+    state = subprocess.run(['systemctl', 'show', unit, '--property=ActiveState,MainPID'], capture_output=True, text=True, timeout=5)
+    fields = dict(line.split('=', 1) for line in state.stdout.splitlines() if '=' in line)
+    item = {'unit': unit, 'active': fields.get('ActiveState')}
+    pid = fields.get('MainPID', '0')
+    if pid != '0':
+        proc = Path('/proc') / pid
+        try:
+            cwd = (proc / 'cwd').resolve()
+            argv = (proc / 'cmdline').read_bytes().decode().split('\0')
+            sources = []
+            for arg in argv:
+                if re.fullmatch(r'[A-Za-z0-9_./-]+\.(?:js|mjs|cjs)', arg):
+                    path = Path(arg) if arg.startswith('/') else cwd / arg
+                    if path.is_file():
+                        content = path.read_text()
+                        sources.append({
+                            'path': str(path),
+                            'transport_markers': [word for word in ['nodemailer', 'SMTPServer', 'resolveMx', 'lookupMx', 'createTransport', 'net.connect', 'tls.connect', 'api.resend.com', 'sendgrid', 'mailgun', 'postmark', 'smtp.gmail.com'] if word in content],
+                            'configuration_names': sorted(set(re.findall(r'process\.env\.([A-Z][A-Z0-9_]+)', content))),
+                            'fixed_url_hosts': sorted(set(urllib.parse.urlparse(url).hostname for url in re.findall(r'https?://[A-Za-z0-9_.:-]+', content) if urllib.parse.urlparse(url).hostname)),
+                        })
+            item['source_summary'] = sources
+        except (OSError, ValueError):
+            item['source_summary'] = 'unavailable'
+    report['existing_relays'].append(item)
 if shutil.which('docker'):
     containers = subprocess.run(['docker', 'ps', '--format', '{{.Image}} {{.Ports}}'], capture_output=True, text=True, timeout=5)
     report['mail_containers'] = [line for line in containers.stdout.splitlines() if any(word in line.lower() for word in ['mail', 'postfix', 'exim', 'stalwart', ':587->', ':25->', ':465->'])]
