@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: bechirobob/tickets
-          ref: 11e601c5554fe3f6a9eb08ad80cd75644f7ddd42
+          ref: dc4c0b4ad1ef31ad2e58b8210a35d6bac0ca2b0c
           persist-credentials: false
       - name: Verify isolated fallback behavior
         run: python3 -m unittest discover -s ops/fallback -p 'test_*.py' -v
@@ -40,7 +40,7 @@ jobs:
       - name: Install isolated page and validate Caddy before reloading
         run: |
           set -euo pipefail
-          source_revision=11e601c5554fe3f6a9eb08ad80cd75644f7ddd42
+          source_revision=dc4c0b4ad1ef31ad2e58b8210a35d6bac0ca2b0c
           staging="/srv/becore-tickets-fallback/.staging/$source_revision"
           cp ops/fallback/install-host.py dist/fallback/install-host.py
           tailscale ssh root@hermes "install -d -m 0700 '$staging'"
@@ -72,4 +72,22 @@ jobs:
           before=int(pathlib.Path('/tmp/bubblewash-before-status').read_text())
           assert status == before, f'Existing site changed HTTP response: {before} -> {status}'
           print(f'Fallback page and API behavior verified. Existing site HTTP response preserved: {status}.')
+          PY
+      - name: Activate automatic switching when the private connection is available
+        env:
+          FALLBACK_TOKEN: ${{ secrets.TICKETS_FALLBACK_CLOUDFLARE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FALLBACK_TOKEN" ]; then
+            echo 'Page verified. Automatic switching is inactive: TICKETS_FALLBACK_CLOUDFLARE_TOKEN is missing.'
+            exit 0
+          fi
+          python3 - <<'PY' | tailscale ssh root@hermes 'python3 /srv/becore-tickets-fallback/current/activate-monitor.py'
+          import json, os
+          print(json.dumps({
+              'CLOUDFLARE_API_TOKEN': os.environ['FALLBACK_TOKEN'].strip(),
+              'CLOUDFLARE_ZONE_ID': 'bbf0174f839a0d22dbf6d9f4bd3cf53d',
+              'CLOUDFLARE_FALLBACK_RULESET_ID': 'c2e81ba1a73248c0a2974c1fc6889e28',
+              'CLOUDFLARE_FALLBACK_RULE_ID': '33ad93cad5f1407bb22bd3cca2686db5'
+          }))
           PY
