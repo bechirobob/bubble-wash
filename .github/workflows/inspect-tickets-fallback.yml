@@ -1,4 +1,4 @@
-name: Inspect Tickets fallback host
+name: Inspect Tickets fallback connection
 on:
   push:
     branches: [ops/inspect-tickets-fallback]
@@ -17,29 +17,16 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Inspect fallback prerequisites without changing services
-        env:
-          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Inspect secure activation connection
         run: |
-          if [ -n "$CF_TOKEN" ]; then echo 'Cloudflare connection present: yes'; else echo 'Cloudflare connection present: no'; fi
           tailscale ssh root@hermes 'bash -s' <<'REMOTE'
           set -eu
-          hostname
-          caddy version
-          systemctl is-active caddy
-          command -v python3
-          command -v node || true
-          df -h /srv
-          python3 - <<'PY'
-          import pathlib, re
-          p = pathlib.Path("/etc/caddy/Caddyfile")
-          print("Caddyfile exists:", p.is_file())
-          if p.is_file():
-              for line in p.read_text().splitlines():
-                  s=line.strip()
-                  if s.startswith("import "):
-                      print("Import:",s)
-                  elif line and not line[0].isspace() and re.fullmatch(r"[a-zA-Z0-9.*:_ ,/-]+\s*\{",line):
-                      print("Site:",line)
-          PY
+          /usr/sbin/sshd -T | awk '$1 ~ /^(port|permitrootlogin|pubkeyauthentication|authorizedkeysfile|allowusers|denyusers|listenaddress)$/'
+          cat /etc/ssh/ssh_host_ed25519_key.pub
+          systemctl is-active becore-tickets-fallback.timer || true
           REMOTE
+          python3 - <<'PY'
+          import socket
+          with socket.create_connection(('51.195.20.137',22),timeout=10) as connection:
+              print('Public SSH connection:',connection.recv(128).decode().strip())
+          PY
