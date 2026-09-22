@@ -18,7 +18,10 @@ jobs:
           tags: tag:ci
           ping: hermes
       - name: Inspect fallback prerequisites without changing services
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
+          if [ -n "$CF_TOKEN" ]; then echo 'Cloudflare connection present: yes'; else echo 'Cloudflare connection present: no'; fi
           tailscale ssh root@hermes 'bash -s' <<'REMOTE'
           set -eu
           hostname
