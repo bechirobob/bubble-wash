@@ -1,0 +1,97 @@
+name: Install isolated Tickets VPS runtime
+on:
+  push:
+    branches: [ops/inspect-tickets-fallback]
+    paths: [.github/workflows/install-tickets-runtime.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tickets-vps-install
+  cancel-in-progress: false
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SOURCE_SHA: 5c5b4f2d2925cffd1e1641754cd8c5cf1fd13867
+      SOURCE_RUN: '35730058785'
+    steps:
+      - name: Check out exact Tickets source for isolated verification
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bechirobob/tickets
+          ref: 5c5b4f2d2925cffd1e1641754cd8c5cf1fd13867
+          persist-credentials: false
+          path: tickets-source
+      - name: Require successful exact-source verification and download its artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/bechirobob/tickets/actions/runs/$SOURCE_RUN" > "$RUNNER_TEMP/source-run.json"
+          python3 - <<'PY'
+          import json,os
+          with open(os.environ['RUNNER_TEMP']+'/source-run.json') as stream: run=json.load(stream)
+          assert run['head_sha']==os.environ['SOURCE_SHA'] and run['conclusion']=='success'
+          PY
+          gh run download "$SOURCE_RUN" --repo bechirobob/tickets --name "tickets-vps-$SOURCE_SHA" --dir artifact
+          cd artifact
+          sha256sum --check tickets-vps-runtime.tar.gz.sha256
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Transfer verified runtime and install without changing public routing
+        run: |
+          digest=$(sha256sum artifact/tickets-vps-runtime.tar.gz | cut -d ' ' -f 1)
+          cat artifact/tickets-vps-runtime.tar.gz | tailscale ssh root@hermes "umask 077; mkdir -p /var/tmp/becore-tickets-$SOURCE_SHA; cat > /var/tmp/becore-tickets-$SOURCE_SHA/runtime.tar.gz"
+          tailscale ssh root@hermes "bash -s -- '$SOURCE_SHA' '$digest'" <<'REMOTE'
+          set -euo pipefail
+          revision=$1
+          expected=$2
+          stage="/var/tmp/becore-tickets-$revision"
+          trap 'rm -rf "$stage"' EXIT
+          test "$(sha256sum "$stage/runtime.tar.gz" | cut -d ' ' -f 1)" = "$expected"
+          mkdir "$stage/source"
+          tar --no-same-owner -xzf "$stage/runtime.tar.gz" -C "$stage/source"
+          python3 "$stage/source/operations/install-preview.py" "$stage/source" "$revision"
+          systemctl is-active becore-tickets-preview.service becore-tickets-retention.timer becore-tickets-fallback.timer caddy
+          systemctl show becore-tickets-preview.service -p MemoryCurrent -p MemoryPeak -p ActiveState -p SubState -p IPAddressDeny -p IPAddressAllow
+          du -sh "/srv/becore-tickets/releases/$revision" /var/lib/becore-tickets-preview
+          REMOTE
+      - name: Transfer isolated real-network rehearsal
+        run: |
+          tar -C tickets-source -cf - scripts/verify-vps-runtime.mjs runtime/vps/database.mjs | tailscale ssh root@hermes "umask 077; mkdir -p /var/tmp/becore-tickets-rehearsal-$SOURCE_SHA; tar -xf - -C /var/tmp/becore-tickets-rehearsal-$SOURCE_SHA"
+          tailscale ssh root@hermes "bash -s -- '$SOURCE_SHA'" <<'REMOTE'
+          set -euo pipefail
+          revision=$1
+          stage="/var/tmp/becore-tickets-rehearsal-$revision"
+          trap 'rm -rf "$stage"' EXIT
+          ln -s "/srv/becore-tickets/releases/$revision" "$stage/dist-vps"
+          ln -s "/srv/becore-tickets/releases/$revision/node_modules" "$stage/node_modules"
+          ln -s "/srv/becore-tickets/releases/$revision/migrations" "$stage/drizzle"
+          chown -hR becore-tickets:becore-tickets "$stage"
+          cd "$stage"
+          runuser -u becore-tickets -- node scripts/verify-vps-runtime.mjs
+          REMOTE
+      - name: Verify bounded concurrency against the isolated service
+        run: |
+          tailscale ssh root@hermes 'python3 -' <<'PY'
+          import concurrent.futures,json,time,urllib.request,statistics
+          def request(n):
+              route='/api/public/events' if n%4 else '/'
+              req=urllib.request.Request('http://127.0.0.1:3118'+route,headers={'Host':'tickets.becoreops.com'})
+              start=time.monotonic()
+              with urllib.request.urlopen(req,timeout=15) as response:
+                  assert response.status==200
+                  assert response.headers.get('Content-Security-Policy')
+                  response.read()
+              return (time.monotonic()-start)*1000
+          with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+              durations=list(pool.map(request,range(40)))
+          print(json.dumps({'isolatedRequests':len(durations),'concurrency':8,'successes':len(durations),'medianMs':round(statistics.median(durations)),'maxMs':round(max(durations))}))
+          PY
+          tailscale ssh root@hermes 'systemctl show becore-tickets-preview.service -p MemoryCurrent -p MemoryPeak -p ActiveState; systemctl is-active becore-tickets-fallback.timer caddy; df -h /srv'
