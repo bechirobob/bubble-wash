@@ -1,0 +1,52 @@
+name: Authorize Tickets fallback activation
+on:
+  push:
+    branches: [ops/inspect-tickets-fallback]
+    paths: [.github/workflows/authorize-tickets-fallback.yml]
+permissions:
+  contents: read
+concurrency:
+  group: hermes-tickets-fallback
+  cancel-in-progress: false
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Connect through the existing VPS administrator path
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Authorize only the verified one-time Tickets activation
+        run: |
+          tailscale ssh root@hermes 'python3 -' <<'PY'
+          import datetime, fcntl, ipaddress, os, pathlib, subprocess
+          key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILJn0dL2hzb49VVJnvjw41ykwY6ed0up0ivvfxxQzl4o tickets-fallback-35724143368"
+          ip = "13.83.107.150"
+          ipaddress.ip_address(ip)
+          release = pathlib.Path('/srv/becore-tickets-fallback/current').resolve()
+          assert release.name == 'dc4c0b4ad1ef31ad2e58b8210a35d6bac0ca2b0c', 'Unexpected installed release.'
+          assert not pathlib.Path('/etc/becore-tickets-fallback.env').exists(), 'Connection already exists; inspect before replacing.'
+          root = pathlib.Path('/run/becore-tickets-activation-35724143368')
+          root.mkdir(mode=0o700, exist_ok=False)
+          gate = root / 'gate.py'
+          gate.write_text("import fcntl, os, pathlib, subprocess, sys\nKEY = \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILJn0dL2hzb49VVJnvjw41ykwY6ed0up0ivvfxxQzl4o tickets-fallback-35724143368\"\nAUTH = pathlib.Path('/root/.ssh/authorized_keys')\nLOCK = pathlib.Path('/run/lock/becore-tickets-activation.lock')\ndef remove_key():\n    with LOCK.open('a') as guard:\n        fcntl.flock(guard, fcntl.LOCK_EX)\n        if AUTH.exists():\n            old = AUTH.read_text()\n            new = ''.join(line for line in old.splitlines(keepends=True) if KEY not in line)\n            if old != new:\n                AUTH.write_text(new)\n                AUTH.chmod(0o600)\nif len(sys.argv) == 2 and sys.argv[1] == 'cleanup':\n    remove_key()\n    raise SystemExit(0)\ncommand = os.environ.get('SSH_ORIGINAL_COMMAND', '')\nif command == 'probe':\n    print('tickets-activation-ready')\nelif command == 'activate':\n    with pathlib.Path('/run/lock/becore-tickets-activation-use.lock').open('a') as guard:\n        fcntl.flock(guard, fcntl.LOCK_EX)\n        marker = pathlib.Path('/run/becore-tickets-activation-35724143368/used')\n        if marker.exists():\n            raise SystemExit('Activation session already used.')\n        marker.touch(mode=0o600)\n        try:\n            code = subprocess.run(['/usr/bin/python3', '/srv/becore-tickets-fallback/releases/dc4c0b4ad1ef31ad2e58b8210a35d6bac0ca2b0c/activate-monitor.py'], timeout=140).returncode\n        finally:\n            remove_key()\n        raise SystemExit(code)\nelse:\n    raise SystemExit('This key only permits Tickets fallback activation.')\n")
+          gate.chmod(0o600)
+          expiry = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=20)).strftime('%Y%m%d%H%M%SZ')
+          line = f'restrict,from="{ip}/32",expiry-time="{expiry}",command="/usr/bin/python3 {gate}" {key}\n'
+          auth = pathlib.Path('/root/.ssh/authorized_keys')
+          auth.parent.mkdir(mode=0o700, exist_ok=True)
+          with pathlib.Path('/run/lock/becore-tickets-activation.lock').open('a') as guard:
+              fcntl.flock(guard, fcntl.LOCK_EX)
+              old = auth.read_text() if auth.exists() else ''
+              assert key not in old
+              with auth.open('a') as output:
+                  if old and not old.endswith('\n'): output.write('\n')
+                  output.write(line)
+              auth.chmod(0o600)
+          subprocess.run(['systemd-run','--quiet','--unit=becore-tickets-activation-cleanup-35724143368','--on-active=20m','/usr/bin/python3',str(gate),'cleanup'],check=True)
+          print('Restricted, expiring activation key installed. Existing access preserved.')
+          PY
