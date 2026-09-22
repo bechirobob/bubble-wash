@@ -11,11 +11,16 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          repository: bechirobob/tickets
+          ref: dc8355093f42cb00501d9f587e494b25811af884
+          path: tickets-source
           persist-credentials: false
+      - name: Check the exact mail service source
+        run: python3 -m unittest discover -s tickets-source/ops/email -p 'test_*.py' -v
       - name: Connect through the existing VPS access path
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
         with:
@@ -23,5 +28,13 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Inspect mail setup prerequisites and existing provider access
-        run: tailscale ssh root@hermes 'timeout 75 python3 -' < ops/tickets-mail-preflight.py
+      - name: Install the isolated mail service without enabling sending
+        env:
+          MAIL_REVISION: dc8355093f42cb00501d9f587e494b25811af884
+        run: |
+          set -euo pipefail
+          tar -czf /tmp/tickets-mail.tar.gz -C tickets-source/ops/email .
+          tailscale ssh root@hermes "mkdir -p /srv/becore-tickets-mail/releases/$MAIL_REVISION && tar -xzf - -C /srv/becore-tickets-mail/releases/$MAIL_REVISION" < /tmp/tickets-mail.tar.gz
+          tailscale ssh root@hermes "python3 /srv/becore-tickets-mail/releases/$MAIL_REVISION/install.py /srv/becore-tickets-mail/releases/$MAIL_REVISION $MAIL_REVISION"
+      - name: Verify HTTPS, DNS, authentication and the paused state without sending mail
+        run: tailscale ssh root@hermes 'python3 /srv/becore-tickets-mail/releases/dc8355093f42cb00501d9f587e494b25811af884/verify.py'
