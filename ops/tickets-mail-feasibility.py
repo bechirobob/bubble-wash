@@ -1,6 +1,7 @@
 """Read-only mail feasibility checks. No messages, authentication or changes."""
 import concurrent.futures
 import json
+import re
 import shutil
 import smtplib
 import socket
@@ -32,11 +33,11 @@ def smtp_probe(domain):
         return {**result, 'mx_lookup': records}
     target = min(choices)[1]
     result['mx'] = target
-    client = smtplib.SMTP(timeout=8, local_hostname='tickets.becoreops.com')
+    client = None
     try:
-        code, _ = client.connect(target, 25)
+        client = smtplib.SMTP(host=target, port=25, timeout=8, local_hostname='tickets.becoreops.com')
         result['port_25'] = 'reachable'
-        result['greeting_code'] = code
+        result['greeting_code'] = 220
         code, _ = client.ehlo()
         result['ehlo_code'] = code
         result['starttls_offered'] = client.has_extn('starttls')
@@ -52,7 +53,8 @@ def smtp_probe(domain):
             result['smtp_code'] = error.smtp_code
             result['smtp_reason'] = error.smtp_error.decode('utf-8', errors='replace')[:300]
     finally:
-        client.close()
+        if client is not None:
+            client.close()
     return result
 
 
@@ -85,7 +87,15 @@ if ptr:
     report['dns']['reverse_name_forward_dns'] = dns(ptr[0].rstrip('.'), 'A')
 listeners = subprocess.run(['ss', '-H', '-ltn'], capture_output=True, text=True, timeout=5)
 report['smtp_listeners'] = [line.split()[3] for line in listeners.stdout.splitlines() if len(line.split()) > 3 and line.split()[3].rsplit(':', 1)[-1] in ['25', '465', '587']]
+processes = subprocess.run(['ss', '-H', '-ltnp'], capture_output=True, text=True, timeout=5)
+report['smtp_processes'] = []
+for line in processes.stdout.splitlines():
+    if len(line.split()) > 3 and line.split()[3].rsplit(':', 1)[-1] in ['25', '465', '587']:
+        for name, pid in re.findall(r'\("([^\"]+)",pid=(\d+)', line):
+            report['smtp_processes'].append({'name': name, 'pid': pid})
+units = subprocess.run(['systemctl', 'list-units', '--all', '--type=service', '--no-legend', '--plain'], capture_output=True, text=True, timeout=5)
+report['mail_service_units'] = [line.split()[0] for line in units.stdout.splitlines() if line.split() and any(word in line.split()[0].lower() for word in ['mail', 'smtp', 'relay'])]
 if shutil.which('docker'):
-    containers = subprocess.run(['docker', 'ps', '--format', '{{.Image}}'], capture_output=True, text=True, timeout=5)
-    report['mail_container_images'] = [line for line in containers.stdout.splitlines() if any(word in line.lower() for word in ['mail', 'postfix', 'exim', 'stalwart'])]
+    containers = subprocess.run(['docker', 'ps', '--format', '{{.Image}} {{.Ports}}'], capture_output=True, text=True, timeout=5)
+    report['mail_containers'] = [line for line in containers.stdout.splitlines() if any(word in line.lower() for word in ['mail', 'postfix', 'exim', 'stalwart', ':587->', ':25->', ':465->'])]
 print(json.dumps(report, indent=2))
