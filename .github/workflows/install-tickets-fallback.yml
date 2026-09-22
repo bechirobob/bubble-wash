@@ -29,6 +29,14 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
+      - name: Record existing site's response before the reload
+        run: |
+          python3 - <<'PY'
+          import urllib.request, urllib.error, pathlib
+          try: r=urllib.request.urlopen('https://bubblewash.co/',timeout=20)
+          except urllib.error.HTTPError as e: r=e
+          with r: pathlib.Path('/tmp/bubblewash-before-status').write_text(str(r.status))
+          PY
       - name: Install isolated page and validate Caddy before reloading
         run: |
           set -euo pipefail
@@ -41,7 +49,7 @@ jobs:
       - name: Verify page and shared host
         run: |
           python3 - <<'PY'
-          import urllib.request, urllib.error, time
+          import urllib.request, urllib.error, time, pathlib
           def get(url, method='GET'):
               try: r=urllib.request.urlopen(urllib.request.Request(url, method=method),timeout=20)
               except urllib.error.HTTPError as e: r=e
@@ -61,6 +69,7 @@ jobs:
           assert status == 503 and b'temporarily_unavailable' in body
           assert headers.get('Content-Type') == 'application/json'
           status, _, _=get('https://bubblewash.co/')
-          assert status == 200
-          print('Public fallback page, non-success API response, and existing Bubble Wash homepage verified.')
+          before=int(pathlib.Path('/tmp/bubblewash-before-status').read_text())
+          assert status == before, f'Existing site changed HTTP response: {before} -> {status}'
+          print(f'Fallback page and API behavior verified. Existing site HTTP response preserved: {status}.')
           PY
