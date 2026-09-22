@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: bechirobob/tickets
-          ref: 001bae4fa47b85a8c486b172d3dcea1b3c2a2080
+          ref: 11e601c5554fe3f6a9eb08ad80cd75644f7ddd42
           persist-credentials: false
       - name: Verify isolated fallback behavior
         run: python3 -m unittest discover -s ops/fallback -p 'test_*.py' -v
@@ -32,7 +32,7 @@ jobs:
       - name: Install isolated page and validate Caddy before reloading
         run: |
           set -euo pipefail
-          source_revision=001bae4fa47b85a8c486b172d3dcea1b3c2a2080
+          source_revision=11e601c5554fe3f6a9eb08ad80cd75644f7ddd42
           staging="/srv/becore-tickets-fallback/.staging/$source_revision"
           cp ops/fallback/install-host.py dist/fallback/install-host.py
           tailscale ssh root@hermes "install -d -m 0700 '$staging'"
@@ -41,12 +41,18 @@ jobs:
       - name: Verify page and shared host
         run: |
           python3 - <<'PY'
-          import urllib.request, urllib.error
+          import urllib.request, urllib.error, time
           def get(url, method='GET'):
               try: r=urllib.request.urlopen(urllib.request.Request(url, method=method),timeout=20)
               except urllib.error.HTTPError as e: r=e
               with r: return r.status, r.headers, r.read(65536)
-          status, headers, body=get('https://tickets-status.becoreops.com/healthz')
+          for attempt in range(12):
+              try:
+                  status, headers, body=get('https://tickets-status.becoreops.com/healthz')
+                  if status == 200: break
+              except (OSError, urllib.error.URLError):
+                  if attempt == 11: raise
+              time.sleep(5)
           assert status == 200 and body.strip() == b'becore-tickets-fallback-ready'
           status, headers, body=get('https://tickets-status.becoreops.com/')
           assert status == 503 and b'We\xe2\x80\x99ll be back shortly.' in body
