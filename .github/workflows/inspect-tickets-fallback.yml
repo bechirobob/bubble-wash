@@ -1,0 +1,42 @@
+name: Inspect Tickets fallback host
+on:
+  push:
+    branches: [ops/inspect-tickets-fallback]
+    paths: [.github/workflows/inspect-tickets-fallback.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Connect to the existing VPS
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Inspect fallback prerequisites without changing services
+        run: |
+          tailscale ssh root@hermes 'bash -s' <<'REMOTE'
+          set -eu
+          hostname
+          caddy version
+          systemctl is-active caddy
+          command -v python3
+          command -v node || true
+          df -h /srv
+          python3 - <<'PY'
+          import pathlib, re
+          p = pathlib.Path("/etc/caddy/Caddyfile")
+          print("Caddyfile exists:", p.is_file())
+          if p.is_file():
+              for line in p.read_text().splitlines():
+                  s=line.strip()
+                  if s.startswith("import "):
+                      print("Import:",s)
+                  elif line and not line[0].isspace() and re.fullmatch(r"[a-zA-Z0-9.*:_ ,/-]+\s*\{",line):
+                      print("Site:",line)
+          PY
+          REMOTE
