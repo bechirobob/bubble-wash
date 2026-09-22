@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: bechirobob/tickets
-          ref: dc8355093f42cb00501d9f587e494b25811af884
+          ref: 420982eff81078270a147a41b41de34cb4ff2b3e
           path: tickets-source
           persist-credentials: false
       - name: Check the exact mail service source
@@ -28,13 +28,7 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Install the isolated mail service without enabling sending
-        env:
-          MAIL_REVISION: dc8355093f42cb00501d9f587e494b25811af884
-        run: |
-          set -euo pipefail
-          tar -czf /tmp/tickets-mail.tar.gz -C tickets-source/ops/email .
-          tailscale ssh root@hermes "mkdir -p /srv/becore-tickets-mail/releases/$MAIL_REVISION && tar -xzf - -C /srv/becore-tickets-mail/releases/$MAIL_REVISION" < /tmp/tickets-mail.tar.gz
-          tailscale ssh root@hermes "python3 /srv/becore-tickets-mail/releases/$MAIL_REVISION/install.py /srv/becore-tickets-mail/releases/$MAIL_REVISION $MAIL_REVISION"
       - name: Verify HTTPS, DNS, authentication and the paused state without sending mail
-        run: tailscale ssh root@hermes 'python3 /srv/becore-tickets-mail/releases/dc8355093f42cb00501d9f587e494b25811af884/verify.py'
+        run: tailscale ssh root@hermes 'python3 -' < tickets-source/ops/email/verify.py
+      - name: Check real SMTP queue acceptance and DKIM without transmitting mail
+        run: tailscale ssh root@hermes 'docker exec -i becore-tickets-mail python3 -' < tickets-source/ops/email/smoke.py
