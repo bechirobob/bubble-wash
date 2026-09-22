@@ -38,13 +38,13 @@ jobs:
           rule=next(r for r in ruleset['rules'] if r['id']==values['CLOUDFLARE_FALLBACK_RULE_ID'])
           assert rule['ref']==RULE_REF and rule['action']=='redirect' and rule['expression']==EXPRESSION and rule['action_parameters']==ACTION
           enabled=rule.get('enabled',True)
-          status,headers,body=request(PRODUCTION,{'Accept':'application/json','Cache-Control':'no-cache'})
+          status,headers,body=request(PRODUCTION,{'Accept':'application/json','Cache-Control':'no-cache','User-Agent':'BeCore-Fallback/1.0'})
           outcome=classify(status,headers,body)
           if outcome=='quota': assert enabled, 'Quota detected but fallback not enabled.'
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self,*args,**kwargs): return None
           def no_redirect(url,accept='text/html'):
-              req=urllib.request.Request(url,headers={'Accept':accept,'Cache-Control':'no-cache'})
+              req=urllib.request.Request(url,headers={'Accept':accept,'Cache-Control':'no-cache','User-Agent':'BeCore-Fallback/1.0'})
               try: response=urllib.request.build_opener(NoRedirect()).open(req,timeout=20)
               except urllib.error.HTTPError as error: response=error
               with response: return response.status,response.headers,response.read(65536)
@@ -63,10 +63,11 @@ jobs:
           assert key not in pathlib.Path('/root/.ssh/authorized_keys').read_text(), 'Temporary key was not revoked.'
           subprocess.run(['systemctl','stop','becore-tickets-activation-cleanup-35724143368.timer'],check=True)
           temporary=pathlib.Path('/run/becore-tickets-activation-35724143368')
-          for child in temporary.iterdir():
+          for child in temporary.iterdir() if temporary.exists() else ():
               assert child.name in ('gate.py','used')
               child.unlink()
-          temporary.rmdir()
+          if temporary.exists(): temporary.rmdir()
           print(json.dumps({'timer_active':True,'timer_enabled':True,'last_service_result':result,'private_file_root_0600':True,'production_probe':outcome,'production_api_http':status,'redirect_enabled':enabled,'production_html_http':page_status,'api_html_accept_http':api_status,'branded_page_http':fallback_status,'temporary_key_revoked':True,'temporary_gate_removed':True}))
           print(subprocess.check_output(['systemctl','show','becore-tickets-fallback.timer','--property=LastTriggerUSec','--property=NextElapseUSecRealtime','--property=NextElapseUSecMonotonic'],text=True).strip())
+          print(subprocess.check_output(['journalctl','-u','becore-tickets-fallback.service','-n','15','--no-pager','--output=cat'],text=True).strip())
           PY
