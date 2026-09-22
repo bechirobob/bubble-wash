@@ -1,0 +1,34 @@
+name: Inspect Tickets VPS runtime capacity
+on:
+  push:
+    branches: [ops/inspect-tickets-fallback]
+    paths: [.github/workflows/inspect-tickets-runtime.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Inspect runtime capacity without changing services
+        run: |
+          tailscale ssh root@hermes 'bash -s' <<'REMOTE'
+          set -eu
+          nproc
+          free -m
+          df -h /srv
+          cat /proc/loadavg
+          node --version
+          command -v node
+          uname -m
+          systemctl is-active caddy
+          ss -lnt | head -25
+          du -sh /srv/becore-tickets-fallback /var/log/journal 2>/dev/null || true
+          REMOTE
