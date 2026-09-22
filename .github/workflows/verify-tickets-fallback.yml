@@ -1,0 +1,72 @@
+name: Verify active Tickets fallback
+on:
+  push:
+    branches: [ops/inspect-tickets-fallback]
+    paths: [.github/workflows/verify-tickets-fallback.yml]
+permissions:
+  contents: read
+concurrency:
+  group: hermes-tickets-fallback
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Connect through the existing VPS administrator path
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Verify live routing and remove temporary activation files
+        run: |
+          tailscale ssh root@hermes 'python3 -' <<'PY'
+          import json, os, pathlib, stat, subprocess, sys, urllib.error, urllib.request
+          sys.path.insert(0, '/srv/becore-tickets-fallback/current')
+          from monitor import api, request, classify, PRODUCTION, RULE_REF, EXPRESSION, ACTION
+          subprocess.run(['systemctl','is-enabled','--quiet','becore-tickets-fallback.timer'],check=True)
+          subprocess.run(['systemctl','is-active','--quiet','becore-tickets-fallback.timer'],check=True)
+          result=subprocess.check_output(['systemctl','show','becore-tickets-fallback.service','--property=Result','--value'],text=True).strip()
+          assert result == 'success', 'Monitor service did not succeed.'
+          private=pathlib.Path('/etc/becore-tickets-fallback.env')
+          assert private.stat().st_uid == 0 and stat.S_IMODE(private.stat().st_mode) == 0o600
+          values=dict(line.split('=',1) for line in private.read_text().splitlines() if line)
+          base=f"/zones/{values['CLOUDFLARE_ZONE_ID']}/rulesets/{values['CLOUDFLARE_FALLBACK_RULESET_ID']}"
+          ruleset=api(base,values['CLOUDFLARE_API_TOKEN'])
+          rule=next(r for r in ruleset['rules'] if r['id']==values['CLOUDFLARE_FALLBACK_RULE_ID'])
+          assert rule['ref']==RULE_REF and rule['action']=='redirect' and rule['expression']==EXPRESSION and rule['action_parameters']==ACTION
+          enabled=rule.get('enabled',True)
+          status,headers,body=request(PRODUCTION,{'Accept':'application/json','Cache-Control':'no-cache'})
+          outcome=classify(status,headers,body)
+          if outcome=='quota': assert enabled, 'Quota detected but fallback not enabled.'
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs): return None
+          def no_redirect(url,accept='text/html'):
+              req=urllib.request.Request(url,headers={'Accept':accept,'Cache-Control':'no-cache'})
+              try: response=urllib.request.build_opener(NoRedirect()).open(req,timeout=20)
+              except urllib.error.HTTPError as error: response=error
+              with response: return response.status,response.headers,response.read(65536)
+          page_status,page_headers,page_body=no_redirect('https://tickets.becoreops.com/?fallback-verification=1')
+          if enabled:
+              assert page_status==302
+              assert page_headers.get('Location')=='https://tickets-status.becoreops.com/', 'Unexpected redirect or query leak.'
+          else:
+              assert page_status not in (301,302,307,308), 'Unexpected production redirect.'
+          api_status,api_headers,_=no_redirect(PRODUCTION)
+          assert api_status not in (301,302,307,308), 'API endpoint was redirected.'
+          fallback_status,fallback_headers,fallback_body=request('https://tickets-status.becoreops.com/')
+          assert fallback_status==503 and b'We\xe2\x80\x99ll be back shortly.' in fallback_body
+          assert fallback_headers.get('Cache-Control')=='no-store, max-age=0'
+          key='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILJn0dL2hzb49VVJnvjw41ykwY6ed0up0ivvfxxQzl4o tickets-fallback-35724143368'
+          assert key not in pathlib.Path('/root/.ssh/authorized_keys').read_text(), 'Temporary key was not revoked.'
+          subprocess.run(['systemctl','stop','becore-tickets-activation-cleanup-35724143368.timer'],check=True)
+          temporary=pathlib.Path('/run/becore-tickets-activation-35724143368')
+          for child in temporary.iterdir():
+              assert child.name in ('gate.py','used')
+              child.unlink()
+          temporary.rmdir()
+          print(json.dumps({'timer_active':True,'timer_enabled':True,'last_service_result':result,'private_file_root_0600':True,'production_probe':outcome,'production_api_http':status,'redirect_enabled':enabled,'production_html_http':page_status,'api_html_accept_http':api_status,'branded_page_http':fallback_status,'temporary_key_revoked':True,'temporary_gate_removed':True}))
+          print(subprocess.check_output(['systemctl','show','becore-tickets-fallback.timer','--property=LastTriggerUSec','--property=NextElapseUSecRealtime','--property=NextElapseUSecMonotonic'],text=True).strip())
+          PY
