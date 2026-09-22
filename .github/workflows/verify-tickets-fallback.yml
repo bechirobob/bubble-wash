@@ -61,12 +61,7 @@ jobs:
           assert fallback_headers.get('Cache-Control')=='no-store, max-age=0'
           key='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILJn0dL2hzb49VVJnvjw41ykwY6ed0up0ivvfxxQzl4o tickets-fallback-35724143368'
           assert key not in pathlib.Path('/root/.ssh/authorized_keys').read_text(), 'Temporary key was not revoked.'
-          subprocess.run(['systemctl','stop','becore-tickets-activation-cleanup-35724143368.timer'],check=True)
-          temporary=pathlib.Path('/run/becore-tickets-activation-35724143368')
-          for child in temporary.iterdir() if temporary.exists() else ():
-              assert child.name in ('gate.py','used')
-              child.unlink()
-          if temporary.exists(): temporary.rmdir()
+          assert not pathlib.Path('/run/becore-tickets-activation-35724143368').exists(), 'Temporary gate remains.'
           print(json.dumps({'timer_active':True,'timer_enabled':True,'last_service_result':result,'private_file_root_0600':True,'production_probe':outcome,'production_api_http':status,'redirect_enabled':enabled,'production_html_http':page_status,'api_html_accept_http':api_status,'branded_page_http':fallback_status,'temporary_key_revoked':True,'temporary_gate_removed':True}))
           print(subprocess.check_output(['systemctl','show','becore-tickets-fallback.timer','--property=LastTriggerUSec','--property=NextElapseUSecRealtime','--property=NextElapseUSecMonotonic'],text=True).strip())
           print(subprocess.check_output(['journalctl','-u','becore-tickets-fallback.service','-n','15','--no-pager','--output=cat'],text=True).strip())
