@@ -1,0 +1,84 @@
+name: Profile isolated Tickets wallet CPU
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-cpu.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tickets-vps-install
+  cancel-in-progress: false
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SOURCE_SHA: 4e04e464a9e1f1c21658653e9fa06d5cc1eef165
+      SOURCE_RUN: '36489497697'
+    steps:
+      - name: Check out exact Tickets source for isolated verification
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bechirobob/tickets
+          ref: 4e04e464a9e1f1c21658653e9fa06d5cc1eef165
+          persist-credentials: false
+          path: tickets-source
+      - name: Add profiler only to the synthetic test process
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tickets-source/scripts/verify-vps-capacity.mjs')
+          s=p.read_text().replace("['dist-vps/server.mjs']", "['--cpu-prof', '--cpu-prof-dir='+directory, 'dist-vps/server.mjs']")
+          replacement="""finally {await stop();
+            for(const file of readdirSync(directory).filter(f=>f.endsWith('.cpuprofile'))) {
+              const profile=JSON.parse(readFileSync(path.join(directory,file),'utf8')), hits=new Map();
+              for(const node of profile.nodes){const key=node.callFrame.functionName+' '+path.basename(node.callFrame.url);hits.set(key,(hits.get(key)??0)+(node.hitCount??0));}
+              console.log(JSON.stringify({syntheticCpuProfile:[...hits.entries()].sort((a,b)=>b[1]-a[1]).slice(0,20)}));
+            }
+          """
+          s=s.replace("finally {await stop();",replacement)
+          p.write_text(s)
+          PY
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Transfer isolated real-network rehearsal
+        run: |
+          tar -C tickets-source -cf - scripts/verify-vps-runtime.mjs scripts/verify-vps-capacity.mjs runtime/vps/database.mjs | tailscale ssh root@hermes "umask 077; mkdir -p /srv/becore-tickets/temporary/rehearsal-$SOURCE_SHA; tar -xf - -C /srv/becore-tickets/temporary/rehearsal-$SOURCE_SHA"
+          tailscale ssh root@hermes "bash -s -- '$SOURCE_SHA'" <<'REMOTE'
+          set -euo pipefail
+          revision=$1
+          test "$(readlink -f /srv/becore-tickets/current)" = "/srv/becore-tickets/releases/$revision"
+          stage="/srv/becore-tickets/temporary/rehearsal-$revision"
+          trap 'rm -rf "$stage"' EXIT
+          ln -s "/srv/becore-tickets/releases/$revision" "$stage/dist-vps"
+          ln -s "/srv/becore-tickets/releases/$revision/node_modules" "$stage/node_modules"
+          ln -s "/srv/becore-tickets/releases/$revision/migrations" "$stage/drizzle"
+          chown -hR becore-tickets:becore-tickets "$stage"
+          cd "$stage"
+          runuser -u becore-tickets -- node scripts/verify-vps-runtime.mjs
+          systemd-run --quiet --wait --collect --pipe --unit="tickets-capacity-${revision:0:12}" --property=User=becore-tickets --property=Group=becore-tickets --property="WorkingDirectory=$stage" --property=MemoryMax=1G --property=CPUQuota=150% --property=TasksMax=128 --property=LimitNOFILE=4096 --property=IPAddressDeny=any --property=IPAddressAllow=localhost --property=NoNewPrivileges=true --property=PrivateTmp=true --property=RuntimeMaxSec=240 /usr/bin/node scripts/verify-vps-capacity.mjs
+          REMOTE
+      - name: Verify bounded concurrency against the isolated service
+        run: |
+          tailscale ssh root@hermes 'python3 -' <<'PY'
+          import concurrent.futures,json,time,urllib.request,statistics
+          def request(n):
+              route='/api/public/events' if n%4 else '/'
+              req=urllib.request.Request('http://127.0.0.1:3118'+route,headers={'Host':'tickets.becoreops.com'})
+              start=time.monotonic()
+              with urllib.request.urlopen(req,timeout=15) as response:
+                  assert response.status==200
+                  assert response.headers.get('Content-Security-Policy')
+                  response.read()
+              return (time.monotonic()-start)*1000
+          with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+              durations=list(pool.map(request,range(40)))
+          print(json.dumps({'isolatedRequests':len(durations),'concurrency':8,'successes':len(durations),'medianMs':round(statistics.median(durations)),'maxMs':round(max(durations))}))
+          PY
+          tailscale ssh root@hermes 'systemctl show becore-tickets-preview.service -p MemoryCurrent -p MemoryPeak -p ActiveState; systemctl is-active becore-tickets-fallback.timer caddy; df -h /srv'
