@@ -1,0 +1,38 @@
+name: Diagnose isolated Tickets wallet latency
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-profile.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Measure synthetic SQLite commits and date formatting
+        run: |
+          tailscale ssh root@hermes 'node --input-type=module' <<'NODE'
+          import {DatabaseSync} from 'node:sqlite';
+          import {mkdtempSync,rmSync} from 'node:fs';
+          const path=mkdtempSync('/var/tmp/tickets-io-profile-');
+          const db=new DatabaseSync(path+'/test.sqlite');
+          try {
+            db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE fixture(id INTEGER PRIMARY KEY,value TEXT);');
+            let start=performance.now();
+            for(let i=0;i<600;i++){db.exec('BEGIN IMMEDIATE');db.prepare('INSERT INTO fixture VALUES (?,?)').run(i,'synthetic');db.exec('COMMIT');}
+            const individualCommitsMs=Math.round(performance.now()-start);
+            start=performance.now();
+            for(let i=0;i<1800;i++)new Intl.DateTimeFormat('en-GB',{dateStyle:'full',timeZone:'Africa/Accra'}).format(new Date());
+            const dateConstructorsMs=Math.round(performance.now()-start);
+            start=performance.now();
+            for(let i=0;i<600;i+=100){db.exec('BEGIN IMMEDIATE');for(let j=0;j<100;j++)db.prepare('UPDATE fixture SET value=? WHERE id=?').run('grouped',i+j);db.exec('COMMIT');}
+            console.log(JSON.stringify({synthetic:true,individualCommitsMs,dateConstructorsMs,groupedCommitsMs:Math.round(performance.now()-start)}));
+          } finally {db.close();rmSync(path,{recursive:true});}
+          NODE
