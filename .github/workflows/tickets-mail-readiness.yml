@@ -1,0 +1,21 @@
+name: Inspect Tickets mail readiness
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-mail-readiness.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check public DNS and service status without sending mail
+        run: |
+          node --input-type=module <<'NODE'
+          import {reverse,resolve4} from 'node:dns/promises';
+          const ptr=await reverse('51.195.20.137').catch(()=>[]);
+          const forward=await resolve4('mail.becoreops.com').catch(()=>[]);
+          const response=await fetch('https://mail.becoreops.com/healthz',{signal:AbortSignal.timeout(15000)});
+          console.log(JSON.stringify({ptr,forward,expectedPtr:'mail.becoreops.com',matchingReverse:ptr.includes('mail.becoreops.com'),healthStatus:response.status,emailSent:false}));
+          NODE
