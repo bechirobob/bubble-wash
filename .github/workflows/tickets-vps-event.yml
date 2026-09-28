@@ -1,0 +1,36 @@
+name: Inspect Tickets VPS event readiness
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-event.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Read host and Tickets service readiness
+        run: |
+          tailscale ssh root@hermes 'bash -s' <<'REMOTE'
+          set -eu
+          nproc
+          free -m
+          df -h /srv
+          cat /proc/loadavg
+          node --version
+          uname -m
+          systemctl is-active caddy
+          systemctl list-units 'becore-tickets*' --all --no-pager
+          ss -lnt | head -25
+          for dir in /srv/becore-tickets /srv/becore-tickets-preview /etc/becore-tickets /var/lib/becore-tickets; do
+            if [ -d "$dir" ]; then find "$dir" -maxdepth 2 -type f -printf '%p %s bytes\n' | head -30; fi
+          done
+          REMOTE
