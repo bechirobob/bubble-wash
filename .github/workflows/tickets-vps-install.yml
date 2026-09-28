@@ -14,14 +14,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SOURCE_SHA: 9ccd03621306e9dc7d41b4bef2a6a813c4105464
-      SOURCE_RUN: '36491153996'
+      SOURCE_SHA: 79fa5e68f9e7d5b90cf5f47a8bea9e0ac95c84d4
+      SOURCE_RUN: '36492808138'
     steps:
       - name: Check out exact Tickets source for isolated verification
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: bechirobob/tickets
-          ref: 9ccd03621306e9dc7d41b4bef2a6a813c4105464
+          ref: 79fa5e68f9e7d5b90cf5f47a8bea9e0ac95c84d4
           persist-credentials: false
           path: tickets-source
       - name: Require successful exact-source verification and download its artifact
@@ -80,8 +80,8 @@ jobs:
           ln -s "/srv/becore-tickets/releases/$revision/migrations" "$stage/drizzle"
           chown -hR becore-tickets:becore-tickets "$stage"
           cd "$stage"
-          runuser -u becore-tickets -- node scripts/verify-vps-runtime.mjs
-          TICKETS_REHEARSAL_SYSTEMD=1 /usr/bin/node scripts/verify-vps-capacity.mjs
+          runuser -u becore-tickets -- "/srv/becore-tickets/releases/$revision/bin/node" scripts/verify-vps-runtime.mjs
+          TICKETS_REHEARSAL_SYSTEMD=1 "/srv/becore-tickets/releases/$revision/bin/node" scripts/verify-vps-capacity.mjs
           REMOTE
       - name: Verify bounded concurrency against the isolated service
         run: |
