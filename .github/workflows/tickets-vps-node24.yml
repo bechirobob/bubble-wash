@@ -1,0 +1,103 @@
+name: Verify isolated Tickets Node 24 runtime
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-node24.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tickets-vps-install
+  cancel-in-progress: false
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SOURCE_SHA: 9ccd03621306e9dc7d41b4bef2a6a813c4105464
+      SOURCE_RUN: '36491153996'
+    steps:
+      - name: Check out exact Tickets source for isolated verification
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bechirobob/tickets
+          ref: 9ccd03621306e9dc7d41b4bef2a6a813c4105464
+          persist-credentials: false
+          path: tickets-source
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.21.0
+      - name: Verify shared business tests on Node 24
+        working-directory: tickets-source
+        run: |
+          npm ci
+          npm run test:vps
+      - name: Download and verify the official isolated Node binary
+        run: |
+          curl --fail --silent --show-error --proto '=https' --tlsv1.2 https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz -o node-v24.21.0-linux-x64.tar.xz
+          curl --fail --silent --show-error --proto '=https' --tlsv1.2 https://nodejs.org/dist/v24.21.0/SHASUMS256.txt -o node-shasums.txt
+          awk '$2 == "node-v24.21.0-linux-x64.tar.xz" {print}' node-shasums.txt > node-verify.txt
+          test "$(wc -l < node-verify.txt)" = 1
+          sha256sum --check node-verify.txt
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Install separate Node binary without changing other services
+        run: |
+          cat node-v24.21.0-linux-x64.tar.xz | tailscale ssh root@hermes 'umask 077; mkdir -p /srv/becore-tickets/temporary/node24; cat > /srv/becore-tickets/temporary/node24/runtime.tar.xz'
+          digest=$(sha256sum node-v24.21.0-linux-x64.tar.xz | cut -d ' ' -f 1)
+          tailscale ssh root@hermes "bash -s -- '$digest'" <<'REMOTE'
+          set -euo pipefail
+          stage=/srv/becore-tickets/temporary/node24
+          trap 'rm -rf "$stage"' EXIT
+          test "$(sha256sum "$stage/runtime.tar.xz" | cut -d ' ' -f 1)" = "$1"
+          target=/srv/becore-tickets/node-v24.21.0
+          if [ ! -d "$target" ]; then
+            mkdir "$stage/extracted"
+            tar --no-same-owner -xJf "$stage/runtime.tar.xz" --strip-components=1 -C "$stage/extracted"
+            chmod 0755 "$stage/extracted"
+            mv "$stage/extracted" "$target"
+          fi
+          test "$("$target/bin/node" --version)" = v24.21.0
+          /usr/bin/node --version
+          "$target/bin/node" --version
+          REMOTE
+      - name: Transfer isolated real-network rehearsal
+        run: |
+          tar -C tickets-source -cf - scripts/verify-vps-runtime.mjs scripts/verify-vps-capacity.mjs runtime/vps/database.mjs | tailscale ssh root@hermes "umask 077; mkdir -p /srv/becore-tickets/temporary/rehearsal-$SOURCE_SHA; tar -xf - -C /srv/becore-tickets/temporary/rehearsal-$SOURCE_SHA"
+          tailscale ssh root@hermes "bash -s -- '$SOURCE_SHA'" <<'REMOTE'
+          set -euo pipefail
+          revision=$1
+          test "$(readlink -f /srv/becore-tickets/current)" = "/srv/becore-tickets/releases/$revision"
+          stage="/srv/becore-tickets/temporary/rehearsal-$revision"
+          trap 'rm -rf "$stage"' EXIT
+          ln -s "/srv/becore-tickets/releases/$revision" "$stage/dist-vps"
+          ln -s "/srv/becore-tickets/releases/$revision/node_modules" "$stage/node_modules"
+          ln -s "/srv/becore-tickets/releases/$revision/migrations" "$stage/drizzle"
+          chown -hR becore-tickets:becore-tickets "$stage"
+          cd "$stage"
+          runuser -u becore-tickets -- /srv/becore-tickets/node-v24.21.0/bin/node scripts/verify-vps-runtime.mjs
+          TICKETS_REHEARSAL_SYSTEMD=1 /srv/becore-tickets/node-v24.21.0/bin/node scripts/verify-vps-capacity.mjs
+          REMOTE
+      - name: Verify bounded concurrency against the isolated service
+        run: |
+          tailscale ssh root@hermes 'python3 -' <<'PY'
+          import concurrent.futures,json,time,urllib.request,statistics
+          def request(n):
+              route='/api/public/events' if n%4 else '/'
+              req=urllib.request.Request('http://127.0.0.1:3118'+route,headers={'Host':'tickets.becoreops.com'})
+              start=time.monotonic()
+              with urllib.request.urlopen(req,timeout=15) as response:
+                  assert response.status==200
+                  assert response.headers.get('Content-Security-Policy')
+                  response.read()
+              return (time.monotonic()-start)*1000
+          with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+              durations=list(pool.map(request,range(40)))
+          print(json.dumps({'isolatedRequests':len(durations),'concurrency':8,'successes':len(durations),'medianMs':round(statistics.median(durations)),'maxMs':round(max(durations))}))
+          PY
+          tailscale ssh root@hermes 'systemctl show becore-tickets-preview.service -p MemoryCurrent -p MemoryPeak -p ActiveState; systemctl is-active becore-tickets-fallback.timer caddy; df -h /srv'
