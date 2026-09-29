@@ -1,0 +1,51 @@
+name: Upload Tickets reverse SQL through scoped encrypted capability
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-return-upload.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tickets-vps-handover
+  cancel-in-progress: false
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bechirobob/tickets
+          ref: f3e3dc7daab95f269dbab985566f882441257464
+          persist-credentials: false
+      - name: Verify authorized preparation and download encrypted capability
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/bechirobob/tickets/actions/runs/36512162403 > "$RUNNER_TEMP/preparation.json"
+          python3 - <<'PY'
+          import json,os
+          r=json.load(open(os.environ['RUNNER_TEMP']+'/preparation.json'))
+          assert r['head_sha']=='f3e3dc7daab95f269dbab985566f882441257464' and r['conclusion']=='success'
+          PY
+          gh run download 36512162403 --repo bechirobob/tickets --name scoped-return-36512162403 --dir scoped-return
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Upload private SQL directly to its one-time Cloudflare destination
+        run: |
+          set -euo pipefail
+          tar -cf - ops/handover/sqlite-export.mjs ops/handover/open-envelope.mjs ops/handover/return-metadata.mjs ops/handover/upload-return.mjs scoped-return/upload.json | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-scoped-36512162403; tar -xf - -C /var/tmp/tickets-scoped-36512162403'
+          tailscale ssh root@hermes 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          stage=/var/tmp/tickets-scoped-36512162403
+          trap 'rm -rf "$stage"' EXIT
+          cd "$stage"
+          /srv/becore-tickets/current/bin/node ops/handover/upload-return.mjs scoped-return/upload.json 36512162403
+          REMOTE
