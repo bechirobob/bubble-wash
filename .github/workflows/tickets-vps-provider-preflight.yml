@@ -1,0 +1,52 @@
+name: Tickets VPS provider connectivity preflight
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-provider-preflight.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Verify identities and provider access without sending or charging
+        run: |
+          tailscale ssh root@hermes '/srv/becore-tickets/current/bin/node --input-type=module' <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { createECDH } from 'node:crypto';
+          import { DatabaseSync } from 'node:sqlite';
+          const values = JSON.parse(readFileSync('/etc/becore-tickets/runtime.pending.json', 'utf8'));
+          const ec = createECDH('prime256v1');
+          ec.setPrivateKey(Buffer.from(values.VAPID_PRIVATE_KEY, 'base64url'));
+          const pushIdentityMatches = ec.getPublicKey().equals(Buffer.from(values.VAPID_PUBLIC_KEY, 'base64url'));
+          console.log(JSON.stringify({ pushIdentityMatches, photoModerationApiConfigured: Boolean(values.CLOUDFLARE_AI_TOKEN && values.CLOUDFLARE_ACCOUNT_ID) }));
+          if (!pushIdentityMatches) throw new Error('Push identity mismatch.');
+          for (const [provider, url, key] of [['paystack','https://api.paystack.co/balance',values.PAYSTACK_SECRET_KEY],['resend','https://api.resend.com/domains',values.RESEND_API_KEY]]) {
+            try {
+              const response = await fetch(url, { headers: { authorization: 'Bearer ' + key }, signal: AbortSignal.timeout(20000), redirect: 'error' });
+              const body = await response.json();
+              console.log(JSON.stringify({ provider, httpStatus: response.status, authenticatedRead: response.ok, ...(provider==='resend' && response.ok ? { sendingDomainVerified: body.data?.some(row=>row.name==='becoreops.com' && row.status==='verified') ?? false } : {}) }));
+            } catch { console.log(JSON.stringify({ provider, reachable: false })); }
+          }
+          const db = new DatabaseSync('/var/lib/becore-tickets-handover/rehearsal-36505772936/tickets.sqlite', { readOnly: true });
+          try {
+            const orders = db.prepare("SELECT provider_reference,total_amount_minor,currency FROM orders WHERE payment_provider='seevplus' AND provider_reference IS NOT NULL").all();
+            let verified = 0;
+            for (const row of orders) {
+              if (!/^PAY-[A-Za-z0-9-]{1,160}$/.test(row.provider_reference)) throw new Error('Invalid stored provider reference.');
+              const response = await fetch('https://api.seevplus.com/api/v1/developer/payments/' + encodeURIComponent(row.provider_reference), { signal: AbortSignal.timeout(20000), redirect: 'error' });
+              const body = await response.json();
+              if (response.ok && body.success && body.data?.reference === row.provider_reference && body.data.amount === row.total_amount_minor && body.data.currency === row.currency) verified++;
+            }
+            console.log(JSON.stringify({ provider: 'seevplus', existingReferencesChecked: orders.length, verified, newCharges: 0, databaseWrites: 0 }));
+          } catch { console.log(JSON.stringify({ provider: 'seevplus', verificationReadFailed: true, newCharges: 0 })); }
+          finally { db.close(); }
+          NODE
