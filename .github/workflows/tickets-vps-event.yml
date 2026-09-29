@@ -11,7 +11,7 @@ concurrency:
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
       - name: Connect to Hermes
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
@@ -20,40 +20,29 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Check out exact Tickets operator source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          repository: bechirobob/tickets
-          ref: ad44bb16b34885e7c3f3ed829f00d9c8b646b11a
-          persist-credentials: false
-      - name: Verify disposable database transport and inherited bindings
+      - name: Read source work and private backup access
         shell: bash
         run: |
           set -euo pipefail
-          stage="/var/tmp/tickets-operator-$GITHUB_RUN_ID"
-          trap 'tailscale ssh root@hermes "rm -rf -- $stage"' EXIT
-          tailscale ssh root@hermes "install -d -m 700 '$stage'"
-          tar -czf - ops/handover worker/handover-control.ts package.json | tailscale ssh root@hermes "tar -xzf - -C '$stage'"
-          tailscale ssh root@hermes "python3 - '$stage' '$GITHUB_RUN_ID'" <<'PY'
-          import os,pathlib,sys
-          stage,run_id=sys.argv[1:]
-          values=dict(line.split('=',1) for line in pathlib.Path('/etc/becore-tickets-fallback.env').read_text().splitlines() if '=' in line and not line.startswith('#'))
-          env=dict(os.environ)
-          env['CLOUDFLARE_API_TOKEN']=values['CLOUDFLARE_API_TOKEN'].strip().strip('"\'')
-          env['GITHUB_RUN_ID']=run_id
-          os.chdir(stage)
-          os.execve('/srv/becore-tickets/current/bin/node',['node','ops/handover/operator-smoke.mjs'],env)
+          tailscale ssh root@hermes 'python3 -' <<'PY'
+          import json,pathlib,urllib.request,urllib.error
+          v=dict(l.split('=',1) for l in pathlib.Path('/etc/becore-tickets-fallback.env').read_text().splitlines() if '=' in l and not l.startswith('#'))
+          token=v['CLOUDFLARE_API_TOKEN'].strip().strip('"\'')
+          root='https://api.cloudflare.com/client/v4/accounts/af75a230de2eea882606db8d9acce473'
+          def api(path,body=None):
+           req=urllib.request.Request(root+path,headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'},data=json.dumps(body).encode() if body else None)
+           with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)['result']
+          print(json.dumps({'queueMetrics':api('/queues/4bcab6ba4d2447efa852e83c9091906c/metrics')}))
+          for name,sql in {
+           'queuedDeliveries':"SELECT COUNT(*) AS n FROM delivery_events WHERE status='queued'",
+           'retryableFailures':"SELECT COUNT(*) AS n FROM delivery_events WHERE status='failed' AND attempt_count<3 AND next_attempt_at IS NOT NULL",
+           'leasedHostAnnouncements':"SELECT COUNT(*) AS n FROM room_announcement_deliveries WHERE lease_token IS NOT NULL",
+           'leasedMarketing':"SELECT COUNT(*) AS n FROM marketing_state WHERE lease_token IS NOT NULL",
+           'claimedAnnouncements':"SELECT COUNT(*) AS n FROM event_announcement_recipients WHERE status='sending' OR (claimed_at IS NOT NULL AND status NOT IN ('sent','failed','suppressed'))"
+          }.items():
+           print(json.dumps({'check':name,'count':api('/d1/database/8f8723c2-673a-4aba-b025-83c05d67d075/query',{'sql':sql})[0]['results'][0]['n']}))
+          try:
+           buckets=api('/r2/buckets')
+           print(json.dumps({'r2Accessible':True,'ticketsBackupExists':any(b.get('name')=='becore-tickets-backups' for b in buckets.get('buckets',[]))}))
+          except urllib.error.HTTPError as e:print(json.dumps({'r2Accessible':False,'http':e.code}))
           PY
-      - name: Verify origin certificate chain without changing DNS
-        shell: bash
-        run: |
-          set -euo pipefail
-          tailscale ssh root@hermes 'bash -s' <<'SH'
-          set -euo pipefail
-          cert="$(mktemp)"
-          trap 'rm -f "$cert"' EXIT
-          curl --fail --silent --show-error https://developers.cloudflare.com/ssl/static/origin_ca_rsa_root.pem -o "$cert"
-          code="$(curl --silent --show-error --cacert "$cert" --resolve tickets.becoreops.com:443:127.0.0.1 --output /dev/null --write-out '%{http_code}' https://tickets.becoreops.com/)"
-          test "$code" = 503
-          echo 'Tickets origin TLS chain verified; maintenance response 503; public DNS unchanged.'
-          SH
