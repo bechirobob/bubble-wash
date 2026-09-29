@@ -1,4 +1,4 @@
-name: Inspect Tickets VPS event readiness
+name: Inspect Tickets VPS cutover prerequisites
 on:
   push:
     branches: [ops/tickets-vps-event-20260928]
@@ -30,6 +30,15 @@ jobs:
                   print(json.dumps({'privateConfig':p.name,'mode':oct(stat.S_IMODE(p.stat().st_mode)),'keys':sorted(values) if isinstance(values,dict) else []}))
               except Exception:
                   print(json.dumps({'privateConfig':p.name,'readableJson':False}))
+          PY
+          python3 - <<'PY'
+          import pathlib,json
+          p=pathlib.Path('/srv/becore-tickets/current/release.json')
+          if p.exists(): print(json.dumps({'release':json.loads(p.read_text())}))
+          for name in ['standby-verification.json','handoff.json']:
+              p=pathlib.Path('/var/lib/becore-tickets-handover')/name
+              if p.exists(): print(json.dumps({'report':name,'data':json.loads(p.read_text())}))
+          print(json.dumps({'runtimePresent':pathlib.Path('/etc/becore-tickets/runtime.json').exists(),'fallbackCredentialPresent':pathlib.Path('/etc/becore-tickets-fallback.env').exists()}))
           PY
           nproc
           free -m
