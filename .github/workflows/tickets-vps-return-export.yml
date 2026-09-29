@@ -1,0 +1,60 @@
+name: Export encrypted Tickets standby SQL for return rehearsal
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-return-export.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tickets-vps-handover
+  cancel-in-progress: false
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bechirobob/tickets
+          ref: 817c6c972c07febc739e0b948cefc298057bff40
+          persist-credentials: false
+      - name: Obtain public key from exact authorized return workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/bechirobob/tickets/actions/runs/36511764000 > "$RUNNER_TEMP/return-run.json"
+          python3 - <<'PY'
+          import json,os
+          r=json.load(open(os.environ['RUNNER_TEMP']+'/return-run.json'))
+          assert r['head_sha']=='817c6c972c07febc739e0b948cefc298057bff40' and r['path']=='.github/workflows/handover-return-cloudflare.yml'
+          assert r['status']=='in_progress'
+          PY
+          gh run download 36511764000 --repo bechirobob/tickets --name return-recipient-36511764000 --dir return-recipient
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Encrypt on Hermes and retrieve ciphertext only
+        run: |
+          set -euo pipefail
+          tar -cf - ops/handover/sqlite-export.mjs ops/handover/seal-return-rehearsal.mjs worker/handover-crypto.ts return-recipient/recipient.json | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-return-36511764000; tar -xf - -C /var/tmp/tickets-return-36511764000'
+          tailscale ssh root@hermes 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /var/tmp/tickets-return-36511764000
+          /srv/becore-tickets/current/bin/node ops/handover/seal-return-rehearsal.mjs return-recipient/recipient.json return.json
+          REMOTE
+          mkdir encrypted-return
+          tailscale ssh root@hermes 'cat /var/tmp/tickets-return-36511764000/return.json' > encrypted-return/return.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tickets-return-36511764000
+          path: encrypted-return/return.json
+          retention-days: 1
+      - name: Remove temporary encrypted export staging
+        if: always()
+        run: tailscale ssh root@hermes 'rm -rf /var/tmp/tickets-return-36511764000'
