@@ -1,4 +1,4 @@
-name: Upload Tickets reverse SQL through scoped encrypted capability
+name: Inspect phased Tickets return digests on Hermes
 on:
   push:
     branches: [ops/tickets-vps-event-20260928]
@@ -17,20 +17,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: bechirobob/tickets
-          ref: 4b37f9c5df36c08306d6fae7bb78f6a9a241b58a
+          ref: 0e1737c70de24547487000d9e92f427aafd535ae
           persist-credentials: false
-      - name: Verify authorized preparation and download encrypted capability
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh api repos/bechirobob/tickets/actions/runs/36516258577 > "$RUNNER_TEMP/preparation.json"
-          python3 - <<'PY'
-          import json,os
-          r=json.load(open(os.environ['RUNNER_TEMP']+'/preparation.json'))
-          assert r['head_sha']=='4b37f9c5df36c08306d6fae7bb78f6a9a241b58a' and r['conclusion']=='success'
-          PY
-          gh run download 36516258577 --repo bechirobob/tickets --name scoped-return-36516258577 --dir scoped-return
       - name: Connect to Hermes
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
         with:
@@ -38,14 +26,14 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Upload private SQL directly to its one-time Cloudflare destination
+      - name: Read only aggregate phase digests from private standby
         run: |
           set -euo pipefail
-          tar -cf - ops/handover/sqlite-export.mjs ops/handover/open-envelope.mjs ops/handover/return-metadata.mjs ops/handover/upload-return.mjs scoped-return/upload.json | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-scoped-36516258577; tar -xf - -C /var/tmp/tickets-scoped-36516258577'
+          tar -cf - ops/handover/sqlite-export.mjs ops/handover/return-metadata.mjs | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-phase-metadata-0e1737c7; tar -xf - -C /var/tmp/tickets-phase-metadata-0e1737c7'
           tailscale ssh root@hermes 'bash -s' <<'REMOTE'
           set -euo pipefail
-          stage=/var/tmp/tickets-scoped-36516258577
+          stage=/var/tmp/tickets-phase-metadata-0e1737c7
           trap 'rm -rf "$stage"' EXIT
           cd "$stage"
-          /srv/becore-tickets/current/bin/node ops/handover/upload-return.mjs scoped-return/upload.json 36516258577
+          /srv/becore-tickets/current/bin/node ops/handover/return-metadata.mjs --inspect
           REMOTE
