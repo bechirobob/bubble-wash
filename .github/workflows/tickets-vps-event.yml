@@ -20,12 +20,23 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Prepare maintenance-only Tickets TLS origin
+      - name: Read scoped operator readiness
+        shell: bash
         run: |
-          tailscale ssh root@hermes 'bash -s' <<'REMOTE'
-          set -eu
-          work=$(mktemp -d /var/lib/becore-tickets-handover/origin-XXXXXX)
-          trap 'rm -rf "$work"' EXIT
-          curl --fail --silent --show-error --location 'https://raw.githubusercontent.com/bechirobob/tickets/6bda273f4d6e7c6fe9139986d490266c270e3166/ops/vps/prepare-origin.py' -o "$work/prepare-origin.py"
-          python3 "$work/prepare-origin.py"
-          REMOTE
+          set -euo pipefail
+          tailscale ssh root@hermes 'python3 -' <<'PY'
+          import json,pathlib,urllib.request,urllib.error,ssl,subprocess
+          p=pathlib.Path('/etc/becore-tickets-fallback.env')
+          v=dict(l.split('=',1) for l in p.read_text().splitlines() if '=' in l and not l.startswith('#'))
+          token=v['CLOUDFLARE_API_TOKEN'].strip().strip('"\'')
+          root='https://api.cloudflare.com/client/v4'
+          paths={'workerSettings':'/accounts/af75a230de2eea882606db8d9acce473/workers/scripts/becore-tickets/settings','sourceDatabase':'/accounts/af75a230de2eea882606db8d9acce473/d1/database/8f8723c2-673a-4aba-b025-83c05d67d075','queue':'/accounts/af75a230de2eea882606db8d9acce473/queues/4bcab6ba4d2447efa852e83c9091906c'}
+          for name,path in paths.items():
+           try:
+            with urllib.request.urlopen(urllib.request.Request(root+path,headers={'Authorization':'Bearer '+token}),timeout=25) as r:
+             data=json.load(r);print(json.dumps({'probe':name,'http':r.status,'success':data.get('success',False)}))
+           except urllib.error.HTTPError as e:print(json.dumps({'probe':name,'http':e.code,'success':False}))
+          cert=pathlib.Path('/etc/caddy/certs/becore-tickets/origin.pem')
+          details=subprocess.run(['openssl','x509','-in',str(cert),'-noout','-checkhost','tickets.becoreops.com','-checkend','2592000'],capture_output=True)
+          print(json.dumps({'originCertificateValid':details.returncode==0,'productionServiceExists':pathlib.Path('/etc/systemd/system/becore-tickets.service').exists(),'productionConfigExists':pathlib.Path('/etc/becore-tickets/runtime.json').exists()}))
+          PY
