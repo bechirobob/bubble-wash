@@ -14,14 +14,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SOURCE_SHA: 5807f6ea9a7baef998cf379dc298ce636caf1f60
-      SOURCE_RUN: '36507766312'
+      SOURCE_SHA: 492036711e4fb118347cc12795cf60eba0a3bb24
+      SOURCE_RUN: '36542575709'
     steps:
       - name: Check out exact Tickets source for isolated verification
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: bechirobob/tickets
-          ref: 5807f6ea9a7baef998cf379dc298ce636caf1f60
+          ref: 492036711e4fb118347cc12795cf60eba0a3bb24
           persist-credentials: false
           path: tickets-source
       - name: Require successful exact-source verification and download its artifact
