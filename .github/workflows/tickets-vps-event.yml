@@ -37,12 +37,14 @@ jobs:
            const f=new FormData();f.set('metadata',JSON.stringify({main_module:'test.mjs',compatibility_date:'2026-08-11'}));f.set('test.mjs',new Blob(['export default {fetch(){return new Response("Disposable routing test",{status:404})}}'],{type:'application/javascript+module'}),'test.mjs');
            attempted=true;await api(worker,'PUT',f);
            await api(zone+'/dns_records','POST',{type:'A',name:hostname,content:'51.195.20.137',ttl:1,proxied:true});
+           for(const dns of await api(zone+'/dns_records?name='+hostname)){assert.ok(dns.type==='A'&&dns.content==='51.195.20.137'&&dns.proxied===true);await api(zone+'/dns_records/'+dns.id,'DELETE')}
            await api(root+'/workers/domains','PUT',{hostname,service:name,zone_id:zone.split('/')[2]});
            let domains=(await api(root+'/workers/domains')).filter(d=>d.hostname===hostname);assert.equal(domains.length,1);assert.equal(domains[0].service,name);
            await api(root+'/workers/domains/'+domains[0].id,'DELETE');
            const records=await api(zone+'/dns_records?name='+hostname);assert.ok(records.length<=1);
            const desired={type:'A',name:hostname,content:'51.195.20.137',ttl:1,proxied:true};
            if(records.length)await api(zone+'/dns_records/'+records[0].id,'PUT',desired);else await api(zone+'/dns_records','POST',desired);
+           for(const dns of await api(zone+'/dns_records?name='+hostname)){assert.ok(dns.type==='A'&&dns.content==='51.195.20.137'&&dns.proxied===true);await api(zone+'/dns_records/'+dns.id,'DELETE')}
            await api(root+'/workers/domains','PUT',{hostname,service:name,zone_id:zone.split('/')[2]});
            domains=(await api(root+'/workers/domains')).filter(d=>d.hostname===hostname);assert.equal(domains.length,1);assert.equal(domains[0].service,name);
            console.log(JSON.stringify({routingRoundTripVerified:true,productionChanged:false}));
