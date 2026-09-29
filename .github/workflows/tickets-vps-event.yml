@@ -5,6 +5,9 @@ on:
     paths: [.github/workflows/tickets-vps-event.yml]
 permissions:
   contents: read
+concurrency:
+  group: tickets-vps-handover
+  cancel-in-progress: false
 jobs:
   inspect:
     runs-on: ubuntu-latest
@@ -53,3 +56,42 @@ jobs:
             if [ -d "$dir" ]; then find "$dir" -maxdepth 2 -type f -printf '%p %s bytes\n' | head -30; fi
           done
           REMOTE
+      - name: Record verified standby SQL return
+        run: |
+          tailscale ssh root@hermes 'python3 -' <<'PY'
+          import json,os,pathlib,stat,tempfile
+          p=pathlib.Path('/var/lib/becore-tickets-handover/standby-verification.json')
+          st=p.lstat()
+          assert stat.S_ISREG(st.st_mode) and st.st_uid==0 and not st.st_mode & 0o077
+          report=json.loads(p.read_text())
+          assert report['databaseTransfer']=='36505772936'
+          assert report['roomTransfer']=='36507909340'
+          assert report['database']['tables']==107 and report['database']['rows']==430
+          assert report['activated'] is False and report['liveWritesPaused'] is False
+          report['cloudflareSqlReturn']={
+            'repository':'bechirobob/tickets',
+            'runId':36535200847,
+            'revision':'1ba9ab96958e3dbf20153ea4998acf316795debb',
+            'verifiedAt':'2026-09-29T07:13:05Z',
+            'actualVpsSqlRestoredInCloudflare':True,
+            'exactSchemaRowsAndSequences':True,
+            'tables':107,'rows':430,
+            'disposableTargetRemoved':True,
+            'productionChanged':False
+          }
+          report['cutoverReady']=False
+          report['remaining']='Live activation requires coordinated Cloudflare D1/Room/queue freeze, a fresh consistent snapshot, pending-delivery reconciliation, live Room reverse-import verification, and secured public routing/rollback rehearsal.'
+          fd,name=tempfile.mkstemp(prefix='.standby-',dir=p.parent)
+          try:
+              with os.fdopen(fd,'w') as f:
+                  json.dump(report,f,indent=2)
+                  f.write('\n')
+                  f.flush()
+                  os.fsync(f.fileno())
+              os.replace(name,p)
+          finally:
+              if os.path.exists(name): os.unlink(name)
+          saved=json.loads(p.read_text())
+          assert saved==report
+          print(json.dumps({'standbySqlReturnRecorded':True,'runId':36535200847,'cutoverReady':saved['cutoverReady'],'activated':saved['activated']}))
+          PY
