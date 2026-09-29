@@ -1,0 +1,53 @@
+name: Verify Tickets standby SQL return path on Hermes
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-standby-verify.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tickets-vps-handover
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bechirobob/tickets
+          ref: 771bfaf9ed8c2fe24fdcdc3adf5c91072c29bec1
+          persist-credentials: false
+      - name: Require exact-source verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/bechirobob/tickets/actions/runs/36511276156 > "$RUNNER_TEMP/check.json"
+          python3 - <<'PY'
+          import json,os
+          run=json.load(open(os.environ['RUNNER_TEMP']+'/check.json'))
+          assert run['conclusion']=='success' and run['head_sha']=='771bfaf9ed8c2fe24fdcdc3adf5c91072c29bec1'
+          PY
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Verify existing private snapshots without changing live services
+        run: |
+          tar -cf - ops/handover/sqlite-export.mjs ops/handover/writer-lock.mjs ops/handover/verify-restored-state.mjs | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-standby-771bfaf9ed8c2fe24fdcdc3adf5c91072c29bec1; tar -xf - -C /var/tmp/tickets-standby-771bfaf9ed8c2fe24fdcdc3adf5c91072c29bec1'
+          tailscale ssh root@hermes 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          stage=/var/tmp/tickets-standby-771bfaf9ed8c2fe24fdcdc3adf5c91072c29bec1
+          trap 'rm -rf "$stage"' EXIT
+          cd "$stage"
+          /srv/becore-tickets/current/bin/node ops/handover/verify-restored-state.mjs 36505772936 36507909340 771bfaf9ed8c2fe24fdcdc3adf5c91072c29bec1
+          systemctl is-active becore-tickets-preview.service caddy
+          curl -fsS --max-time 10 -H 'Host: tickets.becoreops.com' http://127.0.0.1:3118/healthz
+          df -h /
+          free -m
+          REMOTE
