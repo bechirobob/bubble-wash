@@ -24,13 +24,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api repos/bechirobob/tickets/actions/runs/36513757529 > "$RUNNER_TEMP/preparation.json"
+          gh api repos/bechirobob/tickets/actions/runs/36513757418 > "$RUNNER_TEMP/preparation.json"
           python3 - <<'PY'
           import json,os
           r=json.load(open(os.environ['RUNNER_TEMP']+'/preparation.json'))
           assert r['head_sha']=='da7a6185b9e6e4e2df6b3b2803bd3b6c65db9bb3' and r['conclusion']=='success'
           PY
-          gh run download 36513757529 --repo bechirobob/tickets --name scoped-return-36513757529 --dir scoped-return
+          gh run download 36513757418 --repo bechirobob/tickets --name scoped-return-36513757418 --dir scoped-return
       - name: Connect to Hermes
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
         with:
@@ -41,11 +41,11 @@ jobs:
       - name: Upload private SQL directly to its one-time Cloudflare destination
         run: |
           set -euo pipefail
-          tar -cf - ops/handover/sqlite-export.mjs ops/handover/open-envelope.mjs ops/handover/return-metadata.mjs ops/handover/upload-return.mjs scoped-return/upload.json | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-scoped-36513757529; tar -xf - -C /var/tmp/tickets-scoped-36513757529'
+          tar -cf - ops/handover/sqlite-export.mjs ops/handover/open-envelope.mjs ops/handover/return-metadata.mjs ops/handover/upload-return.mjs scoped-return/upload.json | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-scoped-36513757418; tar -xf - -C /var/tmp/tickets-scoped-36513757418'
           tailscale ssh root@hermes 'bash -s' <<'REMOTE'
           set -euo pipefail
-          stage=/var/tmp/tickets-scoped-36513757529
+          stage=/var/tmp/tickets-scoped-36513757418
           trap 'rm -rf "$stage"' EXIT
           cd "$stage"
-          /srv/becore-tickets/current/bin/node ops/handover/upload-return.mjs scoped-return/upload.json 36513757529
+          /srv/becore-tickets/current/bin/node ops/handover/upload-return.mjs scoped-return/upload.json 36513757418
           REMOTE
