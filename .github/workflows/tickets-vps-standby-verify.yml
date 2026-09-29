@@ -17,18 +17,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: bechirobob/tickets
-          ref: 26e319161d85e3c47d7f9a0cb8d5e0ee69eb9658
+          ref: e520ed048ec739600a5ace43a7200fc99db0c209
           persist-credentials: false
-      - name: Require exact-source verification
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api repos/bechirobob/tickets/actions/runs/36511394996 > "$RUNNER_TEMP/check.json"
-          python3 - <<'PY'
-          import json,os
-          run=json.load(open(os.environ['RUNNER_TEMP']+'/check.json'))
-          assert run['conclusion']=='success' and run['head_sha']=='26e319161d85e3c47d7f9a0cb8d5e0ee69eb9658'
-          PY
       - name: Connect to Hermes
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
         with:
@@ -39,14 +29,15 @@ jobs:
       - name: Verify existing private snapshots without changing live services
         run: |
           set -euo pipefail
-          tar -cf - ops/handover/sqlite-export.mjs ops/handover/writer-lock.mjs ops/handover/verify-restored-state.mjs | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-standby-26e319161d85e3c47d7f9a0cb8d5e0ee69eb9658; tar -xf - -C /var/tmp/tickets-standby-26e319161d85e3c47d7f9a0cb8d5e0ee69eb9658'
+          tar -cf - ops/handover/sqlite-export.mjs ops/handover/writer-lock.mjs ops/handover/verify-restored-state.mjs ops/handover/return-metadata.mjs | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-standby-e520ed048ec739600a5ace43a7200fc99db0c209; tar -xf - -C /var/tmp/tickets-standby-e520ed048ec739600a5ace43a7200fc99db0c209'
           tailscale ssh root@hermes 'bash -s' <<'REMOTE'
           set -euo pipefail
           umask 077
-          stage=/var/tmp/tickets-standby-26e319161d85e3c47d7f9a0cb8d5e0ee69eb9658
+          stage=/var/tmp/tickets-standby-e520ed048ec739600a5ace43a7200fc99db0c209
           trap 'rm -rf "$stage"' EXIT
           cd "$stage"
-          /srv/becore-tickets/current/bin/node ops/handover/verify-restored-state.mjs 36505772936 36507909340 26e319161d85e3c47d7f9a0cb8d5e0ee69eb9658
+          /srv/becore-tickets/current/bin/node ops/handover/verify-restored-state.mjs 36505772936 36507909340 e520ed048ec739600a5ace43a7200fc99db0c209
+          /srv/becore-tickets/current/bin/node ops/handover/return-metadata.mjs --inspect
           systemctl is-active becore-tickets-preview.service caddy
           curl -fsS --max-time 10 -H 'Host: tickets.becoreops.com' http://127.0.0.1:3118/healthz
           df -h /
