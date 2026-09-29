@@ -17,20 +17,20 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: bechirobob/tickets
-          ref: 76b6fbe06ea2f0e7e54df7a5f4018f7214420e1c
+          ref: b3bc3db3bd20f7087c93f8e640765c493077e7e0
           persist-credentials: false
       - name: Verify authorized preparation and download encrypted capability
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api repos/bechirobob/tickets/actions/runs/36512972209 > "$RUNNER_TEMP/preparation.json"
+          gh api repos/bechirobob/tickets/actions/runs/36513281723 > "$RUNNER_TEMP/preparation.json"
           python3 - <<'PY'
           import json,os
           r=json.load(open(os.environ['RUNNER_TEMP']+'/preparation.json'))
-          assert r['head_sha']=='76b6fbe06ea2f0e7e54df7a5f4018f7214420e1c' and r['conclusion']=='success'
+          assert r['head_sha']=='b3bc3db3bd20f7087c93f8e640765c493077e7e0' and r['conclusion']=='success'
           PY
-          gh run download 36512972209 --repo bechirobob/tickets --name scoped-return-36512972209 --dir scoped-return
+          gh run download 36513281723 --repo bechirobob/tickets --name scoped-return-36513281723 --dir scoped-return
       - name: Connect to Hermes
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
         with:
@@ -41,11 +41,11 @@ jobs:
       - name: Upload private SQL directly to its one-time Cloudflare destination
         run: |
           set -euo pipefail
-          tar -cf - ops/handover/sqlite-export.mjs ops/handover/open-envelope.mjs ops/handover/return-metadata.mjs ops/handover/upload-return.mjs scoped-return/upload.json | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-scoped-36512972209; tar -xf - -C /var/tmp/tickets-scoped-36512972209'
+          tar -cf - ops/handover/sqlite-export.mjs ops/handover/open-envelope.mjs ops/handover/return-metadata.mjs ops/handover/upload-return.mjs scoped-return/upload.json | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-scoped-36513281723; tar -xf - -C /var/tmp/tickets-scoped-36513281723'
           tailscale ssh root@hermes 'bash -s' <<'REMOTE'
           set -euo pipefail
-          stage=/var/tmp/tickets-scoped-36512972209
+          stage=/var/tmp/tickets-scoped-36513281723
           trap 'rm -rf "$stage"' EXIT
           cd "$stage"
-          /srv/becore-tickets/current/bin/node ops/handover/upload-return.mjs scoped-return/upload.json 36512972209
+          /srv/becore-tickets/current/bin/node ops/handover/upload-return.mjs scoped-return/upload.json 36513281723
           REMOTE
