@@ -21,12 +21,19 @@ jobs:
         run: |
           tailscale ssh root@hermes '/srv/becore-tickets/current/bin/node --input-type=module' <<'NODE'
           import { readFileSync } from 'node:fs';
-          import { createECDH } from 'node:crypto';
+          import { createECDH, createPrivateKey, createPublicKey } from 'node:crypto';
           import { DatabaseSync } from 'node:sqlite';
           const values = JSON.parse(readFileSync('/etc/becore-tickets/runtime.pending.json', 'utf8'));
-          const ec = createECDH('prime256v1');
-          ec.setPrivateKey(Buffer.from(values.VAPID_PRIVATE_KEY, 'base64url'));
-          const pushIdentityMatches = ec.getPublicKey().equals(Buffer.from(values.VAPID_PUBLIC_KEY, 'base64url'));
+          const decoded = Buffer.from(values.VAPID_PRIVATE_KEY, 'base64url');
+          let derived;
+          if (decoded.length === 32) {
+            const ec = createECDH('prime256v1'); ec.setPrivateKey(decoded); derived = ec.getPublicKey();
+          } else {
+            const jwk = createPublicKey(createPrivateKey({ key: decoded, format: 'der', type: 'pkcs8' })).export({ format: 'jwk' });
+            if (jwk.crv !== 'P-256') throw new Error('Unexpected push curve.');
+            derived = Buffer.concat([Buffer.from([4]), Buffer.from(jwk.x, 'base64url'), Buffer.from(jwk.y, 'base64url')]);
+          }
+          const pushIdentityMatches = derived.equals(Buffer.from(values.VAPID_PUBLIC_KEY, 'base64url'));
           console.log(JSON.stringify({ pushIdentityMatches, photoModerationApiConfigured: Boolean(values.CLOUDFLARE_AI_TOKEN && values.CLOUDFLARE_ACCOUNT_ID) }));
           if (!pushIdentityMatches) throw new Error('Push identity mismatch.');
           for (const [provider, url, key] of [['paystack','https://api.paystack.co/balance',values.PAYSTACK_SECRET_KEY],['resend','https://api.resend.com/domains',values.RESEND_API_KEY]]) {
