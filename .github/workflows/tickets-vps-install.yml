@@ -14,14 +14,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SOURCE_SHA: 79fa5e68f9e7d5b90cf5f47a8bea9e0ac95c84d4
-      SOURCE_RUN: '36492808138'
+      SOURCE_SHA: 8e606198440d648e4ccbfa82119db943892dd64c
+      SOURCE_RUN: '36501239467'
     steps:
       - name: Check out exact Tickets source for isolated verification
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: bechirobob/tickets
-          ref: 79fa5e68f9e7d5b90cf5f47a8bea9e0ac95c84d4
+          ref: 8e606198440d648e4ccbfa82119db943892dd64c
           persist-credentials: false
           path: tickets-source
       - name: Require successful exact-source verification and download its artifact
@@ -65,6 +65,16 @@ jobs:
           python3 "$stage/source/operations/install-preview.py" "$stage/source" "$revision"
           systemctl is-active becore-tickets-preview.service becore-tickets-retention.timer becore-tickets-fallback.timer caddy
           systemctl show becore-tickets-preview.service -p MemoryCurrent -p MemoryPeak -p ActiveState -p SubState -p IPAddressDeny -p IPAddressAllow
+          python3 - <<'PY'
+          import pathlib,json,stat
+          root=pathlib.Path('/etc/becore-tickets')
+          for p in sorted(root.glob('*.json')):
+              try:
+                  values=json.loads(p.read_text())
+                  print(json.dumps({'privateConfig':p.name,'mode':oct(stat.S_IMODE(p.stat().st_mode)),'keys':sorted(values) if isinstance(values,dict) else []}))
+              except Exception:
+                  print(json.dumps({'privateConfig':p.name,'readableJson':False}))
+          PY
           du -sh "/srv/becore-tickets/releases/$revision" /var/lib/becore-tickets-preview
           REMOTE
       - name: Transfer isolated real-network rehearsal
