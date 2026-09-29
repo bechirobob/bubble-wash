@@ -1,0 +1,60 @@
+name: Install encrypted Tickets configuration on Hermes
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-configuration.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tickets-vps-handover
+  cancel-in-progress: false
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bechirobob/tickets
+          ref: 0a74c92c9f3b5e3aeea9d7b666cf215ea3bf14b6
+          persist-credentials: false
+      - name: Wait for successful encrypted configuration collection
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 130); do
+            gh api repos/bechirobob/tickets/actions/runs/36506762582 > "$RUNNER_TEMP/transfer-run.json"
+            status=$(python3 - <<'PY'
+          import json,os
+          r=json.load(open(os.environ['RUNNER_TEMP']+'/transfer-run.json'))
+          assert r['head_sha']=='6f9f998e5e2dae6d9fe92cb2396ae7aa82d5118c'
+          print(r['conclusion'] if r['status']=='completed' else 'waiting')
+          PY
+            )
+            if [ "$status" = success ]; then break; fi
+            if [ "$status" != waiting ]; then exit 1; fi
+            sleep 10
+          done
+          test "$status" = success
+          gh run download 36506762582 --repo bechirobob/tickets --name tickets-encrypted-configuration --dir encrypted
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Authenticate and decrypt configuration on its destination only
+        run: |
+          tar -cf - ops/handover/open-envelope.mjs ops/handover/install-configuration.mjs encrypted/configuration.json | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-config-36506762582; tar -xf - -C /var/tmp/tickets-config-36506762582'
+          tailscale ssh root@hermes 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          stage=/var/tmp/tickets-config-36506762582
+          trap 'rm -rf "$stage"' EXIT
+          cd "$stage"
+          /srv/becore-tickets/current/bin/node ops/handover/install-configuration.mjs encrypted/configuration.json 0a74c92c9f3b5e3aeea9d7b666cf215ea3bf14b6
+          stat -c 'Private configuration mode: %a' /etc/becore-tickets/runtime.pending.json
+          systemctl is-active becore-tickets-preview.service caddy
+          REMOTE
