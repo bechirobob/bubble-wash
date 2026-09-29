@@ -20,13 +20,12 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Inspect origin certificate support
+      - name: Prepare maintenance-only Tickets TLS origin
         run: |
-          tailscale ssh root@hermes 'python3 -' <<'PY'
-          import pathlib,json,subprocess,shutil
-          p=pathlib.Path('/etc/caddy/becore-tickets-fallback.caddy')
-          if p.exists(): print(json.dumps({'fallbackCaddy':p.read_text()}))
-          modules=subprocess.check_output(['caddy','list-modules'],text=True)
-          print(json.dumps({'cloudflareDnsModule':'dns.providers.cloudflare' in modules,'certbot':shutil.which('certbot'),'certbotConfigExists':pathlib.Path('/etc/letsencrypt/renewal').exists()}))
-          print(json.dumps({'node':subprocess.check_output(['/srv/becore-tickets/current/bin/node','--version'],text=True).strip()}))
-          PY
+          tailscale ssh root@hermes 'bash -s' <<'REMOTE'
+          set -eu
+          work=$(mktemp -d /var/lib/becore-tickets-handover/origin-XXXXXX)
+          trap 'rm -rf "$work"' EXIT
+          curl --fail --silent --show-error --location 'https://raw.githubusercontent.com/bechirobob/tickets/4ead7609028b73f1de88e11e4de851e3e2b23f9e/ops/vps/prepare-origin.py' -o "$work/prepare-origin.py"
+          python3 "$work/prepare-origin.py"
+          REMOTE
