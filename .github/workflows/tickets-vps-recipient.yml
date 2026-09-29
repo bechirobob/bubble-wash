@@ -1,0 +1,39 @@
+name: Prepare Tickets encrypted handover recipient
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-recipient.yml]
+permissions:
+  contents: read
+concurrency:
+  group: tickets-vps-handover
+  cancel-in-progress: false
+jobs:
+  recipient:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Create private recipient key on destination only
+        run: |
+          tailscale ssh root@hermes '/srv/becore-tickets/current/bin/node --input-type=module' <<'NODE'
+          import { generateKeyPairSync, createPublicKey, createHash } from 'node:crypto';
+          import { mkdirSync, existsSync, writeFileSync, readFileSync, statSync } from 'node:fs';
+          const directory = '/etc/becore-tickets/handover';
+          mkdirSync(directory, { recursive: true, mode: 0o700 });
+          const file = directory + '/recipient.pem';
+          if (!existsSync(file)) {
+            const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 3072 });
+            writeFileSync(file, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600, flag: 'wx' });
+          }
+          if ((statSync(file).mode & 0o077) !== 0) throw new Error('Private recipient permissions invalid.');
+          const publicKey = createPublicKey(readFileSync(file)).export({ type: 'spki', format: 'der' }).toString('base64');
+          const fingerprint = createHash('sha256').update(Buffer.from(publicKey, 'base64')).digest('hex');
+          console.log(JSON.stringify({ recipient: 'hermes-tickets', publicKey, fingerprint, privateKeyStayedOnVps: true }));
+          NODE
