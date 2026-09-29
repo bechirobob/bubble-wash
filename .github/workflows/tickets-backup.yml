@@ -1,0 +1,92 @@
+name: Tickets encrypted production backup
+on:
+  push:
+    branches: [main, ops/tickets-backups-20260929]
+    paths: [.github/workflows/tickets-backup.yml]
+  schedule:
+    - cron: '45 1 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: tickets-vps-handover
+  cancel-in-progress: false
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Check whether Tickets is the live writer
+        id: writer
+        shell: bash
+        run: |
+          set -euo pipefail
+          active="$(tailscale ssh root@hermes 'python3 -' <<'PY'
+          import json,urllib.request
+          try:
+            req=urllib.request.Request('http://127.0.0.1:3119/healthz',headers={'Host':'tickets.becoreops.com'})
+            with urllib.request.urlopen(req,timeout=5) as response: health=json.load(response)
+            print('true' if health.get('active') is True and health.get('runtime')=='vps' else 'false')
+          except Exception: print('false')
+          PY
+          )"
+          [[ "$active" == true || "$active" == false ]]
+          echo "active=$active" >> "$GITHUB_OUTPUT"
+      - name: Create encrypted backup and test complete restore
+        if: steps.writer.outputs.active == 'true'
+        id: backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(tailscale ssh root@hermes 'bash -s' <<'SH'
+          set -euo pipefail
+          exec 9>/run/lock/becore-tickets-deploy.lock
+          flock -n 9
+          release="$(systemctl show becore-tickets.service --property=WorkingDirectory --value)"
+          test -f "$release/operations/backup.mjs"
+          result="$("$release/bin/node" "$release/operations/backup.mjs")"
+          name="$(printf '%s' "$result" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["ok"]; print(x["filename"])')"
+          target="/var/backups/becore-tickets/restore-check-$RANDOM"
+          trap 'rm -rf -- "$target"' EXIT
+          "$release/bin/node" "$release/operations/restore-backup.mjs" "/var/backups/becore-tickets/$name" /etc/becore-tickets/backup.key "$target" >/dev/null
+          printf '%s\n' "$result"
+          SH
+          )"
+          name="$(printf '%s' "$result" | python3 -c 'import json,sys; x=json.load(sys.stdin); assert x["ok"] and x["restoredAndAuthenticated"]; print(x["filename"])')"
+          [[ "$name" =~ ^tickets-[0-9TZ.:-]+\.tar\.gz\.enc$ ]]
+          tailscale ssh root@hermes "cat '/var/backups/becore-tickets/$name'" > "$RUNNER_TEMP/$name"
+          test -s "$RUNNER_TEMP/$name"
+          chmod 600 "$RUNNER_TEMP/$name"
+          echo "file=$RUNNER_TEMP/$name" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - name: Preserve encrypted backup off-host
+        if: steps.writer.outputs.active == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tickets-encrypted-backup-${{ github.run_id }}
+          path: ${{ steps.backup.outputs.file }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 35
+      - name: Record successful off-host backup
+        if: steps.writer.outputs.active == 'true'
+        shell: bash
+        env:
+          BACKUP_NAME: ${{ steps.backup.outputs.name }}
+        run: |
+          set -euo pipefail
+          tailscale ssh root@hermes "python3 - '$BACKUP_NAME' '$GITHUB_RUN_ID'" <<'PY'
+          import json,pathlib,sys
+          filename,run_id=sys.argv[1:]
+          path=pathlib.Path('/var/backups/becore-tickets/offhost.json')
+          path.write_text(json.dumps({'filename':filename,'runId':run_id,'encrypted':True,'restoreTested':True,'retentionDays':35}))
+          path.chmod(0o600)
+          print('Tickets encrypted backup stored off-host; restore test passed.')
+          PY
