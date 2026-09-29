@@ -1,0 +1,56 @@
+name: Restore encrypted Tickets database on isolated VPS
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-data-restore.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tickets-vps-handover
+  cancel-in-progress: false
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bechirobob/tickets
+          ref: 62eac2a5ce107d62305d79a1ea4b1d9e4ed8459c
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.21.0
+      - name: Verify importer before reading private data
+        run: node --test tests/handover-envelope.test.mjs tests/handover-data.test.mjs
+      - name: Require successful encrypted export and download ciphertext only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/bechirobob/tickets/actions/runs/36505772936 > "$RUNNER_TEMP/export-run.json"
+          python3 - <<'PY'
+          import json,os
+          r=json.load(open(os.environ['RUNNER_TEMP']+'/export-run.json'))
+          assert r['conclusion']=='success' and r['head_sha']=='3ebb877a6ce9068c7dd05920014dccb560ed2de6'
+          PY
+          gh run download 36505772936 --repo bechirobob/tickets --name tickets-encrypted-d1 --dir encrypted
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Decrypt and validate only on Hermes without activating
+        run: |
+          tar -cf - import-d1.mjs ops/handover/open-envelope.mjs ops/handover/sqlite-snapshot.mjs encrypted/database.json | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-data-36505772936; tar -xf - -C /var/tmp/tickets-data-36505772936'
+          tailscale ssh root@hermes 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          stage=/var/tmp/tickets-data-36505772936
+          trap 'rm -rf "$stage"' EXIT
+          cd "$stage"
+          /srv/becore-tickets/current/bin/node import-d1.mjs encrypted/database.json 36505772936
+          systemctl is-active becore-tickets-preview.service caddy
+          REMOTE
