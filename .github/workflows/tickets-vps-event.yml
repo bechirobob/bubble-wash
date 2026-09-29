@@ -26,6 +26,6 @@ jobs:
           set -eu
           work=$(mktemp -d /var/lib/becore-tickets-handover/origin-XXXXXX)
           trap 'rm -rf "$work"' EXIT
-          curl --fail --silent --show-error --location 'https://raw.githubusercontent.com/bechirobob/tickets/4ead7609028b73f1de88e11e4de851e3e2b23f9e/ops/vps/prepare-origin.py' -o "$work/prepare-origin.py"
+          curl --fail --silent --show-error --location 'https://raw.githubusercontent.com/bechirobob/tickets/6bda273f4d6e7c6fe9139986d490266c270e3166/ops/vps/prepare-origin.py' -o "$work/prepare-origin.py"
           python3 "$work/prepare-origin.py"
           REMOTE
