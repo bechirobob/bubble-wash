@@ -20,26 +20,13 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Inspect routing and encrypted backup prerequisites
+      - name: Inspect origin certificate support
         run: |
           tailscale ssh root@hermes 'python3 -' <<'PY'
-          import pathlib,json,re,subprocess,urllib.request
-          root=pathlib.Path('/etc/caddy')
-          for p in root.rglob('*'):
-              if not p.is_file() or p.is_symlink(): continue
-              if p.suffix not in ('.conf','') and p.name!='Caddyfile': continue
-              try: text=p.read_text()
-              except (UnicodeError,PermissionError): continue
-              lines=text.splitlines()
-              relevant=[line for line in lines if 'tickets' in line or line.strip().startswith('import ')]
-              if relevant: print(json.dumps({'caddyFile':str(p),'ticketsLines':relevant}))
-          credential=pathlib.Path('/etc/becore-tickets-fallback.env')
-          fields=[]
-          if credential.exists():
-              fields=[line.split('=',1)[0] for line in credential.read_text().splitlines() if '=' in line and not line.startswith('#')]
-          print(json.dumps({'operatorCredentialNames':fields}))
-          units=subprocess.check_output(['systemctl','list-unit-files','--no-pager'],text=True)
-          print('\n'.join(line for line in units.splitlines() if 'backup' in line or 'becore-tickets' in line))
-          for p in [pathlib.Path('/var/backups/becore-tickets'),pathlib.Path('/srv/becore-tickets/current/release.json')]:
-              print(json.dumps({'path':str(p),'exists':p.exists()}))
+          import pathlib,json,subprocess,shutil
+          p=pathlib.Path('/etc/caddy/becore-tickets-fallback.caddy')
+          if p.exists(): print(json.dumps({'fallbackCaddy':p.read_text()}))
+          modules=subprocess.check_output(['caddy','list-modules'],text=True)
+          print(json.dumps({'cloudflareDnsModule':'dns.providers.cloudflare' in modules,'certbot':shutil.which('certbot'),'certbotConfigExists':pathlib.Path('/etc/letsencrypt/renewal').exists()}))
+          print(json.dumps({'node':subprocess.check_output(['/srv/becore-tickets/current/bin/node','--version'],text=True).strip()}))
           PY
