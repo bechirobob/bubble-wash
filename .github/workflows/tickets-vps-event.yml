@@ -11,7 +11,7 @@ concurrency:
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
       - name: Connect to Hermes
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
@@ -20,33 +20,25 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Check out finalized Tickets operator
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          repository: bechirobob/tickets
-          ref: 082888a007afe4fec83a7f2f795917e77edf7738
-          persist-credentials: false
-      - name: Verify finalized private transport including full-precision numeric values
+      - name: Inspect current writer, transfer journal and backup evidence without changes
         shell: bash
         run: |
           set -euo pipefail
-          stage="/var/tmp/tickets-operator-$GITHUB_RUN_ID"
-          trap 'tailscale ssh root@hermes "rm -rf -- $stage"' EXIT
-          tailscale ssh root@hermes "install -d -m 700 '$stage'"
-          tar -czf - ops/handover worker/handover-control.ts package.json | tailscale ssh root@hermes "tar -xzf - -C '$stage'"
-          tailscale ssh root@hermes "python3 - '$stage' '$GITHUB_RUN_ID'" <<'PY'
-          import os,pathlib,sys
-          stage,run_id=sys.argv[1:]
-          values=dict(line.split('=',1) for line in pathlib.Path('/etc/becore-tickets-fallback.env').read_text().splitlines() if '=' in line and not line.startswith('#'))
-          env=dict(os.environ)
-          env['CLOUDFLARE_API_TOKEN']=values['CLOUDFLARE_API_TOKEN'].strip().strip('"\'')
-          env['GITHUB_RUN_ID']=run_id
-          os.chdir(stage)
-          fixture=pathlib.Path('ops/handover/operator-smoke.mjs')
-          text=fixture.read_text()
-          before="content TEXT); INSERT INTO sample VALUES(6,'disposable operator fixture');"
-          after="content TEXT,fraction REAL); INSERT INTO sample VALUES(6,'disposable operator fixture',0.12345678901234567);"
-          assert before in text
-          fixture.write_text(text.replace(before,after))
-          os.execve('/srv/becore-tickets/current/bin/node',['node','ops/handover/operator-smoke.mjs'],env)
+          tailscale ssh root@hermes 'python3 -' <<'PY'
+          import json,pathlib,subprocess,urllib.request,shutil
+          for name in ['becore-tickets.service','becore-tickets-preview.service','becore-tickets-fallback.timer']:
+            state=subprocess.run(['systemctl','show',name,'--property=ActiveState,WorkingDirectory','--no-pager'],capture_output=True,text=True)
+            print(json.dumps({'service':name,'state':state.stdout.strip()}))
+          for filename,fields in [
+            ('/var/lib/becore-tickets-handover/live-transfer.json',['revision','phase','preparedAt','capturedAt','activatedAt','evidence']),
+            ('/var/backups/becore-tickets/offhost.json',['runId','encrypted','restoreTested','retentionDays'])]:
+            p=pathlib.Path(filename)
+            value=json.loads(p.read_text()) if p.exists() else {}
+            print(json.dumps({'record':p.name,'exists':p.exists(),'summary':{k:value[k] for k in fields if k in value}}))
+          try:
+            req=urllib.request.Request('http://127.0.0.1:3119/healthz',headers={'Host':'tickets.becoreops.com'})
+            with urllib.request.urlopen(req,timeout=5) as response: health=json.load(response)
+            print(json.dumps({'productionHealth':{k:health.get(k) for k in ['active','runtime','revision']}}))
+          except Exception: print(json.dumps({'productionHealthReachable':False}))
+          print(json.dumps({'freeBytes':shutil.disk_usage('/').free,'backupFiles':len(list(pathlib.Path('/var/backups/becore-tickets').glob('tickets-*.enc')))}))
           PY
