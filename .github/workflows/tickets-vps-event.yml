@@ -20,25 +20,46 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Inspect Tickets rehearsal storage only
+      - name: Remove completed Tickets rehearsal snapshots
         run: |
           tailscale ssh root@hermes 'python3 -' <<'PY'
-          import pathlib,json,os,subprocess
+          import pathlib,json,os,shutil,datetime
           root=pathlib.Path('/var/lib/becore-tickets-handover')
-          for p in sorted(root.iterdir()):
-              total=0; files=0
-              if p.is_dir() and not p.is_symlink():
-                  for base,dirs,names in os.walk(p,followlinks=False):
-                      for name in names:
-                          q=pathlib.Path(base)/name
-                          if not q.is_symlink():
-                              total+=q.stat().st_size; files+=1
-              elif p.is_file(): total=p.stat().st_size; files=1
-              print(json.dumps({'path':str(p),'bytes':total,'files':files,'symlink':p.is_symlink()}))
-          for unit in ['becore-tickets-preview.service','becore-tickets.service']:
-              r=subprocess.run(['systemctl','cat',unit],capture_output=True,text=True)
-              for line in r.stdout.splitlines():
-                  if line.startswith('WorkingDirectory=') or 'TICKETS_STATE=' in line:
-                      print(json.dumps({'unit':unit,'stateSetting':line}))
-          print(subprocess.check_output(['df','-B1','/var/lib'],text=True))
+          report_file=root/'standby-verification.json'
+          report=json.loads(report_file.read_text())
+          assert report['cloudflareSqlReturn']['runId']==36535200847
+          assert report['cloudflareSqlReturn']['exactSchemaRowsAndSequences'] is True
+          assert report['activated'] is False and report['liveWritesPaused'] is False
+          targets=[root/'rehearsal-36505772936',root/'rooms-rehearsal-36507909340']
+          assert not root.is_symlink()
+          for p in targets:
+              assert not p.is_symlink()
+              if p.exists():
+                  m=json.loads((p/'manifest.json').read_text())
+                  assert m['activated'] is False
+                  assert m.get('snapshotType')=='rehearsal-not-cutover' or m.get('cutoverSnapshot') is False
+          for process in pathlib.Path('/proc').glob('[0-9]*'):
+              for fd in (process/'fd').glob('*'):
+                  try: opened=os.readlink(fd)
+                  except OSError: continue
+                  assert not any(opened.startswith(str(p)+'/') for p in targets), 'Rehearsal snapshot is in use'
+          removed=[]
+          for p in targets:
+              if p.exists():
+                  size=sum(q.stat().st_size for q in p.rglob('*') if q.is_file() and not q.is_symlink())
+                  shutil.rmtree(p)
+                  assert not p.exists()
+                  removed.append({'directory':p.name,'bytes':size})
+          report['rehearsalCleanup']={'completedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'removed':removed,'snapshotsRetained':False}
+          temporary=report_file.with_suffix('.pending')
+          with open(temporary,'w',opener=lambda path,flags:os.open(path,flags,0o600)) as f:
+              json.dump(report,f,indent=2); f.write('\n'); f.flush(); os.fsync(f.fileno())
+          os.replace(temporary,report_file)
+          print(json.dumps({'rehearsalCleanup':report['rehearsalCleanup'],'productionChanged':False}))
+          preview=pathlib.Path('/var/lib/becore-tickets-preview')
+          if preview.exists():
+              for p in sorted(preview.iterdir()):
+                  size=sum(q.stat().st_size for q in p.rglob('*') if q.is_file() and not q.is_symlink()) if p.is_dir() else p.stat().st_size
+                  print(json.dumps({'previewPath':str(p),'bytes':size,'symlink':p.is_symlink()}))
+          print(json.dumps({'diskFreeBytes':shutil.disk_usage(root).free}))
           PY
