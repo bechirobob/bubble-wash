@@ -20,46 +20,48 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Remove completed Tickets rehearsal snapshots
+      - name: Remove obsolete isolated preview state
         run: |
           tailscale ssh root@hermes 'python3 -' <<'PY'
-          import pathlib,json,os,shutil,datetime
-          root=pathlib.Path('/var/lib/becore-tickets-handover')
-          report_file=root/'standby-verification.json'
-          report=json.loads(report_file.read_text())
-          assert report['cloudflareSqlReturn']['runId']==36535200847
-          assert report['cloudflareSqlReturn']['exactSchemaRowsAndSequences'] is True
-          assert report['activated'] is False and report['liveWritesPaused'] is False
-          targets=[root/'rehearsal-36505772936',root/'rooms-rehearsal-36507909340']
+          import pathlib,json,os,shutil,subprocess,urllib.request,sqlite3,datetime
+          root=pathlib.Path('/var/lib/becore-tickets-preview')
+          revision='5807f6ea9a7baef998cf379dc298ce636caf1f60'
+          health_url=urllib.request.Request('http://127.0.0.1:3118/healthz',headers={'Host':'tickets.becoreops.com'})
+          with urllib.request.urlopen(health_url,timeout=10) as response: health=json.load(response)
+          assert health['revision']==revision and health['active'] is False
+          unit=subprocess.check_output(['systemctl','cat','becore-tickets-preview.service'],text=True)
+          settings=[line for line in unit.splitlines() if line.startswith('Environment=TICKETS_STATE=')]
+          assert settings[-1]=='Environment=TICKETS_STATE='+str(root/revision)
           assert not root.is_symlink()
-          for p in targets:
-              assert not p.is_symlink()
-              if p.exists():
-                  m=json.loads((p/'manifest.json').read_text())
-                  assert m['activated'] is False
-                  assert m.get('snapshotType')=='rehearsal-not-cutover' or m.get('cutoverSnapshot') is False
+          names=['31989632c066fc5f6673353832483f9cde670fc0','4e04e464a9e1f1c21658653e9fa06d5cc1eef165','4f70f500d09dc43ddb8a36b6f7231c261333eb4e','79fa5e68f9e7d5b90cf5f47a8bea9e0ac95c84d4','9ccd03621306e9dc7d41b4bef2a6a813c4105464','a947aee5e3274b8812ffade5b63817c5b4804c69','operations.sqlite','tickets.sqlite','rooms']
+          targets=[root/name for name in names]
+          for p in targets: assert not p.is_symlink()
           for process in pathlib.Path('/proc').glob('[0-9]*'):
               for fd in (process/'fd').glob('*'):
                   try: opened=os.readlink(fd)
                   except OSError: continue
-                  assert not any(opened.startswith(str(p)+'/') for p in targets), 'Rehearsal snapshot is in use'
+                  assert not any(opened==str(p) or opened.startswith(str(p)+'/') for p in targets),'Preview state in use'
           removed=[]
           for p in targets:
-              if p.exists():
-                  size=sum(q.stat().st_size for q in p.rglob('*') if q.is_file() and not q.is_symlink())
-                  shutil.rmtree(p)
-                  assert not p.exists()
-                  removed.append({'directory':p.name,'bytes':size})
-          report['rehearsalCleanup']={'completedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'removed':removed,'snapshotsRetained':False}
-          temporary=report_file.with_suffix('.pending')
-          with open(temporary,'w',opener=lambda path,flags:os.open(path,flags,0o600)) as f:
-              json.dump(report,f,indent=2); f.write('\n'); f.flush(); os.fsync(f.fileno())
-          os.replace(temporary,report_file)
-          print(json.dumps({'rehearsalCleanup':report['rehearsalCleanup'],'productionChanged':False}))
-          preview=pathlib.Path('/var/lib/becore-tickets-preview')
-          if preview.exists():
-              for p in sorted(preview.iterdir()):
-                  size=sum(q.stat().st_size for q in p.rglob('*') if q.is_file() and not q.is_symlink()) if p.is_dir() else p.stat().st_size
-                  print(json.dumps({'previewPath':str(p),'bytes':size,'symlink':p.is_symlink()}))
-          print(json.dumps({'diskFreeBytes':shutil.disk_usage(root).free}))
+              if not p.exists(): continue
+              size=sum(q.stat().st_size for q in p.rglob('*') if q.is_file() and not q.is_symlink()) if p.is_dir() else p.stat().st_size
+              if p.is_dir(): shutil.rmtree(p)
+              else: p.unlink()
+              removed.append({'name':p.name,'bytes':size})
+          db=sqlite3.connect('file:'+str(root/revision/'tickets.sqlite')+'?mode=ro',uri=True)
+          counts={}
+          for name in ['orders','tickets','registrations']:
+              if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(name,)).fetchone():
+                  counts[name]=db.execute('SELECT COUNT(*) FROM "'+name+'"').fetchone()[0]
+          db.close()
+          with urllib.request.urlopen(health_url,timeout=10) as response: health=json.load(response)
+          assert health['active'] is False and health['revision']==revision
+          report_file=pathlib.Path('/var/lib/becore-tickets-handover/standby-verification.json')
+          report=json.loads(report_file.read_text())
+          report['obsoletePreviewCleanup']={'removed':removed,'activePreviewPreserved':revision,'activePreviewCounts':counts}
+          tmp=report_file.with_suffix('.pending')
+          with open(tmp,'w',opener=lambda p,f:os.open(p,f,0o600)) as f:
+              json.dump(report,f,indent=2); f.flush(); os.fsync(f.fileno())
+          os.replace(tmp,report_file)
+          print(json.dumps({'previewCleanup':report['obsoletePreviewCleanup'],'diskFreeBytes':shutil.disk_usage(root).free,'previewHealthy':True,'productionChanged':False}))
           PY
