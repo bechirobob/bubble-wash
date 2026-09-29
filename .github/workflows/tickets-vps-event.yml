@@ -21,6 +21,16 @@ jobs:
         run: |
           tailscale ssh root@hermes 'bash -s' <<'REMOTE'
           set -eu
+          python3 - <<'PY'
+          import pathlib,json,stat
+          root=pathlib.Path('/etc/becore-tickets')
+          for p in sorted(root.glob('*.json')):
+              try:
+                  values=json.loads(p.read_text())
+                  print(json.dumps({'privateConfig':p.name,'mode':oct(stat.S_IMODE(p.stat().st_mode)),'keys':sorted(values) if isinstance(values,dict) else []}))
+              except Exception:
+                  print(json.dumps({'privateConfig':p.name,'readableJson':False}))
+          PY
           nproc
           free -m
           df -h /srv
