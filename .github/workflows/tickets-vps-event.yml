@@ -11,7 +11,7 @@ concurrency:
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - name: Connect to Hermes
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
@@ -20,39 +20,33 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Verify disposable DNS and Worker routing round trip
+      - name: Check out finalized Tickets operator
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bechirobob/tickets
+          ref: 082888a007afe4fec83a7f2f795917e77edf7738
+          persist-credentials: false
+      - name: Verify finalized private transport including full-precision numeric values
         shell: bash
         run: |
           set -euo pipefail
-          tailscale ssh root@hermes "/srv/becore-tickets/current/bin/node --input-type=module - '$GITHUB_RUN_ID'" <<'JS'
-          import assert from 'node:assert/strict';
-          import {readFileSync} from 'node:fs';
-          const values=Object.fromEntries(readFileSync('/etc/becore-tickets-fallback.env','utf8').split('\n').filter(l=>l.includes('=')&&!l.startsWith('#')).map(l=>{const i=l.indexOf('=');return [l.slice(0,i),l.slice(i+1).trim().replace(/^['"]|['"]$/g,'')]}));
-          const token=values.CLOUDFLARE_API_TOKEN;
-          const root='/accounts/af75a230de2eea882606db8d9acce473',zone='/zones/bbf0174f839a0d22dbf6d9f4bd3cf53d';
-          const name='tickets-route-test-'+process.argv[2],hostname=name+'.becoreops.com',worker=root+'/workers/scripts/'+name;
-          async function api(path,method='GET',body){const r=await fetch('https://api.cloudflare.com/client/v4'+path,{method,headers:{authorization:'Bearer '+token,...(body&&!(body instanceof FormData)?{'content-type':'application/json'}:{})},body:body instanceof FormData?body:body?JSON.stringify(body):undefined});const text=await r.text();if(r.ok&&!text){console.log(JSON.stringify({emptyApiResponse:method,status:r.status}));return null}const p=JSON.parse(text);if(!r.ok||!p.success)throw new Error('API '+r.status+' codes '+JSON.stringify(p.errors?.map(e=>e.code)));return p.result}
-          let attempted=false;
-          try{
-           const f=new FormData();f.set('metadata',JSON.stringify({main_module:'test.mjs',compatibility_date:'2026-08-11'}));f.set('test.mjs',new Blob(['export default {fetch(){return new Response("Disposable routing test",{status:404})}}'],{type:'application/javascript+module'}),'test.mjs');
-           attempted=true;await api(worker,'PUT',f);
-           await api(zone+'/dns_records','POST',{type:'A',name:hostname,content:'51.195.20.137',ttl:1,proxied:true});
-           for(const dns of await api(zone+'/dns_records?name='+hostname)){assert.ok(dns.type==='A'&&dns.content==='51.195.20.137'&&dns.proxied===true);await api(zone+'/dns_records/'+dns.id,'DELETE')}
-           await api(root+'/workers/domains','PUT',{hostname,service:name,zone_id:zone.split('/')[2]});
-           let domains=(await api(root+'/workers/domains')).filter(d=>d.hostname===hostname);assert.equal(domains.length,1);assert.equal(domains[0].service,name);
-           await api(root+'/workers/domains/'+domains[0].id,'DELETE');
-           const records=await api(zone+'/dns_records?name='+hostname);assert.ok(records.length<=1);
-           const desired={type:'A',name:hostname,content:'51.195.20.137',ttl:1,proxied:true};
-           if(records.length)await api(zone+'/dns_records/'+records[0].id,'PUT',desired);else await api(zone+'/dns_records','POST',desired);
-           for(const dns of await api(zone+'/dns_records?name='+hostname)){assert.ok(dns.type==='A'&&dns.content==='51.195.20.137'&&dns.proxied===true);await api(zone+'/dns_records/'+dns.id,'DELETE')}
-           await api(root+'/workers/domains','PUT',{hostname,service:name,zone_id:zone.split('/')[2]});
-           domains=(await api(root+'/workers/domains')).filter(d=>d.hostname===hostname);assert.equal(domains.length,1);assert.equal(domains[0].service,name);
-           console.log(JSON.stringify({routingRoundTripVerified:true,productionChanged:false}));
-          }catch(e){console.error(JSON.stringify({routingTestFailed:true,reason:e.message}));process.exitCode=1}
-          finally{
-           for(const d of (await api(root+'/workers/domains')).filter(d=>d.hostname===hostname))await api(root+'/workers/domains/'+d.id,'DELETE');
-           for(const d of await api(zone+'/dns_records?name='+hostname))await api(zone+'/dns_records/'+d.id,'DELETE');
-           if(attempted)await api(worker,'DELETE');
-           console.log(JSON.stringify({temporaryRoutingRemoved:true}));
-          }
-          JS
+          stage="/var/tmp/tickets-operator-$GITHUB_RUN_ID"
+          trap 'tailscale ssh root@hermes "rm -rf -- $stage"' EXIT
+          tailscale ssh root@hermes "install -d -m 700 '$stage'"
+          tar -czf - ops/handover worker/handover-control.ts package.json | tailscale ssh root@hermes "tar -xzf - -C '$stage'"
+          tailscale ssh root@hermes "python3 - '$stage' '$GITHUB_RUN_ID'" <<'PY'
+          import os,pathlib,sys
+          stage,run_id=sys.argv[1:]
+          values=dict(line.split('=',1) for line in pathlib.Path('/etc/becore-tickets-fallback.env').read_text().splitlines() if '=' in line and not line.startswith('#'))
+          env=dict(os.environ)
+          env['CLOUDFLARE_API_TOKEN']=values['CLOUDFLARE_API_TOKEN'].strip().strip('"\'')
+          env['GITHUB_RUN_ID']=run_id
+          os.chdir(stage)
+          fixture=pathlib.Path('ops/handover/operator-smoke.mjs')
+          text=fixture.read_text()
+          before="content TEXT); INSERT INTO sample VALUES(6,'disposable operator fixture');"
+          after="content TEXT,fraction REAL); INSERT INTO sample VALUES(6,'disposable operator fixture',0.12345678901234567);"
+          assert before in text
+          fixture.write_text(text.replace(before,after))
+          os.execve('/srv/becore-tickets/current/bin/node',['node','ops/handover/operator-smoke.mjs'],env)
+          PY
