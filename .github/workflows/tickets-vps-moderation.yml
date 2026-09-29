@@ -1,0 +1,72 @@
+name: Connect and verify Tickets VPS photo moderation
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-moderation.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tickets-vps-handover
+  cancel-in-progress: false
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bechirobob/tickets
+          ref: 5807f6ea9a7baef998cf379dc298ce636caf1f60
+          persist-credentials: false
+      - name: Wait for successful encrypted moderation provisioning
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 130); do
+            gh api repos/bechirobob/tickets/actions/runs/36507959821 > "$RUNNER_TEMP/transfer-run.json"
+            status=$(python3 - <<'PY'
+          import json,os
+          r=json.load(open(os.environ['RUNNER_TEMP']+'/transfer-run.json'))
+          assert r['head_sha']=='3eb41e7760967763c9d2cc06c07c845ce475d0cc'
+          print(r['conclusion'] if r['status']=='completed' else 'waiting')
+          PY
+            )
+            if [ "$status" = success ]; then break; fi
+            if [ "$status" != waiting ]; then exit 1; fi
+            sleep 10
+          done
+          test "$status" = success
+          gh run download 36507959821 --repo bechirobob/tickets --name tickets-encrypted-moderation --dir encrypted
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Authenticate and decrypt configuration on its destination only
+        run: |
+          tar -cf - ops/handover/open-envelope.mjs ops/moderation/install.mjs runtime/vps/moderation.mjs encrypted/moderation.json | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-moderation-36507959821; tar -xf - -C /var/tmp/tickets-moderation-36507959821'
+          tailscale ssh root@hermes 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          stage=/var/tmp/tickets-moderation-36507959821
+          trap 'rm -rf "$stage"' EXIT
+          cd "$stage"
+          /srv/becore-tickets/current/bin/node ops/moderation/install.mjs encrypted/moderation.json 5807f6ea9a7baef998cf379dc298ce636caf1f60
+          /srv/becore-tickets/current/bin/node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { createRequire } from 'node:module';
+          import { createModerationBinding } from './runtime/vps/moderation.mjs';
+          const sharp = createRequire('/srv/becore-tickets/current/package.json')('sharp');
+          const values = JSON.parse(readFileSync('/etc/becore-tickets/runtime.pending.json', 'utf8'));
+          const unauthenticated = await fetch(values.VPS_AI_URL, { method: 'POST', body: 'invalid', signal: AbortSignal.timeout(20000) });
+          if (unauthenticated.status !== 404) throw new Error('Gateway authentication check failed.');
+          const bytes = await sharp({ create: { width: 160, height: 160, channels: 3, background: '#ffffff' } }).webp().toBuffer();
+          const result = await createModerationBinding(values).run('@cf/meta/llama-3.2-11b-vision-instruct', { image: Array.from(bytes) });
+          if (!['ALLOW','BLOCK'].includes(result.response)) throw new Error('Provider response invalid.');
+          console.log(JSON.stringify({ photoSafetyConnected: true, unsignedRequestsRejected: true, syntheticImageOnly: true, activeRuntimeChanged: false }));
+          NODE
+          systemctl is-active becore-tickets-preview.service caddy
+          REMOTE
