@@ -1,0 +1,80 @@
+name: Verify Tickets restored data through private VPS routing
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-restored-probe.yml]
+permissions:
+  contents: read
+concurrency:
+  group: tickets-vps-handover
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bechirobob/tickets
+          ref: a902f8794dc2dcc8bfc21ec4907c76b4eca05f3b
+          persist-credentials: false
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Exercise restored private data with external network and background jobs disabled
+        env:
+          PROBE_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          tar -cf - ops/handover/sqlite-export.mjs ops/handover/prepare-restored-probe.mjs | tailscale ssh root@hermes "umask 077; mkdir /var/tmp/tickets-restored-$PROBE_ID; tar -xf - -C /var/tmp/tickets-restored-$PROBE_ID"
+          tailscale ssh root@hermes "bash -s -- '$PROBE_ID'" <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          id=$1
+          stage=/var/tmp/tickets-restored-$id
+          state=/srv/becore-tickets/temporary/restored-probe-$id
+          unit=tickets-restored-$id
+          proxy=tickets-proxy-$id
+          cleanup() {
+            systemctl stop "$proxy" "$unit" >/dev/null 2>&1 || true
+            rm -rf "$stage" "$state"
+          }
+          trap cleanup EXIT
+          cd "$stage"
+          /srv/becore-tickets/current/bin/node ops/handover/prepare-restored-probe.mjs "$state"
+          python3 - "$state" <<'PY'
+          import pathlib,sys,json
+          target=pathlib.Path(sys.argv[1])
+          config={'admin':{'disabled':True},'apps':{'http':{'servers':{'probe':{'listen':['127.0.0.1:3319'],'routes':[{'handle':[{'handler':'reverse_proxy','upstreams':[{'dial':'127.0.0.1:3119'}],'headers':{'request':{'set':{'Host':['tickets.becoreops.com']}}}}]}]}}}}}
+          (target/'proxy.json').write_text(json.dumps(config))
+          PY
+          chown -R becore-tickets:becore-tickets "$state"
+          systemd-run --quiet --collect --unit="$unit" --property=User=becore-tickets --property=MemoryMax=1G --property=CPUQuota=200% --property=RuntimeMaxSec=180 --property=IPAddressDeny=any --property=IPAddressAllow=localhost --property=NoNewPrivileges=yes --property=PrivateTmp=yes --property=ProtectSystem=strict --property=ReadWritePaths="$state" --setenv=NODE_ENV=production --setenv=TICKETS_ACTIVE=0 --setenv=TICKETS_CONFIG="$state/config.json" --setenv=TICKETS_STATE="$state/state" --setenv=TICKETS_HOST=tickets.becoreops.com --setenv=TICKETS_PORT=3119 /srv/becore-tickets/current/bin/node /srv/becore-tickets/current/server.mjs
+          systemd-run --quiet --collect --unit="$proxy" --property=User=becore-tickets --property=RuntimeMaxSec=180 --property=IPAddressDeny=any --property=IPAddressAllow=localhost --property=NoNewPrivileges=yes --property=PrivateTmp=yes --property=ProtectSystem=strict /usr/bin/caddy run --config "$state/proxy.json"
+          python3 - <<'PY'
+          import json,time,urllib.request,urllib.error
+          base='http://127.0.0.1:3319'
+          for attempt in range(40):
+              try:
+                  with urllib.request.urlopen(base+'/healthz',timeout=3) as response: health=json.load(response)
+                  assert health['active'] is False and health['revision']=='5807f6ea9a7baef998cf379dc298ce636caf1f60'
+                  break
+              except Exception: time.sleep(1)
+          else: raise RuntimeError('Restored runtime did not become ready.')
+          for route in ['/', '/my-nights','/api/public/events','/api/version']:
+              with urllib.request.urlopen(base+route,timeout=15) as response:
+                  assert response.status==200
+                  assert response.headers.get('Content-Security-Policy')
+                  response.read()
+          for route in ['/api/payments/webhook','/api/payments/seevplus/webhook','/api/email/webhook']:
+              request=urllib.request.Request(base+route,data=b'{}',headers={'Content-Type':'application/json'})
+              try: urllib.request.urlopen(request,timeout=10); raise RuntimeError('Unsigned callback accepted.')
+              except urllib.error.HTTPError as error: assert error.code in (400,401,403,503)
+          print(json.dumps({'restoredDataApplicationProbe':'passed','privateProxy':'passed','unsignedCallbacksRejected':True,'externalNetwork':'blocked','backgroundJobs':'disabled','revision':health['revision'],'publicRoutingChanged':False}))
+          PY
+          systemctl is-active becore-tickets-preview.service caddy
+          REMOTE
