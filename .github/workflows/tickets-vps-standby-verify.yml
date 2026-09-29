@@ -17,8 +17,23 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: bechirobob/tickets
-          ref: e520ed048ec739600a5ace43a7200fc99db0c209
+          ref: 73d865a6910270237268c851bd40e693fa9c094c
           persist-credentials: false
+      - name: Require successful exact-source handover checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 12); do
+            gh api 'repos/bechirobob/tickets/actions/runs?head_sha=73d865a6910270237268c851bd40e693fa9c094c&per_page=10' > "$RUNNER_TEMP/checks.json"
+            if python3 - <<'PY'
+          import json,os
+          runs=json.load(open(os.environ['RUNNER_TEMP']+'/checks.json'))['workflow_runs']
+          assert any(r['name']=='Verify isolated handover tools' and r['head_sha']=='73d865a6910270237268c851bd40e693fa9c094c' and r['conclusion']=='success' for r in runs)
+          PY
+            then break; fi
+            test "$attempt" -lt 12 || exit 1
+            sleep 10
+          done
       - name: Connect to Hermes
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
         with:
@@ -29,14 +44,14 @@ jobs:
       - name: Verify existing private snapshots without changing live services
         run: |
           set -euo pipefail
-          tar -cf - ops/handover/sqlite-export.mjs ops/handover/writer-lock.mjs ops/handover/verify-restored-state.mjs ops/handover/return-metadata.mjs | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-standby-e520ed048ec739600a5ace43a7200fc99db0c209; tar -xf - -C /var/tmp/tickets-standby-e520ed048ec739600a5ace43a7200fc99db0c209'
+          tar -cf - ops/handover/sqlite-export.mjs ops/handover/writer-lock.mjs ops/handover/verify-restored-state.mjs ops/handover/return-metadata.mjs | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-standby-73d865a6910270237268c851bd40e693fa9c094c; tar -xf - -C /var/tmp/tickets-standby-73d865a6910270237268c851bd40e693fa9c094c'
           tailscale ssh root@hermes 'bash -s' <<'REMOTE'
           set -euo pipefail
           umask 077
-          stage=/var/tmp/tickets-standby-e520ed048ec739600a5ace43a7200fc99db0c209
+          stage=/var/tmp/tickets-standby-73d865a6910270237268c851bd40e693fa9c094c
           trap 'rm -rf "$stage"' EXIT
           cd "$stage"
-          /srv/becore-tickets/current/bin/node ops/handover/verify-restored-state.mjs 36505772936 36507909340 e520ed048ec739600a5ace43a7200fc99db0c209
+          /srv/becore-tickets/current/bin/node ops/handover/verify-restored-state.mjs 36505772936 36507909340 73d865a6910270237268c851bd40e693fa9c094c
           /srv/becore-tickets/current/bin/node ops/handover/return-metadata.mjs --inspect
           systemctl is-active becore-tickets-preview.service caddy
           curl -fsS --max-time 10 -H 'Host: tickets.becoreops.com' http://127.0.0.1:3118/healthz
