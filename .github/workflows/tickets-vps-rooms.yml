@@ -1,0 +1,59 @@
+name: Restore encrypted Tickets Room histories on Hermes
+on:
+  push:
+    branches: [ops/tickets-vps-event-20260928]
+    paths: [.github/workflows/tickets-vps-rooms.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: tickets-vps-handover
+  cancel-in-progress: false
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: bechirobob/tickets
+          ref: 6b6fd02cf2b94501b0fdc0122c4d7a647444366c
+          persist-credentials: false
+      - name: Wait for successful encrypted Room collection
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 130); do
+            gh api repos/bechirobob/tickets/actions/runs/36507909340 > "$RUNNER_TEMP/transfer-run.json"
+            status=$(python3 - <<'PY'
+          import json,os
+          r=json.load(open(os.environ['RUNNER_TEMP']+'/transfer-run.json'))
+          assert r['head_sha']=='9d5fa229dbb305c3f8d3daba9c8817970f79f8ff'
+          print(r['conclusion'] if r['status']=='completed' else 'waiting')
+          PY
+            )
+            if [ "$status" = success ]; then break; fi
+            if [ "$status" != waiting ]; then exit 1; fi
+            sleep 10
+          done
+          test "$status" = success
+          gh run download 36507909340 --repo bechirobob/tickets --name tickets-encrypted-rooms --dir encrypted
+      - name: Connect to Hermes
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Authenticate and decrypt configuration on its destination only
+        run: |
+          tar -cf - ops/handover/open-envelope.mjs ops/handover/sqlite-snapshot.mjs ops/handover/install-rooms.mjs encrypted | tailscale ssh root@hermes 'umask 077; mkdir /var/tmp/tickets-rooms-36507909340; tar -xf - -C /var/tmp/tickets-rooms-36507909340'
+          tailscale ssh root@hermes 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          stage=/var/tmp/tickets-rooms-36507909340
+          trap 'rm -rf "$stage"' EXIT
+          cd "$stage"
+          /srv/becore-tickets/current/bin/node ops/handover/install-rooms.mjs encrypted 36507909340 6b6fd02cf2b94501b0fdc0122c4d7a647444366c
+          systemctl is-active becore-tickets-preview.service caddy
+          REMOTE
