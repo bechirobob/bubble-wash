@@ -22,9 +22,11 @@ if sudo test -e "$target"; then
 else
     sudo install -m 0644 "$config" "$target"
 fi
+sudo systemctl mask --now ssh.socket
 if ! sudo test -x /usr/sbin/sshd; then sudo apt install -y openssh-server; fi
+sudo install -d -m 0755 /run/sshd
 sudo /usr/sbin/sshd -t
-sudo /usr/sbin/sshd -T | python3 -c 'import sys; rows=[l.split() for l in sys.stdin]; d={r[0]:r[1] for r in rows}; listeners=[r[1] for r in rows if r[0]=="listenaddress"]; assert listeners==["100.74.152.91:22"],listeners; assert d["passwordauthentication"]=="no" and d["kbdinteractiveauthentication"]=="no" and d["permitrootlogin"]=="no" and d["authenticationmethods"]=="publickey"; print("SSH configuration verified")'
+sudo /usr/sbin/sshd -T -C user=bechirob,host=hermes,addr=100.84.164.68 | python3 -c 'import sys; rows=[l.split() for l in sys.stdin]; d={r[0]:r[1] for r in rows}; listeners=[r[1] for r in rows if r[0]=="listenaddress"]; assert listeners==["100.74.152.91:22"],listeners; assert d["passwordauthentication"]=="no" and d["kbdinteractiveauthentication"]=="no" and d["permitrootlogin"]=="no" and d["authenticationmethods"]=="publickey"; print("SSH configuration verified")'
 install -d -m 0700 "$HOME/.ssh"
 touch "$HOME/.ssh/authorized_keys"
 chmod 0600 "$HOME/.ssh/authorized_keys"
@@ -40,7 +42,6 @@ StartLimitIntervalSec=0
 Restart=on-failure
 RestartSec=5s
 UNIT
-sudo systemctl disable --now ssh.socket 2>/dev/null || true
 sudo systemctl daemon-reload
 sudo systemctl enable --now ssh
 sudo systemctl restart ssh
