@@ -1,0 +1,44 @@
+name: Host recovery and Graphify
+on:
+  push:
+    branches: [ops/host-recovery-graphify-20261003]
+    paths: [.github/workflows/host-recovery-graphify.yml]
+permissions:
+  contents: read
+concurrency:
+  group: host-recovery-graphify
+  cancel-in-progress: false
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Connect existing tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      - name: Check the two known machines
+        run: |
+          tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({"backend":d.get("BackendState"),"targets":[{k:p.get(k) for k in ("HostName","DNSName","TailscaleIPs","Online","LastSeen","OS")} for p in d.get("Peer",{}).values() if p.get("HostName") in ("hermes","parrot") or any(i in ("100.84.164.68","100.74.152.91") for i in p.get("TailscaleIPs",[]))]},indent=2))'
+          timeout 15 tailscale ping --c 2 --timeout 5s hermes || true
+          timeout 15 tailscale ping --c 2 --timeout 5s 100.74.152.91 || true
+      - name: Inspect Hermes without changing services
+        run: |
+          timeout 45 tailscale ssh root@hermes 'bash -s' <<'SH'
+          hostname
+          cat /etc/os-release
+          uptime
+          df -h /
+          free -m
+          systemctl is-active tailscaled ssh caddy becore-tickets bubblewash || true
+          systemctl --failed --no-pager
+          getent passwd ubuntu
+          command -v python3 uv pipx || true
+          curl --silent --show-error --max-time 10 --output /dev/null --write-out 'tickets_http=%{http_code}\n' https://tickets.becoreops.com/api/health || true
+          SH
+      - name: Inspect Parrot without changing services
+        if: always()
+        run: |
+          timeout 30 tailscale ssh bechirob@100.74.152.91 'hostname; cat /etc/os-release; uptime; systemctl is-active tailscaled ssh; command -v python3 uv pipx' || true
