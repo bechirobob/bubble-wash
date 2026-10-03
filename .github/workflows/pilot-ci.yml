@@ -4,9 +4,19 @@ on:
   push:
     branches:
       - main
+    # Configuration-only backup recovery never activates an application release.
+    paths-ignore:
+      - .github/workflows/nightly-backup.yml
+      - .github/workflows/backup-transport-checks.yml
+      - .github/backup/**
+      - .github/workflows/pilot-ci.yml
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - .github/workflows/nightly-backup.yml
+      - .github/workflows/backup-transport-checks.yml
+      - .github/backup/**
   workflow_dispatch:
 
 permissions:
@@ -52,3 +62,4 @@ jobs:
         run: npm run verify:image-runtime
       - name: Verify required production routes
         run: npm run verify:routes
+
