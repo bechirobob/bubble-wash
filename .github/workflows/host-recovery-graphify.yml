@@ -19,26 +19,35 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
-      - name: Verify Parrot through dedicated Hermes SSH key
+      - name: Inspect Codex plugin registration and verify Graphify on Parrot
         run: |
-          timeout 60 tailscale ssh root@hermes 'bash -s' <<'HERMES'
+          timeout 120 tailscale ssh root@hermes 'bash -s' <<'HERMES'
           set -euo pipefail
-          ssh -i /root/.ssh/parrot-assistance-ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 bechirob@100.74.152.91 'bash -s' <<'PARROT'
+          ssh -i /root/.ssh/parrot-assistance-ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 bechirob@100.74.152.91 'bash -s' <<'PARROT'
           set -euo pipefail
           test "$(hostname)" = parrot
-          test "$(id -un)" = bechirob
-          hostname
-          id -un
-          cat /etc/os-release
-          systemctl is-active ssh tailscaled
-          systemctl is-enabled ssh
-          python3 --version
-          command -v codex uv pipx graphify || true
-          for path in "$HOME/.local/bin/graphify" "$HOME/.local/bin/codex" /usr/sbin/sshd; do
-            if [ -x "$path" ]; then printf 'AVAILABLE %s\n' "$path"; fi
-          done
-          python3 -c 'import venv,ensurepip; print("PYTHON_VENV_READY")' || true
-          if sudo -n true 2>/dev/null; then echo SUDO_NONINTERACTIVE=yes; else echo SUDO_NONINTERACTIVE=no; fi
-          if [ -x "$HOME/.local/bin/graphify" ]; then "$HOME/.local/bin/graphify" --version; fi
+          export PATH="$HOME/.local/bin:$PATH"
+          codex --version
+          codex plugin --help
+          codex plugin list || true
+          graphify install --platform codex
+          graphify install --platform agents
+          graphify --version
+          python3 - <<'PY'
+          import json,pathlib,subprocess,tempfile
+          with tempfile.TemporaryDirectory(prefix='graphify-smoke-') as directory:
+              root=pathlib.Path(directory)
+              (root/'sample.py').write_text('def double(x):\n    return x * 2\n\ndef total(x):\n    return double(x) + 1\n')
+              subprocess.run(['graphify','extract',str(root),'--code-only','--no-cluster','--max-workers','1'],check=True,timeout=60)
+              graph=json.loads((root/'graphify-out/graph.json').read_text())
+              nodes=graph.get('nodes',[])
+              edges=graph.get('links',graph.get('edges',[]))
+              assert len(nodes)>=2 and edges,(len(nodes),len(edges))
+              assert any('double' in str(n.get('label','')) for n in nodes)
+              home=pathlib.Path.home()
+              assert (home/'.codex/skills/graphify/SKILL.md').is_file()
+              assert (home/'.agents/skills/graphify/SKILL.md').is_file()
+              print('PARROT_GRAPHIFY_SMOKE_OK',json.dumps({'nodes':len(nodes),'edges':len(edges),'codexSkill':True,'agentSkill':True}))
+          PY
           PARROT
           HERMES
