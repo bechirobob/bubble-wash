@@ -19,26 +19,32 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
-      - name: Install and verify Graphify for the VPS user
+      - name: Register Graphify and verify a local code graph
         run: |
-          timeout 240 tailscale ssh root@hermes 'bash -s' <<'ROOT'
+          timeout 120 tailscale ssh root@hermes 'bash -s' <<'ROOT'
           set -euo pipefail
-          python3 -m venv --help >/dev/null
           runuser -u ubuntu -- bash -s <<'USER'
           set -euo pipefail
           cd /home/ubuntu
-          mkdir -p .local/share/graphify .local/bin
-          python3 -m venv .local/share/graphify/venv
-          .local/share/graphify/venv/bin/python -m pip install --disable-pip-version-check 'graphifyy==0.9.74'
-          if [ -e .local/bin/graphify ] && [ ! -L .local/bin/graphify ]; then
-            echo 'Existing non-symlink graphify launcher needs inspection'; exit 1
-          fi
-          ln -sfn /home/ubuntu/.local/share/graphify/venv/bin/graphify .local/bin/graphify
           export PATH="/home/ubuntu/.local/bin:$PATH"
-          graphify --version
-          graphify --help
-          .local/share/graphify/venv/bin/python -m pip check
+          graphify install --platform codex
+          graphify install --platform agents
+          test -s .codex/skills/graphify/SKILL.md
+          test -s .agents/skills/graphify/SKILL.md
+          .local/share/graphify/venv/bin/python - <<'PY'
+          import importlib.metadata,json,pathlib,subprocess,tempfile
+          assert importlib.metadata.version('graphifyy')=='0.9.74'
+          with tempfile.TemporaryDirectory(prefix='graphify-smoke-') as directory:
+              root=pathlib.Path(directory)
+              (root/'sample.py').write_text('def double(x):\n    return x * 2\n\ndef total(x):\n    return double(x) + 1\n')
+              subprocess.run(['/home/ubuntu/.local/bin/graphify','extract',str(root),'--code-only','--no-cluster','--max-workers','1'],check=True,timeout=60)
+              graph=json.loads((root/'graphify-out/graph.json').read_text())
+              nodes=graph.get('nodes',[])
+              edges=graph.get('links',graph.get('edges',[]))
+              assert len(nodes)>=2 and edges,(len(nodes),len(edges))
+              assert any('double' in str(n.get('label','')) for n in nodes)
+              print('GRAPHIFY_SMOKE_OK',json.dumps({'version':'0.9.74','nodes':len(nodes),'edges':len(edges),'codexSkill':True,'agentSkill':True}))
+          PY
           USER
           systemctl is-active tailscaled ssh caddy becore-tickets
-          timeout 8 bash -c 'cat < /dev/null > /dev/tcp/100.74.152.91/22' && echo parrot_tcp_22=reachable || echo parrot_tcp_22=unreachable
           ROOT
