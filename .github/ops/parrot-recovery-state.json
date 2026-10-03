@@ -1,0 +1,84 @@
+{
+  "schema": 1,
+  "verifiedAt": "2026-10-03T22:40:36Z",
+  "scope": "Restore Parrot SSH and complete Graphify/Ponytail availability on Hermes and Parrot.",
+  "authority": "User requested SSH recovery and both tools on both machines; user applied the restricted local bootstrap.",
+  "parrot": {
+    "hostname": "parrot",
+    "user": "bechirob",
+    "tailscaleIPv4": "100.74.152.91",
+    "os": "Parrot Security 7.4 / Debian 13.6",
+    "ssh": {
+      "type": "OpenSSH",
+      "listen": "100.74.152.91:22",
+      "allowedUserFrom": "bechirob@100.84.164.68",
+      "authentication": "publickey",
+      "rootLogin": false,
+      "passwordLogin": false,
+      "shieldsUp": false,
+      "tailscaleSSH": false,
+      "active": true,
+      "enabledAtStartup": true,
+      "rebootTested": false,
+      "configuration": "/etc/ssh/sshd_config.d/00-parrot-tailnet.conf",
+      "systemdDropIn": "/etc/systemd/system/ssh.service.d/parrot-tailnet.conf",
+      "socketMasked": true
+    },
+    "graphify": {
+      "version": "0.9.74",
+      "codexSkill": "/home/bechirob/.codex/skills/graphify/SKILL.md",
+      "agentSkill": "/home/bechirob/.agents/skills/graphify/SKILL.md",
+      "smoke": {
+        "codeFiles": 1,
+        "nodes": 3,
+        "edges": 3,
+        "passed": true
+      }
+    },
+    "codex": {
+      "version": "0.153.4",
+      "executable": "/home/bechirob/.local/bin/codex"
+    },
+    "ponytail": {
+      "plugin": "engineering-suite-ponytail@openai-curated-remote",
+      "version": "2.0.0",
+      "installed": true,
+      "enabled": true
+    }
+  },
+  "hermes": {
+    "tailscaleIPv4": "100.84.164.68",
+    "access": "Existing GitHub/Tailscale route: root@hermes",
+    "parrotIdentity": "/root/.ssh/parrot-assistance-ed25519",
+    "parrotHostKeyTrust": "Pinned on first connection through the authenticated Tailscale route; subsequent verification uses StrictHostKeyChecking=yes.",
+    "graphify": {
+      "version": "0.9.74",
+      "user": "ubuntu",
+      "smokePassed": true
+    },
+    "ponytail": {
+      "version": "2.0.0",
+      "user": "ubuntu",
+      "skills": 8,
+      "verified": true
+    },
+    "codexCLI": "Not detected during preceding installation verification."
+  },
+  "evidence": {
+    "parrotSSHRun": 37159099481,
+    "parrotToolsRun": 37159162272,
+    "hermesGraphifyRun": 37153135218,
+    "hermesPonytailRun": 37158011933,
+    "localBootstrapCommit": "2a26464d36f3220d2a11ad0cb85a6369d14d0210",
+    "localBootstrapSHA256": "15d8d150d235a32cef12d16a375f4028341afb2980913d4b83c134c75e9d4537",
+    "verificationWorkflowCommit": "f6a0c186cdec1059e2865c00307b4bacd89c034f"
+  },
+  "constraints": [
+    "Private SSH key remains on Hermes; never export or log its contents.",
+    "Do not replace this route with tagged-device Tailscale SSH to the user-owned Parrot node.",
+    "Keep unrelated applications and existing product deployments unchanged.",
+    "Parrot requires power and a network connection for remote access; Hermes is independent."
+  ],
+  "remaining": [],
+  "nextAction": "Use the dedicated SSH identity from Hermes to Parrot for authorized work; specify the repository to map before a Graphify project run."
+}
