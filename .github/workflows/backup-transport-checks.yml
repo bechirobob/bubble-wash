@@ -1,0 +1,33 @@
+name: Verify encrypted backup transport
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pilot-ci.yml
+      - .github/backup/**
+      - .github/workflows/backup-transport-checks.yml
+      - .github/workflows/nightly-backup.yml
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pilot-ci.yml
+      - .github/backup/**
+      - .github/workflows/backup-transport-checks.yml
+      - .github/workflows/nightly-backup.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify encrypted-only transport and failure guards
+        run: |
+          python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
+          python3 -m py_compile .github/backup/backup_release.py
+          git diff --check
