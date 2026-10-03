@@ -1,13 +1,6 @@
 name: Nightly Production Backup
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/nightly-backup.yml
-      - .github/backup/**
-      - scripts/backup-database.mjs
-      - scripts/finalize-backup.mjs
   schedule:
     - cron: "15 1 * * *"
   workflow_dispatch:
@@ -21,9 +14,10 @@ concurrency:
 
 jobs:
   backup:
-    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    environment: backup-storage
     permissions:
-      contents: write
+      contents: read
     name: Back up and restore-test production data
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -33,6 +27,23 @@ jobs:
           persist-credentials: false
       - name: Verify encrypted backup transport before host access
         run: python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
+      - name: Require private backup destination before host access
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+          BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+          BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+        run: |
+          python3 - <<'PYGUARD'
+          import os,re,sys
+          sys.path.insert(0,'.github/backup')
+          from backup_release import GitHub,STORAGE_REPOSITORY,private_repository,require
+          require(re.fullmatch(r'[a-f0-9]{40}',os.environ['BACKUP_STORE_SHA']), 'Pinned store SHA required.')
+          require(re.fullmatch(r'[1-9][0-9]{0,19}',os.environ['BACKUP_STORE_ID']), 'Pinned store ID required.')
+          api=GitHub(STORAGE_REPOSITORY)
+          private_repository(api,STORAGE_REPOSITORY,int(os.environ['BACKUP_STORE_ID']))
+          commit=api.api('git/commits/'+os.environ['BACKUP_STORE_SHA'])
+          require(commit.get('sha')==os.environ['BACKUP_STORE_SHA'], 'Backup store commit mismatch.')
+          PYGUARD
       - name: Connect to the production tailnet
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
         with:
@@ -88,7 +99,9 @@ jobs:
       - name: Publish and download-verify encrypted private release
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+          BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+          BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
           BACKUP_PROJECT: bubblewash
         run: python3 .github/backup/backup_release.py
       - name: Record durable verified off-host receipt
@@ -101,7 +114,8 @@ jobs:
           import base64,hashlib,json,os,pathlib,re,sys,tempfile
           raw=base64.b64decode(sys.argv[1],validate=True)
           proof=json.loads(raw)
-          assert proof['schema']=='becore-encrypted-backup-release/v1'
+          assert proof['schema']=='becore-encrypted-backup-release/v2'
+          assert proof['storageRepository']=='bechirobob/becore-backups'
           assert proof['repository']=='bechirobob/bubble-wash'
           assert proof['encrypted'] is True and proof['restoreTested'] is True and proof['downloadVerified'] is True
           assert re.fullmatch(r'bubblewash-[0-9TZ.:-]+\.sqlite\.enc',proof['filename'])

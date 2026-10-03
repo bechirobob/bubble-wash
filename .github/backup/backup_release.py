@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Publish encrypted backups only, then independently download/hash before receipt.
 
-Uses the existing job token. Never overwrites/deletes a release or asset, never
+Uses a destination-only credential from a main-restricted environment. Never overwrites/deletes a release or asset, never
 loads an encryption key, and never expires/prunes old backups. Failed attempts
 retain their private draft for inspection. Reruns use a distinct attempt tag.
 """
@@ -17,7 +17,8 @@ import tempfile
 import time
 from urllib.parse import quote
 
-SCHEMA = 'becore-encrypted-backup-release/v1'
+SCHEMA = 'becore-encrypted-backup-release/v2'
+STORAGE_REPOSITORY = 'bechirobob/becore-backups'
 PROJECTS = {'tickets': ('bechirobob/tickets', r'tickets-[0-9TZ.:-]+\.tar\.gz\.enc'),
             'bubblewash': ('bechirobob/bubble-wash', r'bubblewash-[0-9TZ.:-]+\.sqlite\.enc')}
 MAX_SIZE = 2 * 1024 ** 3 - 1
@@ -46,10 +47,12 @@ def context(env):
     repository, pattern = PROJECTS[project]
     require(env['GITHUB_REPOSITORY'] == repository, 'Unexpected repository.')
     require(env['GITHUB_REF'] == 'refs/heads/main', 'Only main may publish backups.')
-    require(env['GITHUB_EVENT_NAME'] in ('push', 'schedule', 'workflow_dispatch'), 'Unexpected backup event.')
+    require(env['GITHUB_EVENT_NAME'] in ('schedule', 'workflow_dispatch'), 'Unexpected backup event.')
     require(re.fullmatch(r'[a-f0-9]{40}', env['GITHUB_SHA']), 'Exact source SHA required.')
     for field in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'):
         require(re.fullmatch(r'[1-9][0-9]{0,19}', env[field]), 'Positive bounded run identity required.')
+    require(re.fullmatch(r'[a-f0-9]{40}', env.get('BACKUP_STORE_SHA', '')), 'Pinned backup-store SHA required.')
+    require(re.fullmatch(r'[1-9][0-9]{0,19}', env.get('BACKUP_STORE_ID', '')), 'Pinned backup-store repository ID required.')
     path = Path(env['BACKUP_PATH'])
     require(path.is_absolute() and re.fullmatch(pattern, path.name), 'Invalid encrypted backup path.')
     info = path.lstat()
@@ -59,6 +62,8 @@ def context(env):
         header = handle.read(len(magic))
     require(info.st_size > len(magic) + 28 and header == magic, 'Encrypted backup format marker is invalid.')
     return {'project': project, 'repository': repository, 'path': path,
+            'storageRepository': STORAGE_REPOSITORY, 'storageSha': env['BACKUP_STORE_SHA'],
+            'storageId': int(env['BACKUP_STORE_ID']),
             'sourceSha': env['GITHUB_SHA'], 'runId': env['GITHUB_RUN_ID'],
             'runAttempt': env['GITHUB_RUN_ATTEMPT'],
             'tag': f"{project}-encrypted-backup-{env['GITHUB_RUN_ID']}-{env['GITHUB_RUN_ATTEMPT']}"}
@@ -66,7 +71,7 @@ def context(env):
 
 class GitHub:
     def __init__(self, repository):
-        require(bool(os.environ.get('GH_TOKEN')), 'The existing job token is required.')
+        require(bool(os.environ.get('GH_TOKEN')), 'The destination-only backup token is required.')
         self.repository = repository
         self.env = dict(os.environ, GH_HOST='github.com', GH_PROMPT_DISABLED='1',
                         GH_PAGER='cat', GH_DEBUG='', NO_COLOR='1')
@@ -129,15 +134,15 @@ class GitHub:
         target.chmod(0o600)
 
 
-def private_repository(api, repository):
+def private_repository(api, repository, repository_id):
     data = api.api()
     require(data.get('private') is True and data.get('visibility') == 'private'
-            and data.get('full_name') == repository, 'Repository must remain private.')
+            and data.get('full_name') == repository and data.get('id') == repository_id, 'Repository must remain private.')
 
 
 def validate_release(data, ctx, expected, draft):
     require(type(data.get('id')) is int and data['id'] > 0, 'Invalid release ID.')
-    require(data.get('tag_name') == ctx['tag'] and data.get('target_commitish') == ctx['sourceSha'], 'Release identity mismatch.')
+    require(data.get('tag_name') == ctx['tag'] and data.get('target_commitish') == ctx['storageSha'], 'Release identity mismatch.')
     require(data.get('draft') is draft and data.get('prerelease') is True, 'Unexpected release visibility/state.')
     assets = data.get('assets', [])
     require(len(assets) == len(expected), 'Unexpected or missing release assets.')
@@ -155,7 +160,7 @@ def validate_release(data, ctx, expected, draft):
 
 
 def publish(ctx, api, work):
-    private_repository(api, ctx['repository'])
+    private_repository(api, ctx['storageRepository'], ctx['storageId'])
     path = ctx['path']
     archive_hash = digest(path)
     checksum = work / (path.name + '.sha256')
@@ -163,8 +168,8 @@ def publish(ctx, api, work):
         handle.write(f'{archive_hash}  {path.name}\n'.encode())
     checksum.chmod(0o600)
     expected = {item.name: (item.stat().st_size, digest(item)) for item in (path, checksum)}
-    body = f"Encrypted backup only. Run {ctx['runId']} attempt {ctx['runAttempt']}.\nSHA-256: {archive_hash}\nNo automatic expiry; retention requires a separately approved policy.\n"
-    release = api.api('releases', 'POST', {'tag_name': ctx['tag'], 'target_commitish': ctx['sourceSha'],
+    body = f"Source: {ctx['repository']} at {ctx['sourceSha']}.\nEncrypted backup only. Run {ctx['runId']} attempt {ctx['runAttempt']}.\nSHA-256: {archive_hash}\nNo automatic expiry; retention requires a separately approved policy.\n"
+    release = api.api('releases', 'POST', {'tag_name': ctx['tag'], 'target_commitish': ctx['storageSha'],
                        'name': ctx['tag'], 'body': body, 'draft': True, 'prerelease': True, 'make_latest': 'false'})
     release_id = release['id']
     require(type(release_id) is int and release_id > 0, 'Invalid created release ID.')
@@ -177,18 +182,19 @@ def publish(ctx, api, work):
         api.download(asset['id'], target, asset['size'])
         require(digest(target) == expected[asset['name']][1], 'Downloaded asset hash mismatch; no receipt recorded.')
     require((work / ('download-' + checksum.name)).read_bytes() == checksum.read_bytes(), 'Downloaded checksum mismatch.')
-    private_repository(api, ctx['repository'])
+    private_repository(api, ctx['storageRepository'], ctx['storageId'])
     published = api.api(f'releases/{release_id}', 'PATCH', {'draft': False, 'make_latest': 'false'})
     published_assets = validate_release(published, ctx, expected, False)
     require({a['name']: a['id'] for a in published_assets} == {a['name']: a['id'] for a in assets}, 'Published assets changed.')
     require(published.get('published_at'), 'Release is not published.')
-    private_repository(api, ctx['repository'])
-    receipt = {'schema': SCHEMA, 'repository': ctx['repository'], 'filename': path.name,
+    private_repository(api, ctx['storageRepository'], ctx['storageId'])
+    receipt = {'schema': SCHEMA, 'repository': ctx['repository'], 'storageRepository': ctx['storageRepository'],
+               'storageRepositoryId': ctx['storageId'], 'storageSha': ctx['storageSha'], 'filename': path.name,
                'runId': ctx['runId'], 'runAttempt': ctx['runAttempt'], 'sourceSha': ctx['sourceSha'],
                'encrypted': True, 'restoreTested': True, 'downloadVerified': True,
                'sha256': archive_hash, 'size': expected[path.name][0], 'storage': 'private-github-release',
                'retentionDays': None, 'automaticExpiry': False, 'releaseTag': ctx['tag'],
-               'releaseId': release_id, 'releaseUrl': f"https://github.com/{ctx['repository']}/releases/tag/{ctx['tag']}",
+               'releaseId': release_id, 'releaseUrl': f"https://github.com/{ctx['storageRepository']}/releases/tag/{ctx['tag']}",
                'verifiedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
                'assets': [{'name': a['name'], 'id': a['id'], 'sha256': expected[a['name']][1], 'size': a['size']} for a in assets]}
     return receipt
@@ -197,7 +203,7 @@ def publish(ctx, api, work):
 def main():
     ctx = context(os.environ)
     with tempfile.TemporaryDirectory(prefix='verified-backup-', dir=os.environ['RUNNER_TEMP']) as directory:
-        receipt = publish(ctx, GitHub(ctx['repository']), Path(directory))
+        receipt = publish(ctx, GitHub(ctx['storageRepository']), Path(directory))
     target = Path(os.environ['RUNNER_TEMP']) / 'offhost-release-receipt.json'
     with target.open('xb') as handle:
         handle.write(canonical(receipt))

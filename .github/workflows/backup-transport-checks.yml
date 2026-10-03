@@ -7,6 +7,7 @@ on:
       - .github/backup/**
       - .github/workflows/backup-transport-checks.yml
       - .github/workflows/nightly-backup.yml
+      - .github/workflows/production-deploy.yml
   push:
     branches: [main]
     paths:
@@ -14,6 +15,7 @@ on:
       - .github/backup/**
       - .github/workflows/backup-transport-checks.yml
       - .github/workflows/nightly-backup.yml
+      - .github/workflows/production-deploy.yml
   workflow_dispatch:
 permissions:
   contents: read
