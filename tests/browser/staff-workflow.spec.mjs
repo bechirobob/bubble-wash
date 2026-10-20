@@ -155,6 +155,23 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
     await save(admin, 'Assign vendor + driver');
     await detail('support');
     await form(support, 'Log customer contact', { nextFollowUpAt: `${date}T09:00`, operatorNote: 'Synthetic contact log, no actual call or email.' }, 'Save contact log', testInfo, 'support-contact');
+    await beforeHardNavigation(vendor, 'vendor populated queue');
+    await vendor.goto(paths.vendor);
+    const assignedRow = vendor.locator('.staffOrderRow').filter({ hasText: booking.id });
+    await expect(assignedRow).toBeVisible();
+    await expect(assignedRow).toContainText(`Synthetic account ${fixture}`);
+    const queueHeader = vendor.locator('.staffOrderListHeader');
+    if (width === 1440) {
+      await expect(queueHeader).toBeVisible();
+      const headerColumns = await queueHeader.locator(':scope > span').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().left));
+      const rowColumns = await assignedRow.locator(':scope > *').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().left));
+      expect(headerColumns).toHaveLength(5);
+      expect(rowColumns).toHaveLength(5);
+      for (let column = 0; column < 5; column++) expect(Math.abs(headerColumns[column] - rowColumns[column]), `Vendor queue column ${column + 1} aligns with its header`).toBeLessThanOrEqual(1);
+    } else {
+      await expect(queueHeader).toBeHidden();
+    }
+    await evidence(vendor, testInfo, 'vendor-populated-queue');
     await detail('vendor'); await evidence(vendor, testInfo, 'vendor-assignment');
     await save(vendor, 'Accept assigned job');
     await detail('driver'); await save(driver, 'Start pickup route');
