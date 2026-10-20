@@ -89,8 +89,7 @@ test("productionReadinessErrors fails closed when production demo credentials wo
   assert.ok(errors.some((item) => item.includes("BUBBLEWASH_DISABLE_DEMO_LOGIN=true")));
   assert.ok(errors.some((item) => item.includes("demo login cannot be enabled")));
   assert.ok(errors.some((item) => item.includes("BUBBLEWASH_SESSION_SECRET")));
-  assert.ok(errors.some((item) => item.includes("BUBBLEWASH_VENDOR_ENTITY_ID")));
-  assert.ok(errors.some((item) => item.includes("BUBBLEWASH_DRIVER_ENTITY_ID")));
+  assert.ok(errors.some((item) => item.includes("effective active admin")));
   assert.equal(errors.some((item) => item.includes("NEXT_PUBLIC_BUBBLEWASH_WHATSAPP")), false);
   assert.equal(errors.some((item) => item.includes("NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL")), false);
 });
@@ -109,58 +108,12 @@ test("password hashes reject malformed values and detect every built-in demo cre
   assert.equal(matchesKnownDemoPassword(uniqueHash), false);
 });
 
-test("production readiness rejects known demo hashes for every staff role", () => {
-  const env = {
-    NODE_ENV: "production",
-    BUBBLEWASH_DISABLE_DEMO_LOGIN: "true",
-    BUBBLEWASH_SESSION_SECRET: "a-secure-session-secret-with-32-characters",
-    BUBBLEWASH_DATABASE_PATH: "/var/lib/bubblewash/bubblewash.sqlite",
-    BUBBLEWASH_PUBLIC_URL: "https://bubblewash.co",
-    BUBBLEWASH_VENDOR_ENTITY_ID: "vendor-approved-partner",
-    BUBBLEWASH_DRIVER_ENTITY_ID: "driver-approved-rider",
-    BUBBLEWASH_TRUST_PROXY_HEADERS: "true",
-    BUBBLEWASH_TRUST_EDGE_HEADERS: "false",
-  };
-
-  for (const [index, role] of ["ADMIN", "VENDOR", "DRIVER", "SUPPORT"].entries()) {
-    env[`BUBBLEWASH_${role}_EMAIL`] = `${role.toLowerCase()}@example.com`;
-    env[`BUBBLEWASH_${role}_PASSWORD_HASH`] = createPasswordHash(knownDemoPasswords[index], `readiness-${role}`);
-  }
-
-  const errors = productionReadinessErrors(env);
-  for (const role of ["ADMIN", "VENDOR", "DRIVER", "SUPPORT"]) {
-    assert.ok(errors.some((item) => item.includes(`BUBBLEWASH_${role}_PASSWORD_HASH`) && item.includes("known demo credentials")));
-  }
-});
-
-test("production readiness requires vendor and rider entity bindings", () => {
-  const base = {
-    NODE_ENV: "production",
-    BUBBLEWASH_DISABLE_DEMO_LOGIN: "true",
-    BUBBLEWASH_SESSION_SECRET: "a-secure-session-secret-with-32-characters",
-    BUBBLEWASH_DATABASE_PATH: "/var/lib/bubblewash/bubblewash.sqlite",
-    BUBBLEWASH_PUBLIC_URL: "https://bubblewash.co",
-    BUBBLEWASH_ADMIN_EMAIL: "admin@example.com",
-    BUBBLEWASH_ADMIN_PASSWORD_HASH: "hash",
-    BUBBLEWASH_VENDOR_EMAIL: "vendor@example.com",
-    BUBBLEWASH_VENDOR_PASSWORD_HASH: "hash",
-    BUBBLEWASH_DRIVER_EMAIL: "driver@example.com",
-    BUBBLEWASH_DRIVER_PASSWORD_HASH: "hash",
-    BUBBLEWASH_SUPPORT_EMAIL: "support@example.com",
-    BUBBLEWASH_SUPPORT_PASSWORD_HASH: "hash",
-    BUBBLEWASH_TRUST_PROXY_HEADERS: "true",
-    BUBBLEWASH_TRUST_EDGE_HEADERS: "false",
-  };
-  const missing = productionReadinessErrors(base);
-  assert.ok(missing.some((item) => item.includes("BUBBLEWASH_VENDOR_ENTITY_ID")));
-  assert.ok(missing.some((item) => item.includes("BUBBLEWASH_DRIVER_ENTITY_ID")));
-
-  const bound = productionReadinessErrors({
-    ...base,
-    BUBBLEWASH_VENDOR_ENTITY_ID: "vendor-approved-partner",
-    BUBBLEWASH_DRIVER_ENTITY_ID: "driver-approved-rider",
-  });
-  assert.equal(bound.some((item) => item.includes("ENTITY_ID")), false);
+test("production readiness requires effective non-demo admin credentials, not legacy worker logins", () => {
+  const env = { NODE_ENV: "production", BUBBLEWASH_ADMIN_EMAIL: "owner@example.test", BUBBLEWASH_ADMIN_PASSWORD_HASH: createPasswordHash("Admin123!") };
+  assert.ok(productionReadinessErrors(env).some((item) => item.includes("effective active admin")));
+  env.BUBBLEWASH_ADMIN_PASSWORD_HASH = createPasswordHash("A unique synthetic owner password!");
+  assert.equal(productionReadinessErrors(env).some((item) => item.includes("effective active admin")), false);
+  assert.equal(productionReadinessErrors(env).some((item) => item.includes("ENTITY_ID") || item.includes("VENDOR_PASSWORD_HASH")), false);
 });
 
 test("pilot operations may hide optional public contacts while readiness reports warnings", () => {

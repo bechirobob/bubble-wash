@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { createPasswordHash } from "../src/lib/passwords.ts";
 
 process.env.NODE_ENV = "production";
+process.env.BUBBLEWASH_DATABASE_PATH = path.join(mkdtempSync(path.join(tmpdir(), "bubblewash-prod-auth-synthetic-")), "test.sqlite");
 process.env.BUBBLEWASH_SESSION_SECRET = "production-auth-test-session-secret-32-plus";
 process.env.BUBBLEWASH_DISABLE_DEMO_LOGIN = "true";
 process.env.BUBBLEWASH_ADMIN_EMAIL = "admin-production-test@bubblewash.local";
@@ -21,8 +25,11 @@ assert.equal(staffUsers.some((user) => user.role === "admin"), false);
 assert.equal(findStaffUser(process.env.BUBBLEWASH_ADMIN_EMAIL, "Admin123!"), null);
 
 const vendor = findStaffUser(process.env.BUBBLEWASH_VENDOR_EMAIL, "vendor-pilot-unique-password");
-assert.equal(vendor?.role, "vendor");
-assert.equal(vendor?.entityId, "vendor-production-bound-test");
+assert.equal(vendor, null, "legacy worker credentials are never production identities");
+const { inviteStaffAccount, activateStaffAccount } = await import("../src/lib/staff-accounts.ts");
+const token = inviteStaffAccount({ email: process.env.BUBBLEWASH_VENDOR_EMAIL, name: "Synthetic vendor", role: "vendor", entityId: "vendor-production-bound-test" }, "test");
+assert.equal(activateStaffAccount(token, "managed-vendor-unique-password"), true);
+assert.equal(findStaffUser(process.env.BUBBLEWASH_VENDOR_EMAIL, "managed-vendor-unique-password")?.entityId, "vendor-production-bound-test");
 assert.equal(findStaffUser(process.env.BUBBLEWASH_VENDOR_EMAIL, "Vendor123!"), null);
 
-console.log(JSON.stringify({ ok: true, checks: 5 }));
+console.log(JSON.stringify({ ok: true, checks: 6 }));

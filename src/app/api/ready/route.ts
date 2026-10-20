@@ -9,7 +9,11 @@ import { adminMfaConfigured } from "@/lib/admin-mfa";
 import { decodeSession, sessionCookieName, currentStaffUsers } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
-  const blockers = productionReadinessErrors();
+  let staff: ReturnType<typeof currentStaffUsers> = [];
+  let staffReadFailed = false;
+  try { staff = currentStaffUsers(); } catch { staffReadFailed = true; }
+  const blockers = productionReadinessErrors(process.env, staff);
+  if (staffReadFailed) blockers.push("The managed staff account store is unavailable.");
   blockers.push(...backupReadiness());
   try {
     if (!databaseReadiness()) blockers.push("The operations database did not pass its integrity/read check.");
@@ -23,7 +27,7 @@ export async function GET(request: NextRequest) {
   const ready = blockers.length === 0;
   let adminMfaReady = false;
   try {
-    const admin = currentStaffUsers().find((user) => user.role === "admin");
+    const admin = staff.find((user) => user.role === "admin");
     adminMfaReady = Boolean(admin && adminMfaConfigured(admin.email));
   } catch {
     adminMfaReady = false;

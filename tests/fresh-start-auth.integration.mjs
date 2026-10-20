@@ -1,0 +1,51 @@
+// Isolated synthetic data only. No HTTP requests, payments, or messages.
+import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { randomBytes } from "node:crypto";
+import { createPasswordHash } from "../src/lib/passwords.ts";
+import { totpCode } from "../src/lib/totp.ts";
+
+const cwd = mkdtempSync(path.join(tmpdir(), "bubblewash-auth-reset-synthetic-"));
+for (const key of Object.keys(process.env)) if (key.startsWith("BUBBLEWASH_")) delete process.env[key];
+Object.assign(process.env, { NODE_ENV: "production", BUBBLEWASH_DATABASE_PATH: path.join(cwd, "synthetic.sqlite"), BUBBLEWASH_DATABASE_DRIVER: "sqlite", BUBBLEWASH_DISABLE_DEMO_LOGIN: "true",
+  BUBBLEWASH_SESSION_SECRET: randomBytes(32).toString("hex"), BUBBLEWASH_MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64"), BUBBLEWASH_ADMIN_MFA_REQUIRED: "true", BUBBLEWASH_CONFIRM_FRESH_RESET: "DELETE_ALL_NONADMIN_OPERATIONAL_DATA_WITHOUT_NEW_BACKUP",
+  BUBBLEWASH_VENDOR_EMAIL: "worker@example.test", BUBBLEWASH_VENDOR_PASSWORD_HASH: createPasswordHash("Legacy synthetic password!"), BUBBLEWASH_VENDOR_ENTITY_ID: "synthetic-vendor" });
+const { findStaffUser, encodeSession, decodeSession } = await import("../src/lib/auth.ts");
+const { getDatabase } = await import("../src/lib/data-store.ts");
+const { inviteStaffAccount, activateStaffAccount } = await import("../src/lib/staff-accounts.ts");
+const { startAdminMfaEnrollment, confirmAdminMfaEnrollment, verifyAdminMfaCredential, adminMfaConfigured } = await import("../src/lib/admin-mfa.ts");
+const { inspectFreshReset, applyFreshReset } = await import("../scripts/reset-fresh-start.mjs");
+const ownerPassword = "Synthetic owner password only!";
+const workerPassword = "Synthetic worker password only!";
+assert.equal(activateStaffAccount(inviteStaffAccount({ email: "owner@example.test", name: "Synthetic owner", role: "admin", entityId: "" }, "synthetic-test"), ownerPassword), true);
+assert.equal(activateStaffAccount(inviteStaffAccount({ email: "worker@example.test", name: "Synthetic worker", role: "vendor", entityId: "synthetic-vendor" }, "synthetic-test"), workerPassword), true);
+const owner = findStaffUser("owner@example.test", ownerPassword);
+const worker = findStaffUser("worker@example.test", workerPassword);
+assert.ok(owner && worker);
+const ownerSession = encodeSession(owner);
+const workerSession = encodeSession(worker);
+const enrollment = await startAdminMfaEnrollment(owner.email);
+const confirmed = confirmAdminMfaEnrollment(owner.email, totpCode(enrollment.manualKey));
+assert.equal(confirmed.ok, true);
+assert.equal(adminMfaConfigured(owner.email), true);
+assert.equal(decodeSession(workerSession)?.role, "vendor");
+for (const key of ["BUBBLEWASH_VENDOR_EMAIL", "BUBBLEWASH_VENDOR_PASSWORD_HASH", "BUBBLEWASH_VENDOR_ENTITY_ID"]) delete process.env[key];
+const db = getDatabase();
+const inventory = inspectFreshReset(db, process.env, cwd);
+applyFreshReset(db, process.env, cwd, inventory.fingerprint, () => {});
+assert.equal(findStaffUser("owner@example.test", ownerPassword)?.role, "admin");
+assert.equal(decodeSession(ownerSession)?.role, "admin");
+assert.equal(adminMfaConfigured(owner.email), true);
+assert.equal(verifyAdminMfaCredential(owner.email, totpCode(enrollment.manualKey, Math.floor(Date.now() / 30000) + 1)), true);
+assert.equal(verifyAdminMfaCredential(owner.email, confirmed.recoveryCodes[0]), true);
+assert.equal(verifyAdminMfaCredential(owner.email, confirmed.recoveryCodes[0]), false);
+assert.equal(decodeSession(workerSession), null);
+assert.equal(findStaffUser("worker@example.test", workerPassword), null);
+process.env.BUBBLEWASH_VENDOR_EMAIL = "worker@example.test";
+process.env.BUBBLEWASH_VENDOR_PASSWORD_HASH = createPasswordHash("Legacy synthetic password!");
+assert.equal(findStaffUser("worker@example.test", "Legacy synthetic password!"), null);
+assert.equal(decodeSession(workerSession), null);
+db.close();
+console.log(JSON.stringify({ ok: true, checks: 19, scope: "synthetic login, session revocation, enrolled MFA and recovery-code survival; no live reset" }));

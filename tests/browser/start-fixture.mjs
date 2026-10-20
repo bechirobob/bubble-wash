@@ -1,4 +1,5 @@
 import './block-egress.mjs';
+import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,9 +25,15 @@ Object.assign(process.env, platformEnv, {
   BUBBLEWASH_PUBLIC_URL: 'http://localhost:3100',
   NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED: 'false', NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED: 'false',
 });
-for (const role of ['admin', 'vendor', 'driver', 'support']) {
+for (const role of ['admin']) {
   process.env[`BUBBLEWASH_${role.toUpperCase()}_EMAIL`] = `${role}@example.invalid`;
   process.env[`BUBBLEWASH_${role.toUpperCase()}_PASSWORD_HASH`] = createPasswordHash(`synthetic-${role}-password-123`);
+}
+// Production non-admin access uses managed identities, never environment fallbacks.
+const { inviteStaffAccount, activateStaffAccount } = await import('../../src/lib/staff-accounts.ts');
+for (const role of ['vendor', 'driver', 'support']) {
+  const token = inviteStaffAccount({ email: `${role}@example.invalid`, name: `Synthetic ${role}`, role, entityId: process.env[`BUBBLEWASH_${role.toUpperCase()}_ENTITY_ID`] || '' }, 'synthetic-fixture');
+  assert.equal(activateStaffAccount(token, `synthetic-${role}-password-123`), true);
 }
 const availability = await import('../../src/lib/availability-store.ts');
 availability.upsertVendorAvailability({ vendorId: 'vendor-browser', vendorName: 'Synthetic Laundry', serviceZones: ['Osu'], serviceTypes: ['Wash + fold'], capacityRemaining: 10, availabilityStatus: 'available', updatedBy: 'synthetic-fixture' });

@@ -36,3 +36,11 @@ jobs:
         run: npm run build
       - name: Run four-role journeys at mobile and desktop sizes
         run: npm run test:browser
+      - name: Preserve synthetic browser screenshots for review
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: synthetic-browser-screenshots
+          path: test-results/browser/**/*.png
+          if-no-files-found: ignore
+          retention-days: 7

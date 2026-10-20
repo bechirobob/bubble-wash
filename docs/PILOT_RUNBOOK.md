@@ -17,9 +17,9 @@ This runbook is the go/no-go standard for the controlled commercial-laundry pilo
 Use `.env.production.example` as the inventory. Before launch:
 
 1. Set `BUBBLEWASH_DATABASE_DRIVER=sqlite` and `BUBBLEWASH_DATABASE_PATH` to the mounted volume, for example `/var/lib/bubblewash/bubblewash.sqlite`.
-2. Generate a unique 32+ character session secret and a different strong password hash for each of the four current role logins. Set `BUBBLEWASH_DISABLE_DEMO_LOGIN=true`. The current master-admin operating mode uses `BUBBLEWASH_ADMIN_MFA_REQUIRED=false` and `NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED=false`, so the approved admin email and password open the workspace without an authenticator code. If the owner later enables MFA, set both flags true, complete `/admin/mfa/enroll`, save the eight one-use recovery codes, and test code and recovery-code replay protection before reopening admin access.
+2. Generate a unique 32+ character session secret and a strong password hash for the owner/admin bootstrap login; create individual managed accounts for workers. Set `BUBBLEWASH_DISABLE_DEMO_LOGIN=true`. The current master-admin operating mode uses `BUBBLEWASH_ADMIN_MFA_REQUIRED=false` and `NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED=false`, so the approved admin email and password open the workspace without an authenticator code. If the owner later enables MFA, set both flags true, complete `/admin/mfa/enroll`, save the eight one-use recovery codes, and test code and recovery-code replay protection before reopening admin access.
 3. Set `BUBBLEWASH_PUBLIC_URL=https://bubblewash.co`.
-4. Set `BUBBLEWASH_VENDOR_ENTITY_ID` and `BUBBLEWASH_DRIVER_ENTITY_ID` to the exact approved roster IDs. The current pilot has one configured rider login; only that bound rider may share foreground GPS.
+4. Invite and activate vendor, driver and support users through admin staff management. Bind vendor and driver accounts to exact approved roster IDs. Production ignores legacy worker environment credentials; deleting or suspending a managed account must never revive them. Only the bound rider may share foreground GPS. After a fresh reset, an empty worker roster is valid.
 5. Set `NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED=false` and `NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED=false` for the manual operational pilot. The future services appear only as disabled “Coming soon” information.
 6. `NEXT_PUBLIC_BUBBLEWASH_WHATSAPP` and `NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL` are optional public contact links and may remain unset during the pilot; the corresponding links stay hidden. Only real, approved public contact values may be added later.
 7. Leave Paystack unset while online payments remain disabled. Configure Resend plus approved `WHATSAPP_EARLY_ACCESS_TEMPLATE` and `WHATSAPP_PRIVACY_TEMPLATE` credentials before launch; these confirmations are operational even while commercial automated updates remain disabled. Do not enable commercial automated updates until booking/operations templates and end-to-end tests pass.
@@ -86,3 +86,7 @@ Use a fresh test customer and a test bank-transfer/invoice record approved by th
 ## Rollback
 
 Keep the previous production image/commit and its compatible volume snapshot. If the release gate or smoke test fails, stop traffic to the new instance, redeploy the previous image without changing the database schema manually, verify `/api/health` and staff access, then reopen the controlled pilot. Never run two revisions against the SQLite volume at the same time.
+
+## Fresh start
+
+See [FRESH_RESET.md](FRESH_RESET.md) for the separately confirmed destructive fresh-start scope. It removes nonadmin staff and operational records, not all staff: owner/admin credentials, MFA and service settings remain. The older production reset scripts have different scopes and backup prerequisites and must not be substituted.

@@ -17,5 +17,9 @@ Production npm audit: zero findings. Full-tree npm audit: five high-severity dev
 
 Local browser launch is blocked by executor sandbox restrictions; WebKit also lacks host libraries. The dedicated browser CI must run and be reviewed before claiming browser validation. CI results on the published revision supersede this local snapshot.
 
-## Separate reset boundary
-Reset/authentication-readiness changes are not included. A separately approved fresh reset must remove operational records and nonadmin staff while preserving owner/admin authentication, service settings and infrastructure credentials, and excluding historical archives. Live owner access and runtime identity revocation require verification before any reset. This PR does not execute or authorize that reset.
+## Reset preparation, not execution
+Reviewed reset/authentication-readiness code and synthetic tests are included. Production workers must use active managed accounts; deleting a worker must not revive an environment login. Readiness accepts an empty worker roster while retaining effective admin and infrastructure checks. The guarded reset preparation covers operational records, customer recovery and checkout locks, and nonadmin staff while preserving owner/admin authentication, service settings and infrastructure credentials, excluding historical archives.
+
+No reset, live credential/configuration change or deployment is performed by this PR. A separately authorized release and controlled writer freeze are required. The operator must verify live owner/admin password and MFA before and after execution, revoke old worker identities, and verify no reseeding. The source-level preflight is not proof of live owner access. See docs/FRESH_RESET.md.
+
+Combined local validation: 102 unit tests plus all data integrations passed; reset-specific 18 cases cover unknown schema, drift, rollback, usable owner/MFA preservation and stopped-runtime checks. HTTP workflow, production build, required routes and image runtime rerun on integrated auth code. Rendered browser CI remains required for the final commit.

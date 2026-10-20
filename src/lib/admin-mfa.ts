@@ -1,4 +1,5 @@
 import "server-only";
+import { mfaEncryptionKey as encryptionKey } from "./mfa-encryption.ts";
 
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, randomInt } from "node:crypto";
 import QRCode from "qrcode";
@@ -24,15 +25,6 @@ function base32(buffer: Buffer) {
     output += alphabet[Number.parseInt(bits.slice(offset, offset + 5).padEnd(5, "0"), 2)];
   }
   return output;
-}
-
-function encryptionKey() {
-  const configured = process.env.BUBBLEWASH_MFA_ENCRYPTION_KEY?.trim() ?? "";
-  const decoded = Buffer.from(configured, "base64");
-  if (decoded.length !== 32 || decoded.toString("base64").replace(/=+$/, "") !== configured.replace(/=+$/, "")) {
-    throw new Error("BUBBLEWASH_MFA_ENCRYPTION_KEY must be a base64-encoded 32-byte key.");
-  }
-  return decoded;
 }
 
 function encrypt(value: string) {
