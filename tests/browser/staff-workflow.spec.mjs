@@ -1,6 +1,20 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { fixtureRequestPolicy } from './request-policy.mjs';
+import { observePrefetches } from './prefetch-lifecycle.mjs';
+
+const prefetches = new WeakMap();
+async function beforeHardNavigation(page, label) {
+  const tracker = prefetches.get(page);
+  tracker.setPhase(`settling before ${label}`);
+  await expect.poll(() => tracker.settled(), { timeout: 15_000, message: `Existing RSC prefetches finish before ${label}` }).toBe(true);
+  tracker.setPhase(label);
+}
+function safeError(message) {
+  return message.replace(/https?:\/\/[^\s]+/g, value => {
+    try { const url = new URL(value); return `${url.origin}${url.pathname}`; } catch { return '[URL]'; }
+  });
+}
 
 const paths = { admin: '/admin?view=orders', vendor: '/vendors?view=jobs', driver: '/drivers?view=route', support: '/support?view=orders' };
 
@@ -75,7 +89,13 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
         return route.continue(options);
       });
       const page = await context.newPage(); pages[role] = page;
-      page.on('pageerror', error => errors.push(error.message));
+      const tracker = observePrefetches(page, event => console.log(`[${fixture}] ${role} ${Date.now()} ${JSON.stringify(event)}`));
+      prefetches.set(page, tracker);
+      page.on('pageerror', error => {
+        const message = safeError(error.message);
+        errors.push(message);
+        console.error(`[${fixture}] ${role} ${Date.now()} pageerror during ${tracker.phase()}: ${message}`);
+      });
       page.on('requestfailed', request => {
         if (request.resourceType() === 'script') console.error(`[${fixture}] script request failed: ${new URL(request.url()).pathname} ${request.failure()?.errorText}`);
       });
@@ -86,6 +106,7 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
       await page.getByLabel('Password', { exact: true }).press('Tab');
       await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeFocused();
       expect(await page.getByRole('button', { name: 'Sign in', exact: true }).evaluate(element => getComputedStyle(element).outlineStyle)).not.toBe('none');
+      await beforeHardNavigation(page, `${role} submit login`);
       console.log(`[${fixture}] submit login: ${role}`);
       const [loginResponse] = await Promise.all([
         page.waitForResponse(response => response.url().endsWith('/api/login') && response.request().method() === 'POST', { timeout: 15_000 }),
@@ -104,6 +125,7 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
       // A transient navigation URL is not proof of a usable session. Verify an
       // actual browser cookie-backed API request and a complete workspace reload.
       await expect.poll(() => page.evaluate(async () => (await fetch('/api/orders')).status), { message: `${role} browser session API roundtrip` }).toBe(200);
+      await beforeHardNavigation(page, `${role} session reload`);
       const workspaceResponse = await page.reload({ waitUntil: 'load' });
       const sent = await workspaceResponse.headerValue('x-fixture-staff-cookie-received') === 'true';
       expect(sent, `${role} fixture server receives session cookie on workspace reload`).toBe(true);
@@ -119,7 +141,7 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
     const response = await customer.request.post('/api/submit', { timeout: 15_000, data: { submissionType: 'pickup-booking', idempotencyKey: randomUUID(), name: `Synthetic customer ${fixture}`, email: `customer${fixture}@example.invalid`, phone: '0200000000', company: `Synthetic account ${fixture}`, pickupAddress: 'Synthetic reception, Osu, Accra', pickupDate: date, pickupWindow: '8:00–10:00', plan: 'Weekly', businessType: 'Office or small team', laundryRhythm: 'About once a week', locationCount: '1 location', servicePriority: 'Standard scheduled service', paymentPreference: 'Invoice me', alertPreference: 'Call me', addons: [] } });
     expect(response.ok(), `Synthetic booking: HTTP ${response.status()}`).toBeTruthy();
     const booking = await response.json();
-    const detail = async role => { console.log(`[${fixture}] order detail: ${role}`); await pages[role].goto(`${paths[role]}&order=${booking.id}`); await expect(pages[role].getByRole('heading', { name: `Synthetic account ${fixture}`, exact: true })).toBeVisible(); };
+    const detail = async role => { console.log(`[${fixture}] order detail: ${role}`); await beforeHardNavigation(pages[role], `${role} order detail`); await pages[role].goto(`${paths[role]}&order=${booking.id}`); await expect(pages[role].getByRole('heading', { name: `Synthetic account ${fixture}`, exact: true })).toBeVisible(); };
     const { admin, vendor, driver, support } = pages;
     await detail('admin');
     // Native disclosure is keyboard operable, without disturbing the saved action.
@@ -160,6 +182,7 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
     const tracking = await customer.request.get(`/api/track?id=${booking.id}`, { timeout: 15_000 });
     expect(tracking.ok(), `Tracking: HTTP ${tracking.status()}`).toBeTruthy();
     expect((await tracking.json()).tracking.status).toBe('Closed');
+    await beforeHardNavigation(admin, 'admin overdue fixture');
     await admin.goto('/admin?view=orders&order=BW-BROWSEROVERDUE01');
     await expect(admin.locator('.stageClock b')).toHaveText('Overdue');
     await admin.waitForTimeout(1100);

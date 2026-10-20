@@ -7,7 +7,7 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   workers: 1,
   retries: 0,
-  maxFailures: 1,
+  maxFailures: 0,
   reporter: 'list',
   outputDir: 'test-results/browser',
   use: { actionTimeout: 15_000, navigationTimeout: 20_000, baseURL: 'http://localhost:3100', browserName: 'chromium', launchOptions: process.env.BUBBLEWASH_TEST_CHROMIUM_PATH ? { executablePath: process.env.BUBBLEWASH_TEST_CHROMIUM_PATH } : {}, trace: 'off', video: 'off', screenshot: 'off' },
