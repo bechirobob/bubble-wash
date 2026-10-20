@@ -18,6 +18,7 @@ test('fixture edge forwards real HTTP bodies, Host, cookies and response cookies
   const upstream = http.createServer(async (request, response) => {
     let body = ''; for await (const chunk of request) body += chunk;
     response.setHeader('set-cookie', 'synthetic=cookie; HttpOnly; Path=/');
+    if (['/admin', '/vendors', '/drivers', '/support'].includes(request.url)) response.setHeader('x-fixture-staff-cookie-received', 'upstream-untrusted');
     response.end(JSON.stringify({ headers: request.headers, body }));
   });
   await new Promise(resolve => upstream.listen(0, 'localhost', resolve));
@@ -42,6 +43,13 @@ test('fixture edge forwards real HTTP bodies, Host, cookies and response cookies
     assert.equal(received.headers.origin, 'https://localhost:3100');
     assert.equal(received.headers.cookie, 'synthetic=session');
     assert.equal(received.body, '{"fixture":true}');
+    for (const path of ['/admin', '/vendors', '/drivers', '/support']) {
+      const withCookie = await send(path, { headers: { host: 'localhost:3100', cookie: 'bubblewash_staff_session=fixture-only' } });
+      assert.equal(withCookie.headers['x-fixture-staff-cookie-received'], 'true');
+      const withoutCookie = await send(path, { headers: { host: 'localhost:3100', cookie: 'unrelated=fixture-only' } });
+      assert.equal(withoutCookie.headers['x-fixture-staff-cookie-received'], 'false');
+    }
+    assert.equal(response.headers['x-fixture-staff-cookie-received'], undefined, 'No cookie diagnostic on API responses');
     const cross = await (await send('/api/login', { method: 'POST', headers: { host: 'localhost:3100', origin: 'https://example.invalid' } })).json();
     assert.equal(cross.headers.origin, 'https://example.invalid');
     assert.equal((await send('/', { headers: { host: 'wrong.invalid' } })).status, 403);

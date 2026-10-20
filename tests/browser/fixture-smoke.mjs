@@ -64,7 +64,9 @@ try {
     const cookie = setCookies.map(value => value.split(';')[0]).join('; ');
     const workspace = await fetch(`${base}${path}`, { headers: { cookie }, redirect: 'manual' });
     assert.equal(workspace.status, 200, `${role} cookie-backed workspace`);
+    assert.equal(workspace.headers.get('x-fixture-staff-cookie-received'), 'true', 'Edge observes workspace cookie');
     const anonymous = await fetch(`${base}${path}`, { redirect: 'manual' });
+    assert.equal(anonymous.headers.get('x-fixture-staff-cookie-received'), 'false', 'Edge observes anonymous workspace without cookie');
     if (anonymous.status === 307) {
       assert.equal(new URL(anonymous.headers.get('location'), base).pathname, '/login');
     } else {

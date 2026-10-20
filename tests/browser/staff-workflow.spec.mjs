@@ -104,14 +104,14 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
       // A transient navigation URL is not proof of a usable session. Verify an
       // actual browser cookie-backed API request and a complete workspace reload.
       await expect.poll(() => page.evaluate(async () => (await fetch('/api/orders')).status), { message: `${role} browser session API roundtrip` }).toBe(200);
-      const [workspaceRequest] = await Promise.all([
-        page.waitForRequest(request => request.isNavigationRequest() && new URL(request.url()).pathname === paths[role].split('?')[0]),
-        page.reload({ waitUntil: 'load' }),
-      ]);
-      const sent = /(?:^|;\s*)bubblewash_staff_session=/.test((await workspaceRequest.allHeaders()).cookie ?? '');
-      expect(sent, `${role} workspace reload sends session cookie`).toBe(true);
+      const workspaceResponse = await page.reload({ waitUntil: 'load' });
+      const sent = await workspaceResponse.headerValue('x-fixture-staff-cookie-received') === 'true';
+      expect(sent, `${role} fixture server receives session cookie on workspace reload`).toBe(true);
+      expect(workspaceResponse.status(), `${role} authenticated workspace reload`).toBe(200);
       await expect(page).toHaveURL(url => url.pathname === paths[role].split('?')[0]);
-      console.log(`[${fixture}] ${role} session retained=${retained}, reload sent=${sent}`);
+      await expect.poll(() => page.evaluate(async () => (await fetch('/api/orders')).status), { message: `${role} browser session survives workspace reload` }).toBe(200);
+      await expect(page.getByRole('navigation', { name: `${role} workspace sections`, exact: true })).toBeVisible();
+      console.log(`[${fixture}] ${role} session retained=${retained}, server received=${sent}`);
       await evidence(page, testInfo, `${role}-landing`);
     }
     const customer = await browser.newContext({ baseURL: 'http://localhost:3100', extraHTTPHeaders: { origin: 'http://localhost:3100' } }); contexts.push(customer);

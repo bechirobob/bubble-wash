@@ -44,7 +44,13 @@ export function createFixtureEdge({ upstreamPort = 3101, origin = 'http://localh
     }
     const upstream = http.request({ hostname: 'localhost', port: upstreamPort, method: request.method,
       path: `${target.pathname}${target.search}`, headers: fixtureEdgeHeaders(request.method, target.pathname, request.headers, origin) }, incoming => {
-      response.writeHead(incoming.statusCode, fixtureEdgeResponseHeaders(incoming.headers));
+      const headers = fixtureEdgeResponseHeaders(incoming.headers);
+      // Metadata-only transport proof: WebKit's protocol may omit Cookie from
+      // request.allHeaders(). Observe receipt here, never expose a token value.
+      if (request.method === 'GET' && ['/admin', '/vendors', '/drivers', '/support'].includes(target.pathname)) {
+        headers['x-fixture-staff-cookie-received'] = String(/(?:^|;\s*)bubblewash_staff_session=/.test(request.headers.cookie ?? ''));
+      }
+      response.writeHead(incoming.statusCode, headers);
       incoming.pipe(response);
     });
     upstream.on('error', () => { if (!response.headersSent) response.writeHead(502); response.end('Fixture upstream unavailable'); });
