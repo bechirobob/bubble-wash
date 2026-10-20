@@ -1717,7 +1717,7 @@ input, select, textarea { font-size: 1rem; }
 .portalPage .staffAdminHome { display: inline-flex; align-items: center; min-height: 44px; font-size: .88rem; font-weight: 600; }
 .portalPage .staffSectionNav { flex-wrap: wrap; gap: 0 24px; overflow: visible; margin-inline: 0; padding-inline: 0; }
 .portalPage .staffSectionNav a { min-width: 0; min-height: 44px; padding-block: 8px; font-size: .88rem; line-height: 1.35; }
-.portalPage .staffSectionNav a span { overflow-wrap: anywhere; }
+.portalPage .staffSectionNav a span { overflow-wrap: normal; }
 .portalPage .staffViewHeader { padding-block: 20px 16px; }
 .portalPage .staffViewHeader h1 { font-size: clamp(1.4rem, 2.5vw, 1.75rem); }
 .portalPage .staffViewHeader > p:last-child { max-width: 64ch; font-size: .9rem; }
@@ -1753,6 +1753,8 @@ input, select, textarea { font-size: 1rem; }
 }
 @media (max-width: 720px) {
   .portalPage .staffTopbar { flex-wrap: wrap; gap: 4px 12px; }
+  .portalPage .staffTopbar .brandArtwork { width: 64px; height: 46px; flex: 0 0 64px; }
+  .portalPage .staffTopbar .brandMark { width: 102px; height: 102px; }
   .portalPage .staffAccount { flex: 1 1 180px; gap: 8px 12px; }
   .portalPage .staffAccount > span { flex: 1 1 100px; }
   .portalPage .staffAccount > span small { display: block; }
@@ -1767,4 +1769,8 @@ input, select, textarea { font-size: 1rem; }
   .portalPage .staffPrimaryAction { padding-block: 16px; }
   .portalPage .staffRosterEditor > summary { gap: 12px; }
   .portalPage .staffRosterEditor > summary b { white-space: normal; }
+}
+
+@media (max-width: 400px) {
+  .portalPage .staffSectionNav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

@@ -17,7 +17,16 @@ async function save(page, label, endpoint = '/api/orders/advance') {
       page.waitForResponse(response => response.url().endsWith(endpoint) && response.request().method() === 'POST', { timeout: 15_000 }),
       page.getByRole('button', { name: label, exact: true }).click(),
     ]);
-    expect(response.ok(), await response.text()).toBeTruthy();
+    // Header success is not client completion. Let the app consume the body and
+    // finish its refresh before the next navigation or action can abort that work.
+    expect(response.ok(), `${label}: HTTP ${response.status()}`).toBeTruthy();
+    if (endpoint === '/api/orders/invoice') {
+      await expect(page.locator('.invoicePanel [role="status"]')).toHaveText('Ledger entry recorded.');
+      await expect(page.locator('.invoicePanel').getByRole('button', { name: label, exact: true })).toBeEnabled();
+    } else {
+      await expect(page.locator('.automationPanel [role="status"]')).toHaveText(/^Saved /);
+      await expect(page.locator('.automationPanel button:disabled')).toHaveCount(0);
+    }
     await expect(page.getByRole('button', { name: 'Working…', exact: true })).toHaveCount(0);
   });
 }
@@ -74,17 +83,20 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
         page.waitForResponse(response => response.url().endsWith('/api/login') && response.request().method() === 'POST', { timeout: 15_000 }),
         page.keyboard.press('Enter'),
       ]);
-      const loginBody = await loginResponse.json();
-      const safeErrors = new Set(['Same-origin staff action required.', 'Invalid Bubble Wash staff credentials.', 'Too many login attempts. Try again shortly.', 'Login cannot be reached.', 'Unable to sign in.', 'Admin sign-in is temporarily unavailable.', 'Invalid Bubble Wash staff credentials.']);
-      const loginError = safeErrors.has(loginBody.error) ? loginBody.error : 'Unrecognized login error';
-      expect(loginResponse.ok(), `Login HTTP ${loginResponse.status()}: ${loginError}`).toBeTruthy();
+      // Successful sign-in navigates immediately; do not read a discarded response body.
+      if (!loginResponse.ok()) {
+        const loginBody = await loginResponse.json();
+        const safeErrors = new Set(['Same-origin staff action required.', 'Invalid Bubble Wash staff credentials.', 'Too many login attempts. Try again shortly.', 'Login cannot be reached.', 'Unable to sign in.', 'Admin sign-in is temporarily unavailable.']);
+        const loginError = safeErrors.has(loginBody.error) ? loginBody.error : 'Unrecognized login error';
+        throw new Error(`Login HTTP ${loginResponse.status()}: ${loginError}`);
+      }
       await page.waitForURL(url => url.pathname === paths[role].split('?')[0]);
       await evidence(page, testInfo, `${role}-landing`);
     }
     const customer = await browser.newContext({ baseURL: 'http://localhost:3100', extraHTTPHeaders: { origin: 'http://localhost:3100' } }); contexts.push(customer);
     console.log(`[${fixture}] create synthetic booking`);
-    const response = await customer.request.post('/api/submit', { data: { submissionType: 'pickup-booking', idempotencyKey: randomUUID(), name: `Synthetic customer ${fixture}`, email: `customer${fixture}@example.invalid`, phone: '0200000000', company: `Synthetic account ${fixture}`, pickupAddress: 'Synthetic reception, Osu, Accra', pickupDate: date, pickupWindow: '8:00–10:00', plan: 'Weekly', businessType: 'Office or small team', laundryRhythm: 'About once a week', locationCount: '1 location', servicePriority: 'Standard scheduled service', paymentPreference: 'Invoice me', alertPreference: 'Call me', addons: [] } });
-    expect(response.ok(), await response.text()).toBeTruthy();
+    const response = await customer.request.post('/api/submit', { timeout: 15_000, data: { submissionType: 'pickup-booking', idempotencyKey: randomUUID(), name: `Synthetic customer ${fixture}`, email: `customer${fixture}@example.invalid`, phone: '0200000000', company: `Synthetic account ${fixture}`, pickupAddress: 'Synthetic reception, Osu, Accra', pickupDate: date, pickupWindow: '8:00–10:00', plan: 'Weekly', businessType: 'Office or small team', laundryRhythm: 'About once a week', locationCount: '1 location', servicePriority: 'Standard scheduled service', paymentPreference: 'Invoice me', alertPreference: 'Call me', addons: [] } });
+    expect(response.ok(), `Synthetic booking: HTTP ${response.status()}`).toBeTruthy();
     const booking = await response.json();
     const detail = async role => { console.log(`[${fixture}] order detail: ${role}`); await pages[role].goto(`${paths[role]}&order=${booking.id}`); await expect(pages[role].getByRole('heading', { name: `Synthetic account ${fixture}`, exact: true })).toBeVisible(); };
     const { admin, vendor, driver, support } = pages;
@@ -121,7 +133,8 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
     await save(admin, 'Close order');
     await expect(admin.locator('.stageClock b')).toHaveText('Complete');
     await evidence(admin, testInfo, 'admin-closed');
-    const tracking = await customer.request.get(`/api/track?id=${booking.id}`);
+    const tracking = await customer.request.get(`/api/track?id=${booking.id}`, { timeout: 15_000 });
+    expect(tracking.ok(), `Tracking: HTTP ${tracking.status()}`).toBeTruthy();
     expect((await tracking.json()).tracking.status).toBe('Closed');
     await admin.goto('/admin?view=orders&order=BW-BROWSEROVERDUE01');
     await expect(admin.locator('.stageClock b')).toHaveText('Overdue');

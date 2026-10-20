@@ -43,3 +43,11 @@ test("support bag scans open the order view that consumes selectedOrderId", asyn
   assert.match(scan, /user.role === "support" \? "\/support\?view=orders"/);
   assert.match(source, /initialView === "orders" \? <SharedOrderBoard role="support"/);
 });
+
+test("small worker headers preserve logo proportions and whole navigation words", () => {
+  const rules = css.slice(css.indexOf("/* Worker workspaces:"));
+  assert.match(rules, /\.staffSectionNav a span \{ overflow-wrap: normal; \}/);
+  assert.match(rules, /\.staffTopbar \.brandArtwork \{ width: 64px; height: 46px;/);
+  assert.match(rules, /\.staffTopbar \.brandMark \{ width: 102px; height: 102px; \}/);
+  assert.match(rules, /@media \(max-width: 400px\) \{\s*\.portalPage \.staffSectionNav \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+});
