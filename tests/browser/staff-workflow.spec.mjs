@@ -47,9 +47,9 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
       context.setDefaultNavigationTimeout(20_000);
       contexts.push(context);
       console.log(`[${fixture}] login: ${role}`);
-      await context.route('**/*', async route => {
+      await context.route('**/*', route => {
         const request = route.request();
-        const options = fixtureRequestPolicy(request.url(), request.method(), await request.allHeaders());
+        const options = fixtureRequestPolicy(request.url());
         if (options === null) {
           const target = new URL(request.url());
           external.push(`${target.origin}${target.pathname}`);
@@ -74,11 +74,14 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
         page.waitForResponse(response => response.url().endsWith('/api/login') && response.request().method() === 'POST', { timeout: 15_000 }),
         page.keyboard.press('Enter'),
       ]);
-      expect(loginResponse.ok(), `Login failed with HTTP ${loginResponse.status()}`).toBeTruthy();
+      const loginBody = await loginResponse.json();
+      const safeErrors = new Set(['Same-origin staff action required.', 'Invalid Bubble Wash staff credentials.', 'Too many login attempts. Try again shortly.', 'Login cannot be reached.', 'Unable to sign in.', 'Admin sign-in is temporarily unavailable.', 'Invalid Bubble Wash staff credentials.']);
+      const loginError = safeErrors.has(loginBody.error) ? loginBody.error : 'Unrecognized login error';
+      expect(loginResponse.ok(), `Login HTTP ${loginResponse.status()}: ${loginError}`).toBeTruthy();
       await page.waitForURL(url => url.pathname === paths[role].split('?')[0]);
       await evidence(page, testInfo, `${role}-landing`);
     }
-    const customer = await browser.newContext({ baseURL: 'http://localhost:3100', extraHTTPHeaders: { origin: 'https://localhost:3100' } }); contexts.push(customer);
+    const customer = await browser.newContext({ baseURL: 'http://localhost:3100', extraHTTPHeaders: { origin: 'http://localhost:3100' } }); contexts.push(customer);
     console.log(`[${fixture}] create synthetic booking`);
     const response = await customer.request.post('/api/submit', { data: { submissionType: 'pickup-booking', idempotencyKey: randomUUID(), name: `Synthetic customer ${fixture}`, email: `customer${fixture}@example.invalid`, phone: '0200000000', company: `Synthetic account ${fixture}`, pickupAddress: 'Synthetic reception, Osu, Accra', pickupDate: date, pickupWindow: '8:00–10:00', plan: 'Weekly', businessType: 'Office or small team', laundryRhythm: 'About once a week', locationCount: '1 location', servicePriority: 'Standard scheduled service', paymentPreference: 'Invoice me', alertPreference: 'Call me', addons: [] } });
     expect(response.ok(), await response.text()).toBeTruthy();

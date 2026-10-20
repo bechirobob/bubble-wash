@@ -16,7 +16,7 @@ test('synthetic browser roles retain separate rate-limit scopes with local proxy
     const fixture = await readFile(new URL('./browser/start-fixture.mjs', import.meta.url), 'utf8');
     const journey = await readFile(new URL('./browser/staff-workflow.spec.mjs', import.meta.url), 'utf8');
     assert.match(fixture, /BUBBLEWASH_TRUST_PROXY_HEADERS: 'true'/);
-    assert.match(journey, /await request\.allHeaders\(\)/);
+    assert.doesNotMatch(journey, /request\.allHeaders\(\)|request\.headers\(\)/);
     const limiter = await readFile(new URL('../src/lib/rate-limit.ts', import.meta.url), 'utf8');
     assert.match(limiter, /return clientScopeKey\(headers, scope\)/);
   } finally {

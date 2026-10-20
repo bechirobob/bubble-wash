@@ -1,5 +1,6 @@
 import './block-egress.mjs';
 import assert from 'node:assert/strict';
+import { createFixtureEdge } from './fixture-edge.mjs';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,9 +44,12 @@ availability.upsertVendorAvailability({ vendorId: 'vendor-browser', vendorName: 
 availability.upsertDriverAvailability({ driverId: 'driver-browser', driverName: 'Synthetic Rider', serviceZones: ['Osu'], capacityRemaining: 10, availabilityStatus: 'active', updatedBy: 'synthetic-fixture' });
 const { appendSubmissionRecord, getDatabase } = await import('../../src/lib/data-store.ts');
 appendSubmissionRecord({ id: 'BW-BROWSEROVERDUE01', createdAt: new Date(Date.now() - 3600000).toISOString(), source: 'synthetic-browser-fixture', data: { submissionType: 'pickup-booking', name: 'Synthetic overdue customer', company: 'Synthetic overdue account', email: 'overdue@example.invalid', phone: '0200000000', pickupAddress: 'Synthetic reception, Osu, Accra', pickupDate: new Date().toISOString().slice(0, 10), pickupWindow: '8:00–10:00', plan: 'Weekly', paymentPreference: 'Invoice me', alertPreference: 'Call me' } });
-const server = spawn(process.execPath, ['--import', resolve('tests/browser/block-egress.mjs'), 'node_modules/next/dist/bin/next', 'start', '-H', 'localhost', '-p', '3100'], { env: process.env, stdio: 'inherit' });
+const server = spawn(process.execPath, ['--import', resolve('tests/browser/block-egress.mjs'), 'node_modules/next/dist/bin/next', 'start', '-H', 'localhost', '-p', '3101'], { env: process.env, stdio: 'inherit' });
+const edge = createFixtureEdge();
+edge.listen(3100, 'localhost');
+edge.on('error', error => { console.error(error.message); server.kill('SIGTERM'); });
 let stopping = false;
 function stop() { if (!stopping) { stopping = true; server.kill('SIGTERM'); } }
 process.on('SIGTERM', stop); process.on('SIGINT', stop);
-server.on('exit', code => { getDatabase().close(); rmSync(directory, { recursive: true, force: true }); process.exit(stopping ? 0 : code ?? 1); });
-server.on('error', error => { console.error(error); getDatabase().close(); rmSync(directory, { recursive: true, force: true }); process.exit(1); });
+server.on('exit', code => { edge.closeAllConnections(); edge.close(); getDatabase().close(); rmSync(directory, { recursive: true, force: true }); process.exit(stopping ? 0 : code ?? 1); });
+server.on('error', error => { edge.closeAllConnections(); edge.close(); console.error(error); getDatabase().close(); rmSync(directory, { recursive: true, force: true }); process.exit(1); });

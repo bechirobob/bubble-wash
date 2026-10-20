@@ -34,6 +34,8 @@ jobs:
         run: node --test tests/browser-egress.test.mjs
       - name: Build production runtime for synthetic test data
         run: npm run build
+      - name: Verify synthetic edge, logins, cookies, redirects and script assets
+        run: node tests/browser/fixture-smoke.mjs
       - name: Run four-role journeys at mobile and desktop sizes
         run: npm run test:browser
       - name: Preserve synthetic browser screenshots for review
