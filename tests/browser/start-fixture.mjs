@@ -21,6 +21,9 @@ Object.assign(process.env, platformEnv, {
   BUBBLEWASH_SESSION_SECRET: 'synthetic-browser-session-secret-never-use-in-production',
   BUBBLEWASH_STAFF_AUTH_DISABLED: 'false', BUBBLEWASH_DISABLE_DEMO_LOGIN: 'true',
   BUBBLEWASH_ADMIN_MFA_REQUIRED: 'false', NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED: 'false',
+  // This loopback-only fixture intentionally trusts distinct synthetic test IPs.
+  // Production configuration and rate-limit thresholds are unchanged.
+  BUBBLEWASH_TRUST_PROXY_HEADERS: 'true',
   BUBBLEWASH_VENDOR_ENTITY_ID: 'vendor-browser', BUBBLEWASH_DRIVER_ENTITY_ID: 'driver-browser',
   BUBBLEWASH_PUBLIC_URL: 'http://localhost:3100',
   NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED: 'false', NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED: 'false',

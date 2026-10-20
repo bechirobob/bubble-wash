@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { fixtureRequestPolicy } from './request-policy.mjs';
 
 const paths = { admin: '/admin?view=orders', vendor: '/vendors?view=jobs', driver: '/drivers?view=route', support: '/support?view=orders' };
 
@@ -39,17 +40,22 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
   try {
     for (const [index, role] of Object.keys(paths).entries()) {
       const context = await browser.newContext({ viewport: testInfo.project.use.viewport, isMobile: testInfo.project.use.isMobile, hasTouch: testInfo.project.use.hasTouch, deviceScaleFactor: testInfo.project.use.deviceScaleFactor, baseURL: 'http://localhost:3100', extraHTTPHeaders: {
-        // Same loopback HTTPS-proxy emulation as workflow-http.integration.mjs.
-        origin: 'https://localhost:3100', 'x-forwarded-for': `192.0.2.${index + (fixture.startsWith('webkit') ? 31 : width === 320 ? 1 : width === 390 ? 11 : 21)}`,
+        'x-forwarded-for': `192.0.2.${index + (fixture.startsWith('webkit') ? 31 : width === 320 ? 1 : width === 390 ? 11 : 21)}`,
       } });
       // These manually created contexts do not inherit Playwright's page fixture timeouts.
       context.setDefaultTimeout(15_000);
       context.setDefaultNavigationTimeout(20_000);
       contexts.push(context);
       console.log(`[${fixture}] login: ${role}`);
-      await context.route('**/*', route => {
-        if (new URL(route.request().url()).hostname !== 'localhost') { external.push(route.request().url()); return route.abort(); }
-        return route.continue();
+      await context.route('**/*', async route => {
+        const request = route.request();
+        const options = fixtureRequestPolicy(request.url(), request.method(), await request.allHeaders());
+        if (options === null) {
+          const target = new URL(request.url());
+          external.push(`${target.origin}${target.pathname}`);
+          return route.abort();
+        }
+        return route.continue(options);
       });
       const page = await context.newPage(); pages[role] = page;
       page.on('pageerror', error => errors.push(error.message));
