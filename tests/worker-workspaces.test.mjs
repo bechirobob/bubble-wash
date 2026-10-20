@@ -68,3 +68,17 @@ test("quality choices fit small screens without changing persisted values", () =
   assert.match(source, /<option value="Ready with noted exception">Noted exception<\/option>/);
   assert.ok(source.includes('id={`quality-check-help-${order.orderId}`}>Check count, finish, and packaging. Record any exception in the dispatch note.'));
 });
+
+
+test("order queue headers and rows reserve the same action column width", () => {
+  const desktop = css.match(/\.staffOrderListHeader,\s*\.staffOrderRow \{([^}]+)\}/)?.[1];
+  assert.ok(desktop);
+  assert.match(desktop, /grid-template-columns: minmax\(160px, 1\.1fr\) minmax\(135px, \.8fr\) minmax\(155px, 1fr\) minmax\(180px, 1\.05fr\) 7rem;/);
+  const tablet = css.match(/\.portalPage \.staffOrderListHeader, \.portalPage \.staffOrderRow \{([^}]+)\}/)?.[1];
+  assert.ok(tablet);
+  assert.match(tablet, /grid-template-columns: minmax\(0, 1\.1fr\) minmax\(0, \.8fr\) minmax\(0, 1fr\) minmax\(0, 1fr\) 7rem;/);
+});
+
+test("structured form fields do not stretch beside labels with help text", () => {
+  assert.match(css, /\.portalPage \.structuredActionForm \.two \{ align-items: start; \}/);
+});

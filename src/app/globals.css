@@ -705,7 +705,7 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .staffOrderListHeader,
 .staffOrderRow {
   display: grid;
-  grid-template-columns: minmax(160px, 1.1fr) minmax(135px, .8fr) minmax(155px, 1fr) minmax(180px, 1.05fr) auto;
+  grid-template-columns: minmax(160px, 1.1fr) minmax(135px, .8fr) minmax(155px, 1fr) minmax(180px, 1.05fr) 7rem;
   align-items: center;
   gap: 24px;
 }
@@ -1728,6 +1728,7 @@ input, select, textarea { font-size: 1rem; }
 .portalPage .staffFilterBar { margin-bottom: 16px; gap: 16px; }
 .portalPage .staffTextFilters { flex-wrap: wrap; gap: 4px 18px; overflow: visible; margin-inline: 0; padding-inline: 0; }
 .portalPage .staffTextFilters button { min-height: 44px; }
+.portalPage .structuredActionForm .two { align-items: start; }
 .portalPage .staffOrderRow { min-height: 68px; padding-block: 14px; }
 .portalPage .staffPriorityRow, .portalPage .staffSimpleRow, .portalPage .overviewRow { padding-block: 14px; }
 .portalPage .staffDetailHeader { gap: 16px; padding-bottom: 20px; }
@@ -1748,7 +1749,7 @@ input, select, textarea { font-size: 1rem; }
 .portalPage .stageClock.timer-breached > b { color: var(--danger); }
 .portalPage .stageClock.timer-paused > b { color: var(--muted); }
 @media (min-width: 721px) and (max-width: 980px) {
-  .portalPage .staffOrderListHeader, .portalPage .staffOrderRow { grid-template-columns: minmax(0, 1.1fr) minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 16px; }
+  .portalPage .staffOrderListHeader, .portalPage .staffOrderRow { grid-template-columns: minmax(0, 1.1fr) minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1fr) 7rem; gap: 16px; }
   .portalPage .staffPriorityRow { grid-template-columns: minmax(0, .8fr) minmax(0, 1.35fr) minmax(0, 1fr) auto; gap: 16px; }
 }
 @media (max-width: 720px) {

@@ -22,6 +22,9 @@ export function observePrefetches(page, report, now = Date.now) {
   return {
     settled: () => pending.size === 0 && now() - changedAt >= 500,
     phase: () => phase,
+    // Start a fresh quiet window at every guard entry. Historical idle time from
+    // the previous document must not let hydration's new prefetches race a reload.
+    arm() { changedAt = now(); },
     setPhase(value) { phase = value; report({ event: 'phase', phase, pending: pending.size }); },
   };
 }

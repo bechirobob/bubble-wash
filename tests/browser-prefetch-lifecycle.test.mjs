@@ -27,3 +27,31 @@ test('navigation guard waits for real RSC completion and a stable period without
   assert.ok(!JSON.stringify(events).includes('view='));
   assert.equal(tracker.phase(), 'reload');
 });
+
+
+test('each navigation guard starts a fresh quiet window and captures delayed hydration prefetch', () => {
+  const page = new EventEmitter();
+  let time = 0;
+  const tracker = observePrefetches(page, () => {}, () => time);
+  const request = { url: () => 'http://localhost:3100/vendors?_rsc=synthetic' };
+  // Previous document finished long ago. This must not immediately unlock reload.
+  time = 5000;
+  assert.equal(tracker.settled(), true);
+  tracker.arm();
+  assert.equal(tracker.settled(), false);
+  time += 1;
+  page.emit('request', request);
+  time += 15000;
+  assert.equal(tracker.settled(), false, 'No timeout or arm fabricates request completion');
+  tracker.arm();
+  assert.equal(tracker.settled(), false, 'Arming never clears an unresolved request');
+  page.emit('requestfailed', request);
+  time += 499;
+  assert.equal(tracker.settled(), false);
+  time += 1;
+  assert.equal(tracker.settled(), true, 'Actual canceled request event removes it');
+  tracker.arm();
+  assert.equal(tracker.settled(), false, 'Every next navigation must wait anew');
+  time += 500;
+  assert.equal(tracker.settled(), true);
+});

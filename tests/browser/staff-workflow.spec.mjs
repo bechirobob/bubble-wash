@@ -6,6 +6,7 @@ import { observePrefetches } from './prefetch-lifecycle.mjs';
 const prefetches = new WeakMap();
 async function beforeHardNavigation(page, label) {
   const tracker = prefetches.get(page);
+  tracker.arm();
   tracker.setPhase(`settling before ${label}`);
   await expect.poll(() => tracker.settled(), { timeout: 15_000, message: `Existing RSC prefetches finish before ${label}` }).toBe(true);
   tracker.setPhase(label);
@@ -125,6 +126,7 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
       // A transient navigation URL is not proof of a usable session. Verify an
       // actual browser cookie-backed API request and a complete workspace reload.
       await expect.poll(() => page.evaluate(async () => (await fetch('/api/orders')).status), { message: `${role} browser session API roundtrip` }).toBe(200);
+      await expect(page.getByRole('navigation', { name: `${role} workspace sections`, exact: true })).toBeVisible();
       await beforeHardNavigation(page, `${role} session reload`);
       const workspaceResponse = await page.reload({ waitUntil: 'load' });
       const sent = await workspaceResponse.headerValue('x-fixture-staff-cookie-received') === 'true';
