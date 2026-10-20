@@ -4,18 +4,24 @@ import { randomUUID } from 'node:crypto';
 const paths = { admin: '/admin?view=orders', vendor: '/vendors?view=jobs', driver: '/drivers?view=route', support: '/support?view=orders' };
 
 async function evidence(page, testInfo, label) {
+  console.log(`[${testInfo.project.name}] evidence: ${label}`);
   await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   await page.screenshot({ path: testInfo.outputPath(`${label}.png`), fullPage: true, animations: 'disabled' });
 }
 async function save(page, label, endpoint = '/api/orders/advance') {
-  const responsePromise = page.waitForResponse(response => response.url().endsWith(endpoint) && response.request().method() === 'POST');
-  await page.getByRole('button', { name: label, exact: true }).click();
-  const response = await responsePromise;
-  expect(response.ok(), await response.text()).toBeTruthy();
-  await expect(page.getByRole('button', { name: 'Working…', exact: true })).toHaveCount(0);
+  console.log(`[${test.info().project.name}] save: ${label}`);
+  await test.step(`Save ${label}`, async () => {
+    const [response] = await Promise.all([
+      page.waitForResponse(response => response.url().endsWith(endpoint) && response.request().method() === 'POST', { timeout: 15_000 }),
+      page.getByRole('button', { name: label, exact: true }).click(),
+    ]);
+    expect(response.ok(), await response.text()).toBeTruthy();
+    await expect(page.getByRole('button', { name: 'Working…', exact: true })).toHaveCount(0);
+  });
 }
 async function form(page, action, values, submit, testInfo, label) {
+  console.log(`[${testInfo.project.name}] form: ${action}`);
   await page.getByRole('button', { name: action, exact: true }).click();
   for (const [name, value] of Object.entries(values)) await page.locator(`.structuredActionForm [name="${name}"]`).fill(value);
   await evidence(page, testInfo, label);
@@ -36,7 +42,11 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
         // Same loopback HTTPS-proxy emulation as workflow-http.integration.mjs.
         origin: 'https://localhost:3100', 'x-forwarded-for': `192.0.2.${index + (fixture.startsWith('webkit') ? 31 : width === 320 ? 1 : width === 390 ? 11 : 21)}`,
       } });
+      // These manually created contexts do not inherit Playwright's page fixture timeouts.
+      context.setDefaultTimeout(15_000);
+      context.setDefaultNavigationTimeout(20_000);
       contexts.push(context);
+      console.log(`[${fixture}] login: ${role}`);
       await context.route('**/*', route => {
         if (new URL(route.request().url()).hostname !== 'localhost') { external.push(route.request().url()); return route.abort(); }
         return route.continue();
@@ -49,15 +59,17 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
       await page.getByLabel('Password', { exact: true }).press('Tab');
       await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeFocused();
       expect(await page.getByRole('button', { name: 'Sign in', exact: true }).evaluate(element => getComputedStyle(element).outlineStyle)).not.toBe('none');
+      console.log(`[${fixture}] submit login: ${role}`);
       await page.keyboard.press('Enter');
       await page.waitForURL(url => url.pathname === paths[role].split('?')[0]);
       await evidence(page, testInfo, `${role}-landing`);
     }
     const customer = await browser.newContext({ baseURL: 'http://localhost:3100', extraHTTPHeaders: { origin: 'https://localhost:3100' } }); contexts.push(customer);
+    console.log(`[${fixture}] create synthetic booking`);
     const response = await customer.request.post('/api/submit', { data: { submissionType: 'pickup-booking', idempotencyKey: randomUUID(), name: `Synthetic customer ${fixture}`, email: `customer${fixture}@example.invalid`, phone: '0200000000', company: `Synthetic account ${fixture}`, pickupAddress: 'Synthetic reception, Osu, Accra', pickupDate: date, pickupWindow: '8:00–10:00', plan: 'Weekly', businessType: 'Office or small team', laundryRhythm: 'About once a week', locationCount: '1 location', servicePriority: 'Standard scheduled service', paymentPreference: 'Invoice me', alertPreference: 'Call me', addons: [] } });
     expect(response.ok(), await response.text()).toBeTruthy();
     const booking = await response.json();
-    const detail = async role => { await pages[role].goto(`${paths[role]}&order=${booking.id}`); await expect(pages[role].getByRole('heading', { name: `Synthetic account ${fixture}`, exact: true })).toBeVisible(); };
+    const detail = async role => { console.log(`[${fixture}] order detail: ${role}`); await pages[role].goto(`${paths[role]}&order=${booking.id}`); await expect(pages[role].getByRole('heading', { name: `Synthetic account ${fixture}`, exact: true })).toBeVisible(); };
     const { admin, vendor, driver, support } = pages;
     await detail('admin');
     // Native disclosure is keyboard operable, without disturbing the saved action.
@@ -102,8 +114,11 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
     expect(external, 'No browser request may contact an external service').toEqual([]);
     expect(errors, 'No uncaught browser errors').toEqual([]);
   } catch (error) {
+    console.error(`[${fixture}] journey failed: ${error.message}`);
+    console.error(`[${fixture}] page errors: ${JSON.stringify(errors)}`);
     for (const [role, page] of Object.entries(pages)) {
-      if (!page.isClosed()) await page.screenshot({ path: testInfo.outputPath(`${role}-failure.png`), fullPage: true }).catch(() => {});
+      if (!page.isClosed()) console.error(`[${fixture}] ${role} current URL: ${page.url()}`);
+      if (!page.isClosed()) await page.screenshot({ timeout: 5_000, path: testInfo.outputPath(`${role}-failure.png`), fullPage: true }).catch(() => {});
     }
     throw error;
   } finally { for (const context of contexts) await context.close(); }
