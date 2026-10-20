@@ -13,7 +13,8 @@ test('staff sign-in cannot submit while JavaScript is unavailable', async ({ bro
     await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeDisabled();
     await expect(page.locator('form')).toHaveAttribute('method', 'post');
     await expect(page.locator('form')).toHaveAttribute('aria-busy', 'true');
-    await expect(page.locator('noscript')).toContainText('JavaScript is required');
+    // Playwright's text matcher intentionally skips NOSCRIPT; read its DOM text directly.
+    await expect.poll(() => page.locator('noscript').textContent()).toContain('JavaScript is required');
     // Credential controls remain unnamed, so even a forced native submission
     // cannot serialize credentials. Enabled keyboard sign-in is covered by the journey.
     await expect(page.locator('form input[name]')).toHaveCount(0);
