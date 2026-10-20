@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { createFixtureEdge, fixtureEdgeHeaders } from './browser/fixture-edge.mjs';
+import { securityHeaders } from '../src/lib/security-headers.js';
+import { createFixtureEdge, fixtureEdgeHeaders, fixtureEdgeResponseHeaders } from './browser/fixture-edge.mjs';
 
 test('fixture edge changes only exact same-origin API mutation Origin', () => {
   const headers = { host: 'localhost:3100', origin: 'http://localhost:3100', cookie: 'synthetic=session', 'x-forwarded-for': '192.0.2.1' };
@@ -46,5 +47,37 @@ test('fixture edge forwards real HTTP bodies, Host, cookies and response cookies
   } finally {
     edge.closeAllConnections(); upstream.closeAllConnections();
     await Promise.all([new Promise(resolve => edge.close(resolve)), new Promise(resolve => upstream.close(resolve))]);
+  }
+});
+
+test('HTTP fixture edge removes only HTTPS transport directives, preserving application security headers', () => {
+  const headers = {
+    'content-security-policy': "default-src 'self'; upgrade-insecure-requests; script-src 'self'; form-action 'self'; frame-ancestors 'none'; block-all-mixed-content",
+    'strict-transport-security': 'max-age=31536000; includeSubDomains; preload',
+    'content-security-policy-report-only': 'upgrade-insecure-requests',
+    'set-cookie': ['synthetic=cookie; HttpOnly; Secure; SameSite=Lax'],
+    'x-frame-options': 'DENY', 'x-content-type-options': 'nosniff',
+  };
+  const expected = {
+    ...headers,
+    'content-security-policy': "default-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; block-all-mixed-content",
+  };
+  delete expected['strict-transport-security'];
+  assert.deepEqual(fixtureEdgeResponseHeaders(headers), expected);
+  assert.match(headers['content-security-policy'], /upgrade-insecure-requests/);
+  assert.ok(headers['strict-transport-security']);
+  const previous = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'production';
+    const production = Object.fromEntries(securityHeaders().map(header => [header.key.toLowerCase(), header.value]));
+    assert.match(production['content-security-policy'], /upgrade-insecure-requests/);
+    assert.ok(production['strict-transport-security']);
+    const filtered = fixtureEdgeResponseHeaders(production);
+    for (const [key, value] of Object.entries(production)) {
+      if (!['content-security-policy', 'strict-transport-security'].includes(key)) assert.deepEqual(filtered[key], value);
+    }
+    assert.deepEqual(filtered['content-security-policy'].split(';').map(value => value.trim()), production['content-security-policy'].split(';').map(value => value.trim()).filter(value => value !== 'upgrade-insecure-requests'));
+  } finally {
+    if (previous === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previous;
   }
 });

@@ -8,6 +8,21 @@ export function fixtureEdgeHeaders(method, pathname, headers, origin = 'http://l
   return forwarded;
 }
 
+// Local HTTP cannot implement production HTTPS transport. WebKit correctly
+// upgrades its localhost subresources under this directive, unlike Chromium.
+// Remove only transport-upgrade instructions at this test edge, never in the app.
+export function fixtureEdgeResponseHeaders(headers) {
+  const result = { ...headers };
+  for (const key of Object.keys(result)) {
+    if (key.toLowerCase() === 'strict-transport-security') delete result[key];
+    if (key.toLowerCase() === 'content-security-policy') {
+      const filter = value => value.split(';').filter(directive => directive.trim().toLowerCase() !== 'upgrade-insecure-requests').join(';');
+      result[key] = Array.isArray(result[key]) ? result[key].map(filter) : filter(result[key]);
+    }
+  }
+  return result;
+}
+
 // Loopback-only synthetic TLS-edge emulation. Never used by the application.
 // Browser headers remain native; the production same-origin guard stays unchanged.
 export function createFixtureEdge({ upstreamPort = 3101, origin = 'http://localhost:3100' } = {}) {
@@ -21,7 +36,7 @@ export function createFixtureEdge({ upstreamPort = 3101, origin = 'http://localh
     }
     const upstream = http.request({ hostname: 'localhost', port: upstreamPort, method: request.method,
       path: `${target.pathname}${target.search}`, headers: fixtureEdgeHeaders(request.method, target.pathname, request.headers, origin) }, incoming => {
-      response.writeHead(incoming.statusCode, incoming.headers);
+      response.writeHead(incoming.statusCode, fixtureEdgeResponseHeaders(incoming.headers));
       incoming.pipe(response);
     });
     upstream.on('error', () => { if (!response.headersSent) response.writeHead(502); response.end('Fixture upstream unavailable'); });

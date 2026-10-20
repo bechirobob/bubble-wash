@@ -51,3 +51,20 @@ test("small worker headers preserve logo proportions and whole navigation words"
   assert.match(rules, /\.staffTopbar \.brandMark \{ width: 102px; height: 102px; \}/);
   assert.match(rules, /@media \(max-width: 400px\) \{\s*\.portalPage \.staffSectionNav \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
 });
+
+
+test("terminal orders do not present a waiting state or duplicate empty actions", () => {
+  const component = source.slice(source.indexOf("function AutomatedOrderActions"), source.indexOf("function CustomerContactActions"));
+  assert.match(component, /order.workflowStage.key === "closed" \? "Order closed"/);
+  assert.match(component, /order.workflowStage.key === "cancelled" \? "Order cancelled"/);
+  assert.match(component, /isClosedOrder\(order\) \? "No further action required."/);
+  assert.match(component, /No action is currently available for this role./);
+  assert.doesNotMatch(component, /Waiting/);
+});
+
+test("quality choices fit small screens without changing persisted values", () => {
+  assert.ok(source.includes('name="qualityCheck" aria-describedby={`quality-check-help-${order.orderId}`}'));
+  assert.match(source, /<option value="Count, finish, and packaging checked">Checks complete<\/option>/);
+  assert.match(source, /<option value="Ready with noted exception">Noted exception<\/option>/);
+  assert.ok(source.includes('id={`quality-check-help-${order.orderId}`}>Check count, finish, and packaging. Record any exception in the dispatch note.'));
+});

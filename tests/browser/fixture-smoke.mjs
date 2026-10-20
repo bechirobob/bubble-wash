@@ -15,7 +15,14 @@ try {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert.equal(ready, true, 'Synthetic fixture health');
-  const html = await (await fetch(`${base}/login`)).text();
+  const loginPage = await fetch(`${base}/login`);
+  assert.equal(loginPage.headers.has('strict-transport-security'), false, 'HTTP fixture omits HSTS only at the edge');
+  const csp = loginPage.headers.get('content-security-policy');
+  assert.ok(csp && !csp.includes('upgrade-insecure-requests'));
+  for (const directive of ["default-src 'self'", "form-action 'self'", "frame-ancestors 'none'", "object-src 'none'"]) assert.ok(csp.includes(directive), 'Other CSP directives remain intact');
+  assert.equal(loginPage.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(loginPage.headers.get('x-frame-options'), 'DENY');
+  const html = await loginPage.text();
   const scripts = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map(match => match[1]);
   assert.ok(scripts.length > 0, 'Login must expose its script assets');
   for (const script of scripts) {

@@ -34,6 +34,12 @@ async function form(page, action, values, submit, testInfo, label) {
   console.log(`[${testInfo.project.name}] form: ${action}`);
   await page.getByRole('button', { name: action, exact: true }).click();
   for (const [name, value] of Object.entries(values)) await page.locator(`.structuredActionForm [name="${name}"]`).fill(value);
+  if (action === 'Mark ready for driver') {
+    const quality = page.getByLabel('Quality check');
+    await expect(quality).toHaveValue('Count, finish, and packaging checked');
+    await expect(quality.locator('option:checked')).toHaveText('Checks complete');
+    await expect(quality).toHaveAccessibleDescription('Check count, finish, and packaging. Record any exception in the dispatch note.');
+  }
   await evidence(page, testInfo, label);
   await save(page, submit);
 }
@@ -61,7 +67,9 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
         const options = fixtureRequestPolicy(request.url());
         if (options === null) {
           const target = new URL(request.url());
-          external.push(`${target.origin}${target.pathname}`);
+          const blocked = `${target.origin}${target.pathname}`;
+          external.push(blocked);
+          console.error(`[${fixture}] blocked by fixture egress: ${blocked}`);
           return route.abort();
         }
         return route.continue(options);
@@ -132,6 +140,9 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
     admin.once('dialog', dialog => dialog.accept());
     await save(admin, 'Close order');
     await expect(admin.locator('.stageClock b')).toHaveText('Complete');
+    await expect(admin.locator('.automationPanel')).toContainText('Order closed');
+    await expect(admin.locator('.automationPanel')).toContainText('No further action required.');
+    await expect(admin.locator('.automationPanel')).not.toContainText('Waiting');
     await evidence(admin, testInfo, 'admin-closed');
     const tracking = await customer.request.get(`/api/track?id=${booking.id}`, { timeout: 15_000 });
     expect(tracking.ok(), `Tracking: HTTP ${tracking.status()}`).toBeTruthy();

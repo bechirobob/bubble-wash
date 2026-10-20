@@ -28,3 +28,6 @@ Combined local validation: 102 unit tests plus all data integrations passed; res
 Login controls remain disabled until hydration attaches handlers, with an explicit POST fallback and unnamed credential fields. Four no-JavaScript safety cases supplement the four full role journeys. The interrupted prehydration login cannot serialize credentials into the URL. The latest published browser failure occurred on synthetic data; no live credential exposure is inferred.
 
 The follow-up was reconstructed from verified published source and retained reviewed code after local workspace loss. Prior results do not validate this reconstruction. Final fresh local and CI results must be checked for the exact published commit.
+
+## Rendered fixture boundary
+Browser journeys use a loopback-only HTTP test edge with synthetic data and blocked external egress. The edge emulates the write Origin of an HTTPS terminator and removes only HTTP-to-HTTPS transport-upgrade response directives that cannot operate on this HTTP fixture. Other CSP/security headers and all application origin guards remain intact. These tests verify application journeys, not production HTTPS/CSP transport behavior. No certificate warnings are bypassed. A live deployed browser verification remains necessary after a separately authorized release.
