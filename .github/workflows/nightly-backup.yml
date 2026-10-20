@@ -32,18 +32,7 @@ jobs:
           GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
           BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
           BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
-        run: |
-          python3 - <<'PYGUARD'
-          import os,re,sys
-          sys.path.insert(0,'.github/backup')
-          from backup_release import GitHub,STORAGE_REPOSITORY,private_repository,require
-          require(re.fullmatch(r'[a-f0-9]{40}',os.environ['BACKUP_STORE_SHA']), 'Pinned store SHA required.')
-          require(re.fullmatch(r'[1-9][0-9]{0,19}',os.environ['BACKUP_STORE_ID']), 'Pinned store ID required.')
-          api=GitHub(STORAGE_REPOSITORY)
-          private_repository(api,STORAGE_REPOSITORY,int(os.environ['BACKUP_STORE_ID']))
-          commit=api.api('git/commits/'+os.environ['BACKUP_STORE_SHA'])
-          require(commit.get('sha')==os.environ['BACKUP_STORE_SHA'], 'Backup store commit mismatch.')
-          PYGUARD
+        run: python3 .github/backup/check_store.py
       - name: Connect to the production tailnet
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
         with:

@@ -6,6 +6,7 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import { Activity as ActivityIcon, ClipboardList, Gauge, HeartPulse, History, LayoutDashboard, Map as MapIcon, MessagesSquare, Route as RouteIcon, Users } from "lucide-react";
 import type { StaffRole } from "@/lib/auth";
 import { automationActionsForOrder, paymentReadyForCloseout } from "@/lib/order-workflow";
+import { stageCountdown } from "@/lib/stage-countdown";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import { BrandLink } from "@/components/BrandLink";
 
@@ -426,27 +427,27 @@ function StageCountdown({ order }: { order: OrderSummary }) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+    let timer: number | undefined;
+    const tick = () => {
+      const current = Date.now();
+      const next = stageCountdown(order.updatedAt, order.stageTimer.targetMinutes, current);
+      setNow(current);
+      if (next.state !== "running" && timer !== undefined) window.clearInterval(timer);
+      return next.state;
+    };
+    if (tick() === "running") timer = window.setInterval(tick, 1000);
+    return () => { if (timer !== undefined) window.clearInterval(timer); };
+  }, [order.updatedAt, order.stageTimer.targetMinutes]);
 
-  if (!order.stageTimer.targetMinutes) {
-    return <div className="stageClock timer-paused" aria-label="Phase timer complete"><span>Phase timer</span><b>Complete</b><small>{workflowPhaseLabel(order.workflowStage.key)} · {order.priority}</small></div>;
-  }
-
-  const startedAt = new Date(order.updatedAt).getTime();
-  const targetMs = order.stageTimer.targetMinutes * 60_000;
-  const remainingSeconds = Math.ceil((startedAt + targetMs - now) / 1000);
-  const overdue = remainingSeconds < 0;
-  const dueSoon = !overdue && remainingSeconds <= 20 * 60;
-  const tone = overdue ? "breached" : dueSoon ? "due" : "ok";
-  const label = overdue ? "Overdue" : "SLA";
-  const duration = formatDuration(Math.abs(remainingSeconds));
+  const countdown = stageCountdown(order.updatedAt, order.stageTimer.targetMinutes, now);
+  const value = countdown.state === "running" ? formatDuration(countdown.remainingSeconds)
+    : countdown.state === "overdue" ? "Overdue"
+    : countdown.state === "complete" ? "Complete" : "Unavailable";
 
   return (
-    <div className={`stageClock countdown timer-${tone}`} aria-label={`${label} ${duration}`}>
-      <span>{label === "SLA" ? "Phase timer" : label}</span>
-      <b>{duration}</b>
+    <div className={`stageClock countdown timer-${countdown.tone}`} aria-label={`Phase timer ${value}`}>
+      <span>Phase timer</span>
+      <b>{value}</b>
       <small>{workflowPhaseLabel(order.workflowStage.key)} · {order.priority}</small>
     </div>
   );
@@ -1380,7 +1381,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
 
   return (
     <section className="staffContentSection sharedBoardSection" aria-busy={!hasLoaded}>
-      {role === "driver" && !selectedOrderId ? <DispatchBoard orders={orders} role="driver" basePath={basePath} hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={/unable/i.test(status) ? status : ""} embedded /> : null}
+      {role === "driver" && !selectedOrderId ? <details className="staffRouteDisclosure"><summary>Route map and stops</summary><DispatchBoard orders={orders} role="driver" basePath={basePath} hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={/unable/i.test(status) ? status : ""} embedded /></details> : null}
       {selectedOrderId ? selectedOrder ? <article className="staffDetailView orderDetail">
         <Link className="staffBackLink" href={basePath}>← Back to order list</Link>
         <header className="staffDetailHeader">
@@ -1454,7 +1455,7 @@ function PortalShell({ title, role, pageRole = role, userName, currentView, navi
     <main className="portalPage">
       <header className="staffTopbar">
         <BrandLink />
-        <div className="staffAccount"><span><strong>{userName}</strong><small>{title}</small></span><button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button></div>
+        <div className="staffAccount">{role === "admin" && pageRole !== "admin" ? <Link className="staffAdminHome" href="/admin">Admin home</Link> : null}<span><strong>{userName}</strong><small>{title}</small></span><button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button></div>
       </header>
       <nav className="staffSectionNav" aria-label={`${pageRole} workspace sections`}>
         {navigation.map((item) => {
