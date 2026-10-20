@@ -53,14 +53,22 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
       });
       const page = await context.newPage(); pages[role] = page;
       page.on('pageerror', error => errors.push(error.message));
+      page.on('requestfailed', request => {
+        if (request.resourceType() === 'script') console.error(`[${fixture}] script request failed: ${new URL(request.url()).pathname} ${request.failure()?.errorText}`);
+      });
       await page.goto(`/login?next=${encodeURIComponent(paths[role].split('?')[0])}`);
+      await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeEnabled();
       await page.getByLabel('Staff username or email').fill(`${role}@example.invalid`);
       await page.getByLabel('Password', { exact: true }).fill(`synthetic-${role}-password-123`);
       await page.getByLabel('Password', { exact: true }).press('Tab');
       await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeFocused();
       expect(await page.getByRole('button', { name: 'Sign in', exact: true }).evaluate(element => getComputedStyle(element).outlineStyle)).not.toBe('none');
       console.log(`[${fixture}] submit login: ${role}`);
-      await page.keyboard.press('Enter');
+      const [loginResponse] = await Promise.all([
+        page.waitForResponse(response => response.url().endsWith('/api/login') && response.request().method() === 'POST', { timeout: 15_000 }),
+        page.keyboard.press('Enter'),
+      ]);
+      expect(loginResponse.ok(), `Login failed with HTTP ${loginResponse.status()}`).toBeTruthy();
       await page.waitForURL(url => url.pathname === paths[role].split('?')[0]);
       await evidence(page, testInfo, `${role}-landing`);
     }
@@ -117,8 +125,12 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
     console.error(`[${fixture}] journey failed: ${error.message}`);
     console.error(`[${fixture}] page errors: ${JSON.stringify(errors)}`);
     for (const [role, page] of Object.entries(pages)) {
-      if (!page.isClosed()) console.error(`[${fixture}] ${role} current URL: ${page.url()}`);
-      if (!page.isClosed()) await page.screenshot({ timeout: 5_000, path: testInfo.outputPath(`${role}-failure.png`), fullPage: true }).catch(() => {});
+      if (page.isClosed()) continue;
+      const pathname = new URL(page.url()).pathname;
+      console.error(`[${fixture}] ${role} current path: ${pathname}`);
+      // Never capture a login or other credential-entry page, even with fixture accounts.
+      if (pathname !== paths[role].split('?')[0]) continue;
+      await page.screenshot({ timeout: 5_000, path: testInfo.outputPath(`${role}-failure.png`), fullPage: true }).catch(() => {});
     }
     throw error;
   } finally { for (const context of contexts) await context.close(); }

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, Suspense, useMemo, useState } from "react";
+import { FormEvent, Suspense, useMemo, useState, useSyncExternalStore } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, Grid2X2 } from "lucide-react";
 import { BrandLink } from "@/components/BrandLink";
@@ -16,7 +16,13 @@ const credentialCards = [
   ["Support", "support@bubblewash.local"],
 ];
 
+// SSR and the first hydration render stay inert until event handlers are attached.
+const subscribeToHydration = () => () => {};
+const clientReady = () => true;
+const serverReady = () => false;
+
 function LoginForm() {
+  const hydrated = useSyncExternalStore(subscribeToHydration, clientReady, serverReady);
   const searchParams = useSearchParams();
   const nextPath = useMemo(() => {
     const value = searchParams.get("next");
@@ -71,17 +77,18 @@ function LoginForm() {
           <p className="eyebrow">Staff access</p>
           <h2>Staff sign-in</h2>
           <p>Use your individual work account to open your assigned workspace.</p>
-          {showCredentialCards ? <div className="credentialList redesignCredentialList">{credentialCards.map(([role, emailValue]) => <button className="credentialCard" type="button" key={role} onClick={() => fillCredential(emailValue)}><strong>{role}</strong><span>{emailValue}</span></button>)}</div> : null}
+          {showCredentialCards ? <div className="credentialList redesignCredentialList">{credentialCards.map(([role, emailValue]) => <button className="credentialCard" disabled={!hydrated} type="button" key={role} onClick={() => fillCredential(emailValue)}><strong>{role}</strong><span>{emailValue}</span></button>)}</div> : null}
         </aside>
-        <form className="redesignLoginForm" onSubmit={login}>
+        <form className="redesignLoginForm" method="post" aria-busy={!hydrated} onSubmit={login}>
           <p className="eyebrow">Sign in</p>
           <h1 id="login-title">Open your workspace</h1>
           <p>Enter your staff username or work email.</p>
-          <label>Staff username or email<input value={email} onChange={(event) => setEmail(event.target.value)} type="text" placeholder="Staff username or email" autoComplete="username" required /></label>
-          <label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" autoComplete="current-password" required /></label>
-          {adminMfaRequired ? <label>Admin authenticator or recovery code <small>(admin only)</small><input value={totp} onChange={(event) => setTotp(event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 18))} type="text" placeholder="6 digits or recovery code" inputMode="text" autoComplete="one-time-code" /></label> : null}
-          <button className="button primary full" type="submit">Sign in</button>
+          <label>Staff username or email<input disabled={!hydrated} value={email} onChange={(event) => setEmail(event.target.value)} type="text" placeholder="Staff username or email" autoComplete="username" required /></label>
+          <label>Password<input disabled={!hydrated} value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" autoComplete="current-password" required /></label>
+          {adminMfaRequired ? <label>Admin authenticator or recovery code <small>(admin only)</small><input disabled={!hydrated} value={totp} onChange={(event) => setTotp(event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 18))} type="text" placeholder="6 digits or recovery code" inputMode="text" autoComplete="one-time-code" /></label> : null}
+          <button className="button primary full" disabled={!hydrated} type="submit">Sign in</button>
           {adminMfaRequired ? <Link className="inlineIconLink" href="/admin/mfa/enroll">Set up admin authenticator</Link> : null}
+          <noscript>JavaScript is required for secure staff sign-in. Enable it and reload this page.</noscript>
           <p className="destination">Sessions expire after eight hours. Sign out when using a shared device.</p>
           <p className={`status ${statusTone}`} role={statusTone === "error" ? "alert" : "status"} aria-live={statusTone === "error" ? "assertive" : "polite"}>{status}</p>
         </form>
