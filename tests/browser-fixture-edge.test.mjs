@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
 import { securityHeaders } from '../src/lib/security-headers.js';
 import { createFixtureEdge, fixtureEdgeHeaders, fixtureEdgeResponseHeaders } from './browser/fixture-edge.mjs';
 
@@ -55,11 +56,12 @@ test('HTTP fixture edge removes only HTTPS transport directives, preserving appl
     'content-security-policy': "default-src 'self'; upgrade-insecure-requests; script-src 'self'; form-action 'self'; frame-ancestors 'none'; block-all-mixed-content",
     'strict-transport-security': 'max-age=31536000; includeSubDomains; preload',
     'content-security-policy-report-only': 'upgrade-insecure-requests',
-    'set-cookie': ['synthetic=cookie; HttpOnly; Secure; SameSite=Lax'],
+    'set-cookie': ['bubblewash_staff_session=cookie; HttpOnly; Secure; SameSite=Lax'],
     'x-frame-options': 'DENY', 'x-content-type-options': 'nosniff',
   };
   const expected = {
     ...headers,
+    'set-cookie': ['bubblewash_staff_session=cookie; HttpOnly; SameSite=Lax'],
     'content-security-policy': "default-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; block-all-mixed-content",
   };
   delete expected['strict-transport-security'];
@@ -80,4 +82,16 @@ test('HTTP fixture edge removes only HTTPS transport directives, preserving appl
   } finally {
     if (previous === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previous;
   }
+});
+
+test('HTTP fixture removes only standalone Secure cookie attribute; production cookie remains Secure', () => {
+  const cookies = ['bubblewash_staff_session=Secure; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=28800', 'bubblewash_staff_session=x; Expires=Thu, 01 Jan 1970 00:00:00 GMT; sEcUrE; SameSite=Strict', 'secure=x; Securely=yes; Secure'];
+  assert.deepEqual(fixtureEdgeResponseHeaders({ 'Set-Cookie': cookies })['Set-Cookie'], [
+    'bubblewash_staff_session=Secure; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800',
+    'bubblewash_staff_session=x; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Strict',
+    'secure=x; Securely=yes; Secure',
+  ]);
+  assert.equal(fixtureEdgeResponseHeaders({ 'set-cookie': cookies[0] })['set-cookie'], 'bubblewash_staff_session=Secure; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800');
+  assert.match(readFileSync(new URL('../src/lib/auth.ts', import.meta.url), 'utf8'), /secure: process.env.NODE_ENV === "production"/);
+  assert.match(cookies[0], /; Secure;/);
 });

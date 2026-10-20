@@ -38,7 +38,30 @@ try {
     assert.equal(login.user.role, role);
     const path = { admin: '/admin', vendor: '/vendors', driver: '/drivers', support: '/support' }[role];
     assert.equal(login.next, path);
-    const cookie = response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
+    // Verify the actual production-mode upstream still emits transport security.
+    // Only attribute names/values are compared; session values never leave memory.
+    const upstream = await fetch('http://localhost:3101/api/login', { method: 'POST', headers: { origin: 'https://localhost:3101', 'content-type': 'application/json', 'x-forwarded-for': `192.0.2.${90 + index}` }, body });
+    assert.equal(upstream.status, 200, `${role} production-mode upstream login`);
+    const attributes = header => header.split(';').slice(1).map(value => value.trim().toLowerCase()).filter(value => !value.startsWith('expires=')).sort();
+    const upstreamCookie = upstream.headers.getSetCookie().find(value => value.startsWith('bubblewash_staff_session='));
+    assert.ok(upstreamCookie, 'Upstream sets the staff session');
+    const upstreamAttributes = attributes(upstreamCookie);
+    for (const attribute of ['secure', 'httponly', 'samesite=lax', 'path=/']) assert.ok(upstreamAttributes.includes(attribute), `Upstream retains ${attribute}`);
+    const setCookies = response.headers.getSetCookie();
+    const edgeCookie = setCookies.find(value => value.startsWith('bubblewash_staff_session='));
+    assert.ok(edgeCookie, 'Edge sets the staff session');
+    assert.deepEqual(attributes(edgeCookie), upstreamAttributes.filter(value => value !== 'secure'), 'Edge preserves upstream cookie attributes except Secure');
+    const expiry = header => header.split(';').slice(1).map(value => value.trim()).find(value => /^expires=/i.test(value));
+    assert.equal(Boolean(expiry(edgeCookie)), Boolean(expiry(upstreamCookie)), 'Expiry presence retained');
+    if (expiry(upstreamCookie)) assert.ok(Math.abs(Date.parse(expiry(edgeCookie).slice(8)) - Date.parse(expiry(upstreamCookie).slice(8))) <= 2000, 'Independent login expiries differ only by request timing');
+    assert.ok(setCookies.length > 0);
+    for (const header of setCookies) {
+      assert.ok(!/;\s*Secure(?:;|$)/i.test(header), 'Local HTTP cookie has no Secure transport flag');
+      assert.ok(/;\s*HttpOnly(?:;|$)/i.test(header), 'HttpOnly retained');
+      assert.ok(/;\s*SameSite=Lax(?:;|$)/i.test(header), 'SameSite retained');
+      assert.ok(/;\s*Path=\/(?:;|$)/i.test(header), 'Path retained');
+    }
+    const cookie = setCookies.map(value => value.split(';')[0]).join('; ');
     const workspace = await fetch(`${base}${path}`, { headers: { cookie }, redirect: 'manual' });
     assert.equal(workspace.status, 200, `${role} cookie-backed workspace`);
     const anonymous = await fetch(`${base}${path}`, { redirect: 'manual' });

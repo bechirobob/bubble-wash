@@ -11,10 +11,18 @@ export function fixtureEdgeHeaders(method, pathname, headers, origin = 'http://l
 // Local HTTP cannot implement production HTTPS transport. WebKit correctly
 // upgrades its localhost subresources under this directive, unlike Chromium.
 // Remove only transport-upgrade instructions at this test edge, never in the app.
-export function fixtureEdgeResponseHeaders(headers) {
+export function fixtureEdgeResponseHeaders(headers, cookieName = 'bubblewash_staff_session') {
   const result = { ...headers };
   for (const key of Object.keys(result)) {
     if (key.toLowerCase() === 'strict-transport-security') delete result[key];
+    if (key.toLowerCase() === 'set-cookie') {
+      // Synthetic HTTP only: WebKit does not accept Secure cookies on localhost.
+      // Keep every other attribute and value byte-for-byte; production stays Secure.
+      const filter = value => value.split(';')[0].split('=')[0] === cookieName
+        ? value.split(';').filter((part, index) => index === 0 || part.trim().toLowerCase() !== 'secure').join(';')
+        : value;
+      result[key] = Array.isArray(result[key]) ? result[key].map(filter) : filter(result[key]);
+    }
     if (key.toLowerCase() === 'content-security-policy') {
       const filter = value => value.split(';').filter(directive => directive.trim().toLowerCase() !== 'upgrade-insecure-requests').join(';');
       result[key] = Array.isArray(result[key]) ? result[key].map(filter) : filter(result[key]);
