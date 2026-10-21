@@ -33,3 +33,12 @@ Production readiness checks effective owner/admin access and all existing infras
 - `node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/fresh-start-auth.integration.mjs`
 
 The integration uses only isolated generated SQLite data, valid synthetic password hashes, real encrypted synthetic MFA enrollment and one-use recovery codes. No production reset, external message or financial transaction is part of these tests.
+
+### Approved post-reset backup sequence
+
+For a separately authorized fresh-start release where backups begin only AFTER
+reset, use the maintenance-only activation and post-reset backup gates in
+[FRESH_START_RELEASE.md](FRESH_START_RELEASE.md). Internal maintenance activation
+is not completed/public deployment; normal readiness is never waived. Do not use
+the old backup-producing deploy script. Take the new guarded backup with all writers
+still stopped, then require normal readiness and owner/MFA checks before reopening.

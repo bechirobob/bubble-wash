@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "15 1 * * *"
   workflow_dispatch:
+    inputs:
+      fresh_start:
+        description: "Post-reset only: stopped writers, empty operations, preserve all old archives"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -42,13 +47,24 @@ jobs:
           ping: hermes
 
       - name: Create and restore-test the encrypted backup
+        env:
+          FRESH_START: ${{ github.event_name == 'workflow_dispatch' && inputs.fresh_start && 'true' || 'false' }}
         shell: bash
         run: |
           set -euo pipefail
           # Use supported, per-run preservation only for recovery/verification.
           # Ordinary scheduled runs retain their configured local retention.
           retention=""
-          if [[ "$GITHUB_EVENT_NAME" != schedule ]]; then
+          backup_command="/usr/bin/npm run db:backup"
+          runtime_bus=""
+          if [[ "$FRESH_START" == true ]]; then
+            # No configuration changes or key setup. Runtime checks fail closed
+            # unless the app and maintenance units are actually stopped.
+            backup_command="/usr/bin/node --experimental-strip-types scripts/backup-database.mjs --fresh-start"
+            app_uid="$(tailscale ssh root@hermes 'id -u ubuntu')"
+            [[ "$app_uid" =~ ^[0-9]+$ ]]
+            runtime_bus="XDG_RUNTIME_DIR=/run/user/$app_uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$app_uid/bus"
+          elif [[ "$GITHUB_EVENT_NAME" != schedule ]]; then
             tailscale ssh root@hermes 'python3 -' <<'PYPRESERVE'
           import json,pathlib,re,time
           root=pathlib.Path('/home/ubuntu/bubblewash-backups')
@@ -64,7 +80,7 @@ jobs:
           fi
           unit_name="bubblewash-nightly-backup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           backup_output="$(tailscale ssh root@hermes \
-            "systemd-run --quiet --wait --collect --pipe --unit='$unit_name' --property='User=ubuntu' --property='Group=ubuntu' --property='WorkingDirectory=/home/ubuntu/bubblewash-pilot' --property='EnvironmentFile=/home/ubuntu/.config/bubblewash/env' --property='Environment=HOME=/home/ubuntu' /usr/bin/env $retention BUBBLEWASH_BACKUP_DEFER_STATUS=true /usr/bin/npm run db:backup")"
+            "systemd-run --quiet --wait --collect --pipe --unit='$unit_name' --property='User=ubuntu' --property='Group=ubuntu' --property='WorkingDirectory=/home/ubuntu/bubblewash-pilot' --property='EnvironmentFile=/home/ubuntu/.config/bubblewash/env' --property='Environment=HOME=/home/ubuntu' /usr/bin/env $retention $runtime_bus BUBBLEWASH_BACKUP_DEFER_STATUS=true $backup_command")"
 
           backup_name="$(printf '%s\n' "$backup_output" | python3 -c 'import json,sys; text=sys.stdin.read(); value=json.loads(text[text.index("{"):]); assert value["ok"]; print(value["filename"])')"
           if [[ ! "$backup_name" =~ ^bubblewash-[0-9TZ.:-]+\.sqlite\.enc$ ]]; then
@@ -100,7 +116,7 @@ jobs:
           receipt="$(base64 -w0 "$RUNNER_TEMP/offhost-release-receipt.json")"
           [[ "$receipt" =~ ^[A-Za-z0-9+/=]+$ ]]
           tailscale ssh root@hermes "python3 - '$receipt'" <<'PYRECEIPT'
-          import base64,hashlib,json,os,pathlib,re,sys,tempfile
+          import base64,hashlib,json,os,pathlib,pwd,re,sys,tempfile
           raw=base64.b64decode(sys.argv[1],validate=True)
           proof=json.loads(raw)
           assert proof['schema']=='becore-encrypted-backup-release/v2'
@@ -117,6 +133,8 @@ jobs:
           with tempfile.NamedTemporaryFile(dir=path.parent,prefix='.offhost-receipt-',delete=False) as handle:
             handle.write(raw);handle.flush();os.fsync(handle.fileno())
             temporary=handle.name
+          owner=pwd.getpwnam('ubuntu')
+          os.chown(temporary,owner.pw_uid,owner.pw_gid)
           os.chmod(temporary,0o600)
           os.replace(temporary,path)
           assert json.loads(path.read_bytes())==proof
@@ -129,9 +147,10 @@ jobs:
           set -euo pipefail
           unit_name="bubblewash-backup-finalize-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           tailscale ssh root@hermes \
-            "systemd-run --quiet --wait --collect --pipe --unit='$unit_name' --property='User=ubuntu' --property='Group=ubuntu' --property='WorkingDirectory=/home/ubuntu/bubblewash-pilot' --property='EnvironmentFile=/home/ubuntu/.config/bubblewash/env' --property='Environment=HOME=/home/ubuntu' /usr/bin/npm run db:backup:finalize -- '$BACKUP_NAME'"
+            "systemd-run --quiet --wait --collect --pipe --unit='$unit_name' --property='User=ubuntu' --property='Group=ubuntu' --property='WorkingDirectory=/home/ubuntu/bubblewash-pilot' --property='EnvironmentFile=/home/ubuntu/.config/bubblewash/env' --property='Environment=HOME=/home/ubuntu' /usr/bin/npm run db:backup:finalize -- '$BACKUP_NAME' '/home/ubuntu/bubblewash-backups/offhost-release.json'"
 
       - name: Verify production readiness
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.fresh_start) }}
         shell: bash
         run: curl --fail --silent --show-error --retry 5 --retry-all-errors --max-time 15 https://bubblewash.co/api/ready
 

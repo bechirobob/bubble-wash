@@ -1,0 +1,52 @@
+name: Read-only Release Preflight
+on:
+  push:
+    branches: [ops/bubblewash-readonly-inventory-20261020]
+    paths:
+      - .github/workflows/release-preflight.yml
+      - scripts/release-preflight.py
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  preflight:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/ops/bubblewash-readonly-inventory-20261020'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Test aggregate-only inspection and existing transport
+        run: python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
+      - name: Check existing private destination identity without uploading
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+          BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+          BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+        run: |
+          if ! python3 .github/backup/check_store.py >/dev/null 2>&1; then
+            echo 'Existing private destination could not be verified. No host inspection attempted.'
+            exit 1
+          fi
+          echo 'Existing private destination identity and pinned commit verified. Write access not tested.'
+      - name: Connect through existing production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      - name: Inspect aggregate release prerequisites without changing the host
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Stream reviewed code to Python stdin. Never source the production env,
+          # upload a file, disable host verification or print SSH diagnostics.
+          if ! tailscale ssh root@hermes 'python3 -B -' < scripts/release-preflight.py 2>/dev/null; then
+            echo 'Read-only host inspection failed. No retry or alternate access attempted.'
+            exit 1
+          fi
