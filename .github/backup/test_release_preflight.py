@@ -1,4 +1,5 @@
 import base64
+import datetime
 import importlib.util
 import json
 from pathlib import Path
@@ -30,6 +31,64 @@ class PreflightTests(unittest.TestCase):
         self.assertFalse(report['mfaKeyFormatValid'])
         self.assertFalse(report['legacyWorkerCredentialsAbsent'])
         self.assertTrue(all(isinstance(value, bool) for value in report.values()))
+
+    def test_backup_paths_reject_normalized_aliases_and_missing_paths(self):
+        for primary, offsite in [
+            ('/synthetic/backups', '/synthetic/backups'),
+            ('/synthetic/backups', '/synthetic/backups/.'),
+            ('/synthetic/backups/', '/synthetic//backups'),
+            ('/synthetic/backups', '/synthetic/other/../backups'),
+            ('/synthetic/backups', '//synthetic/backups'),
+            ('', '/synthetic/backups'), ('/synthetic/backups', ''),
+            ('relative/primary', '/synthetic/backups'),
+            ('/synthetic/backups', 'relative/offsite'),
+        ]:
+            with self.subTest(primary=primary, offsite=offsite):
+                report = preflight.configuration({'BUBBLEWASH_BACKUP_PRIMARY_DIR': primary, 'BUBBLEWASH_BACKUP_OFFSITE_DIR': offsite})
+                self.assertIs(report['distinctBackupPaths'], False)
+                self.assertNotIn('synthetic', json.dumps(report))
+
+    def test_backup_paths_accept_distinct_normalized_absolute_paths(self):
+        report = preflight.configuration({'BUBBLEWASH_BACKUP_PRIMARY_DIR': '/synthetic/primary/.', 'BUBBLEWASH_BACKUP_OFFSITE_DIR': '/synthetic/other/../offsite/'})
+        self.assertIs(report['distinctBackupPaths'], True)
+
+    def test_status_metadata_rejects_invalid_or_unordered_timestamps(self):
+        now = datetime.datetime.now(datetime.timezone.utc)
+        created = (now - datetime.timedelta(hours=2)).isoformat()
+        restored = (now - datetime.timedelta(hours=1)).isoformat()
+        stored = now.isoformat()
+        valid = {'ok': True, 'createdAt': created, 'restoreVerifiedAt': restored, 'offsiteStoredAt': stored}
+        for field in ('createdAt', 'restoreVerifiedAt', 'offsiteStoredAt'):
+            for invalid in ('private-invalid-timestamp', '', None, 123, True, [], {}, '2026-02-30T00:00:00Z', '2026-10-20T00:00:00', '20261020T00:00:00Z', '2026-W43-2T00:00:00Z', '2026-10-20T00:00:00+00:60', '2026-10-20T00:00:00+24:00'):
+                with self.subTest(field=field, invalid=invalid):
+                    self.assertIs(preflight.status_metadata_valid({**valid, field: invalid}), False)
+            missing = valid.copy(); del missing[field]
+            self.assertIs(preflight.status_metadata_valid(missing), False)
+        for changes in ({'restoreVerifiedAt': '2000-01-01T00:00:00Z'}, {'offsiteStoredAt': created}, {'restoreVerifiedAt': 'private-invalid-timestamp'}, {'offsiteStoredAt': 'private-invalid-timestamp'}):
+            with self.subTest(changes=changes), patch.object(preflight, 'bounded_text', return_value=json.dumps({**valid, **changes})):
+                report = preflight.backup_report('/synthetic/status')
+                self.assertIs(report['statusAgeWithin30Hours'], True)
+                self.assertIs(report['statusMetadataValid'], False)
+                self.assertNotIn('private-invalid-timestamp', json.dumps(report))
+                self.assertTrue(all(isinstance(value, bool) for value in report.values()))
+
+    def test_status_metadata_accepts_ordered_equal_and_offset_timestamps(self):
+        for stamps in [
+            ('2026-10-20T00:00:00Z', '2026-10-20T00:01:00Z', '2026-10-20T00:02:00Z'),
+            ('2026-10-20T00:00:00Z',) * 3,
+            ('2026-10-20T03:00:00+03:00', '2026-10-20T00:01:00Z', '2026-10-19T19:02:00-05:00'),
+        ]:
+            status = dict(zip(('createdAt', 'restoreVerifiedAt', 'offsiteStoredAt'), stamps), ok=True)
+            with self.subTest(stamps=stamps):
+                self.assertIs(preflight.status_metadata_valid(status), True)
+                for invalid_ok in ('true', 'false', 1, False, None):
+                    self.assertIs(preflight.status_metadata_valid({**status, 'ok': invalid_ok}), False)
+
+    def test_preflight_push_paths_cover_executed_backup_dependencies(self):
+        workflow = Path(__file__).resolve().parents[1] / 'workflows/release-preflight.yml'
+        push_paths = workflow.read_text().split('    paths:\n', 1)[1].split('  workflow_dispatch:', 1)[0]
+        paths = {line.strip().removeprefix('- ') for line in push_paths.splitlines() if line.strip()}
+        self.assertEqual(paths, {'.github/workflows/release-preflight.yml', 'scripts/release-preflight.py', '.github/backup/check_store.py', '.github/backup/backup_release.py'})
 
     def test_database_aggregates_never_expose_rows_and_preserve_bytes(self):
         with tempfile.TemporaryDirectory() as root:

@@ -4,6 +4,7 @@ import base64
 import datetime
 import json
 from pathlib import Path
+import posixpath
 import pwd
 import re
 import sqlite3
@@ -48,6 +49,8 @@ def key_valid(value):
 
 def configuration(env):
     paths = ['DATABASE_PATH', 'BACKUP_PRIMARY_DIR', 'BACKUP_OFFSITE_DIR', 'BACKUP_STATUS_PATH']
+    primary = env.get('BUBBLEWASH_BACKUP_PRIMARY_DIR', '')
+    offsite = env.get('BUBBLEWASH_BACKUP_OFFSITE_DIR', '')
     return {
         'productionMode': env.get('NODE_ENV') == 'production',
         'demoDisabled': env.get('BUBBLEWASH_DISABLE_DEMO_LOGIN') == 'true' and env.get('BUBBLEWASH_ENABLE_DEMO_LOGIN') != 'true',
@@ -59,7 +62,9 @@ def configuration(env):
         'staffAuthDisabled': env.get('BUBBLEWASH_STAFF_AUTH_DISABLED') == 'true',
         'maintenanceTokenPresent': bool(env.get('BUBBLEWASH_MAINTENANCE_TOKEN')),
         'absoluteRequiredPaths': all(Path(env.get('BUBBLEWASH_' + key, '')).is_absolute() for key in paths),
-        'distinctBackupPaths': bool(env.get('BUBBLEWASH_BACKUP_PRIMARY_DIR')) and env.get('BUBBLEWASH_BACKUP_PRIMARY_DIR') != env.get('BUBBLEWASH_BACKUP_OFFSITE_DIR'),
+        # Match the backup command's POSIX path.resolve check, without accessing
+        # the filesystem. This does not prove independent physical storage.
+        'distinctBackupPaths': Path(primary).is_absolute() and Path(offsite).is_absolute() and posixpath.normpath('/' + primary.lstrip('/')) != posixpath.normpath('/' + offsite.lstrip('/')),
         'legacyWorkerCredentialsAbsent': not any(env.get(f'BUBBLEWASH_{role}_{field}') for role in ('VENDOR', 'DRIVER', 'SUPPORT') for field in ('EMAIL', 'PASSWORD', 'PASSWORD_HASH', 'ENTITY_ID')),
     }
 
@@ -125,6 +130,18 @@ def unit_report(unit, user=False):
         result['environmentFileMatchesExpected'] = values.get('EnvironmentFiles') == f'{ENV_FILE} (ignore_errors=no)'
     return result
 
+def status_metadata_valid(value):
+    try:
+        values = [value[key] for key in ('createdAt', 'restoreVerifiedAt', 'offsiteStoredAt')]
+        # Accept explicit-offset calendar timestamps, not Python-only ISO forms
+        # such as week dates that the application's Date parser rejects.
+        if not all(isinstance(stamp, str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)', stamp) for stamp in values):
+            return False
+        stamps = [datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00')) for stamp in values]
+        return value.get('ok') is True and stamps[0] <= stamps[1] <= stamps[2]
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return False
+
 def backup_report(status_path):
     result = {}
     for label, file in [('status', status_path), ('receipt', HOME / 'bubblewash-backups/offhost-release.json')]:
@@ -133,7 +150,7 @@ def backup_report(status_path):
             stamp = value.get('createdAt' if label == 'status' else 'verifiedAt', '')
             age = (datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))).total_seconds()
             result[label + 'AgeWithin30Hours'] = 0 <= age <= 30 * 3600
-            result[label + 'MetadataValid'] = bool(value.get('ok') and value.get('restoreVerifiedAt') and value.get('offsiteStoredAt')) if label == 'status' else (value.get('schema') == 'becore-encrypted-backup-release/v2' and value.get('storageRepository') == 'bechirobob/becore-backups' and value.get('repository') == 'bechirobob/bubble-wash' and all(value.get(k) is True for k in ('encrypted', 'restoreTested', 'downloadVerified')))
+            result[label + 'MetadataValid'] = status_metadata_valid(value) if label == 'status' else (value.get('schema') == 'becore-encrypted-backup-release/v2' and value.get('storageRepository') == 'bechirobob/becore-backups' and value.get('repository') == 'bechirobob/bubble-wash' and all(value.get(k) is True for k in ('encrypted', 'restoreTested', 'downloadVerified')))
         except Exception:
             result[label + 'Readable'] = False
     return result
