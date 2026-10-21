@@ -1,0 +1,10 @@
+{
+  "name": "@bubblewash/next-eslint-glob",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.cjs",
+  "dependencies": {
+    "glob": "13.0.6",
+    "minimatch": "10.2.6"
+  }
+}

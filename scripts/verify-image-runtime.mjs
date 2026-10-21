@@ -5,8 +5,8 @@ import { createServer } from "node:net";
 import path from "node:path";
 import sharp from "sharp";
 
-const expectedSharpVersion = "0.35.3";
-const minimumLibvipsVersion = [8, 18, 3];
+const expectedSharpVersion = "0.35.5";
+const minimumLibvipsVersion = [8, 18, 7];
 const startupTimeoutMs = 30_000;
 
 function versionAtLeast(actual, minimum) {
