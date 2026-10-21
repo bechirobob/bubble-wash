@@ -5,6 +5,8 @@ on:
     paths:
       - .github/workflows/release-preflight.yml
       - scripts/release-preflight.py
+      - .github/backup/check_store.py
+      - .github/backup/backup_release.py
   workflow_dispatch:
 permissions:
   contents: read
