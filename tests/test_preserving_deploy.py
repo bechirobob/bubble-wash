@@ -215,6 +215,66 @@ class PrivateNetwork(unittest.TestCase):
             run.assert_called_once_with(['ss'], timeout=30)
 
 
+class ProbeStartupGuard(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.candidate = self.root / 'candidate'; self.candidate.mkdir()
+        self.proc = self.root / 'proc'; (self.proc / '321/ns').mkdir(parents=True)
+        self.cwd = self.proc / '321/cwd'; self.cwd.symlink_to(self.candidate)
+        (self.proc / '321/ns/net').write_text('synthetic namespace inode')
+        self.host_net = self.root / 'host-net'; self.host_net.write_text('different inode')
+
+    def path(self, value):
+        return self.proc if value == '/proc' else self.host_net if value == '/proc/self/ns/net' else Path(value)
+
+    def verify(self, state='active', pid='321', expected=None, links=None, routes=None):
+        output = f'ActiveState={state}\nMainPID={pid}\n'
+        links = [{'ifname': 'lo'}] if links is None else links
+        routes = [[], []] if routes is None else routes
+        with patch.object(deploy, 'command', return_value=output), patch.object(deploy, 'Path', side_effect=self.path), \
+                patch.object(deploy, 'network_command', side_effect=[json.dumps(links), *map(json.dumps, routes)]) as network:
+            if expected is None:
+                self.assertEqual(deploy.verify_private_network('synthetic.service', self.candidate), 321)
+                self.assertEqual(network.call_count, 3)
+            else:
+                with self.assertRaises(ValueError) as caught:
+                    deploy.verify_private_network('synthetic.service', self.candidate)
+                report = deploy.RehearsalReport(); report.fail(caught.exception)
+                self.assertEqual(report.failure['error'], expected)
+                if expected not in ('PROBE_SHARED_NETWORK', 'PROBE_EXTERNAL_LINKS', 'PROBE_EXTERNAL_ROUTES'):
+                    network.assert_not_called()
+
+    def test_terminal_state_is_not_confused_with_startup_pending(self):
+        for state in ('inactive', 'failed'):
+            with self.subTest(state=state):
+                self.verify(state=state, pid='0', expected='PROBE_TERMINAL_STATE')
+        self.verify(state='deactivating', pid='0', expected='PROBE_PROCESS_STOPPING')
+        self.verify(state='activating', pid='0', expected='PROBE_STARTUP_PENDING')
+        self.verify(state='unknown', expected='PROBE_STATE_UNSUPPORTED')
+
+    def test_active_state_still_requires_valid_pid_and_exact_available_cwd(self):
+        for pid in ('0', '1'):
+            with self.subTest(pid=pid): self.verify(pid=pid, expected='PROBE_PID_UNAVAILABLE')
+        self.cwd.unlink(); self.verify(expected='PROBE_CWD_UNAVAILABLE')
+        self.cwd.symlink_to(self.root); self.verify(expected='PROBE_CWD_MISMATCH')
+
+    def test_fork_return_before_cwd_setup_fails_then_completed_setup_passes(self):
+        # Models the documented Type=simple ordering, not a live systemd run.
+        # The exact same process can fail before setup and pass after setup.
+        self.cwd.unlink(); self.cwd.symlink_to(self.root)
+        self.verify(expected='PROBE_CWD_MISMATCH')
+        self.cwd.unlink(); self.cwd.symlink_to(self.candidate)
+        self.verify()
+
+    def test_setup_barrier_does_not_replace_private_network_checks(self):
+        self.verify(links=[{'ifname': 'lo'}, {'ifname': 'eth0'}], expected='PROBE_EXTERNAL_LINKS')
+        self.verify(routes=[[{'dev': 'eth0', 'dst': 'default'}], []], expected='PROBE_EXTERNAL_ROUTES')
+        net = self.proc / '321/ns/net'; net.unlink(); os.link(self.host_net, net)
+        self.verify(expected='PROBE_SHARED_NETWORK')
+
+
 class IsolatedEntrypoint(unittest.TestCase):
     def test_workflow_streams_reviewed_source_with_all_existing_arguments(self):
         root = Path(__file__).resolve().parents[1]
@@ -647,6 +707,7 @@ class RehearsalOnly(unittest.TestCase):
         self.fail_error = ValueError('DO_NOT_PRINT_EXCEPTION')
         self.bad_stop = False
         self.launch_timeout = False
+        self.final_probe_pid = 321
         self.mutate_copy = False
         self.change_env = False
         self.original_marker = (self.runtime / 'current-release').read_bytes()
@@ -664,6 +725,7 @@ class RehearsalOnly(unittest.TestCase):
             self.assertNotIn('--wait', args, 'no build allowed')
             self.assertIn('--property=PrivateNetwork=true', args)
             self.assertIn('--property=KillMode=control-group', args)
+            self.assertEqual(args.count('--property=Type=exec'), 1)
             self.assertIn('--property=ProtectHome=tmpfs', args)
             self.assertIn('--property=ProtectSystem=strict', args)
             self.assertIn('--property=StandardOutput=null', args)
@@ -713,7 +775,7 @@ class RehearsalOnly(unittest.TestCase):
             stack.enter_context(patch.object(deploy, 'verify_source_transition'))
             stack.enter_context(patch.object(deploy, 'check_runtime'))
             stack.enter_context(patch.object(deploy, 'health'))
-            stack.enter_context(patch.object(deploy, 'verify_private_network', return_value=321))
+            stack.enter_context(patch.object(deploy, 'verify_private_network', side_effect=[321, self.final_probe_pid]))
             stack.enter_context(patch.object(deploy, 'command', side_effect=self.command))
             stack.enter_context(patch.object(deploy, 'network_command', side_effect=self.network))
             stack.enter_context(patch.object(deploy, 'probe_state', side_effect=self.state))
@@ -795,6 +857,13 @@ class RehearsalOnly(unittest.TestCase):
         self.change_env = True
         result = self.run_rehearsal()
         self.assertFalse(result['ok']); self.assertEqual(result['stage'], 'UNCHANGED'); self.assertTrue(result['cleanup'])
+
+    def test_final_namespace_revalidation_rejects_changed_process_without_retry(self):
+        self.final_probe_pid = 322
+        result = self.run_rehearsal()
+        self.assertEqual(result['stage'], 'NAMESPACE_AFTER')
+        self.assertEqual(result['error'], 'PROBE_NAMESPACE_CHANGED')
+        self.assertFalse(result['ok']); self.assertTrue(result['cleanup']); self.assertTrue(self.stopped)
 
     def test_wrong_retained_sha_rejected_before_any_probe_or_snapshot(self):
         (self.candidate / '.release-sha').write_text('f' * 40)
