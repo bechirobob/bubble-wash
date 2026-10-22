@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Manual code-only release. Never rewrite environment, reset data, or install units."""
 import argparse
+from contextlib import contextmanager
 import datetime as dt
 import fcntl
 import hashlib
@@ -11,6 +12,7 @@ import pwd
 import re
 import signal
 import sqlite3
+import stat
 import subprocess
 import tempfile
 import time
@@ -218,7 +220,82 @@ def activate(current, candidate, service, validate):
             temporary.unlink()
 
 
-def main():
+# Exact source/dependency transition, not an inference from a partial SQL grep.
+# Review evidence identifies all changed writers and their retained-code readers.
+LIVE_SOURCE_SHA256 = {'src': '23387dd00e0c0a97da2f0f125d853e6b4a289009b758760377a49409fca0ac56', 'package.json': 'd33a04aae78f35b296c6f32ce3523136f2144d42694934113eff42fec01a1c52', 'package-lock.json': '5a3190f9d986628f05a8534ddb462b706bca0bb4b3caadc6e49b6328c84b056f', 'next.config.mjs': '55c7cca7ffcd8464dd2432dffef6ef2b7e4ebc3ee7d6dc508ba72855626cc08e', 'tsconfig.json': '2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c'}
+CANDIDATE_SOURCE_SHA256 = {'src': '8c13df12e056df03155bbaff504653b1d771c65eefcd7eaf6910cea4d0b8368d', 'package.json': 'fcebaa669a21c414d74cc921b4603d67cea338a8f11ef82bc18d60301c100b23', 'package-lock.json': '16bf7696ddfa1a4201c3fceb068f466e21287739d23cb7bb78ae80f9d1fb8ca8', 'next.config.mjs': '55c7cca7ffcd8464dd2432dffef6ef2b7e4ebc3ee7d6dc508ba72855626cc08e', 'tsconfig.json': '2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c'}
+
+
+def source_manifest(release):
+    source = release / 'src'
+    require(source.is_dir() and source.resolve(strict=True) == source, 'invalid source directory')
+    rows = []
+    for path in sorted(source.rglob('*')):
+        require(not path.is_symlink(), 'source symlinks are not supported')
+        if path.is_dir():
+            continue
+        require(path.is_file(), 'source must contain only regular files')
+        rows.append((path.relative_to(source).as_posix(), digest(path)))
+    require(rows, 'source tree is empty')
+    result = {'src': hashlib.sha256(json.dumps(rows, separators=(',', ':')).encode()).hexdigest()}
+    for name in ('package.json', 'package-lock.json', 'next.config.mjs', 'tsconfig.json'):
+        path = release / name
+        require(path.is_file() and not path.is_symlink(), 'invalid dependency manifest')
+        result[name] = digest(path)
+    return result
+
+
+def verify_source_transition(current, candidate):
+    require(source_manifest(current) == LIVE_SOURCE_SHA256 and
+            source_manifest(candidate) == CANDIDATE_SOURCE_SHA256,
+            'source or dependency transition lacks exact compatibility review')
+
+
+@contextmanager
+def deployment_lock(runtime, app_uid):
+    """Use the existing shared inode, without following links or creating files."""
+    require(runtime.resolve(strict=True) == runtime, 'runtime path must be canonical')
+    directory = os.open(runtime, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    lock = None
+    try:
+        directory_stat = os.fstat(directory)
+        require(stat.S_ISDIR(directory_stat.st_mode) and directory_stat.st_uid in (0, app_uid) and
+                not directory_stat.st_mode & 0o022, 'unsafe runtime directory')
+        lock = os.open('deploy.lock', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        lock_stat = os.fstat(lock)
+        require(stat.S_ISREG(lock_stat.st_mode) and lock_stat.st_nlink == 1 and
+                lock_stat.st_uid in (0, app_uid) and not lock_stat.st_mode & 0o022, 'unsafe existing deployment lock')
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        def unchanged():
+            current_directory = runtime.lstat()
+            current_lock = os.stat('deploy.lock', dir_fd=directory, follow_symlinks=False)
+            fields = ('st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid', 'st_nlink')
+            require(runtime.resolve(strict=True) == runtime and
+                    all(getattr(current_directory, key) == getattr(directory_stat, key) for key in fields) and
+                    all(getattr(current_lock, key) == getattr(lock_stat, key) for key in fields) and
+                    os.fstat(lock).st_nlink == 1, 'shared deployment lock identity changed')
+        unchanged()
+        yield unchanged
+    finally:
+        if lock is not None:
+            os.close(lock)
+        os.close(directory)
+
+
+def public_health():
+    # This check is part of activation, not a post-commit workflow step.
+    raw = command(['curl', '--fail', '--silent', '--show-error', '--retry', '3', '--max-time', '15',
+                   '--max-filesize', '4096', '--write-out', '\n%{http_code}',
+                   'https://bubblewash.co/api/health'], timeout=90)
+    body, _, status_code = raw.rpartition('\n')
+    require(status_code == '200', 'public liveness requires HTTP 200 without redirect')
+    value = json.loads(body)
+    require(isinstance(value, dict) and value.get('ok') is True and value.get('service') == 'Bubble Wash' and
+            value.get('status') == 'alive', 'unexpected public health response')
+
+
+def main(lock_unchanged):
     parser = argparse.ArgumentParser()
     for key in ('candidate', 'sha', 'expected-live', 'backup-sha256', 'receipt-run', 'store-sha', 'store-id'):
         parser.add_argument('--' + key, required=True)
@@ -250,7 +327,8 @@ def main():
             not db.is_relative_to(candidate), 'database must be stable and outside release directories')
     require(not (current / 'data/submissions.jsonl').exists() and not (candidate / 'data/submissions.jsonl').exists(),
             'legacy import would mutate data')
-    # Rollback is code-only: database implementation must be byte-identical.
+    verify_source_transition(current, candidate)
+    # Additional schema/health byte-identity checks remain in force.
     for relative in ('src/lib/data-store.ts', 'src/lib/operational-store.ts',
                      'src/lib/availability-store.ts', 'src/lib/staff-accounts.ts', 'src/app/api/health/route.ts'):
         require(digest(current / relative) == digest(candidate / relative), 'database or health implementation requires separate review')
@@ -319,6 +397,8 @@ def main():
         require(database_fingerprint(snapshot) == before, 'candidate rehearsal changed schema or data; separate migration review required')
 
     def unchanged():
+        lock_unchanged()
+        verify_source_transition(current, candidate)
         stat = ENV.stat()
         require(ENV.read_bytes() == raw and (stat.st_mode, stat.st_uid, stat.st_gid, stat.st_ino) ==
                 (metadata.st_mode, metadata.st_uid, metadata.st_gid, metadata.st_ino), 'environment changed during release')
@@ -340,6 +420,7 @@ def main():
     def validate(target):
         health(3000)
         check_runtime(target, values)
+        public_health()
         unchanged()
         if target == candidate:
             write_marker(f'sha={args.sha}\nrelease={candidate.name}\npath={candidate}\n'.encode())
@@ -350,6 +431,7 @@ def main():
     require(CURRENT.resolve(strict=True) == current and (RUNTIME / 'current-release').read_bytes() == old_marker,
             'live release drifted during preparation')
     check_runtime(current, values)
+    lock_unchanged()
     activate(CURRENT, candidate, ctl, validate)
     # No readiness request against live DB. It was proven only against a copy.
     print(json.dumps({'ok': True, 'sha': args.sha, 'previousSha': args.expected_live,
@@ -363,9 +445,8 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGHUP, interrupted)
     try:
-        with (RUNTIME / 'deploy.lock').open('a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            main()
+        with deployment_lock(RUNTIME, pwd.getpwnam('ubuntu').pw_uid) as lock_unchanged:
+            main(lock_unchanged)
     except BaseException:
         # Do not leak configuration, SQLite rows, or captured process diagnostics.
         print('Preserving deployment failed closed; inspect the release pointer and service before any retry.', flush=True)
