@@ -1,4 +1,5 @@
 import "server-only";
+import { listStaffAccounts } from "./staff-accounts.ts";
 import { mfaEncryptionKey as encryptionKey } from "./mfa-encryption.ts";
 
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, randomInt } from "node:crypto";
@@ -57,18 +58,21 @@ function recoveryCodeHash(adminEmail: string, code: string) {
   return createHmac("sha256", encryptionKey()).update(`${adminEmail.trim().toLowerCase()}:${code}`).digest("base64url");
 }
 
-function configuredEnvironmentSecret() {
+function configuredEnvironmentSecret(adminEmail: string) {
+  // An additional personal owner must enroll their own authenticator. Never
+  // inherit the legacy master's environment seed or recovery state.
+  if (listStaffAccounts().some((account) => account.email.toLowerCase() === adminEmail.trim().toLowerCase() && account.allStaffAccess)) return "";
   const secret = process.env.BUBBLEWASH_ADMIN_TOTP_SECRET?.trim() ?? "";
   return validTotpSecret(secret) ? secret : "";
 }
 
 export function adminMfaEnrollmentExists(adminEmail: string) {
-  if (configuredEnvironmentSecret()) return true;
+  if (configuredEnvironmentSecret(adminEmail)) return true;
   return readAdminMfaSetting(adminEmail)?.status === "enrolled";
 }
 
 export function adminTotpSecret(adminEmail: string) {
-  const environmentSecret = configuredEnvironmentSecret();
+  const environmentSecret = configuredEnvironmentSecret(adminEmail);
   if (environmentSecret) return environmentSecret;
   const setting = readAdminMfaSetting(adminEmail);
   if (!setting || setting.status !== "enrolled") return "";

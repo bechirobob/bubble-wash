@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Order is not available to this role." }, { status: 404 });
     }
 
-    const actions = automationActionsForOrder(order, user.role, user.name);
+    const actions = automationActionsForOrder(order, user.role, user.name, user.allStaffAccess);
     const selected = actions.find((action) => action.key === actionKey);
     if (!selected) {
       return NextResponse.json({ ok: false, error: "That action is not allowed for the current order stage." }, { status: 400 });
@@ -234,7 +234,8 @@ export async function POST(request: NextRequest) {
       id: `BW-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`,
       createdAt: new Date().toISOString(),
       source: "bubblewash-workflow-automation",
-      data: payload,
+      data: { ...payload, name: user.name, email: user.email,
+        submittedByName: user.name, submittedByEmail: user.email, submittedByRole: user.role },
     };
 
     operationalDatabase().transaction(() => {

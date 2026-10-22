@@ -41,7 +41,7 @@ test("phase countdown stops ticking on expiry and restarts only for a new deadli
 test("support bag scans open the order view that consumes selectedOrderId", async () => {
   const scan = await readFile(new URL("../src/app/scan/page.tsx", import.meta.url), "utf8");
   assert.match(scan, /user.role === "support" \? "\/support\?view=orders"/);
-  assert.match(source, /initialView === "orders" \? <SharedOrderBoard role="support"/);
+  assert.match(source, /initialView === "orders" \? <SharedOrderBoard allStaffAccess=\{allStaffAccess\} role=\{role\}/);
 });
 
 test("small worker headers preserve logo proportions and whole navigation words", () => {

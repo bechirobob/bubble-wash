@@ -153,7 +153,7 @@ function action(key: string, label: string, description: string, submissionType:
   return { key, label, description, submissionType, nextStatus, payload: { ...payload, submissionType } };
 }
 
-export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: WorkflowRole, userName: string): WorkflowAutomationAction[] {
+export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: WorkflowRole, userName: string, allStaffAccess = false): WorkflowAutomationAction[] {
   const stage = workflowStageFromStatus(order.status, order.lastEventType);
   if (stage.key === "cancelled") return [];
   const base = basePayload(order, role, userName);
@@ -362,5 +362,12 @@ export function automationActionsForOrder(order: WorkflowOrderSnapshot, role: Wo
     }
   }
 
+  // Explicitly enrolled personal owners operate across workspaces without impersonating a roster identity.
+  // GPS publishing is separately restricted to the authenticated actual driver.
+  if (role === "admin" && allStaffAccess) {
+    for (const staffRole of ["vendor", "driver", "support"] as const) {
+      actions.push(...automationActionsForOrder(order, staffRole, userName));
+    }
+  }
   return actions;
 }

@@ -30,6 +30,7 @@ const nextConfig = {
         source: "/login",
         headers: appHtmlHeaders,
       },
+      { source: "/api/staff/:path*", headers: privateNoStoreHeaders() },
       {
         source: "/staff",
         headers: appHtmlHeaders,
@@ -58,6 +59,8 @@ const nextConfig = {
         source: "/(.*)",
         headers: securityHeaders(),
       },
+      { source: "/staff/activate", headers: [...appHtmlHeaders, { key: "Referrer-Policy", value: "no-referrer" }] },
+
     ];
   },
 };

@@ -11,6 +11,40 @@ on:
       - ops/deploy-preserving.py
       - ops/check-release-ci.py
       - tests/test_preserving_deploy.py
+      - .github/workflows/owner-enrollment.yml
+      - scripts/owner-enrollment-host.py
+      - ops/owner-enrollment-source-pins.json
+      - scripts/release-preflight.py
+      - .github/workflows/release-preflight.yml
+      - .github/workflows/owner-code-deploy.yml
+      - ops/deploy-personal-owner.py
+      - ops/check-owner-source.py
+      - tests/test_owner_deploy.py
+      - docs/PERSONAL_OWNER_ENROLLMENT.md
+      - next.config.mjs
+      - package.json
+      - scripts/invite-additional-owner.mjs
+      - src/app/admin/page.tsx
+      - src/app/api/health/route.ts
+      - src/app/api/orders/advance/route.ts
+      - src/app/api/ready/route.ts
+      - src/app/api/staff/accounts/route.ts
+      - src/app/drivers/page.tsx
+      - src/app/support/page.tsx
+      - src/app/vendors/page.tsx
+      - src/components/StaffWorkspaces.tsx
+      - src/lib/admin-mfa.ts
+      - src/lib/auth.ts
+      - src/lib/availability-store.ts
+      - src/lib/data-store.ts
+      - src/lib/operational-store.ts
+      - src/lib/order-workflow.ts
+      - src/lib/staff-accounts.ts
+      - src/lib/staff-identity.ts
+      - tests/personal-owner-http.integration.mjs
+      - tests/personal-owner-mfa.integration.mjs
+      - tests/personal-owner.integration.mjs
+      - tests/worker-workspaces.test.mjs
   push:
     branches: [main]
     paths:
@@ -22,6 +56,40 @@ on:
       - ops/deploy-preserving.py
       - ops/check-release-ci.py
       - tests/test_preserving_deploy.py
+      - .github/workflows/owner-enrollment.yml
+      - scripts/owner-enrollment-host.py
+      - ops/owner-enrollment-source-pins.json
+      - scripts/release-preflight.py
+      - .github/workflows/release-preflight.yml
+      - .github/workflows/owner-code-deploy.yml
+      - ops/deploy-personal-owner.py
+      - ops/check-owner-source.py
+      - tests/test_owner_deploy.py
+      - docs/PERSONAL_OWNER_ENROLLMENT.md
+      - next.config.mjs
+      - package.json
+      - scripts/invite-additional-owner.mjs
+      - src/app/admin/page.tsx
+      - src/app/api/health/route.ts
+      - src/app/api/orders/advance/route.ts
+      - src/app/api/ready/route.ts
+      - src/app/api/staff/accounts/route.ts
+      - src/app/drivers/page.tsx
+      - src/app/support/page.tsx
+      - src/app/vendors/page.tsx
+      - src/components/StaffWorkspaces.tsx
+      - src/lib/admin-mfa.ts
+      - src/lib/auth.ts
+      - src/lib/availability-store.ts
+      - src/lib/data-store.ts
+      - src/lib/operational-store.ts
+      - src/lib/order-workflow.ts
+      - src/lib/staff-accounts.ts
+      - src/lib/staff-identity.ts
+      - tests/personal-owner-http.integration.mjs
+      - tests/personal-owner-mfa.integration.mjs
+      - tests/personal-owner.integration.mjs
+      - tests/worker-workspaces.test.mjs
   workflow_dispatch:
 permissions:
   contents: read
@@ -38,6 +106,8 @@ jobs:
         run: |
           python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
           python3 -m unittest discover -s tests -p 'test_preserving_deploy.py' -v
-          python3 -m py_compile .github/backup/backup_release.py ops/deploy-preserving.py ops/check-release-ci.py
+          python3 -m unittest discover -s tests -p 'test_owner_deploy.py' -v
+          python3 ops/check-owner-source.py
+          python3 -m py_compile .github/backup/backup_release.py ops/deploy-preserving.py ops/check-release-ci.py ops/deploy-personal-owner.py ops/check-owner-source.py
           git diff --check
 

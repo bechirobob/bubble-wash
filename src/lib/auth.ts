@@ -88,7 +88,7 @@ export function decodeSession(value?: string) {
     const user = currentStaffUsers().find((item) => item.email.toLowerCase() === session.email.toLowerCase() && item.role === session.role);
     if (!user || session.entityId !== user.entityId) return null;
     if (session.credentialVersion !== user.credentialVersion) return null;
-    return { email: session.email, role: session.role, name: user.name, entityId: user.entityId };
+    return { email: session.email, role: session.role, name: user.name, entityId: user.entityId, allStaffAccess: user.role === "admin" && user.allStaffAccess === true };
   } catch {
     return null;
   }
