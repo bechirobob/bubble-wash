@@ -381,9 +381,11 @@ NPM_CODES = frozenset(('EACCES', 'EPERM', 'ENOENT', 'ENOSPC', 'ENOMEM', 'EIO',
 
 
 def retained_open(parent, name, directory=False):
-    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOATIME
-    if directory:
-        flags |= os.O_DIRECTORY
+    # O_PATH traverses directories without reading entries or changing atime,
+    # and does not require ownership of root-owned ancestors. Actual content
+    # reads retain O_NOATIME and fail closed if that protection is unavailable.
+    flags = (os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW) if directory else (
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOATIME)
     return os.open(name, flags, dir_fd=parent)
 
 
@@ -474,6 +476,12 @@ def retained_candidate_report():
         try:
             npm = retained_open(fd, '.npm', True)
             logs = retained_open(npm, '_logs', True)
+            # scandir needs a readable fd, not O_PATH. Reopen the pinned
+            # directory itself, preserving no-follow and no-atime safeguards.
+            readable = os.open('.', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW |
+                               os.O_NONBLOCK | os.O_NOATIME, dir_fd=logs)
+            os.close(logs)
+            logs = readable
             names = []
             with os.scandir(logs) as entries:
                 for entry in entries:

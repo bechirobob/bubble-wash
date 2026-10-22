@@ -46,7 +46,10 @@ class RetainedCandidateTests(unittest.TestCase):
         def checked_open(name, flags, *args, **kwargs):
             self.assertFalse(flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND))
             self.assertTrue(flags & os.O_NOFOLLOW)
-            self.assertTrue(flags & os.O_NOATIME)
+            if flags & os.O_PATH:
+                self.assertTrue(flags & os.O_DIRECTORY)
+            else:
+                self.assertTrue(flags & os.O_NOATIME)
             calls.append(name)
             return real_open(name, flags, *args, **kwargs)
         with patch.object(p.os, 'open', side_effect=checked_open):
@@ -62,6 +65,47 @@ class RetainedCandidateTests(unittest.TestCase):
             self.assertEqual((metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns), (after.st_size, after.st_mtime_ns, after.st_ctime_ns))
             self.assertEqual(content, Path(name).read_bytes())
         self.assertTrue(calls)
+
+    def test_nonowner_ancestor_traversal_uses_path_fds_but_reads_keep_noatime(self):
+        # Emulate Linux EPERM for O_NOATIME on ancestors owned by another UID.
+        # Local sandbox UID mapping can make even / appear owned by the runner.
+        self.put('.npm/_logs/2026-10-22T20_23_16_123Z-debug-0.log', '1 verbose exit 0\n')
+        wal = self.home / 'db-wal'; wal.write_bytes(b'')
+        real_open = os.open
+        traversal = []
+        readable = []
+        def nonowner_open(name, flags, *args, **kwargs):
+            if flags & os.O_DIRECTORY and name != '.':
+                if flags & os.O_NOATIME and not flags & os.O_PATH:
+                    raise PermissionError(1, 'Operation not permitted')
+                self.assertTrue(flags & os.O_PATH)
+                traversal.append(name)
+            else:
+                self.assertTrue(flags & os.O_NOATIME)
+                self.assertFalse(flags & os.O_PATH)
+                readable.append(name)
+            return real_open(name, flags, *args, **kwargs)
+        with patch.object(p.os, 'open', side_effect=nonowner_open):
+            report = self.report()
+            self.assertTrue(p.regular_sidecar(self.home / 'db', '-wal'))
+        self.assertEqual(report['inspection'], 'completed')
+        self.assertEqual(report['npm']['inspection'], 'completed')
+        self.assertIn('/', traversal)
+        self.assertIn('.', readable)
+
+    def test_directory_listing_noatime_denial_fails_closed_without_fallback(self):
+        self.put('.npm/_logs/2026-10-22T20_23_16_123Z-debug-0.log', '')
+        real_open = os.open
+        attempts = []
+        def denied_listing(name, flags, *args, **kwargs):
+            if name == '.':
+                attempts.append(flags)
+                raise PermissionError(1, 'Operation not permitted')
+            return real_open(name, flags, *args, **kwargs)
+        with patch.object(p.os, 'open', side_effect=denied_listing):
+            self.assertEqual(self.report()['npm']['inspection'], 'rejected')
+        self.assertEqual(len(attempts), 1)
+        self.assertTrue(attempts[0] & os.O_NOATIME)
 
     def test_pin_mismatch_missing_oversized_and_symlink_fail_closed(self):
         marker = self.root / '.release-sha'
