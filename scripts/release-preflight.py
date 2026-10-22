@@ -3,6 +3,7 @@
 import base64
 import datetime
 import json
+import hashlib
 from pathlib import Path
 import posixpath
 import pwd
@@ -155,6 +156,127 @@ def backup_report(status_path):
             result[label + 'Readable'] = False
     return result
 
+# Only operational flags are retained from /proc; never emit process environment.
+LOGIN_FLAGS = ('BUBBLEWASH_STAFF_AUTH_DISABLED', 'BUBBLEWASH_BOOKINGS_DISABLED',
+               'BUBBLEWASH_DISABLE_DEMO_LOGIN', 'BUBBLEWASH_ENABLE_DEMO_LOGIN',
+               'BUBBLEWASH_ADMIN_MFA_REQUIRED', 'NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED')
+PROC = Path('/proc')
+RESTORE_FILES = ('src/app/api/health/route.ts', 'src/lib/auth.ts',
+                 'src/lib/booking-policy.ts', '.next/BUILD_ID')
+
+
+def flag_state(value):
+    return 'absent' if value is None else value if value in ('true', 'false') else 'other'
+
+
+def operational_flags(env):
+    return {'productionMode': env.get('NODE_ENV') == 'production',
+            'productionModePresent': 'NODE_ENV' in env,
+            **{name: flag_state(env.get(name)) for name in LOGIN_FLAGS}}
+
+
+def bounded_bytes(path, limit):
+    with Path(path).open('rb') as handle:
+        raw = handle.read(limit + 1)
+    if len(raw) > limit:
+        raise ValueError('unsupported input')
+    return raw
+
+
+def process_identity(pid):
+    raw = bounded_bytes(PROC / str(pid) / 'stat', 65536)
+    # Only PID and start ticks identify the same process; CPU counters change.
+    head, tail = raw.rsplit(b')', 1)
+    return head.split(b' ', 1)[0], tail.split()[19]
+
+
+def runtime_flags(pid):
+    # /proc exposes the environment as a single record; discard all keys except
+    # this fixed noncredential allowlist before comparison or reporting.
+    raw = bounded_bytes(PROC / str(pid) / 'environ', 1024 * 1024)
+    allowed = {key.encode() for key in (*LOGIN_FLAGS, 'NODE_ENV')}
+    values = {}
+    for entry in raw.split(b'\0'):
+        key, sep, value = entry.partition(b'=')
+        if sep and key in allowed:
+            if key.decode() in values:
+                raise ValueError('duplicate runtime flag')
+            values[key.decode()] = value.decode()
+    return values
+
+
+def release_login_inspection(env):
+    result = {'readOnly': True, 'configuredFlags': operational_flags(env),
+              'sourceToBuildProven': False, 'bookingPolicySemanticsProven': False,
+              'fullRuntimeEnvironmentCompared': False, 'interactiveLoginProven': False}
+    target = CURRENT.resolve(strict=True)
+    marker_path = HOME / 'bubblewash-runtime/current-release'
+    try:
+        raw_marker = bounded_bytes(marker_path, 65536)
+        marker = parse_env(raw_marker.decode())
+        valid = bool(re.fullmatch('[0-9a-f]{40}', marker.get('sha', '')))
+        result['releaseMarker'] = {'shaValid': valid,
+                                  'pathMatchesCurrent': Path(marker.get('path', '/nonexistent')).resolve() == target,
+                                  'stableDuringRead': raw_marker == bounded_bytes(marker_path, 65536)}
+        if valid:
+            result['releaseMarker']['sha'] = marker['sha']
+    except Exception:
+        result['releaseMarker'] = {'inspectionSupported': False}
+    hashes = {}
+    digest = hashlib.sha256()
+    stable = True
+    for name in RESTORE_FILES:
+        try:
+            path = target / name
+            if path.is_symlink() or not path.is_file():
+                raise ValueError('unsupported source')
+            raw = bounded_bytes(path, 262144)
+            stable = stable and raw == bounded_bytes(path, 262144)
+            hashes[name] = hashlib.sha256(raw).hexdigest()
+            if name == '.next/BUILD_ID' and re.fullmatch(rb'[A-Za-z0-9_-]{1,128}\n?', raw):
+                result['buildId'] = raw.decode().strip()
+            digest.update(name.encode() + b'\0' + raw + b'\0')
+        except Exception:
+            hashes[name] = None
+    result['sourceFileSha256'] = hashes
+    result['sourceFilesStableDuringRead'] = stable and all(hashes.values())
+    if result['sourceFilesStableDuringRead']:
+        result['restorationSourceFingerprint'] = digest.hexdigest()
+    try:
+        uid = pwd.getpwnam('ubuntu').pw_uid
+        args = ['runuser', '-u', 'ubuntu', '--', 'env', f'XDG_RUNTIME_DIR=/run/user/{uid}', f'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus', 'systemctl', '--user', 'show', 'bubblewash-local.service', '--property=LoadState,ActiveState,MainPID,WorkingDirectory,EnvironmentFiles']
+        unit = dict(line.split('=', 1) for line in command(args).splitlines() if '=' in line)
+        pid = int(unit.get('MainPID', '0'))
+        if pid <= 1:
+            raise ValueError('inactive process')
+        before = process_identity(pid)
+        main = runtime_flags(pid)
+        listener_pids = set(re.findall(r'pid=(\d+)', command(['ss', '-H', '-ltnp', 'sport = :3000'])))
+        result['runtime'] = {'serviceActive': unit.get('LoadState') == 'loaded' and unit.get('ActiveState') == 'active',
+                             'workingDirectoryMatchesCurrent': Path(unit.get('WorkingDirectory', '/nonexistent')).resolve() == target,
+                             'environmentFileMatchesExpected': unit.get('EnvironmentFiles') == f'{ENV_FILE} (ignore_errors=no)',
+                             'mainProcessDirectoryMatchesCurrent': (PROC / str(pid) / 'cwd').resolve() == target,
+                             'mainProcessFlags': operational_flags(main),
+                             'mainFlagsMatchConfiguration': all(main.get(k) == env.get(k) for k in (*LOGIN_FLAGS, 'NODE_ENV')),
+                             'uniqueListener': len(listener_pids) == 1}
+        if len(listener_pids) == 1:
+            listener = int(next(iter(listener_pids)))
+            listener_before = process_identity(listener)
+            effective = runtime_flags(listener)
+            result['runtime'].update({
+                'listenerDirectoryMatchesCurrent': (PROC / str(listener) / 'cwd').resolve() == target,
+                'listenerIsNode': (PROC / str(listener) / 'exe').resolve().name == 'node',
+                'listenerSameServiceCgroup': bounded_bytes(PROC / str(listener) / 'cgroup', 65536) == bounded_bytes(PROC / str(pid) / 'cgroup', 65536),
+                'listenerFlags': operational_flags(effective),
+                'listenerFlagsMatchConfiguration': all(effective.get(k) == env.get(k) for k in (*LOGIN_FLAGS, 'NODE_ENV')),
+                'listenerStableDuringRead': listener_before == process_identity(listener)})
+        result['runtime']['mainStableDuringRead'] = before == process_identity(pid)
+        result['currentTargetStableDuringRead'] = CURRENT.resolve(strict=True) == target
+    except Exception:
+        result['runtime'] = {'inspectionSupported': False}
+    return result
+
+
 def collect():
     result = {'readOnlyIntent': True, 'resetExecuted': False, 'backupCreated': False,
               'limits': {'interactiveOwnerLoginProven': False, 'interactiveMfaProven': False, 'allWritersIdentified': False, 'ingressMaintenanceProven': False, 'privateDestinationWriteAccessProven': False, 'effectiveRuntimeEnvironmentProven': False}}
@@ -164,6 +286,10 @@ def collect():
         return {**result, 'environmentInspectionSupported': False}
     result['environmentInspectionSupported'] = True
     result['configuration'] = configuration(env)
+    try:
+        result['staffRestorationInspection'] = release_login_inspection(env)
+    except Exception:
+        result['staffRestorationInspection'] = {'inspectionSupported': False}
     result['currentReleaseExists'] = CURRENT.is_dir()
     result['legacyImportAbsent'] = not (CURRENT / 'data/submissions.jsonl').exists()
     for key, unit, user in [('applicationUnit', 'bubblewash-local.service', True), ('maintenanceUnit', 'bubblewash-maintenance.service', False), ('maintenanceTimer', 'bubblewash-maintenance.timer', False)]:
