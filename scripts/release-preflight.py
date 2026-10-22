@@ -8,6 +8,8 @@ from pathlib import Path
 import posixpath
 import os
 import stat
+import time
+import selectors
 import pwd
 import re
 from urllib.parse import quote
@@ -297,6 +299,124 @@ def runtime_flags(pid):
     return values
 
 
+# Fixed historical window; never emit host timestamps or process identifiers.
+FAILED_ATTEMPT_START = datetime.datetime(2026, 10, 22, 20, 23, 20, tzinfo=datetime.timezone.utc).timestamp()
+FAILED_ATTEMPT_END = datetime.datetime(2026, 10, 22, 20, 26, 56, tzinfo=datetime.timezone.utc).timestamp()
+
+
+def process_start_report(pid, expected_identity=None):
+    result = {'classification': 'inconclusive', 'stableDuringRead': False,
+              'clockConsistentDuringRead': False, 'historicalClockAccuracyProven': False}
+    try:
+        monotonic = time.monotonic()
+        now = time.time()
+        identity = process_identity(pid)
+        if expected_identity is not None and identity != expected_identity:
+            return result
+        ticks = int(identity[1])
+        hz = os.sysconf('SC_CLK_TCK')
+        if not 0 <= ticks < 2**63 or not 1 <= hz <= 1000000:
+            return result
+        boot_raw = bounded_bytes(PROC / 'stat', 1048576)
+        boots = re.findall(rb'^btime ([0-9]{1,12})$', boot_raw, re.MULTILINE)
+        uptime_raw = bounded_bytes(PROC / 'uptime', 128)
+        if len(boots) != 1 or not re.fullmatch(rb'[0-9]{1,12}\.[0-9]{1,3} [0-9]{1,15}\.[0-9]{1,3}\n?', uptime_raw):
+            return result
+        boot = int(boots[0])
+        uptime = float(uptime_raw.split()[0])
+        elapsed = time.monotonic() - monotonic
+        clock_elapsed = time.time() - now
+        result['stableDuringRead'] = identity == process_identity(pid)
+        # /proc btime is whole seconds. Reject inconsistent clocks, slow reads,
+        # impossible process ages and observations near either time boundary.
+        consistent = (0 <= elapsed <= 1 and abs(clock_elapsed - elapsed) <= 0.25
+                      and abs(now - uptime - boot) <= 2 and ticks / hz <= uptime)
+        result['clockConsistentDuringRead'] = consistent
+        if not result['stableDuringRead'] or not consistent:
+            return result
+        started = boot + ticks / hz
+        if started < FAILED_ATTEMPT_START - 2:
+            result['classification'] = 'before-attempt'
+        elif FAILED_ATTEMPT_START + 2 < started < FAILED_ATTEMPT_END - 2:
+            result['classification'] = 'during-attempt'
+        elif started > FAILED_ATTEMPT_END + 2:
+            result['classification'] = 'after-attempt'
+        return result
+    except Exception:
+        return result
+
+
+PROBE_PROPERTIES = {
+    'LoadState': frozenset(('loaded', 'not-found', 'error', 'bad-setting', 'masked', 'stub', 'merged')),
+    'ActiveState': frozenset(('active', 'reloading', 'inactive', 'failed', 'activating', 'deactivating', 'maintenance', 'refreshing')),
+    'SubState': frozenset(('dead', 'running', 'exited', 'failed', 'start-pre', 'start', 'start-post', 'stop', 'stop-watchdog', 'stop-sigterm', 'stop-sigkill', 'stop-post', 'final-watchdog', 'final-sigterm', 'final-sigkill', 'auto-restart', 'auto-restart-queued', 'cleaning', 'condition')),
+    'Result': frozenset(('success', 'resources', 'timeout', 'exit-code', 'signal', 'core-dump', 'watchdog', 'start-limit-hit', 'oom-kill', 'exec-condition', 'protocol', 'skip-condition')),
+}
+PROBE_FIELDS = (*PROBE_PROPERTIES, 'ExecMainCode', 'ExecMainStatus')
+
+
+def read_probe_properties():
+    # Fixed metadata request only. Bound bytes while capturing, not afterwards;
+    # discard stderr and terminate only our own metadata-reader on overflow.
+    args = ['systemctl', 'show',
+            'bubblewash-preserving-' + FAILED_CANDIDATE + '-probe.service',
+            '--property=' + ','.join(PROBE_FIELDS)]
+    with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
+        try:
+            deadline = time.monotonic() + 10
+            raw = bytearray()
+            with selectors.DefaultSelector() as selector:
+                selector.register(process.stdout, selectors.EVENT_READ)
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or not selector.select(remaining):
+                        raise ValueError('metadata timeout')
+                    block = os.read(process.stdout.fileno(), 8193 - len(raw))
+                    if not block:
+                        break
+                    raw.extend(block)
+                    if len(raw) > 8192:
+                        raise ValueError('metadata overflow')
+            if process.wait(timeout=max(0.01, deadline - time.monotonic())) != 0:
+                raise ValueError('metadata unavailable')
+            return raw.decode('utf8')
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+
+
+def exact_probe_metadata():
+    # --collect may have removed the unit. Missing metadata cannot establish
+    # whether the rehearsal ran; even available state is not a historical trace.
+    result = {'inspection': 'inconclusive', 'historicalOutcomeProven': False}
+    try:
+        raw = read_probe_properties()
+        if len(raw) > 8192:
+            return result
+        values = {}
+        for line in raw.splitlines():
+            key, separator, value = line.partition('=')
+            if not separator or key not in PROBE_FIELDS or key in values:
+                return result
+            values[key] = value
+        if values.get('LoadState') == 'not-found':
+            return {**result, 'unitMissingOrCollected': True}
+        if set(values) != set(PROBE_FIELDS):
+            return result
+        for key, allowed in PROBE_PROPERTIES.items():
+            if values[key] not in allowed:
+                return result
+        for key, maximum in (('ExecMainCode', 6), ('ExecMainStatus', 255)):
+            if not re.fullmatch(r'[0-9]{1,3}', values[key]) or int(values[key]) > maximum:
+                return result
+            values[key] = int(values[key])
+        return {**result, 'inspection': 'available', 'unitMissingOrCollected': False,
+                'properties': values}
+    except Exception:
+        return result
+
+
 def release_login_inspection(env):
     result = {'readOnly': True, 'configuredFlags': operational_flags(env),
               'sourceToBuildProven': False, 'bookingPolicySemanticsProven': False,
@@ -362,6 +482,9 @@ def release_login_inspection(env):
                 'listenerFlags': operational_flags(effective),
                 'listenerFlagsMatchConfiguration': all(effective.get(k) == env.get(k) for k in (*LOGIN_FLAGS, 'NODE_ENV')),
                 'listenerStableDuringRead': listener_before == process_identity(listener)})
+        result['runtime']['mainStartRelativeToFailedAttempt'] = process_start_report(pid, before)
+        if len(listener_pids) == 1:
+            result['runtime']['listenerStartRelativeToFailedAttempt'] = process_start_report(listener, listener_before)
         result['runtime']['mainStableDuringRead'] = before == process_identity(pid)
         result['currentTargetStableDuringRead'] = CURRENT.resolve(strict=True) == target
     except Exception:
@@ -544,6 +667,7 @@ def collect(owner_email="", expected_live_sha=""):
         return {**result, 'environmentInspectionSupported': False}
     if not owner_email:
         result['retainedCandidateInspection'] = retained_candidate_report()
+        result['failedCandidateProbeMetadata'] = exact_probe_metadata()
     result['environmentInspectionSupported'] = True
     result['configuration'] = configuration(env)
     try:
