@@ -1,10 +1,12 @@
 name: Read-only Release Preflight
 on:
   push:
-    branches: [ops/bubblewash-readonly-inventory-20261020]
+    branches: [main]
     paths:
       - .github/workflows/release-preflight.yml
       - scripts/release-preflight.py
+      - .github/backup/check_store.py
+      - .github/backup/backup_release.py
   workflow_dispatch:
 permissions:
   contents: read
@@ -13,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   preflight:
-    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/ops/bubblewash-readonly-inventory-20261020'
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
     environment: backup-storage
     runs-on: ubuntu-latest
     timeout-minutes: 10
