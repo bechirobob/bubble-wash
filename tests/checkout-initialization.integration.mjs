@@ -63,6 +63,15 @@ try {
   assert.equal(latest(id).paymentStatus, "Checkout initialization failed");
   handler = success; assert.equal((await POST(request(id))).status, 200);
 
+  for (const status of [401, 403]) {
+    id = booking();
+    handler = () => json({ status: false, message: "API authentication rejected" }, status);
+    assert.equal((await POST(request(id))).status, 502); noLock(id);
+    assert.equal(latest(id).paymentStatus, "Checkout initialization failed");
+    handler = success;
+    assert.equal((await POST(request(id))).status, 200, "definitive auth rejection can retry after configuration correction");
+  }
+
   id = booking();
   handler = () => { throw new Error("Synthetic timeout"); };
   assert.equal((await POST(request(id))).status, 502); noLock(id);

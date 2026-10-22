@@ -8,13 +8,14 @@ from pathlib import Path
 import posixpath
 import pwd
 import re
+from urllib.parse import quote
 import sqlite3
 import subprocess
 
 HOME = Path('/home/ubuntu')
 CURRENT = HOME / 'bubblewash-pilot'
 ENV_FILE = HOME / '.config/bubblewash/env'
-TABLES = frozenset('payment_initialization_locks customer_recovery delivery_proofs driver_live_locations workflow_action_claims payment_verifications notification_outbox privacy_requests early_access_signups rate_limits submissions vendor_availability driver_availability vendor_declines assignment_capacity_reservations order_route_fees booking_requests order_holds order_invoices account_service_fees billing_entries staff_credential_overrides admin_mfa_settings admin_mfa_recovery_codes admin_recovery_tokens mfa_replay_guard production_resets production_roster_resets staff_accounts'.split())
+TABLES = frozenset('payment_initialization_locks customer_recovery delivery_proofs driver_live_locations workflow_action_claims payment_verifications notification_outbox privacy_requests early_access_signups rate_limits submissions vendor_availability driver_availability vendor_declines assignment_capacity_reservations order_route_fees booking_requests order_holds order_invoices account_service_fees billing_entries staff_credential_overrides admin_mfa_settings admin_mfa_recovery_codes admin_recovery_tokens mfa_replay_guard production_resets production_roster_resets staff_accounts staff_owner_capabilities'.split())
 
 def bounded_text(path):
     with Path(path).open('rb') as handle:
@@ -115,6 +116,73 @@ def database_report(database_path):
         return report
     finally:
         connection.close()
+
+def owner_database_report(database_path, email, env):
+    target = Path(database_path)
+    if not target.is_absolute() or target.is_symlink() or not target.is_file():
+        return {'inspected': False, 'unsupportedPath': True}
+    # Read committed WAL state correctly. Never immutable=1, app imports, or DDL.
+    # SQLite may maintain -shm bookkeeping; no account/database data is written.
+    connection = sqlite3.connect('file:' + quote(str(target), safe='/') + '?mode=ro', uri=True, timeout=5)
+    try:
+        connection.execute('PRAGMA query_only = ON')
+        connection.execute('PRAGMA trusted_schema = OFF')
+        connection.execute('PRAGMA temp_store = MEMORY')
+        connection.execute('BEGIN')
+        schema = connection.execute("SELECT type,name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").fetchall()
+        tables = [name for kind, name in schema if kind == 'table']
+        if any(name not in TABLES for name in tables) or any(kind in ('view', 'trigger') for kind, _ in schema):
+            return {'inspected': False, 'unsupportedSchema': True}
+        return {**owner_collision_report(connection, tables, email, env), 'walAwareReadTransaction': True,
+                'sqliteSharedMemoryBookkeepingPossible': True, 'accountDataWritten': False}
+    finally:
+        connection.close()
+
+
+def owner_collision_report(connection, tables, email, env):
+    if not {'staff_accounts', 'staff_credential_overrides', 'submissions'}.issubset(tables):
+        return {'inspected': False, 'requiredSchemaMissing': True}
+    types = []
+    if any(env.get('BUBBLEWASH_' + role + '_EMAIL', '').strip().lower() == email for role in ('ADMIN', 'VENDOR', 'DRIVER', 'SUPPORT')):
+        types.append('configured')
+    if connection.execute('SELECT 1 FROM staff_credential_overrides WHERE lower(trim(login)) = ?', (email,)).fetchone():
+        types.append('master')
+    account = connection.execute('SELECT role, status FROM staff_accounts WHERE lower(trim(email)) = ?', (email,)).fetchone()
+    if account:
+        types.append('managed')
+    roster = connection.execute("SELECT 1 FROM submissions WHERE json_extract(data, '$.submissionType') IN ('staff-onboarding', 'vendor-application', 'driver-onboarding') AND lower(trim(json_extract(data, '$.email'))) = ? LIMIT 1", (email,)).fetchone()
+    if roster:
+        types.append('roster')
+    return {'inspected': True, 'duplicatePresent': bool(types), 'duplicateTypes': types,
+            'managedRole': account[0] if account and account[0] in ('admin', 'vendor', 'driver', 'support') else 'unknown' if account else None,
+            'managedStatus': account[1] if account and account[1] in ('active', 'invited', 'suspended') else 'unknown' if account else None}
+
+
+def owner_delivery_configuration(env):
+    sender = env.get('BUBBLEWASH_EMAIL_FROM', '').strip()
+    # Never emit arbitrary environment values. Identify only the known public
+    # sender; another sender must be reviewed privately before any delivery.
+    sender_category = 'updates@bubblewash.co' if sender in ('updates@bubblewash.co', 'Bubble Wash <updates@bubblewash.co>') else 'other-official-domain' if re.fullmatch(r'(?:[^<>\r\n]+<[^<>@\s]+@bubblewash\.co>|[^<>@\s]+@bubblewash\.co)', sender) else 'missing-or-invalid'
+    raw = env.get('BUBBLEWASH_MFA_ENCRYPTION_KEY', '').strip()
+    try:
+        key = base64.b64decode(raw + '=' * (-len(raw) % 4), validate=True)
+        mfa_key_ready = len(key) == 32 and base64.b64encode(key).decode().rstrip('=') == raw.rstrip('=')
+    except (ValueError, TypeError):
+        mfa_key_ready = False
+    return {'resendConfigured': bool(env.get('RESEND_API_KEY')), 'configuredSenderCategory': sender_category,
+            'mfaRequired': env.get('BUBBLEWASH_ADMIN_MFA_REQUIRED') == 'true',
+            'personalMfaKeyReady': mfa_key_ready, 'providerCredentialValidated': False, 'emailSent': False}
+
+
+def release_pin_matches(expected):
+    if not re.fullmatch('[0-9a-f]{40}', expected):
+        return False
+    try:
+        marker = parse_env(bounded_text(HOME / 'bubblewash-runtime/current-release'))
+        return marker.get('sha') == expected and Path(marker.get('path', '/nonexistent')).resolve(strict=True) == CURRENT.resolve(strict=True)
+    except Exception:
+        return False
+
 
 def command(args, env=None):
     return subprocess.run(args, env=env, check=True, text=True, capture_output=True, timeout=10).stdout
@@ -277,9 +345,13 @@ def release_login_inspection(env):
     return result
 
 
-def collect():
+def collect(owner_email="", expected_live_sha=""):
     result = {'readOnlyIntent': True, 'resetExecuted': False, 'backupCreated': False,
               'limits': {'interactiveOwnerLoginProven': False, 'interactiveMfaProven': False, 'allWritersIdentified': False, 'ingressMaintenanceProven': False, 'privateDestinationWriteAccessProven': False, 'effectiveRuntimeEnvironmentProven': False}}
+    if owner_email:
+        owner_email = owner_email.strip().lower()
+        if len(owner_email) > 160 or not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', owner_email) or not release_pin_matches(expected_live_sha):
+            return {**result, 'ownerInspection': {'completed': False, 'releasePinOrPrivateInputInvalid': True}}
     try:
         env = parse_env(bounded_text(ENV_FILE))
     except Exception:
@@ -301,6 +373,15 @@ def collect():
         result['database'] = database_report(env.get('BUBBLEWASH_DATABASE_PATH', ''))
     except Exception:
         result['database'] = {'inspected': False, 'inspectionFailed': True}
+    if owner_email:
+        try:
+            owner = owner_database_report(env.get('BUBBLEWASH_DATABASE_PATH', ''), owner_email, env)
+        except Exception:
+            owner = {'inspected': False, 'inspectionFailed': True}
+        still_pinned = release_pin_matches(expected_live_sha)
+        result['ownerInspection'] = {**owner, **owner_delivery_configuration(env),
+            'completed': owner.get('inspected') is True and still_pinned,
+            'releasePinStillMatches': still_pinned, 'accountCreated': False}
     result['backup'] = backup_report(env.get('BUBBLEWASH_BACKUP_STATUS_PATH', ''))
     process_count = 0
     for process in Path('/proc').glob('[0-9]*/comm'):
