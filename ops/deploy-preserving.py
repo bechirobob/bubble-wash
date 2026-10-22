@@ -223,7 +223,7 @@ def activate(current, candidate, service, validate):
 # Exact source/dependency transition, not an inference from a partial SQL grep.
 # Review evidence identifies all changed writers and their retained-code readers.
 LIVE_SOURCE_SHA256 = {'src': '23387dd00e0c0a97da2f0f125d853e6b4a289009b758760377a49409fca0ac56', 'package.json': 'd33a04aae78f35b296c6f32ce3523136f2144d42694934113eff42fec01a1c52', 'package-lock.json': '5a3190f9d986628f05a8534ddb462b706bca0bb4b3caadc6e49b6328c84b056f', 'next.config.mjs': '55c7cca7ffcd8464dd2432dffef6ef2b7e4ebc3ee7d6dc508ba72855626cc08e', 'tsconfig.json': '2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c'}
-CANDIDATE_SOURCE_SHA256 = {'src': '8c13df12e056df03155bbaff504653b1d771c65eefcd7eaf6910cea4d0b8368d', 'package.json': 'fcebaa669a21c414d74cc921b4603d67cea338a8f11ef82bc18d60301c100b23', 'package-lock.json': '16bf7696ddfa1a4201c3fceb068f466e21287739d23cb7bb78ae80f9d1fb8ca8', 'next.config.mjs': '55c7cca7ffcd8464dd2432dffef6ef2b7e4ebc3ee7d6dc508ba72855626cc08e', 'tsconfig.json': '2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c'}
+CANDIDATE_SOURCE_SHA256 = {'src': '8c13df12e056df03155bbaff504653b1d771c65eefcd7eaf6910cea4d0b8368d', 'package.json': '48f1c8740915afbf91091bdedf6ec65de340b2f6fa70b96338c9276e3cbb1c6e', 'package-lock.json': '65ac93becf9f1e4b44af8633e120a547c33a438af5cb6d83f2f8fe1dc77a9e38', 'next.config.mjs': '55c7cca7ffcd8464dd2432dffef6ef2b7e4ebc3ee7d6dc508ba72855626cc08e', 'tsconfig.json': '2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c'}
 
 
 def source_manifest(release):
