@@ -585,6 +585,334 @@ class ExactCi(unittest.TestCase):
             self.assertIn(guard, source)
 
 
+
+
+
+class RehearsalOnly(unittest.TestCase):
+    """Synthetic host only: no services, credentials, network, or external writes."""
+    def setUp(self):
+        from types import SimpleNamespace
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.runtime = self.root / 'bubblewash-runtime'; self.runtime.mkdir()
+        self.releases = self.root / 'bubblewash-releases'; self.releases.mkdir()
+        self.old_sha = 'a' * 40; self.sha = 'b' * 40
+        self.old = self.releases / ('20261022T190000Z-' + self.old_sha[:12]); self.old.mkdir()
+        self.candidate = self.releases / ('20261022T200000Z-' + self.sha[:12]); self.candidate.mkdir()
+        for release in (self.old, self.candidate):
+            (release / '.next').mkdir(); (release / '.next/BUILD_ID').write_text('synthetic-build')
+            for name in ('src/lib/data-store.ts', 'src/lib/operational-store.ts',
+                         'src/lib/availability-store.ts', 'src/lib/staff-accounts.ts', 'src/app/api/health/route.ts'):
+                path = release / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text('identical synthetic source')
+        (self.candidate / '.release-sha').write_text(self.sha)
+        self.current = self.root / 'bubblewash-pilot'; self.current.symlink_to(self.old)
+        (self.runtime / 'current-release').write_text(f'sha={self.old_sha}\npath={self.old}\n')
+        self.db = self.root / 'live.sqlite'
+        self.live = sqlite3.connect(self.db); self.addCleanup(self.live.close)
+        self.live.execute('PRAGMA journal_mode=WAL')
+        self.live.execute('CREATE TABLE synthetic(id INTEGER PRIMARY KEY, value TEXT)')
+        self.live.execute("INSERT INTO synthetic VALUES(1, 'DO_NOT_PRINT_DATABASE_CONTENT')"); self.live.commit()
+        self.before = deploy.database_fingerprint(self.db)
+        self.status = self.root / 'status.json'
+        self.archive = self.root / 'bubblewash-2026-10-22T09:00:00.sqlite.enc'; self.archive.write_bytes(b'synthetic encrypted archive')
+        sha256 = deploy.digest(self.archive)
+        stamp = deploy.dt.datetime.now(deploy.dt.timezone.utc).isoformat()
+        status = dict(ok=True, filename=self.archive.name, sha256=sha256, createdAt=stamp,
+                      restoreVerifiedAt=stamp, offsiteStoredAt=stamp)
+        self.status.write_text(json.dumps(status))
+        receipt = dict(schema='becore-encrypted-backup-release/v2', repository='bechirobob/bubble-wash',
+                       storageRepository='bechirobob/becore-backups', storage='private-github-release',
+                       storageSha='c' * 40, storageRepositoryId=12, runId='99', encrypted=True,
+                       restoreTested=True, downloadVerified=True, automaticExpiry=False, retentionDays=None,
+                       filename=self.archive.name, sha256=sha256, sourceSha=self.old_sha,
+                       size=self.archive.stat().st_size, verifiedAt=stamp)
+        self.receipt = self.root / 'receipt.json'; self.receipt.write_text(json.dumps(receipt))
+        self.env = self.root / 'env'
+        self.env.write_text(f'NODE_ENV=production\nBUBBLEWASH_DISABLE_DEMO_LOGIN=true\n'
+                            f'BUBBLEWASH_STAFF_AUTH_DISABLED=false\nBUBBLEWASH_BOOKINGS_DISABLED=true\n'
+                            f'BUBBLEWASH_DATABASE_PATH={self.db}\nBUBBLEWASH_BACKUP_STATUS_PATH={self.status}\n'
+                            f'BUBBLEWASH_BACKUP_OFFSITE_DIR={self.root}\nSECRET=DO_NOT_PRINT_CONFIGURATION\n')
+        self.args = ['deploy-preserving.py', '--rehearsal-only', '--run-id', '123', '--run-attempt', '1',
+                     '--candidate', str(self.candidate), '--sha', self.sha, '--expected-live', self.old_sha,
+                     '--backup-sha256', sha256, '--receipt-run', '99', '--store-sha', 'c' * 40, '--store-id', '12']
+        self.owner = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+        self.commands = []
+        self.routes = []
+        self.stages = []
+        self.snapshot = None
+        self.started = False
+        self.stopped = False
+        self.fail_stage = None
+        self.fail_error = ValueError('DO_NOT_PRINT_EXCEPTION')
+        self.bad_stop = False
+        self.launch_timeout = False
+        self.mutate_copy = False
+        self.change_env = False
+        self.original_marker = (self.runtime / 'current-release').read_bytes()
+
+    def stage(self, report, stage):
+        if report is not None:
+            report.stage = stage
+        self.stages.append(stage)
+        if stage == self.fail_stage:
+            raise self.fail_error
+
+    def command(self, args, timeout=30):
+        self.commands.append(args)
+        if args[0] == 'systemd-run':
+            self.assertNotIn('--wait', args, 'no build allowed')
+            self.assertIn('--property=PrivateNetwork=true', args)
+            self.assertIn('--property=KillMode=control-group', args)
+            self.assertIn('--property=ProtectHome=tmpfs', args)
+            self.assertIn('--property=ProtectSystem=strict', args)
+            self.assertIn('--property=StandardOutput=null', args)
+            self.assertIn('--property=StandardError=null', args)
+            self.assertIn('--property=BindReadOnlyPaths=' + str(self.candidate) + ' ' + str(self.status), args)
+            self.snapshot = Path(next(arg.split('=', 1)[1] for arg in args if arg.startswith('BUBBLEWASH_DATABASE_PATH=')))
+            self.assertNotEqual(self.snapshot, self.db)
+            with sqlite3.connect(self.snapshot) as copied:
+                self.assertEqual(copied.execute('SELECT count(*) FROM synthetic').fetchone(), (1,))
+                if self.mutate_copy:
+                    copied.execute('DELETE FROM synthetic')
+            if self.launch_timeout:
+                raise subprocess.TimeoutExpired('DO_NOT_PRINT_COMMAND', 30, output=b'DO_NOT_PRINT_OUTPUT')
+            self.started = True
+            return ''
+        self.assertEqual(args, ['systemctl', 'stop', 'bubblewash-rehearsal-123-1-probe.service'])
+        if self.bad_stop:
+            raise subprocess.CalledProcessError(1, args, output=b'DO_NOT_PRINT_COMMAND_OUTPUT')
+        self.stopped = True
+        return ''
+
+    def state(self, unit):
+        self.assertEqual(unit, 'bubblewash-rehearsal-123-1-probe.service')
+        return ({'LoadState': 'loaded', 'ActiveState': 'active', 'MainPID': '321'} if self.started and not self.stopped else
+                {'LoadState': 'not-found', 'ActiveState': 'inactive', 'MainPID': '0'})
+
+    def network(self, args, pid=None, timeout=30):
+        self.assertEqual(pid, 321)
+        self.assertEqual(args[0], 'curl')
+        self.routes.append(args[-1])
+        if self.change_env:
+            self.env.write_text(self.env.read_text() + 'CHANGED=true\n'); self.change_env = False
+        return ''
+
+    def run_rehearsal(self):
+        import contextlib
+        import io
+        report = deploy.RehearsalReport()
+        output = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            for name, value in [('HOME', self.root), ('CURRENT', self.current), ('ENV', self.env),
+                                ('RUNTIME', self.runtime), ('RECEIPT', self.receipt)]:
+                stack.enter_context(patch.object(deploy, name, value))
+            stack.enter_context(patch.object(sys, 'argv', self.args))
+            stack.enter_context(patch.object(deploy.os, 'geteuid', return_value=0))
+            stack.enter_context(patch.object(deploy.pwd, 'getpwnam', return_value=self.owner))
+            stack.enter_context(patch.object(deploy, 'verify_source_transition'))
+            stack.enter_context(patch.object(deploy, 'check_runtime'))
+            stack.enter_context(patch.object(deploy, 'health'))
+            stack.enter_context(patch.object(deploy, 'verify_private_network', return_value=321))
+            stack.enter_context(patch.object(deploy, 'command', side_effect=self.command))
+            stack.enter_context(patch.object(deploy, 'network_command', side_effect=self.network))
+            stack.enter_context(patch.object(deploy, 'probe_state', side_effect=self.state))
+            stack.enter_context(patch.object(deploy, 'rehearsal_stage', side_effect=self.stage))
+            stack.enter_context(patch.object(deploy.signal, 'setitimer'))
+            for name in ('activate', 'ctl', 'public_health'):
+                stack.enter_context(patch.object(deploy, name, side_effect=AssertionError('forbidden production action')))
+            stack.enter_context(patch.object(deploy.os, 'replace', side_effect=AssertionError('forbidden marker/pointer write')))
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                try:
+                    deploy.main(lambda: None, report)
+                except BaseException as error:
+                    report.fail(error)
+                report.emit()
+        text = output.getvalue()
+        for sentinel in ('DO_NOT_PRINT', str(self.db), str(self.env), str(self.root)):
+            self.assertNotIn(sentinel, text)
+        self.assertEqual(deploy.database_fingerprint(self.db), self.before)
+        self.assertEqual(self.current.resolve(), self.old)
+        self.assertEqual((self.runtime / 'current-release').read_bytes(), self.original_marker)
+        return json.loads(text)
+
+    def test_success_has_no_activation_and_removes_only_disposable_copy(self):
+        sibling = self.runtime / 'unrelated'; sibling.mkdir(); (sibling / 'keep').write_text('keep')
+        result = self.run_rehearsal()
+        self.assertTrue(result['ok']); self.assertTrue(result['cleanup']); self.assertFalse(result['activationAttempted'])
+        self.assertTrue(self.stopped); self.assertFalse(self.snapshot.parent.exists())
+        self.assertTrue((sibling / 'keep').is_file())
+        self.assertEqual(len(self.routes), 7)
+        self.assertEqual(self.routes[-1], 'http://127.0.0.1:3001/api/ready')
+        self.assertEqual(len([cmd for cmd in self.commands if cmd[0] == 'systemd-run']), 1)
+
+    def test_each_boundary_fails_without_activation_or_sensitive_output(self):
+        stages = ('BUILD_ARTIFACT', 'PROBE_ABSENT', 'SNAPSHOT', 'FINGERPRINT_BEFORE', 'PROBE_START',
+                  'NAMESPACE_BEFORE', 'HEALTH', 'RUNTIME_BEFORE', 'ROUTE_HOME', 'ROUTE_SERVICES',
+                  'ROUTE_BOOK', 'ROUTE_TRACK', 'ROUTE_MANAGE', 'ROUTE_EARLY_ACCESS', 'ROUTE_READY',
+                  'RUNTIME_AFTER', 'NAMESPACE_AFTER', 'PROBE_STOP', 'FINGERPRINT_AFTER', 'CLEANUP', 'UNCHANGED')
+        for stage in stages:
+            with self.subTest(stage=stage):
+                self.started = self.stopped = False; self.fail_stage = stage
+                result = self.run_rehearsal()
+                self.assertFalse(result['ok']); self.assertEqual(result['stage'], stage)
+                self.assertFalse(result['activationAttempted'])
+                if stage not in ('PROBE_STOP', 'CLEANUP'):
+                    self.assertTrue(result['cleanup'])
+
+    def test_unknown_probe_stop_retains_private_copy_and_primary_error(self):
+        self.fail_stage = 'ROUTE_READY'; self.bad_stop = True
+        result = self.run_rehearsal()
+        self.assertEqual(result['stage'], 'ROUTE_READY'); self.assertFalse(result['cleanup'])
+        self.assertTrue(self.snapshot.is_file())
+        self.assertEqual(self.snapshot.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_uncertain_launch_failed_stop_and_absent_unit_retain_snapshot(self):
+        self.launch_timeout = self.bad_stop = True
+        result = self.run_rehearsal()
+        self.assertEqual(result['stage'], 'PROBE_START'); self.assertEqual(result['error'], 'TIMEOUT')
+        self.assertFalse(result['cleanup']); self.assertTrue(self.snapshot.is_file())
+        self.assertFalse(self.started); self.assertFalse(self.stopped)
+
+    def test_timeout_and_cancellation_cleanup_and_codes(self):
+        for error, expected in [(TimeoutError('DO_NOT_PRINT_TIMEOUT'), 'TIMEOUT'),
+                                (KeyboardInterrupt('DO_NOT_PRINT_INTERRUPT'), 'INTERRUPTED'),
+                                (deploy.RehearsalDeadline(), 'TIMEOUT'),
+                                (deploy.RehearsalInterrupted(), 'INTERRUPTED')]:
+            with self.subTest(expected=expected):
+                self.started = self.stopped = False; self.fail_stage = 'HEALTH'; self.fail_error = error
+                result = self.run_rehearsal()
+                self.assertEqual(result['error'], expected); self.assertTrue(result['cleanup']); self.assertTrue(self.stopped)
+
+    def test_snapshot_change_is_detected_without_source_change(self):
+        self.mutate_copy = True
+        result = self.run_rehearsal()
+        self.assertFalse(result['ok']); self.assertEqual(result['stage'], 'FINGERPRINT_AFTER')
+        self.assertEqual(result['error'], 'FINGERPRINT_MUTATION')
+        self.assertTrue(result['cleanup'])
+
+    def test_environment_drift_aborts_after_rehearsal_without_activation(self):
+        self.change_env = True
+        result = self.run_rehearsal()
+        self.assertFalse(result['ok']); self.assertEqual(result['stage'], 'UNCHANGED'); self.assertTrue(result['cleanup'])
+
+    def test_wrong_retained_sha_rejected_before_any_probe_or_snapshot(self):
+        (self.candidate / '.release-sha').write_text('f' * 40)
+        result = self.run_rehearsal()
+        self.assertFalse(result['ok']); self.assertEqual(result['stage'], 'PREFLIGHT')
+        self.assertFalse(self.commands); self.assertFalse(list(self.runtime.glob('release-rehearsal-*')))
+
+    def test_wrong_backup_pin_rejected_before_any_probe_or_snapshot(self):
+        self.args[self.args.index('--backup-sha256') + 1] = 'f' * 64
+        result = self.run_rehearsal()
+        self.assertFalse(result['ok']); self.assertEqual(result['stage'], 'PREFLIGHT'); self.assertFalse(self.commands)
+
+    def test_invalid_arguments_never_print_argument_or_usage(self):
+        self.args += ['--DO_NOT_PRINT_UNKNOWN', 'DO_NOT_PRINT_ARGUMENT']
+        result = self.run_rehearsal()
+        self.assertFalse(result['ok']); self.assertEqual(result['stage'], 'PREFLIGHT'); self.assertFalse(self.commands)
+
+
+class RehearsalCleanup(unittest.TestCase):
+    def test_inode_swap_symlink_and_owner_changes_are_rejected_without_deletion(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            original = root / 'release-rehearsal-original'; original.mkdir(mode=0o700)
+            (original / 'original').write_text('preserve')
+            st = original.stat(); identity = (st.st_dev, st.st_ino)
+            owner = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+            moved = root / 'moved'; original.rename(moved)
+            original.mkdir(mode=0o700); (original / 'replacement').write_text('preserve')
+            with patch.object(deploy, 'RUNTIME', root):
+                with self.assertRaises(ValueError): deploy.remove_rehearsal_directory(original, identity, owner)
+                self.assertTrue((original / 'replacement').is_file()); self.assertTrue((moved / 'original').is_file())
+                replacement = root / 'replacement'; original.rename(replacement); original.symlink_to(moved)
+                with self.assertRaises(ValueError): deploy.remove_rehearsal_directory(original, identity, owner)
+                self.assertTrue((moved / 'original').is_file())
+                original.unlink(); moved.rename(original)
+                wrong_owner = SimpleNamespace(pw_uid=os.getuid() + 1, pw_gid=os.getgid())
+                with self.assertRaises(ValueError): deploy.remove_rehearsal_directory(original, identity, wrong_owner)
+                self.assertTrue((original / 'original').is_file())
+
+    def test_unexpected_nested_entries_are_retained_without_deletion(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); outside = root / 'outside'; outside.mkdir(); (outside / 'keep').write_text('keep')
+            disposable = root / 'release-rehearsal-test'; disposable.mkdir(mode=0o700)
+            (disposable / 'nested').mkdir(); (disposable / 'nested/link').symlink_to(outside)
+            (disposable / 'file-link').symlink_to(outside / 'keep')
+            st = disposable.stat(); owner = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+            with patch.object(deploy, 'RUNTIME', root):
+                with self.assertRaises(ValueError):
+                    deploy.remove_rehearsal_directory(disposable, (st.st_dev, st.st_ino), owner)
+            self.assertTrue(disposable.exists()); self.assertEqual((outside / 'keep').read_text(), 'keep')
+
+    def test_collected_unit_requires_explicit_inactive_zero_pid_properties(self):
+        for code, output, accepted in [(0, b'LoadState=loaded\nActiveState=inactive\nMainPID=0\n', True),
+                                       (1, b'LoadState=not-found\nActiveState=inactive\nMainPID=0\n', True),
+                                       (1, b'', False), (2, b'LoadState=not-found\nActiveState=inactive\nMainPID=0\n', False)]:
+            with self.subTest(code=code, output=output):
+                result = subprocess.CompletedProcess([], code, stdout=output, stderr=b'DO_NOT_PRINT_STDERR')
+                with patch.object(deploy.subprocess, 'run', return_value=result):
+                    if accepted: self.assertTrue(deploy.probe_stopped(deploy.probe_state('synthetic.service')))
+                    else:
+                        with self.assertRaises(ValueError): deploy.probe_state('synthetic.service')
+
+
+class RehearsalErrorCodes(unittest.TestCase):
+    def test_normal_deployment_interruption_preserves_exception_derived_handler(self):
+        with self.assertRaises(RuntimeError) as caught:
+            deploy.release_interrupted(None)
+        self.assertIsInstance(caught.exception, Exception)
+        with self.assertRaises(deploy.RehearsalInterrupted):
+            deploy.release_interrupted(deploy.RehearsalReport())
+
+    def test_allowlisted_guards_are_fixed_and_unknown_text_is_not_emitted(self):
+        import contextlib
+        import io
+        for message, code in deploy.REHEARSAL_GUARD_CODES.items():
+            with self.subTest(code=code):
+                report = deploy.RehearsalReport(); report.fail(ValueError(message))
+                self.assertEqual(report.failure['error'], code)
+                self.assertRegex(code, r'^[A-Z_]+$')
+        output = io.StringIO(); report = deploy.RehearsalReport()
+        report.fail(ValueError('DO_NOT_PRINT_SECRET_DB_ROW_OR_PATH'))
+        with contextlib.redirect_stdout(output): report.emit()
+        self.assertEqual(json.loads(output.getvalue())['error'], 'CHECK_FAILED')
+        self.assertNotIn('DO_NOT_PRINT', output.getvalue())
+
+    def test_deadline_and_cancellation_escape_health_retry(self):
+        for error in (deploy.RehearsalDeadline(), deploy.RehearsalInterrupted()):
+            with self.subTest(error=type(error).__name__):
+                with patch.object(deploy, 'network_command', side_effect=error) as command, patch.object(deploy.time, 'sleep') as sleep:
+                    with self.assertRaises(type(error)): deploy.health(3001, 321)
+                    self.assertEqual(command.call_count, 1); sleep.assert_not_called()
+
+
+class RehearsalWorkflow(unittest.TestCase):
+    def test_separate_runner_candidate_pins_and_no_stage_build_or_deploy_option(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / '.github/workflows/production-rehearsal.yml').read_text()
+        self.assertIn('ref: ${{ github.sha }}', workflow)
+        self.assertIn('[[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]', workflow)
+        self.assertIn('TARGET_SHA="$GITHUB_SHA" python3 ops/check-release-ci.py', workflow)
+        self.assertEqual(workflow.count('python3 ops/check-release-ci.py'), 2)
+        self.assertIn('group: bubblewash-production', workflow)
+        self.assertIn('environment: backup-storage', workflow)
+        self.assertNotIn('schedule:', workflow); self.assertNotIn('push:', workflow)
+        for forbidden in ('git archive', 'tar -xf', 'npm ci', 'npm run build', 'upload-artifact', 'continue-on-error'):
+            self.assertNotIn(forbidden, workflow)
+        launch = next(line.strip() for line in workflow.splitlines() if 'python3 -I -B -' in line)
+        words = shlex.split(launch)
+        remote = shlex.split(words[3])
+        self.assertEqual(remote[:4], ['python3', '-I', '-B', '-'])
+        self.assertEqual(remote.count('--rehearsal-only'), 1)
+        self.assertIn('/home/ubuntu/bubblewash-releases/$RETAINED_RELEASE', remote)
+        production = (root / '.github/workflows/production-deploy.yml').read_text()
+        self.assertIn('[[ "$TARGET_SHA" == "$GITHUB_SHA" ]]', production)
+        self.assertNotIn('--rehearsal-only', production)
+
+
 if __name__ == '__main__':
     unittest.main()
-
