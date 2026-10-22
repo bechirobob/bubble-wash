@@ -24,8 +24,8 @@ export function staffAccessDisabled(env: NodeJS.ProcessEnv | Record<string, stri
   return env.BUBBLEWASH_STAFF_AUTH_DISABLED === "true";
 }
 
-// Production workers must be managed accounts. Deleting one can never revive an
-// environment login. Resolve on each request so suspension revokes sessions.
+// Preserve configured legacy staff alongside managed accounts. Resolve managed
+// status on each request so invited/suspended rows shadow fallback and revoke sessions.
 export const staffUsers = environmentStaffUsers(process.env);
 
 export function currentStaffUsers(): StaffUser[] {

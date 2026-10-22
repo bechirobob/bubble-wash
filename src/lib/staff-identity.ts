@@ -19,7 +19,8 @@ type AdminOverride = { login: string; passwordHash: string; credentialVersion: s
 export function environmentStaffUsers(env: Environment): StaffUser[] {
   const production = env.NODE_ENV === "production";
   const demo = !production && env.BUBBLEWASH_DISABLE_DEMO_LOGIN !== "true";
-  const roles: StaffRole[] = production ? ["admin"] : ["admin", "vendor", "driver", "support"];
+  // Preserve existing configured staff identities; managed rows still shadow them.
+  const roles: StaffRole[] = ["admin", "vendor", "driver", "support"];
   return roles.flatMap((role) => {
     const prefix = `BUBBLEWASH_${role.toUpperCase()}`;
     const email = (env[`${prefix}_EMAIL`] ?? (demo ? `${role}@bubblewash.local` : "")).trim();

@@ -4,14 +4,12 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import { createPasswordHash } from "../src/lib/passwords.ts";
 import { totpCode } from "../src/lib/totp.ts";
 
 const cwd = mkdtempSync(path.join(tmpdir(), "bubblewash-auth-reset-synthetic-"));
 for (const key of Object.keys(process.env)) if (key.startsWith("BUBBLEWASH_")) delete process.env[key];
 Object.assign(process.env, { NODE_ENV: "production", BUBBLEWASH_DATABASE_PATH: path.join(cwd, "synthetic.sqlite"), BUBBLEWASH_DATABASE_DRIVER: "sqlite", BUBBLEWASH_DISABLE_DEMO_LOGIN: "true",
-  BUBBLEWASH_SESSION_SECRET: randomBytes(32).toString("hex"), BUBBLEWASH_MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64"), BUBBLEWASH_ADMIN_MFA_REQUIRED: "true", BUBBLEWASH_CONFIRM_FRESH_RESET: "DELETE_ALL_NONADMIN_OPERATIONAL_DATA_WITHOUT_NEW_BACKUP",
-  BUBBLEWASH_VENDOR_EMAIL: "worker@example.test", BUBBLEWASH_VENDOR_PASSWORD_HASH: createPasswordHash("Legacy synthetic password!"), BUBBLEWASH_VENDOR_ENTITY_ID: "synthetic-vendor" });
+  BUBBLEWASH_SESSION_SECRET: randomBytes(32).toString("hex"), BUBBLEWASH_MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64"), BUBBLEWASH_ADMIN_MFA_REQUIRED: "true", BUBBLEWASH_CONFIRM_FRESH_RESET: "DELETE_ALL_NONADMIN_OPERATIONAL_DATA_WITHOUT_NEW_BACKUP" });
 const { findStaffUser, encodeSession, decodeSession } = await import("../src/lib/auth.ts");
 const { getDatabase } = await import("../src/lib/data-store.ts");
 const { inviteStaffAccount, activateStaffAccount } = await import("../src/lib/staff-accounts.ts");
@@ -43,9 +41,5 @@ assert.equal(verifyAdminMfaCredential(owner.email, confirmed.recoveryCodes[0]), 
 assert.equal(verifyAdminMfaCredential(owner.email, confirmed.recoveryCodes[0]), false);
 assert.equal(decodeSession(workerSession), null);
 assert.equal(findStaffUser("worker@example.test", workerPassword), null);
-process.env.BUBBLEWASH_VENDOR_EMAIL = "worker@example.test";
-process.env.BUBBLEWASH_VENDOR_PASSWORD_HASH = createPasswordHash("Legacy synthetic password!");
-assert.equal(findStaffUser("worker@example.test", "Legacy synthetic password!"), null);
-assert.equal(decodeSession(workerSession), null);
 db.close();
-console.log(JSON.stringify({ ok: true, checks: 19, scope: "synthetic login, session revocation, enrolled MFA and recovery-code survival; no live reset" }));
+console.log(JSON.stringify({ ok: true, checks: 17, scope: "synthetic login, session revocation, enrolled MFA and recovery-code survival; no live reset" }));

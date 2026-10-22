@@ -27,12 +27,7 @@ for (const [role, , password] of credentials) {
 process.env.BUBBLEWASH_VENDOR_ENTITY_ID = "vendor-http-role-test";
 process.env.BUBBLEWASH_DRIVER_ENTITY_ID = "driver-http-role-test";
 
-const { inviteStaffAccount, activateStaffAccount } = await import("../src/lib/staff-accounts.ts");
-for (const [role, expectedRole, password] of credentials.filter(([role]) => role !== "ADMIN")) {
-  const token = inviteStaffAccount({ email: process.env[`BUBBLEWASH_${role}_EMAIL`], name: `Synthetic ${role}`, role: expectedRole, entityId: process.env[`BUBBLEWASH_${role}_ENTITY_ID`] || "" }, "test");
-  assert.equal(activateStaffAccount(token, password), true);
-}
-
+// Existing environment-backed accounts must authenticate without account migration.
 const { POST } = await import("../src/app/api/login/route.ts");
 
 // Replay the exact accepted value, even if these requests cross a TOTP step.

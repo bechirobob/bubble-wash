@@ -70,9 +70,9 @@ test("fresh reset deletes operations/nonadmins/customer recovery/payment locks a
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM admin_mfa_recovery_codes").get().n, 1);
   assert.equal(db.prepare("SELECT timestep FROM mfa_replay_guard").get().timestep, 123);
   assert.equal(inspectFreshReset(db, env, cwd).ownerAccessConfigured, true);
-  // Even a still-configured old worker environment cannot resurrect the account.
+  // Reset is not compatible with retained legacy worker credentials; fail closed.
   const legacy = { ...env, BUBBLEWASH_VENDOR_EMAIL: "worker@example.test", BUBBLEWASH_VENDOR_PASSWORD_HASH: hash, BUBBLEWASH_VENDOR_ENTITY_ID: "synthetic-roster" };
-  assert.equal(resolveStaffUsers(legacy, null, managed(db)).some((u) => u.role !== "admin"), false);
+  assert.throws(() => inspectFreshReset(db, legacy, cwd), /remove legacy worker credentials/);
 });
 
 test("managed admin readiness works with empty worker roster, and blocks missing effective owner", (t) => {

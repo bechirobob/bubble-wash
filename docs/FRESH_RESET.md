@@ -1,4 +1,4 @@
-# Fresh-start reset: prepared, not executed
+# Historical fresh-start reset: inactive, do not execute
 
 This separate procedure is for the explicitly confirmed permanent deletion of all current operational data without a new backup. It is **not** a deployment authorization or a replacement for the existing backup-gated production reset scripts. Historical backup archives are outside its scope and remain untouched.
 
@@ -8,11 +8,15 @@ Delete orders/customer submissions (including operational audit submissions), pa
 
 Preserve all managed admin rows, effective owner/admin credentials, credential overrides, MFA enrollment/recovery/replay state, admin recovery tokens, prior reset metadata, environment/service settings and infrastructure credentials. No backup archive, environment file, service configuration or credential is changed by the script. Unknown tables, views and triggers stop the operation for review. Absent required authentication tables also stop it.
 
-## Deployment/account-model prerequisite
+## Inactive account-model prerequisite
 
-The matching application release must be deployed and validated under separate authorization before the reset. Production vendor/driver/support authentication now requires an active managed account, with vendor/driver roster bindings; legacy environment worker logins and built-in demo identities are not production identities. Removing a managed account therefore cannot revive a legacy login or keep its existing session usable. If workers must remain active before reset, migrate/verify their individual managed accounts before this release.
-
-Production readiness checks effective owner/admin access and all existing infrastructure checks, but does not require a worker roster. Empty workers after reset are valid. This does not waive the backup-readiness check; an unrelated broken backup still blocks `/api/ready`.
+This historical reset procedure is not part of the current improvements release.
+The release preserves existing environment-backed and managed staff accounts and
+all operational records. Do not run this reset or remove legacy credentials.
+Managed invited/suspended rows must remain to prevent fallback authentication.
+Hard-deleting one while retaining a matching environment credential can restore
+that legacy identity. A future destructive reset requires a separately reviewed
+account-retirement plan; this document does not authorize it.
 
 ## Preconditions and controlled operation
 

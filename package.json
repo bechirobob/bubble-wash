@@ -26,8 +26,7 @@
     "db:export": "node scripts/export-portable-data.mjs",
     "maintenance:run": "node scripts/run-maintenance.mjs",
     "test:workflow": "node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/workflow-http.integration.mjs && node tests/public-availability.integration.mjs",
-    "test:browser": "playwright test",
-    "db:fresh-reset:inventory": "node --experimental-strip-types scripts/reset-fresh-start.mjs"
+    "test:browser": "playwright test"
   },
   "engines": {
     "node": ">=20.9.0"
