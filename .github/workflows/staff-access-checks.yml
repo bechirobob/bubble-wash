@@ -1,0 +1,31 @@
+name: Verify staff access restoration
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/restore-staff-access.yml
+      - .github/workflows/staff-access-checks.yml
+      - scripts/restore-staff-access.py
+      - tests/test_staff_restore.py
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/restore-staff-access.yml
+      - .github/workflows/staff-access-checks.yml
+      - scripts/restore-staff-access.py
+      - tests/test_staff_restore.py
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify isolated staff restoration guards
+        run: |
+          python3 -B -m unittest discover -s tests -p 'test_staff_restore.py' -v
+          python3 -m py_compile scripts/restore-staff-access.py
+          git diff --check
