@@ -325,7 +325,7 @@ OWNER_CANDIDATE_SOURCE_SHA256 = {
     'src/lib/order-workflow.ts': 'ef5614a8ea143c866b4a1e5b041c8a15a56a39e8aa5c8a2d5903a6df3d3d1735',
     'src/lib/staff-accounts.ts': '2a2b8ad36790308070ab0d0c9451bd959c5ed647900033e3b0153713b74a423c',
     'src/lib/staff-identity.ts': '73296d246fac48806cf332501e91f5ef4838e8ed399b1a9af6de0847d7500b48',
-    'tests/browser/personal-owner-mfa.spec.mjs': '9e0d072722e24219b1ae030c07c107021c81dbffcd443dab9b242f814f12be44',
+    'tests/browser/personal-owner-mfa.spec.mjs': '4519d88305bb919588633f6509a9e27d8dbadde9e9f33e45443bfdcf78a5b3f5',
     'tests/personal-owner-http.integration.mjs': '96cc42efe0bb5b52af398a0fa86680c4e02dbb66492a72aa40b7098458c248ec',
     'tests/personal-owner-mfa.integration.mjs': 'b28ff3bf06a714a76652a3f4247918180721930db9f1e9707ff7d6c4ad90349c',
     'tests/personal-owner.integration.mjs': '6523573d77bdfd8839810e589faa088ac69d658efa7eb0ec4a62e64a691910dd',

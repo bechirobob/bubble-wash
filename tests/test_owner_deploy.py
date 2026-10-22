@@ -54,7 +54,7 @@ class OwnerRoute(unittest.TestCase):
     def test_pins_cover_exact_reviewed_owner_mfa_correction(self):
         self.assertEqual(len(owner.OWNER_CANDIDATE_SOURCE_SHA256), 25)
         normalized = '\n'.join(f'{key} {value}' for key, value in sorted(owner.OWNER_CANDIDATE_SOURCE_SHA256.items()))
-        self.assertEqual(hashlib.sha256(normalized.encode()).hexdigest(), '54e963fcb82c19571db09dec27c4714cd42faefa3e498a7d6b486e7c8e4b7ed7')
+        self.assertEqual(hashlib.sha256(normalized.encode()).hexdigest(), 'cf8b8efe53b09bbea35e3d239d68fa5983750b09586adb84489d993b41ba76ab')
 
     def test_only_exact_reviewed_pair_accepted(self):
         with patch.multiple(owner, **self.pins):

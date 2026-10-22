@@ -15,7 +15,7 @@ test('personal MFA enrollment appears only after credential-verified response', 
   await page.getByLabel('Staff username or email').fill('synthetic-owner@example.invalid');
   await page.getByLabel('Password', { exact:true }).fill('wrong-password');
   await page.getByRole('button', { name:'Sign in', exact:true }).click();
-  await expect(page.getByRole('alert')).toContainText('Invalid Bubble Wash');
+  await expect(page.getByRole('alert').filter({ hasText: /^Invalid Bubble Wash staff credentials\.$/ })).toHaveText('Invalid Bubble Wash staff credentials.');
   await expect(page.getByRole('link', { name:'Set up admin authenticator' })).toHaveCount(0);
   await page.getByLabel('Password', { exact:true }).fill('synthetic-valid-password');
   await page.getByRole('button', { name:'Sign in', exact:true }).click();
