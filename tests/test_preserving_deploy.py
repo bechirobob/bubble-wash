@@ -2,6 +2,9 @@ import copy
 import importlib.util
 import json
 import os
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -210,6 +213,39 @@ class PrivateNetwork(unittest.TestCase):
         with patch.object(deploy, 'command', return_value='ok') as run:
             deploy.network_command(['ss'])
             run.assert_called_once_with(['ss'], timeout=30)
+
+
+class IsolatedEntrypoint(unittest.TestCase):
+    def test_workflow_streams_reviewed_source_with_all_existing_arguments(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / '.github/workflows/production-deploy.yml').read_text()
+        launch = next(line.strip() for line in workflow.splitlines() if 'python3 -I -B -' in line)
+        words = shlex.split(launch)
+        self.assertEqual(words[:3], ['tailscale', 'ssh', 'root@hermes'])
+        self.assertEqual(words[4:], ['<', 'ops/deploy-preserving.py'])
+        remote = shlex.split(words[3])
+        self.assertEqual(remote, ['python3', '-I', '-B', '-', '--candidate', '$RELEASE_DIR',
+                                 '--sha', '$TARGET_SHA', '--expected-live', '$EXPECTED_LIVE',
+                                 '--backup-sha256', '$BACKUP_SHA', '--receipt-run', '$RECEIPT_RUN',
+                                 '--store-sha', '$BACKUP_STORE_SHA', '--store-id', '$BACKUP_STORE_ID'])
+        self.assertNotIn("python3 -B '$RELEASE_DIR/ops/deploy-preserving.py'", workflow)
+        self.assertNotIn('__file__', (root / 'ops/deploy-preserving.py').read_text())
+
+    def test_isolated_stdin_engine_ignores_cwd_and_pythonpath_shadow_modules(self):
+        source = (Path(__file__).resolve().parents[1] / 'ops/deploy-preserving.py').read_text()
+        args = ['--candidate', '/home/ubuntu/bubblewash-releases/20261022T000000Z-' + 'a' * 12,
+                '--sha', 'a' * 40, '--expected-live', 'b' * 40, '--backup-sha256', 'c' * 64,
+                '--receipt-run', '99', '--store-sha', 'd' * 40, '--store-id', '12']
+        # Define the real engine without executing its host main, then inspect argv.
+        harness = "__name__ = 'isolated_entrypoint_test'\n" + source + "\nimport sys\nprint(json.dumps({'argv': sys.argv, 'engine': callable(main), 'isolated': sys.flags.isolated}))\n"
+        with tempfile.TemporaryDirectory() as directory:
+            for name in ('argparse', 'json', 'pathlib', 'pwd', 'sqlite3'):
+                (Path(directory) / (name + '.py')).write_text("raise RuntimeError('application-owned shadow module executed')\n")
+            result = subprocess.run([sys.executable, '-I', '-B', '-', *args], input=harness, text=True,
+                                    capture_output=True, check=True, cwd=directory,
+                                    env={**os.environ, 'PYTHONPATH': directory}, timeout=10)
+            self.assertEqual(json.loads(result.stdout), {'argv': ['-', *args], 'engine': True, 'isolated': 1})
+            self.assertFalse((Path(directory) / '__pycache__').exists())
 
 
 class ReleaseSafety(unittest.TestCase):

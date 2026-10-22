@@ -83,4 +83,4 @@ jobs:
       - name: Build, rehearse privately, activate, and verify rollback-capable release
         run: |
           set -euo pipefail
-          tailscale ssh root@hermes "python3 -B '$RELEASE_DIR/ops/deploy-preserving.py' --candidate '$RELEASE_DIR' --sha '$TARGET_SHA' --expected-live '$EXPECTED_LIVE' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'"
+          tailscale ssh root@hermes "python3 -I -B - --candidate '$RELEASE_DIR' --sha '$TARGET_SHA' --expected-live '$EXPECTED_LIVE' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < ops/deploy-preserving.py
