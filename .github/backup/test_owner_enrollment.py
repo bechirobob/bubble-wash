@@ -1,9 +1,12 @@
 import importlib.util
+import ast
+import sys
 import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch, Mock
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,20 +23,61 @@ class EnrollmentTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name); (self.root/'bubblewash-runtime').mkdir()
         (self.root/'bubblewash-runtime/deploy.lock').touch()
-        self.inspection = {'ownerInspection':{'completed':True,'duplicatePresent':False,'configuredSenderCategory':'updates@bubblewash.co'},
-            'configuration':{'productionMode':True,'demoDisabled':True,'staffAuthDisabled':False,'sqliteConfigured':True,'mfaRequired':True}, 'legacyImportAbsent':True,
+        self.inspection = {'ownerInspection':{'completed':True,'duplicatePresent':False,'configuredSenderCategory':'updates@bubblewash.co','personalMfaKeyReady':True},
+            'configuration':{'productionMode':True,'demoDisabled':True,'staffAuthDisabled':False,'sqliteConfigured':True,'mfaRequired':False}, 'legacyImportAbsent':True,
             'backup':{k:True for k in ('statusAgeWithin30Hours','statusMetadataValid','receiptAgeWithin30Hours','receiptMetadataValid')}}
         self.envtext = 'NODE_ENV=production\nRESEND_API_KEY=private-key-fixture\nNODE_OPTIONS=untrusted-preload\n'
         self.process = Mock(returncode=0, pid=123)
         self.process.communicate.return_value = (json.dumps({'ok':True,'stage':'preflight','accountCreated':False,'resendConfigured':True,'officialSenderDomain':True,'mfaReady':True}), '')
         self.popen = Mock(return_value=self.process)
-        self.patch = patch.dict(ns, {'HOME':self.root, 'CURRENT':self.root, 'release_pin_matches':lambda _:True,
+        self.patch = patch.dict(ns, {'pwd':SimpleNamespace(getpwnam=lambda _:SimpleNamespace(pw_uid=os.getuid())), 'HOME':self.root, 'CURRENT':self.root, 'release_pin_matches':lambda _:True,
              'enrollment_source_matches':lambda *_:True, 'collect':lambda *_:self.inspection,'bounded_text':lambda _:self.envtext})
         self.patch.start(); self.addCleanup(self.patch.stop)
         self.sub = patch.object(ns['subprocess'],'Popen',self.popen); self.sub.start(); self.addCleanup(self.sub.stop)
 
     def run_mode(self,mode='check',approved=False):
-        return ns['run_private_enrollment']('private-fixture@example.test','a'*40,'authorized-actor',mode,approved,{})
+        return ns['run_private_enrollment']('private-fixture@example.test','a'*40,'authorized-actor',mode,approved,{},'synthetic-owner-key')
+
+    def test_private_key_excludes_shared_transport(self):
+        self.envtext += 'BUBBLEWASH_EMAIL_FROM=unapproved@example.test\nBUBBLEWASH_OWNER_RESEND_KEY=host-key-must-not-win\n'
+        result=self.run_mode(); self.assertTrue(result['ok'])
+        env=self.popen.call_args.kwargs['env']
+        self.assertEqual(env['BUBBLEWASH_OWNER_RESEND_KEY'],'synthetic-owner-key')
+        self.assertNotIn('RESEND_API_KEY',env); self.assertNotIn('BUBBLEWASH_EMAIL_FROM',env)
+        self.assertEqual(result['transportScope'],'private-owner-only')
+        self.popen.reset_mock()
+        result=ns['run_private_enrollment']('private-fixture@example.test','a'*40,'actor','check',False,{})
+        self.assertEqual(result['state'],'dedicated-owner-transport-required'); self.popen.assert_not_called()
+
+    def test_absent_node_env_requires_exact_effective_production_proof(self):
+        flags={k:'absent' for k in ns['LOGIN_FLAGS']}
+        runtime={k:True for k in ('serviceActive','workingDirectoryMatchesCurrent','environmentFileMatchesExpected',
+            'mainProcessDirectoryMatchesCurrent','uniqueListener','listenerDirectoryMatchesCurrent','listenerIsNode',
+            'listenerSameServiceCgroup','listenerStableDuringRead','mainStableDuringRead')}
+        runtime.update(mainProcessFlags={**flags,'productionModePresent':False,'productionMode':False},
+                       listenerFlags={**flags,'productionModePresent':True,'productionMode':True})
+        proof={'staffRestorationInspection':{'currentTargetStableDuringRead':True,'runtime':runtime}}
+        check=ns['owner_production_proven']
+        self.assertTrue(check({},proof)); self.assertFalse(check({'NODE_ENV':'development'},proof))
+        self.assertFalse(check({'NODE_ENV':''},proof)); self.assertFalse(check({},{}))
+        for key in list(runtime):
+            saved=runtime[key]; runtime[key]=False if isinstance(saved,bool) else {}
+            self.assertFalse(check({},proof),key); runtime[key]=saved
+        runtime['mainProcessFlags'].update(productionModePresent=True,productionMode=False)
+        self.assertFalse(check({},proof))
+        runtime['mainProcessFlags'].update(productionModePresent=False,productionMode=False)
+        runtime['listenerFlags']['productionMode']=False
+        self.assertFalse(check({},proof)); runtime['listenerFlags']['productionMode']=True
+        runtime['mainProcessFlags']['BUBBLEWASH_STAFF_AUTH_DISABLED']='other'
+        runtime['listenerFlags']['BUBBLEWASH_STAFF_AUTH_DISABLED']='other'
+        self.assertFalse(check({'BUBBLEWASH_STAFF_AUTH_DISABLED':'malformed'},proof))
+        runtime['mainProcessFlags']['BUBBLEWASH_STAFF_AUTH_DISABLED']='absent'
+        runtime['listenerFlags']['BUBBLEWASH_STAFF_AUTH_DISABLED']='true'
+        self.assertFalse(check({},proof)); runtime['listenerFlags']['BUBBLEWASH_STAFF_AUTH_DISABLED']='absent'
+        self.envtext='RESEND_API_KEY=shared-key-not-used\n'
+        self.inspection.update(proof); self.inspection['configuration']['productionMode']=False
+        self.assertTrue(self.run_mode()['ok'])
+        self.assertEqual(self.popen.call_args.kwargs['env']['NODE_ENV'],'production')
 
     def test_default_check_never_confirms_recipient_for_send(self):
         result=self.run_mode(); self.assertTrue(result['ok']); self.assertFalse(result['accountCreated'])
@@ -48,9 +92,50 @@ class EnrollmentTests(unittest.TestCase):
         self.inspection['ownerInspection']['duplicatePresent']=True
         self.assertEqual(self.run_mode('send',True)['state'],'private-preflight-blocked'); self.popen.assert_not_called()
 
+    def test_existing_lock_is_noncreating_and_rejects_unsafe_objects(self):
+        lock = self.root/'bubblewash-runtime/deploy.lock'
+        lock.unlink()
+        with self.assertRaises(OSError): self.run_mode()
+        self.assertFalse(lock.exists()); self.popen.assert_not_called()
+        target=self.root/'protected'; target.write_text('unchanged')
+        for kind in ('symlink','fifo','hardlink','groupwrite'):
+            if kind=='symlink': lock.symlink_to(target)
+            elif kind=='fifo': os.mkfifo(lock)
+            elif kind=='hardlink': os.link(target,lock)
+            else: lock.touch(); lock.chmod(0o660)
+            with self.assertRaises((OSError,ValueError)): self.run_mode()
+            self.assertEqual(target.read_text(),'unchanged'); self.popen.assert_not_called()
+            lock.unlink()
+
+    def test_lock_replacement_during_preflight_blocks_child(self):
+        lock=self.root/'bubblewash-runtime/deploy.lock'
+        def replace_lock(*_):
+            lock.unlink(); lock.touch()
+            return self.inspection
+        with patch.dict(ns,{'collect':replace_lock}):
+            with self.assertRaises(ValueError): self.run_mode('send',True)
+        self.popen.assert_not_called()
+
+    def test_lock_identity_checked_after_child_before_success(self):
+        lock=self.root/'bubblewash-runtime/deploy.lock'
+        def replace_lock(**_):
+            lock.unlink(); lock.touch()
+            return (json.dumps({'ok':True,'stage':'invitation-created','delivery':'provider-accepted','accountActivated':False}),'')
+        self.process.communicate.side_effect=replace_lock
+        with self.assertRaises(ValueError): self.run_mode('send',True)
+        self.assertEqual(self.popen.call_count,1)
+
+    def test_personal_key_required_without_changing_global_mfa(self):
+        self.envtext += 'BUBBLEWASH_ADMIN_MFA_REQUIRED=false\n'
+        self.assertTrue(self.run_mode()['ok'])
+        self.assertEqual(self.popen.call_args.kwargs['env']['BUBBLEWASH_ADMIN_MFA_REQUIRED'],'false')
+        self.popen.reset_mock()
+        self.inspection['ownerInspection']['personalMfaKeyReady'] = False
+        self.assertEqual(self.run_mode()['state'],'private-preflight-blocked')
+        self.popen.assert_not_called()
+
     def test_send_needs_known_sender_recent_backup_and_source_pin(self):
         self.inspection['ownerInspection']['configuredSenderCategory']='other-official-domain'
-        self.assertEqual(self.run_mode('send',True)['state'],'approved-public-sender-required'); self.popen.assert_not_called()
         self.inspection['ownerInspection']['configuredSenderCategory']='updates@bubblewash.co'
         self.inspection['backup']['receiptAgeWithin30Hours']=False
         self.assertEqual(self.run_mode('send',True)['state'],'verified-recent-backup-required'); self.popen.assert_not_called()
@@ -73,7 +158,7 @@ class EnrollmentTests(unittest.TestCase):
     def test_stream_quotes_recipient_and_declines_unapproved_send(self):
         # Temporarily use the real Popen for runner-only stream generation.
         self.sub.stop()
-        env={**os.environ,'OWNER_EMAIL':"quoted'fixture@example.test",'EXPECTED_LIVE_SHA':'a'*40,'GITHUB_ACTOR':'actor','ENROLLMENT_MODE':'check','DELIVERY_APPROVED':'false'}
+        env={**os.environ,'BUBBLEWASH_OWNER_RESEND_KEY':"synthetic'owner\\key",'OWNER_EMAIL':"quoted'fixture@example.test",'EXPECTED_LIVE_SHA':'a'*40,'GITHUB_ACTOR':'actor','ENROLLMENT_MODE':'check','DELIVERY_APPROVED':'false'}
         run=subprocess.run(['python3','.github/backup/stream_owner_enrollment.py'],cwd=ROOT,env=env,capture_output=True,text=True)
         self.assertEqual(run.returncode,0); compile(run.stdout,'<stream>','exec')
         env['ENROLLMENT_MODE']='send'
@@ -88,15 +173,36 @@ class EnrollmentTests(unittest.TestCase):
 
     def test_emitted_program_executes_entrypoint_without_spawning_on_failed_pin(self):
         self.sub.stop()
-        env={**os.environ,'OWNER_EMAIL':"quoted'fixture@example.test",'EXPECTED_LIVE_SHA':'a'*40,'GITHUB_ACTOR':'actor','ENROLLMENT_MODE':'check','DELIVERY_APPROVED':'false'}
+        env={**os.environ,'BUBBLEWASH_OWNER_RESEND_KEY':"synthetic'owner\\key",'OWNER_EMAIL':"quoted'fixture@example.test",'EXPECTED_LIVE_SHA':'a'*40,'GITHUB_ACTOR':'actor','ENROLLMENT_MODE':'check','DELIVERY_APPROVED':'false'}
         emitted=subprocess.run(['python3','.github/backup/stream_owner_enrollment.py'],cwd=ROOT,env=env,capture_output=True,text=True)
         self.assertEqual(emitted.returncode,0)
         guard="\nrelease_pin_matches = lambda _: False\ndef forbidden_spawn(*args, **kwargs):\n    raise AssertionError('Unexpected subprocess')\nsubprocess.Popen = forbidden_spawn\n"
         program=emitted.stdout.replace('\ntry:\n    _result = run_private_enrollment(',guard+'\ntry:\n    _result = run_private_enrollment(')
-        run=subprocess.run(['python3','-'],input=program,capture_output=True,text=True)
+        # The exact emitted payload and positional arguments survive isolated stdin.
+        # Fail before host inspection/spawn; exercise stdlib imports under a hostile cwd.
+        (self.root/'base64.py').write_text("raise RuntimeError('UNTRUSTED IMPORT EXECUTED')")
+        isolated_env={**os.environ,'PYTHONPATH':str(self.root)}
+        run=subprocess.run([sys.executable,'-I','-B','-'],input=program,capture_output=True,text=True,
+                           cwd=self.root,env=isolated_env)
         self.assertEqual(run.returncode,1)
         self.assertEqual(json.loads(run.stdout),{'ok':False,'state':'release-pin-mismatch','accountCreated':False})
-        self.assertNotIn(env['OWNER_EMAIL'],run.stdout+run.stderr); self.assertEqual(run.stderr,'')
+        self.assertNotIn(env['OWNER_EMAIL'],run.stdout+run.stderr)
+        self.assertNotIn(env['BUBBLEWASH_OWNER_RESEND_KEY'],run.stdout+run.stderr); self.assertEqual(run.stderr,'')
+        unsafe=subprocess.run([sys.executable,'-B','-'],input=program,capture_output=True,text=True,
+                              cwd=self.root,env=isolated_env)
+        self.assertIn('UNTRUSTED IMPORT EXECUTED',unsafe.stderr)
+
+    def test_host_stream_uses_stdlib_without_file_or_python_environment_dependencies(self):
+        for relative in ('scripts/release-preflight.py','scripts/owner-enrollment-host.py'):
+            source=(ROOT/relative).read_text()
+            self.assertNotIn('__file__',source)
+            self.assertNotIn('os.environ',source)
+            self.assertNotIn('sys.path',source)
+            for node in ast.walk(ast.parse(source)):
+                modules = [alias.name for alias in node.names] if isinstance(node,ast.Import) else [node.module] if isinstance(node,ast.ImportFrom) else []
+                for name in modules:
+                    self.assertIsNotNone(name)
+                    self.assertIn(name.split('.')[0],sys.stdlib_module_names)
 
     def test_backup_ci_covers_all_enrollment_executable_inputs(self):
         source=(ROOT/'.github/workflows/backup-transport-checks.yml').read_text()
@@ -126,5 +232,7 @@ class EnrollmentTests(unittest.TestCase):
     def test_workflow_has_no_public_recipient_or_secret_outputs(self):
         source=(ROOT/'.github/workflows/owner-enrollment.yml').read_text()
         self.assertIn('default: check',source); self.assertIn('default: false',source)
+        self.assertIn("tailscale ssh root@hermes 'python3 -I -B -'",source)
+        self.assertNotIn("'python3 -B -'",source)
         self.assertIn('secrets.BUBBLEWASH_OWNER_EMAIL',source); self.assertNotIn('inputs.email',source)
         self.assertNotIn('upload-artifact',source); self.assertIn("github.ref == 'refs/heads/main'",source)

@@ -12,10 +12,10 @@ function readOnlyPreflight(email, env) {
       if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) throw new Error("Existing schema is required before owner enrollment.");
     }
     const configuredCollision = ["ADMIN", "VENDOR", "DRIVER", "SUPPORT"].some((role) => env[`BUBBLEWASH_${role}_EMAIL`]?.trim().toLowerCase() === email);
-    const managed = db.prepare("SELECT status FROM staff_accounts WHERE email = ? COLLATE NOCASE").get(email);
+    const managed = db.prepare("SELECT status FROM staff_accounts WHERE lower(trim(email)) = ?").get(email);
     const managedCollision = Boolean(managed);
-    const masterCollision = Boolean(db.prepare("SELECT 1 FROM staff_credential_overrides WHERE login = ? COLLATE NOCASE").get(email));
-    const rosterCollision = Boolean(db.prepare(`SELECT 1 FROM submissions WHERE json_extract(data, '$.submissionType') IN ('staff-onboarding', 'vendor-application', 'driver-onboarding') AND lower(trim(json_extract(data, '$.email'))) = ? LIMIT 1`).get(email));
+    const masterCollision = Boolean(db.prepare("SELECT 1 FROM staff_credential_overrides WHERE lower(trim(login)) = ?").get(email));
+    const rosterCollision = Boolean(db.prepare(`SELECT 1 FROM submissions WHERE json_extract(data, '$.submissionType') IN ('staff-onboarding', 'vendor-application', 'driver-onboarding') AND (lower(trim(json_extract(data, '$.email'))) = ? OR lower(trim(json_extract(data, '$.staffEmail'))) = ?) LIMIT 1`).get(email, email));
     return { recipientCollision: configuredCollision || managedCollision || masterCollision || rosterCollision,
       collisionTypes: [configuredCollision ? "configured" : "", managedCollision ? "managed" : "", masterCollision ? "master" : "", rosterCollision ? "roster" : ""].filter(Boolean),
       managedStatus: managed ? ["invited", "active", "suspended"].includes(managed.status) ? managed.status : "unknown" : null };
@@ -28,13 +28,12 @@ export async function runOwnerEnrollment({ send = false, env = process.env, tran
   const actor = env.BUBBLEWASH_OWNER_INVITED_BY?.trim() || "";
   if (env.NODE_ENV !== "production" || !isAbsolute(env.BUBBLEWASH_DATABASE_PATH || "") || env.BUBBLEWASH_STAFF_AUTH_DISABLED === "true") throw new Error("Production database and enabled staff access are required.");
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 160 || !name || name.length > 100 || !actor) throw new Error("Private recipient, name, and audit actor are required.");
-  const sender = env.BUBBLEWASH_EMAIL_FROM?.trim() || "";
-  const resendConfigured = Boolean(env.RESEND_API_KEY);
-  const officialSenderDomain = /^(?:[^<>\r\n]+<[^<>@\s]+@bubblewash\.co>|[^<>@\s]+@bubblewash\.co)$/.test(sender);
+  const sender = "Bubble Wash <bubblewash@becoreops.com>";
+  const resendConfigured = Boolean(env.BUBBLEWASH_OWNER_RESEND_KEY);
+  const officialSenderDomain = sender === "Bubble Wash <bubblewash@becoreops.com>";
   let mfaReady = true;
-  if (env.BUBBLEWASH_ADMIN_MFA_REQUIRED === "true") {
-    try { mfaEncryptionKey(env); } catch { mfaReady = false; }
-  }
+  // Personal owners always require their own MFA, independent of master flags.
+  try { mfaEncryptionKey(env); } catch { mfaReady = false; }
   const origin = new URL(env.BUBBLEWASH_PUBLIC_URL || "https://bubblewash.co");
   if (origin.origin !== "https://bubblewash.co" || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash) throw new Error("The verified production origin is required.");
   const collision = readOnlyPreflight(email, env);
@@ -51,8 +50,8 @@ export async function runOwnerEnrollment({ send = false, env = process.env, tran
   try {
     response = await transport("https://api.resend.com/emails", {
       method: "POST", signal: AbortSignal.timeout(15000),
-      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: env.BUBBLEWASH_EMAIL_FROM, to: [email], subject: "Activate your personal Bubble Wash owner account", text: `You have been invited as an additional Bubble Wash owner. Existing staff accounts are unchanged. Choose your own password using this private, single-use link within one hour:\n\n${origin.origin}/staff/activate#${token}\n\nNever share this link or your password. If you did not expect this invitation, do not activate it.` }),
+      headers: { Authorization: `Bearer ${env.BUBBLEWASH_OWNER_RESEND_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: sender, to: [email], subject: "Activate your personal Bubble Wash owner account", text: `You have been invited as an additional Bubble Wash owner. Existing staff accounts are unchanged. Choose your own password using this private, single-use link within one hour:\n\n${origin.origin}/staff/activate#${token}\n\nNever share this link or your password. If you did not expect this invitation, do not activate it.` }),
     });
   } catch { throw new Error("Invitation created; delivery outcome is uncertain. Do not retry or reset the account. Review delivery privately."); }
   if (!response.ok) throw new Error("Invitation created; email provider did not accept delivery. Do not retry or reset the account. Review delivery privately.");

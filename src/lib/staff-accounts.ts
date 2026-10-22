@@ -35,7 +35,7 @@ export function assertOwnerEmailAvailable(email: string) {
       ...["ADMIN", "VENDOR", "DRIVER", "SUPPORT"].map((role) => process.env[`BUBBLEWASH_${role}_EMAIL`]),
       ...(process.env.NODE_ENV !== "production" && process.env.BUBBLEWASH_DISABLE_DEMO_LOGIN !== "true" ? ["admin", "vendor", "driver", "support"].map((role) => `${role}@bubblewash.local`) : []),
       ...listStaffAccounts().map((account) => account.email)];
-    const rosterCollision = db().prepare(`SELECT 1 FROM submissions WHERE json_extract(data, '$.submissionType') IN ('staff-onboarding', 'vendor-application', 'driver-onboarding') AND lower(trim(json_extract(data, '$.email'))) = ? LIMIT 1`).get(email);
+    const rosterCollision = db().prepare(`SELECT 1 FROM submissions WHERE json_extract(data, '$.submissionType') IN ('staff-onboarding', 'vendor-application', 'driver-onboarding') AND (lower(trim(json_extract(data, '$.email'))) = ? OR lower(trim(json_extract(data, '$.staffEmail'))) = ?) LIMIT 1`).get(email, email);
     if (rosterCollision) throw new Error("This email already belongs to a roster entry. No access was changed.");
     if (reserved.some((candidate) => candidate?.trim().toLowerCase() === email)) throw new Error("This email already belongs to an account. No access was changed.");
  }

@@ -55,6 +55,7 @@ jobs:
           tags: tag:ci
       - name: Run the bounded private owner operation once
         env:
+          BUBBLEWASH_OWNER_RESEND_KEY: ${{ secrets.BUBBLEWASH_OWNER_RESEND_KEY }}
           OWNER_EMAIL: ${{ secrets.BUBBLEWASH_OWNER_EMAIL }}
           EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
           ENROLLMENT_MODE: ${{ inputs.mode }}
@@ -64,7 +65,7 @@ jobs:
           set -euo pipefail
           # Protected recipient and existing host credentials never become argv,
           # workflow inputs, files, artifacts or displayed subprocess output.
-          if ! python3 .github/backup/stream_owner_enrollment.py | tailscale ssh root@hermes 'python3 -B -' 2>/dev/null; then
+          if ! python3 .github/backup/stream_owner_enrollment.py | tailscale ssh root@hermes 'python3 -I -B -' 2>/dev/null; then
             echo 'Private operation did not confirm success. Stop and inspect private state before any further attempt.'
             exit 1
           fi

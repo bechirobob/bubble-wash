@@ -6,6 +6,9 @@ import re
 import sys
 
 email = os.environ.get('OWNER_EMAIL','').strip().lower()
+owner_key = os.environ.get('BUBBLEWASH_OWNER_RESEND_KEY', '')
+if len(owner_key) > 4096 or (owner_key and (not owner_key.isascii() or any(c.isspace() for c in owner_key))):
+    raise SystemExit('Invalid private owner transport input.')
 sha = os.environ.get('EXPECTED_LIVE_SHA','')
 actor = os.environ.get('GITHUB_ACTOR','')
 mode = os.environ.get('ENROLLMENT_MODE','check')
@@ -15,5 +18,5 @@ if len(email)>160 or not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+',email) or not 
 pins = json.loads(Path('ops/owner-enrollment-source-pins.json').read_text())
 sys.stdout.write("__name__ = 'private_owner_enrollment'\n" + Path('scripts/release-preflight.py').read_text())
 sys.stdout.write('\n' + Path('scripts/owner-enrollment-host.py').read_text())
-sys.stdout.write('\ntry:\n    _result = run_private_enrollment(' + ', '.join(repr(value) for value in (email,sha,actor,mode,approved,pins)) + ')\nexcept Exception:\n    _result = {"ok":False,"state":"outcome-uncertain-stop-inspect-privately","retryPermitted":False}\n')
+sys.stdout.write('\ntry:\n    _result = run_private_enrollment(' + ', '.join(repr(value) for value in (email,sha,actor,mode,approved,pins,owner_key)) + ')\nexcept Exception:\n    _result = {"ok":False,"state":"outcome-uncertain-stop-inspect-privately","retryPermitted":False}\n')
 sys.stdout.write('print(json.dumps(_result, sort_keys=True))\nraise SystemExit(0 if _result.get("ok") is True else 1)\n')

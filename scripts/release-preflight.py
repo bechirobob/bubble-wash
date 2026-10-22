@@ -140,8 +140,10 @@ def owner_database_report(database_path, email, env):
 
 
 def owner_collision_report(connection, tables, email, env):
-    if not {'staff_accounts', 'staff_credential_overrides', 'submissions'}.issubset(tables):
-        return {'inspected': False, 'requiredSchemaMissing': True}
+    required_tables = {name: name in tables for name in ('staff_accounts', 'staff_credential_overrides', 'submissions')}
+    if not all(required_tables.values()):
+        return {'inspected': False, 'requiredSchemaMissing': True, 'requiredTablePresence': required_tables,
+                'collisionInspectionBlockedReason': 'required-schema-not-present-no-initialization-performed'}
     types = []
     if any(env.get('BUBBLEWASH_' + role + '_EMAIL', '').strip().lower() == email for role in ('ADMIN', 'VENDOR', 'DRIVER', 'SUPPORT')):
         types.append('configured')
@@ -150,10 +152,10 @@ def owner_collision_report(connection, tables, email, env):
     account = connection.execute('SELECT role, status FROM staff_accounts WHERE lower(trim(email)) = ?', (email,)).fetchone()
     if account:
         types.append('managed')
-    roster = connection.execute("SELECT 1 FROM submissions WHERE json_extract(data, '$.submissionType') IN ('staff-onboarding', 'vendor-application', 'driver-onboarding') AND lower(trim(json_extract(data, '$.email'))) = ? LIMIT 1", (email,)).fetchone()
+    roster = connection.execute("SELECT 1 FROM submissions WHERE json_extract(data, '$.submissionType') IN ('staff-onboarding', 'vendor-application', 'driver-onboarding') AND (lower(trim(json_extract(data, '$.email'))) = ? OR lower(trim(json_extract(data, '$.staffEmail'))) = ?) LIMIT 1", (email, email)).fetchone()
     if roster:
         types.append('roster')
-    return {'inspected': True, 'duplicatePresent': bool(types), 'duplicateTypes': types,
+    return {'inspected': True, 'requiredTablePresence': required_tables, 'duplicatePresent': bool(types), 'duplicateTypes': types,
             'managedRole': account[0] if account and account[0] in ('admin', 'vendor', 'driver', 'support') else 'unknown' if account else None,
             'managedStatus': account[1] if account and account[1] in ('active', 'invited', 'suspended') else 'unknown' if account else None}
 
@@ -169,7 +171,8 @@ def owner_delivery_configuration(env):
         mfa_key_ready = len(key) == 32 and base64.b64encode(key).decode().rstrip('=') == raw.rstrip('=')
     except (ValueError, TypeError):
         mfa_key_ready = False
-    return {'resendConfigured': bool(env.get('RESEND_API_KEY')), 'configuredSenderCategory': sender_category,
+    return {'transportScope': 'shared-application-only', 'privateOwnerTransportInspected': False,
+            'resendConfigured': bool(env.get('RESEND_API_KEY')), 'configuredSenderCategory': sender_category,
             'mfaRequired': env.get('BUBBLEWASH_ADMIN_MFA_REQUIRED') == 'true',
             'personalMfaKeyReady': mfa_key_ready, 'providerCredentialValidated': False, 'emailSent': False}
 

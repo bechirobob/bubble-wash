@@ -20,6 +20,17 @@ on:
       - ops/deploy-personal-owner.py
       - ops/check-owner-source.py
       - tests/test_owner_deploy.py
+      - .github/workflows/restore-staff-access.yml
+      - .github/workflows/staff-access-checks.yml
+      - scripts/restore-staff-access.py
+      - tests/test_staff_restore.py
+      - src/**
+      - package-lock.json
+      - tsconfig.json
+      - src/app/api/admin/mfa/enroll/route.ts
+      - src/app/api/login/route.ts
+      - src/components/LoginPage.tsx
+      - tests/browser/personal-owner-mfa.spec.mjs
       - docs/PERSONAL_OWNER_ENROLLMENT.md
       - next.config.mjs
       - package.json
@@ -65,6 +76,17 @@ on:
       - ops/deploy-personal-owner.py
       - ops/check-owner-source.py
       - tests/test_owner_deploy.py
+      - .github/workflows/restore-staff-access.yml
+      - .github/workflows/staff-access-checks.yml
+      - scripts/restore-staff-access.py
+      - tests/test_staff_restore.py
+      - src/**
+      - package-lock.json
+      - tsconfig.json
+      - src/app/api/admin/mfa/enroll/route.ts
+      - src/app/api/login/route.ts
+      - src/components/LoginPage.tsx
+      - tests/browser/personal-owner-mfa.spec.mjs
       - docs/PERSONAL_OWNER_ENROLLMENT.md
       - next.config.mjs
       - package.json

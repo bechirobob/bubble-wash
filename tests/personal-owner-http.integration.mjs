@@ -3,11 +3,12 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { totpCode } from '../src/lib/totp.ts';
 import { randomUUID } from 'node:crypto';
 import { createPasswordHash } from '../src/lib/passwords.ts';
 const directory = mkdtempSync(join(tmpdir(), 'bubblewash-http-'));
 const origin = 'http://127.0.0.1:3102';
-Object.assign(process.env, { NODE_ENV: 'production', BUBBLEWASH_DATABASE_PATH: join(directory, 'workflow.sqlite'), BUBBLEWASH_SESSION_SECRET: 'isolated-http-regression-session-secret-32-plus', BUBBLEWASH_STAFF_AUTH_DISABLED: 'false', BUBBLEWASH_DISABLE_DEMO_LOGIN: 'true', BUBBLEWASH_ADMIN_MFA_REQUIRED: 'false', BUBBLEWASH_VENDOR_ENTITY_ID: 'vendor-http', BUBBLEWASH_DRIVER_ENTITY_ID: 'driver-http', BUBBLEWASH_PUBLIC_URL: origin, NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED: 'false', NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED: 'false', RESEND_API_KEY: '', PAYSTACK_SECRET_KEY: '' });
+Object.assign(process.env, { NODE_ENV: 'production', BUBBLEWASH_DATABASE_PATH: join(directory, 'workflow.sqlite'), BUBBLEWASH_SESSION_SECRET: 'isolated-http-regression-session-secret-32-plus', BUBBLEWASH_STAFF_AUTH_DISABLED: 'false', BUBBLEWASH_DISABLE_DEMO_LOGIN: 'true', BUBBLEWASH_ADMIN_MFA_REQUIRED: 'false', BUBBLEWASH_MFA_ENCRYPTION_KEY: Buffer.alloc(32, 21).toString('base64'), BUBBLEWASH_VENDOR_ENTITY_ID: 'vendor-http', BUBBLEWASH_DRIVER_ENTITY_ID: 'driver-http', BUBBLEWASH_PUBLIC_URL: origin, NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED: 'false', NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED: 'false', RESEND_API_KEY: '', PAYSTACK_SECRET_KEY: '' });
 for (const role of ['admin', 'vendor', 'driver', 'support']) { process.env[`BUBBLEWASH_${role.toUpperCase()}_EMAIL`] = `${role}@example.invalid`; process.env[`BUBBLEWASH_${role.toUpperCase()}_PASSWORD_HASH`] = createPasswordHash(`isolated-${role}-password-123`); }
 const { inviteOwnerAccount, inviteStaffAccount, activateStaffAccount } = await import('../src/lib/staff-accounts.ts');
 for (const role of ['vendor', 'driver', 'support']) {
@@ -30,7 +31,14 @@ try {
   const activationPage = await fetch(`${origin}/staff/activate`);
   assert.equal(activationPage.headers.get('referrer-policy'), 'no-referrer');
   assert.match(activationPage.headers.get('cache-control') || '', /no-store/); checks += 2;
-  const ownerLogin = await post('/api/login', { email: 'owner@example.invalid', password: 'isolated-owner-password-123' });
+  const ownerCredentials = { email: 'owner@example.invalid', password: 'isolated-owner-password-123' };
+  const needsEnrollment = await post('/api/login', ownerCredentials, undefined, 403);
+  assert.equal(needsEnrollment.data.mfaStep, 'enroll'); assert.equal(needsEnrollment.response.headers.get('set-cookie'), null);
+  const setup = await post('/api/admin/mfa/enroll', { ...ownerCredentials, action: 'start' });
+  const confirmation = await post('/api/admin/mfa/enroll', { ...ownerCredentials, action: 'confirm', code: totpCode(setup.data.enrollment.manualKey) });
+  const needsCode = await post('/api/login', ownerCredentials, undefined, 401);
+  assert.equal(needsCode.data.mfaStep, 'verify'); assert.equal(needsCode.response.headers.get('set-cookie'), null);
+  const ownerLogin = await post('/api/login', { ...ownerCredentials, totp: confirmation.data.recoveryCodes[0] });
   cookies.owner = ownerLogin.response.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
   const masterVendorPage = await fetch(`${origin}/vendors`, { headers: { cookie: cookies.admin }, redirect: 'manual' });
   if (masterVendorPage.status === 200) assert.match(await masterVendorPage.text(), /NEXT_REDIRECT|http-equiv="refresh"/);
