@@ -5,9 +5,21 @@ on:
     paths:
       - .github/workflows/release-preflight.yml
       - scripts/release-preflight.py
+      - .github/backup/stream_owner_preflight.py
+      - .github/backup/test_owner_preflight.py
       - .github/backup/check_store.py
       - .github/backup/backup_release.py
   workflow_dispatch:
+    inputs:
+      inspect_owner:
+        description: 'Inspect the approved private owner recipient without creating or sending anything'
+        required: false
+        default: false
+        type: boolean
+      expected_live_sha:
+        description: 'Full currently deployed SHA, required for private owner inspection'
+        required: false
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -22,6 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Test aggregate-only inspection and existing transport
         run: python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
@@ -43,6 +56,7 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
       - name: Inspect aggregate release prerequisites without changing the host
+        if: github.event_name != 'workflow_dispatch' || !inputs.inspect_owner
         shell: bash
         run: |
           set -euo pipefail
@@ -50,5 +64,19 @@ jobs:
           # upload a file, disable host verification or print SSH diagnostics.
           if ! tailscale ssh root@hermes 'python3 -B -' < scripts/release-preflight.py 2>/dev/null; then
             echo 'Read-only host inspection failed. No retry or alternate access attempted.'
+            exit 1
+          fi
+      - name: Inspect approved owner recipient privately, without enrollment or delivery
+        if: github.event_name == 'workflow_dispatch' && inputs.inspect_owner
+        env:
+          OWNER_EMAIL: ${{ secrets.BUBBLEWASH_OWNER_EMAIL }}
+          EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Recipient exists only in the protected environment and encrypted SSH
+          # stdin. Never echo, source, upload, or save the input stream.
+          if ! python3 .github/backup/stream_owner_preflight.py | tailscale ssh root@hermes 'python3 -B -' 2>/dev/null; then
+            echo 'Private owner inspection could not complete safely. No account or email was created.'
             exit 1
           fi

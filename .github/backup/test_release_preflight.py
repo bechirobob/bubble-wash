@@ -88,7 +88,7 @@ class PreflightTests(unittest.TestCase):
         workflow = Path(__file__).resolve().parents[1] / 'workflows/release-preflight.yml'
         push_paths = workflow.read_text().split('    paths:\n', 1)[1].split('  workflow_dispatch:', 1)[0]
         paths = {line.strip().removeprefix('- ') for line in push_paths.splitlines() if line.strip()}
-        self.assertEqual(paths, {'.github/workflows/release-preflight.yml', 'scripts/release-preflight.py', '.github/backup/check_store.py', '.github/backup/backup_release.py'})
+        self.assertEqual(paths, {'.github/workflows/release-preflight.yml', 'scripts/release-preflight.py', '.github/backup/check_store.py', '.github/backup/backup_release.py', '.github/backup/stream_owner_preflight.py', '.github/backup/test_owner_preflight.py'})
 
     def test_database_aggregates_never_expose_rows_and_preserve_bytes(self):
         with tempfile.TemporaryDirectory() as root:
@@ -192,3 +192,4 @@ class PreflightTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

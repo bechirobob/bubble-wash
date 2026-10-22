@@ -126,7 +126,7 @@ export async function initializePaystackCheckout(input: CheckoutInput, requested
     // A timeout, malformed success, server failure, or duplicate reference can hide
     // a live provider transaction. Only an explicit ordinary rejection permits retry.
     const message = typeof data.message === "string" ? data.message : "Unable to initialize Paystack checkout.";
-    const retryable = response.status === 400 && data.status === false
+    const retryable = [400, 401, 403].includes(response.status) && data.status === false
       && !/duplicate|reference|already|exist/i.test(message);
     throw new CheckoutInitializationError(message, retryable);
   }

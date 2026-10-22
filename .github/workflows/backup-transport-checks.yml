@@ -8,6 +8,9 @@ on:
       - .github/workflows/backup-transport-checks.yml
       - .github/workflows/nightly-backup.yml
       - .github/workflows/production-deploy.yml
+      - ops/deploy-preserving.py
+      - ops/check-release-ci.py
+      - tests/test_preserving_deploy.py
   push:
     branches: [main]
     paths:
@@ -16,6 +19,9 @@ on:
       - .github/workflows/backup-transport-checks.yml
       - .github/workflows/nightly-backup.yml
       - .github/workflows/production-deploy.yml
+      - ops/deploy-preserving.py
+      - ops/check-release-ci.py
+      - tests/test_preserving_deploy.py
   workflow_dispatch:
 permissions:
   contents: read
@@ -31,5 +37,7 @@ jobs:
       - name: Verify encrypted-only transport and failure guards
         run: |
           python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
-          python3 -m py_compile .github/backup/backup_release.py
+          python3 -m unittest discover -s tests -p 'test_preserving_deploy.py' -v
+          python3 -m py_compile .github/backup/backup_release.py ops/deploy-preserving.py ops/check-release-ci.py
           git diff --check
+

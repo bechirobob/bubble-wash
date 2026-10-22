@@ -241,19 +241,55 @@ class WorkflowContractTests(unittest.TestCase):
             self.assertNotIn('- .github/workflows/pilot-ci.yml', pr)
             self.assertIn('- .github/workflows/production-deploy.yml', pr)
 
-    def test_predeployment_stops_before_secrets_or_host(self):
+    def test_preserving_deployment_guards_before_secrets_or_host(self):
         if self.tickets:
-            self.skipTest('Bubble deploy guard only.')
+            self.skipTest('Bubble preserving deployment only.')
         text = (self.workflows / 'production-deploy.yml').read_text()
-        first_step = text.split('    steps:\n', 1)[1].split('      - name:', 2)[1]
-        self.assertIn('Require reviewed private pre-deployment backup transport', first_step)
-        self.assertIn('exit 1', first_step)
+        triggers = text.split('permissions:', 1)[0]
+        self.assertIn('  workflow_dispatch:', triggers)
+        for trigger in ('workflow_run:', '  push:', '  pull_request:', '  schedule:'):
+            self.assertNotIn(trigger, triggers)
+        self.assertIn("github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'", text)
+        self.assertIn('permissions:\n  contents: read', text)
+        self.assertIn('environment: backup-storage', text)
+        self.assertIn('group: bubblewash-production', text)
+        self.assertIn('cancel-in-progress: false', text)
+        first_step = text.split('    steps:\n', 1)[1].split('      - uses:', 1)[0]
+        self.assertIn('Require explicit reviewed main and receipt pins', first_step)
+        self.assertIn('"$TARGET_SHA" == "$GITHUB_SHA"', first_step)
+        self.assertIn('^[0-9a-f]{40}$', first_step)
+        self.assertIn('^[0-9a-f]{64}$', first_step)
         self.assertNotIn('if:', first_step)
-        self.assertNotIn('continue-on-error', first_step)
-        self.assertNotIn('BACKUP_STORE_TOKEN', text)
-        self.assertLess(text.index('exit 1'), text.index('actions/checkout'))
-        self.assertLess(text.index('exit 1'), text.index('tailscale/github-action'))
-        self.assertLess(text.index('exit 1'), text.index('BACKUP_KEY:'))
+        self.assertNotIn('continue-on-error', text)
+        self.assertIn('ref: ${{ inputs.candidate_sha }}', text)
+        self.assertIn('"$(git rev-parse HEAD)" == "$TARGET_SHA"', text)
+        self.assertIn('persist-credentials: false', text)
+        tests = text.index("python3 -m unittest discover -s tests -p 'test_preserving_deploy.py'")
+        transport_tests = text.index("python3 -m unittest discover -s .github/backup")
+        exact_ci = text.index('python3 ops/check-release-ci.py')
+        secret = text.index('secrets.BACKUP_STORE_TOKEN')
+        private_store = text.index('python3 .github/backup/check_store.py')
+        host = text.index('uses: tailscale/github-action')
+        self.assertLess(tests, secret)
+        self.assertLess(transport_tests, secret)
+        self.assertLess(exact_ci, secret)
+        self.assertLess(secret, private_store)
+        self.assertLess(private_store, host)
+        for forbidden in ('actions/upload-artifact', 'BUBBLEWASH_BACKUP_ENCRYPTION_KEY', 'BACKUP_KEY:',
+                          'ops/deploy-production.sh', 'actions: write', 'contents: write'):
+            self.assertNotIn(forbidden, text)
+        for argument in ('--sha', '--expected-live', '--backup-sha256', '--receipt-run', '--store-sha', '--store-id'):
+            self.assertIn(argument, text)
+        self.assertIn('git archive --format=tar "$TARGET_SHA"', text)
+        self.assertIn('ops/deploy-preserving.py', text)
+
+    def test_preserving_guard_files_run_ci_on_pull_requests_and_main(self):
+        if self.tickets:
+            self.skipTest('Bubble preserving deployment only.')
         checks = (self.workflows / 'backup-transport-checks.yml').read_text()
-        self.assertEqual(checks.count('- .github/workflows/production-deploy.yml'), 2)
+        for path in ('.github/workflows/production-deploy.yml', 'ops/deploy-preserving.py',
+                     'ops/check-release-ci.py', 'tests/test_preserving_deploy.py'):
+            self.assertEqual(checks.count('- ' + path), 2, path)
         self.assertNotIn('secrets.', checks)
+        self.assertIn("python3 -m unittest discover -s tests -p 'test_preserving_deploy.py' -v", checks)
+        self.assertIn('ops/deploy-preserving.py ops/check-release-ci.py', checks)
