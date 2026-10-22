@@ -1,0 +1,52 @@
+name: Restore existing staff access
+on:
+  workflow_dispatch:
+    inputs:
+      expected_release:
+        description: 'Verified full SHA of CURRENT production release, not candidate'
+        required: true
+        type: string
+      reviewed_source_digest:
+        description: 'SHA256 fingerprint independently reviewed from CURRENT health/auth/booking source and BUILD_ID'
+        required: true
+        type: string
+      preserve_unavailable_bookings:
+        description: 'Approved: explicitly keep public bookings disabled if the staff lock was their only gate'
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  restore:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify isolated restoration tests
+        run: python3 -B -m unittest discover -s tests -p 'test_staff_restore.py' -v
+      - name: Connect through existing production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      - name: Restore gate on verified existing release without deploying code
+        env:
+          REVIEWED_SOURCE_DIGEST: ${{ inputs.reviewed_source_digest }}
+          EXPECTED_RELEASE: ${{ inputs.expected_release }}
+          PRESERVE_BOOKINGS: ${{ inputs.preserve_unavailable_bookings && 'true' || 'false' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_RELEASE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$REVIEWED_SOURCE_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PRESERVE_BOOKINGS" == true || "$PRESERVE_BOOKINGS" == false ]]
+          # No env sourcing, secret output, diagnostics, artifacts, or automatic retry.
+          tailscale ssh root@hermes "python3 -B - --expected-release '$EXPECTED_RELEASE' --reviewed-source-digest '$REVIEWED_SOURCE_DIGEST' --preserve-unavailable-bookings '$PRESERVE_BOOKINGS'" < scripts/restore-staff-access.py 2>/dev/null
