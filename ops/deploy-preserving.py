@@ -137,9 +137,18 @@ def verify_network_shape(probe_inode, host_inode, links, route_groups):
 
 def verify_private_network(unit, candidate):
     props = parse(command(['systemctl', 'show', unit, '--property=ActiveState,MainPID']).encode())
+    state = props.get('ActiveState')
+    require(state not in ('inactive', 'failed'), 'probe terminal state')
+    require(state != 'deactivating', 'probe process stopping')
+    require(state != 'activating', 'probe startup pending')
+    require(state == 'active', 'probe active state unsupported')
     pid = int(props.get('MainPID', '0'))
-    require(props.get('ActiveState') == 'active' and pid > 1 and
-            (Path('/proc') / str(pid) / 'cwd').resolve() == candidate, 'probe process unavailable')
+    require(pid > 1, 'probe PID unavailable')
+    try:
+        cwd = (Path('/proc') / str(pid) / 'cwd').resolve(strict=True)
+    except FileNotFoundError:
+        raise ValueError('probe working directory unavailable') from None
+    require(cwd == candidate, 'probe working directory mismatch')
     probe_inode = (Path('/proc') / str(pid) / 'ns/net').stat().st_ino
     host_inode = Path('/proc/self/ns/net').stat().st_ino
     links = json.loads(network_command(['ip', '-j', 'link', 'show'], pid))
@@ -315,7 +324,13 @@ REHEARSAL_GUARD_CODES = {
     'probe shares production network namespace': 'PROBE_SHARED_NETWORK',
     'probe has external network interfaces': 'PROBE_EXTERNAL_LINKS',
     'probe has external network routes': 'PROBE_EXTERNAL_ROUTES',
-    'probe process unavailable': 'PROBE_PROCESS_UNAVAILABLE',
+    'probe terminal state': 'PROBE_TERMINAL_STATE',
+    'probe process stopping': 'PROBE_PROCESS_STOPPING',
+    'probe startup pending': 'PROBE_STARTUP_PENDING',
+    'probe active state unsupported': 'PROBE_STATE_UNSUPPORTED',
+    'probe PID unavailable': 'PROBE_PID_UNAVAILABLE',
+    'probe working directory unavailable': 'PROBE_CWD_UNAVAILABLE',
+    'probe working directory mismatch': 'PROBE_CWD_MISMATCH',
     'service not active': 'RUNTIME_NOT_ACTIVE',
     'service target mismatch': 'RUNTIME_TARGET_MISMATCH',
     'service process mismatch': 'RUNTIME_PROCESS_MISMATCH',
@@ -559,7 +574,10 @@ def rehearse(candidate, values, db, status_path, owner, unit, report=None):
             rehearsal_stage(report, 'PROBE_START')
             if report is not None:
                 report.safe_to_remove = False  # launch outcome may be uncertain
-            command(['systemd-run', '--quiet', '--collect', '--unit=' + unit + '-probe', '--property=User=ubuntu',
+            # Type=simple reports success after fork, before cwd/namespace setup.
+            # Type=exec supplies the setup barrier; all later guards stay strict.
+            command(['systemd-run', '--quiet', '--collect', '--unit=' + unit + '-probe',
+                     '--property=Type=exec', '--property=User=ubuntu',
                      '--property=Group=ubuntu', '--property=WorkingDirectory=' + str(candidate),
                      '--property=EnvironmentFile=' + str(ENV), '--property=RuntimeMaxSec=180',
                      '--property=ProtectSystem=strict', '--property=ProtectHome=tmpfs',
