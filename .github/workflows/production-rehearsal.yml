@@ -1,0 +1,91 @@
+name: Isolated Production Rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: 'Reviewed full SHA of the retained built candidate; never deployed by this workflow'
+        required: true
+        type: string
+      retained_release:
+        description: 'Exact existing release basename, YYYYMMDDTHHMMSSZ-12hex'
+        required: true
+        type: string
+      expected_live_sha:
+        description: 'Full currently deployed SHA; drift aborts'
+        required: true
+        type: string
+      backup_sha256:
+        description: 'Verified encrypted archive SHA-256; no new backup is created'
+        required: true
+        type: string
+      receipt_run:
+        description: 'Verified private backup run ID, no older than 30 hours'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+
+jobs:
+  rehearse:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TARGET_SHA: ${{ inputs.candidate_sha }}
+      RETAINED_RELEASE: ${{ inputs.retained_release }}
+      EXPECTED_LIVE: ${{ inputs.expected_live_sha }}
+      BACKUP_SHA: ${{ inputs.backup_sha256 }}
+      RECEIPT_RUN: ${{ inputs.receipt_run }}
+      BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+      BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+    steps:
+      - name: Validate exact diagnostic and retained-candidate pins
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ && "$EXPECTED_LIVE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RETAINED_RELEASE" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$ ]]
+          [[ "${RETAINED_RELEASE:17}" == "${TARGET_SHA:0:12}" ]]
+          [[ "$BACKUP_SHA" =~ ^[0-9a-f]{64}$ && "$RECEIPT_RUN" =~ ^[1-9][0-9]*$ ]]
+          [[ "$BACKUP_STORE_SHA" =~ ^[0-9a-f]{40}$ && "$BACKUP_STORE_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,19}$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,5}$ ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Test exact reviewed diagnostic engine
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          python3 -m unittest discover -s tests -p 'test_preserving_deploy.py' -v
+          python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
+      - name: Require successful exact-main CI for runner and retained candidate
+        run: |
+          set -euo pipefail
+          TARGET_SHA="$GITHUB_SHA" python3 ops/check-release-ci.py
+          python3 ops/check-release-ci.py
+      - name: Verify existing private backup destination without creating access
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+        run: python3 .github/backup/check_store.py
+      - name: Connect through existing production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Rehearse retained candidate privately without activation
+        run: |
+          set -euo pipefail
+          # No source staging, build, upload, live readiness, or activation.
+          # SQLite's normal readonly backup coordination may touch WAL/SHM
+          # bookkeeping. No source SQL/schema/business-data writes are made.
+          # The disposable copy is removed only after its probe is verified stopped.
+          tailscale ssh root@hermes "python3 -I -B - --rehearsal-only --run-id '$GITHUB_RUN_ID' --run-attempt '$GITHUB_RUN_ATTEMPT' --candidate '/home/ubuntu/bubblewash-releases/$RETAINED_RELEASE' --sha '$TARGET_SHA' --expected-live '$EXPECTED_LIVE' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < ops/deploy-preserving.py 2>/dev/null

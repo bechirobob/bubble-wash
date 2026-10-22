@@ -11,6 +11,7 @@ from pathlib import Path
 import pwd
 import re
 import signal
+import sys
 import sqlite3
 import stat
 import subprocess
@@ -295,11 +296,341 @@ def public_health():
             value.get('status') == 'alive', 'unexpected public health response')
 
 
-def main(lock_unchanged):
-    parser = argparse.ArgumentParser()
+# Exact static messages only. Unknown or dynamic exceptions remain generic;
+# neither exception text nor host values are ever emitted.
+REHEARSAL_GUARD_CODES = {
+    'environment exceeds bound': 'KEY_VALUE_BOUND',
+    'unsupported environment syntax': 'KEY_VALUE_SYNTAX',
+    'backup receipt identity mismatch': 'BACKUP_IDENTITY_MISMATCH',
+    'backup verification proof missing': 'BACKUP_PROOF_MISSING',
+    'backup retention mismatch': 'BACKUP_RETENTION_MISMATCH',
+    'backup metadata invalid': 'BACKUP_METADATA_INVALID',
+    'backup status does not match receipt': 'BACKUP_STATUS_MISMATCH',
+    'backup is expired or future-dated': 'BACKUP_STALE',
+    'backup verification chronology mismatch': 'BACKUP_CHRONOLOGY',
+    'rehearsal database integrity failed': 'SNAPSHOT_INTEGRITY',
+    'rehearsal table identity cannot be completely fingerprinted': 'FINGERPRINT_TABLE_UNSUPPORTED',
+    'rehearsal table columns cannot be completely fingerprinted': 'FINGERPRINT_COLUMNS_UNSUPPORTED',
+    'rehearsal hidden rowid is shadowed by every SQL alias': 'FINGERPRINT_ROWID_SHADOWED',
+    'probe shares production network namespace': 'PROBE_SHARED_NETWORK',
+    'probe has external network interfaces': 'PROBE_EXTERNAL_LINKS',
+    'probe has external network routes': 'PROBE_EXTERNAL_ROUTES',
+    'probe process unavailable': 'PROBE_PROCESS_UNAVAILABLE',
+    'service not active': 'RUNTIME_NOT_ACTIVE',
+    'service target mismatch': 'RUNTIME_TARGET_MISMATCH',
+    'service process mismatch': 'RUNTIME_PROCESS_MISMATCH',
+    'probe process changed': 'PROBE_PROCESS_CHANGED',
+    'ambiguous production listener': 'RUNTIME_LISTENER_AMBIGUOUS',
+    'listener outside release service': 'RUNTIME_LISTENER_OUTSIDE_SERVICE',
+    'runtime configuration drift': 'RUNTIME_CONFIG_DRIFT',
+    'unsafe effective production mode': 'RUNTIME_MODE_UNSAFE',
+    'release health verification failed': 'HEALTH_UNAVAILABLE',
+    'invalid source directory': 'SOURCE_INVALID',
+    'source symlinks are not supported': 'SOURCE_SYMLINK',
+    'source must contain only regular files': 'SOURCE_NOT_REGULAR',
+    'source tree is empty': 'SOURCE_EMPTY',
+    'invalid dependency manifest': 'DEPENDENCY_MANIFEST_INVALID',
+    'source or dependency transition lacks exact compatibility review': 'SOURCE_TRANSITION_UNREVIEWED',
+    'runtime path must be canonical': 'RUNTIME_PATH_INVALID',
+    'unsafe runtime directory': 'RUNTIME_DIRECTORY_UNSAFE',
+    'unsafe existing deployment lock': 'LOCK_UNSAFE',
+    'shared deployment lock identity changed': 'LOCK_CHANGED',
+    'probe state unavailable': 'PROBE_STATE_UNAVAILABLE',
+    'unsafe rehearsal cleanup': 'CLEANUP_PATH_UNSAFE',
+    'rehearsal directory identity changed': 'CLEANUP_IDENTITY_CHANGED',
+    'unexpected rehearsal cleanup entry': 'CLEANUP_ENTRY_UNEXPECTED',
+    'rehearsal cleanup entry changed': 'CLEANUP_ENTRY_CHANGED',
+    'candidate build missing': 'BUILD_MISSING',
+    'diagnostic unit already exists': 'PROBE_UNIT_EXISTS',
+    'WAL requires existing regular sidecars': 'SOURCE_WAL_SIDECARS_UNSAFE',
+    'probe namespace changed': 'PROBE_NAMESPACE_CHANGED',
+    'probe stop not verified': 'PROBE_STOP_UNVERIFIED',
+    'candidate rehearsal changed schema or data; separate migration review required': 'FINGERPRINT_MUTATION',
+    'unsupported release arguments': 'ARGUMENTS_INVALID',
+    'rehearsal entrypoint mismatch': 'MODE_MISMATCH',
+    'invalid diagnostic run identity': 'RUN_ID_INVALID',
+    'root host execution required': 'EXECUTION_USER_INVALID',
+    'invalid commit pin': 'COMMIT_PIN_INVALID',
+    'invalid receipt pin': 'RECEIPT_PIN_INVALID',
+    'invalid candidate directory': 'CANDIDATE_PATH_INVALID',
+    'candidate SHA mismatch': 'CANDIDATE_SHA_MISMATCH',
+    'current release must be a symlink for code-only rollback': 'LIVE_POINTER_INVALID',
+    'rollback release missing': 'ROLLBACK_MISSING',
+    'live SHA or marker path mismatch': 'LIVE_MARKER_MISMATCH',
+    'unsupported environment file': 'ENV_FILE_INVALID',
+    'expected unlocked staff and paused bookings': 'PROTECTION_FLAGS_MISMATCH',
+    'unsafe production mode': 'PRODUCTION_MODE_UNSAFE',
+    'database must be stable and outside release directories': 'DATABASE_PATH_INVALID',
+    'legacy import would mutate data': 'LEGACY_IMPORT_PRESENT',
+    'database or health implementation requires separate review': 'DATABASE_IMPLEMENTATION_CHANGED',
+    'encrypted archive pin mismatch': 'ARCHIVE_PIN_MISMATCH',
+    'backup status path invalid': 'BACKUP_STATUS_PATH_INVALID',
+    'encrypted backup mismatch': 'ARCHIVE_MISMATCH',
+    'environment changed during release': 'ENV_CHANGED',
+    'receipt changed during release': 'RECEIPT_CHANGED',
+    'encrypted backup changed during release': 'ARCHIVE_CHANGED',
+    'live release drifted during preparation': 'LIVE_RELEASE_CHANGED',
+}
+
+
+class RehearsalDeadline(BaseException):
+    # Must escape health's OSError/ValueError retry, unlike TimeoutError.
+    pass
+
+
+class RehearsalInterrupted(BaseException):
+    pass
+
+
+def release_interrupted(report):
+    if report is None:
+        raise RuntimeError('release interrupted')
+    raise RehearsalInterrupted()
+
+
+class RehearsalReport:
+    """Only fixed codes leave the host; captured commands and exceptions never do."""
+    def __init__(self):
+        self.stage = 'PREFLIGHT'
+        self.failure = None
+        self.cleanup = True
+        self.safe_to_remove = True
+        self.deadline = time.monotonic() + 300
+
+    def fail(self, error):
+        if self.failure is None:
+            code = ('TIMEOUT' if isinstance(error, (RehearsalDeadline, TimeoutError, subprocess.TimeoutExpired)) else
+                    'COMMAND_FAILED' if isinstance(error, subprocess.CalledProcessError) else
+                    REHEARSAL_GUARD_CODES.get(error.args[0], 'CHECK_FAILED')
+                    if isinstance(error, ValueError) and len(error.args) == 1 and type(error.args[0]) is str else
+                    'INTERRUPTED' if isinstance(error, (RehearsalInterrupted, KeyboardInterrupt, SystemExit)) else
+                    'IO_FAILED' if isinstance(error, OSError) else
+                    'DATABASE_FAILED' if isinstance(error, sqlite3.Error) else 'INTERNAL_FAILED')
+            self.failure = {'stage': self.stage, 'error': code}
+
+    def emit(self):
+        print(json.dumps({'schema': 'bubblewash-rehearsal/v1', 'ok': self.failure is None,
+                          'stage': self.failure['stage'] if self.failure else 'COMPLETE',
+                          'error': self.failure['error'] if self.failure else 'NONE',
+                          'cleanup': self.cleanup, 'activationAttempted': False}), flush=True)
+
+
+def resume_rehearsal_deadline(report):
+    if report is not None:
+        signal.setitimer(signal.ITIMER_REAL, max(0.001, report.deadline - time.monotonic()))
+
+
+def rehearsal_stage(report, stage):
+    if report is not None:
+        report.stage = stage
+
+
+def probe_state(unit):
+    # A --collect unit may disappear after stop. Accept only explicit unloaded
+    # properties, never a failed/unparseable systemctl request as proof of stop.
+    result = subprocess.run(['systemctl', 'show', unit,
+                             '--property=LoadState,ActiveState,MainPID'],
+                            capture_output=True, timeout=10, check=False)
+    require(result.returncode in (0, 1), 'probe state unavailable')
+    props = parse(result.stdout)
+    require(props.get('LoadState') in ('loaded', 'not-found') and
+            props.get('ActiveState') in ('active', 'activating', 'deactivating', 'inactive', 'failed') and
+            re.fullmatch(r'[0-9]+', props.get('MainPID', '')), 'probe state unavailable')
+    require(result.returncode == 0 or props.get('LoadState') == 'not-found', 'probe state unavailable')
+    return props
+
+
+def probe_stopped(props):
+    return props.get('ActiveState') in ('inactive', 'failed') and props.get('MainPID') == '0'
+
+
+def remove_rehearsal_directory(directory, identity, owner):
+    """Delete only our stopped probe's private inode; never follow replacements."""
+    path = Path(directory)
+    require(path.parent == RUNTIME and path.name.startswith('release-rehearsal-') and
+            path.resolve(strict=True) == path and not path.is_symlink(), 'unsafe rehearsal cleanup')
+    parent = os.open(RUNTIME, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    root = None
+    try:
+        root = os.open(path.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        current = os.fstat(root)
+        require(stat.S_ISDIR(current.st_mode) and current.st_uid == owner.pw_uid and
+                current.st_gid == owner.pw_gid and not current.st_mode & 0o077 and
+                (current.st_dev, current.st_ino) == identity, 'rehearsal directory identity changed')
+        # Bounded leaf-only cleanup. Unexpected contents are retained, never
+        # recursively traversed. Validate every entry before deleting any.
+        allowed = {'rehearsal.sqlite', 'rehearsal.sqlite-wal', 'rehearsal.sqlite-shm', 'rehearsal.sqlite-journal'}
+        entries = {}
+        with os.scandir(root) as scan:
+            for entry in scan:
+                require(entry.name in allowed and len(entries) < len(allowed), 'unexpected rehearsal cleanup entry')
+                item = entry.stat(follow_symlinks=False)
+                require(stat.S_ISREG(item.st_mode) and item.st_nlink == 1 and
+                        item.st_uid in (0, owner.pw_uid) and item.st_gid in (0, owner.pw_gid),
+                        'unexpected rehearsal cleanup entry')
+                entries[entry.name] = (item.st_dev, item.st_ino)
+        for name, identity_before in entries.items():
+            item = os.stat(name, dir_fd=root, follow_symlinks=False)
+            require((item.st_dev, item.st_ino) == identity_before and stat.S_ISREG(item.st_mode),
+                    'rehearsal cleanup entry changed')
+            os.unlink(name, dir_fd=root)
+        named = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        require((named.st_dev, named.st_ino) == identity and stat.S_ISDIR(named.st_mode),
+                'rehearsal directory identity changed')
+        os.rmdir(path.name, dir_fd=parent)
+    finally:
+        if root is not None:
+            os.close(root)
+        os.close(parent)
+
+
+@contextmanager
+def rehearsal_directory(owner, report, unit):
+    if report is None:
+        with tempfile.TemporaryDirectory(prefix='release-rehearsal-', dir=RUNTIME) as directory:
+            os.chown(directory, owner.pw_uid, owner.pw_gid)
+            yield directory
+        return
+    prefix = 'release-rehearsal-' + unit.removeprefix('bubblewash-rehearsal-') + '-'
+    directory = tempfile.mkdtemp(prefix=prefix, dir=RUNTIME)
+    report.cleanup = False
+    os.chown(directory, owner.pw_uid, owner.pw_gid)
+    metadata = Path(directory).lstat()
+    identity = (metadata.st_dev, metadata.st_ino)
+    try:
+        yield directory
+    except BaseException as error:
+        report.fail(error)
+        raise
+    finally:
+        # Deadline cannot interrupt our bounded stop/cleanup after expiring.
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        if report.safe_to_remove:
+            rehearsal_stage(report, 'CLEANUP')
+            try:
+                remove_rehearsal_directory(directory, identity, owner)
+                report.cleanup = True
+            except BaseException as error:
+                report.fail(error)
+                raise
+        resume_rehearsal_deadline(report)
+
+
+def rehearse(candidate, values, db, status_path, owner, unit, report=None):
+    rehearsal_stage(report, 'BUILD_ARTIFACT')
+    require((candidate / '.next/BUILD_ID').is_file(), 'candidate build missing')
+    if report is not None:
+        rehearsal_stage(report, 'PROBE_ABSENT')
+        state = probe_state(unit + '-probe.service')
+        require(state['LoadState'] == 'not-found' and probe_stopped(state), 'diagnostic unit already exists')
+    rehearsal_stage(report, 'SNAPSHOT')
+    with rehearsal_directory(owner, report, unit) as directory:
+        snapshot = Path(directory) / 'rehearsal.sqlite'
+        # Consistent backup includes committed WAL. No source SQL writes or
+        # migrations; normal source WAL/SHM read coordination may still occur.
+        with db.open('rb') as handle:
+            header = handle.read(100)
+        if header[18:20] == b'\x02\x02':
+            for suffix in ('-wal', '-shm'):
+                sidecar = Path(str(db) + suffix)
+                require(sidecar.is_file() and not sidecar.is_symlink(), 'WAL requires existing regular sidecars')
+        source = target = None
+        try:
+            source = sqlite3.connect(db.as_uri() + '?mode=ro', uri=True)
+            target = sqlite3.connect(snapshot)
+            source.execute('PRAGMA query_only=ON')
+            if report is None:
+                source.backup(target)
+            else:
+                def backup_progress(*_):
+                    if time.monotonic() >= report.deadline:
+                        raise RehearsalDeadline()
+                source.backup(target, pages=128, progress=backup_progress, sleep=0.1)
+        finally:
+            if target is not None:
+                target.close()
+            if source is not None:
+                source.close()
+        os.chmod(snapshot, 0o600)
+        os.chown(snapshot, owner.pw_uid, owner.pw_gid)
+        rehearsal_stage(report, 'FINGERPRINT_BEFORE')
+        before = database_fingerprint(snapshot)
+        try:
+            rehearsal_stage(report, 'PROBE_START')
+            if report is not None:
+                report.safe_to_remove = False  # launch outcome may be uncertain
+            command(['systemd-run', '--quiet', '--collect', '--unit=' + unit + '-probe', '--property=User=ubuntu',
+                     '--property=Group=ubuntu', '--property=WorkingDirectory=' + str(candidate),
+                     '--property=EnvironmentFile=' + str(ENV), '--property=RuntimeMaxSec=180',
+                     '--property=ProtectSystem=strict', '--property=ProtectHome=tmpfs',
+                     '--property=BindReadOnlyPaths=' + str(candidate) + ' ' + str(status_path),
+                     '--property=BindPaths=' + directory, '--property=ReadWritePaths=' + directory,
+                     '--property=StandardOutput=null', '--property=StandardError=null', '--property=PrivateTmp=true',
+                     '--property=NoNewPrivileges=true', '--property=PrivateNetwork=true',
+                     *(['--property=KillMode=control-group'] if report is not None else []),
+                     '/usr/bin/env', 'NODE_ENV=production', 'BUBBLEWASH_DATABASE_PATH=' + str(snapshot),
+                     str(candidate / 'node_modules/.bin/next'), 'start', '-H', '127.0.0.1', '-p', '3001'])
+            rehearsal_stage(report, 'NAMESPACE_BEFORE')
+            probe_pid = verify_private_network(unit + '-probe.service', candidate)
+            rehearsal_stage(report, 'HEALTH')
+            health(3001, probe_pid)
+            probe_values = {**values, 'NODE_ENV': 'production', 'BUBBLEWASH_DATABASE_PATH': str(snapshot)}
+            rehearsal_stage(report, 'RUNTIME_BEFORE')
+            check_runtime(candidate, probe_values, unit + '-probe.service', 3001, False, probe_pid)
+            routes = (('/', 'HOME'), ('/services', 'SERVICES'), ('/book', 'BOOK'), ('/track', 'TRACK'),
+                      ('/manage', 'MANAGE'), ('/early-access', 'EARLY_ACCESS'), ('/api/ready', 'READY'))
+            for path, label in routes:
+                rehearsal_stage(report, 'ROUTE_' + label)
+                network_command(['curl', '--fail', '--silent', '--max-time', '15', '--output', '/dev/null',
+                                 'http://127.0.0.1:3001' + path], probe_pid)
+            rehearsal_stage(report, 'RUNTIME_AFTER')
+            check_runtime(candidate, probe_values, unit + '-probe.service', 3001, False, probe_pid)
+            rehearsal_stage(report, 'NAMESPACE_AFTER')
+            require(verify_private_network(unit + '-probe.service', candidate) == probe_pid, 'probe namespace changed')
+        except BaseException as error:
+            if report is not None:
+                report.fail(error)
+            raise
+        finally:
+            rehearsal_stage(report, 'PROBE_STOP')
+            if report is not None:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+            try:
+                command(['systemctl', 'stop', unit + '-probe.service'])
+                if report is not None:
+                    # A failed/uncertain stop never authorizes deletion, even
+                    # if a later observation happens to say not-found.
+                    stopped = probe_stopped(probe_state(unit + '-probe.service'))
+                    require(stopped, 'probe stop not verified')
+                    report.safe_to_remove = True
+            except BaseException as error:
+                if report is not None:
+                    report.fail(error)
+                raise
+        resume_rehearsal_deadline(report)
+        rehearsal_stage(report, 'FINGERPRINT_AFTER')
+        require(database_fingerprint(snapshot) == before, 'candidate rehearsal changed schema or data; separate migration review required')
+
+
+class ReleaseArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise ValueError('unsupported release arguments')
+
+
+def main(lock_unchanged, report=None):
+    parser = ReleaseArgumentParser()
     for key in ('candidate', 'sha', 'expected-live', 'backup-sha256', 'receipt-run', 'store-sha', 'store-id'):
         parser.add_argument('--' + key, required=True)
+    parser.add_argument('--rehearsal-only', action='store_true')
+    parser.add_argument('--run-id')
+    parser.add_argument('--run-attempt')
     args = parser.parse_args()
+    require(args.rehearsal_only == (report is not None), 'rehearsal entrypoint mismatch')
+    if args.rehearsal_only:
+        require(re.fullmatch(r'[1-9][0-9]{0,19}', args.run_id or '') and
+                re.fullmatch(r'[1-9][0-9]{0,5}', args.run_attempt or ''), 'invalid diagnostic run identity')
+    else:
+        require(args.run_id is None and args.run_attempt is None, 'diagnostic arguments require rehearsal mode')
     require(os.geteuid() == 0, 'root host execution required')
     require(all(re.fullmatch(r'[a-f0-9]{40}', v) for v in (args.sha, args.expected_live, args.store_sha)), 'invalid commit pin')
     require(re.fullmatch(r'[a-f0-9]{64}', args.backup_sha256) and re.fullmatch(r'[1-9][0-9]*', args.receipt_run) and
@@ -345,56 +676,6 @@ def main(lock_unchanged):
     health(3000)
     owner = pwd.getpwnam('ubuntu')
     unit = 'bubblewash-preserving-' + candidate.name
-    # Build without production EnvironmentFile or production secrets/database.
-    command(['systemd-run', '--quiet', '--wait', '--collect', '--pipe', '--unit=' + unit + '-build',
-             '--property=User=ubuntu', '--property=Group=ubuntu', '--property=WorkingDirectory=' + str(candidate),
-             '--property=RuntimeMaxSec=900', '--property=ProtectSystem=strict', '--property=ProtectHome=tmpfs',
-             '--property=BindPaths=' + str(candidate), '--property=ReadWritePaths=' + str(candidate),
-             '--property=PrivateTmp=true', '--property=NoNewPrivileges=true',
-             '/usr/bin/env', 'HOME=' + str(candidate), 'NEXT_TELEMETRY_DISABLED=1',
-             '/bin/bash', '-c', 'npm ci --no-audit --no-fund && npm run build && npm prune --omit=dev --no-audit --no-fund'], timeout=930)
-    require((candidate / '.next/BUILD_ID').is_file(), 'candidate build missing')
-    # Snapshot stays private on the VPS. No public artifact or key transfer.
-    with tempfile.TemporaryDirectory(prefix='release-rehearsal-', dir=RUNTIME) as directory:
-        os.chown(directory, owner.pw_uid, owner.pw_gid)
-        snapshot = Path(directory) / 'rehearsal.sqlite'
-        # SQLite's read-only backup API includes committed WAL. Never use immutable=1.
-        # Existing WAL shared-memory bookkeeping may be touched; no SQL writes or migration run on the source.
-        with db.open('rb') as handle:
-            header = handle.read(100)
-        if header[18:20] == b'\x02\x02':
-            for suffix in ('-wal', '-shm'):
-                sidecar = Path(str(db) + suffix)
-                require(sidecar.is_file() and not sidecar.is_symlink(), 'WAL requires existing regular sidecars')
-        with sqlite3.connect(db.as_uri() + '?mode=ro', uri=True) as source, sqlite3.connect(snapshot) as target:
-            source.execute('PRAGMA query_only=ON')
-            source.backup(target)
-        os.chmod(snapshot, 0o600)
-        os.chown(snapshot, owner.pw_uid, owner.pw_gid)
-        before = database_fingerprint(snapshot)
-        try:
-            command(['systemd-run', '--quiet', '--collect', '--unit=' + unit + '-probe', '--property=User=ubuntu',
-                     '--property=Group=ubuntu', '--property=WorkingDirectory=' + str(candidate),
-                     '--property=EnvironmentFile=' + str(ENV), '--property=RuntimeMaxSec=180',
-                     '--property=ProtectSystem=strict', '--property=ProtectHome=tmpfs',
-                     '--property=BindReadOnlyPaths=' + str(candidate) + ' ' + str(status_path),
-                     '--property=BindPaths=' + directory, '--property=ReadWritePaths=' + directory,
-                     '--property=StandardOutput=null', '--property=StandardError=null', '--property=PrivateTmp=true',
-                     '--property=NoNewPrivileges=true', '--property=PrivateNetwork=true',
-                     '/usr/bin/env', 'NODE_ENV=production', 'BUBBLEWASH_DATABASE_PATH=' + str(snapshot),
-                     str(candidate / 'node_modules/.bin/next'), 'start', '-H', '127.0.0.1', '-p', '3001'])
-            probe_pid = verify_private_network(unit + '-probe.service', candidate)
-            health(3001, probe_pid)
-            probe_values = {**values, 'NODE_ENV': 'production', 'BUBBLEWASH_DATABASE_PATH': str(snapshot)}
-            check_runtime(candidate, probe_values, unit + '-probe.service', 3001, False, probe_pid)
-            for path in ('/', '/services', '/book', '/track', '/manage', '/early-access', '/api/ready'):
-                network_command(['curl', '--fail', '--silent', '--max-time', '15', '--output', '/dev/null',
-                                 'http://127.0.0.1:3001' + path], probe_pid)
-            check_runtime(candidate, probe_values, unit + '-probe.service', 3001, False, probe_pid)
-            require(verify_private_network(unit + '-probe.service', candidate) == probe_pid, 'probe namespace changed')
-        finally:
-            command(['systemctl', 'stop', unit + '-probe.service'])
-        require(database_fingerprint(snapshot) == before, 'candidate rehearsal changed schema or data; separate migration review required')
 
     def unchanged():
         lock_unchanged()
@@ -406,6 +687,29 @@ def main(lock_unchanged):
         require(archive.is_file() and not archive.is_symlink() and archive.stat().st_size == receipt['size'] and
                 digest(archive) == args.backup_sha256, 'encrypted backup changed during release')
         verify_receipt(receipt, json.loads(status_path.read_bytes()), time.time(), args.receipt_run, args.store_sha, int(args.store_id))
+
+    if args.rehearsal_only:
+        # This branch returns before any build, activation, or marker writer is
+        # defined/called. Its only service mutation is its own transient probe.
+        unit = 'bubblewash-rehearsal-' + args.run_id + '-' + args.run_attempt
+        rehearse(candidate, values, db, status_path, owner, unit, report)
+        rehearsal_stage(report, 'UNCHANGED')
+        unchanged()
+        require(CURRENT.resolve(strict=True) == current and (RUNTIME / 'current-release').read_bytes() == old_marker,
+                'live release drifted during preparation')
+        check_runtime(current, values)
+        health(3000)
+        lock_unchanged()
+        return
+    # Build without production EnvironmentFile or production secrets/database.
+    command(['systemd-run', '--quiet', '--wait', '--collect', '--pipe', '--unit=' + unit + '-build',
+             '--property=User=ubuntu', '--property=Group=ubuntu', '--property=WorkingDirectory=' + str(candidate),
+             '--property=RuntimeMaxSec=900', '--property=ProtectSystem=strict', '--property=ProtectHome=tmpfs',
+             '--property=BindPaths=' + str(candidate), '--property=ReadWritePaths=' + str(candidate),
+             '--property=PrivateTmp=true', '--property=NoNewPrivileges=true',
+             '/usr/bin/env', 'HOME=' + str(candidate), 'NEXT_TELEMETRY_DISABLED=1',
+             '/bin/bash', '-c', 'npm ci --no-audit --no-fund && npm run build && npm prune --omit=dev --no-audit --no-fund'], timeout=930)
+    rehearse(candidate, values, db, status_path, owner, unit)
 
     def write_marker(content):
         marker = RUNTIME / 'current-release'
@@ -440,14 +744,29 @@ def main(lock_unchanged):
 
 
 if __name__ == '__main__':
+    report = RehearsalReport() if '--rehearsal-only' in sys.argv else None
     def interrupted(*_):
-        raise RuntimeError('release interrupted')
+        release_interrupted(report)
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGHUP, interrupted)
     try:
+        if report is not None:
+            def deadline(*_):
+                raise RehearsalDeadline()
+            signal.signal(signal.SIGALRM, deadline)
+            signal.setitimer(signal.ITIMER_REAL, 300)
         with deployment_lock(RUNTIME, pwd.getpwnam('ubuntu').pw_uid) as lock_unchanged:
-            main(lock_unchanged)
-    except BaseException:
-        # Do not leak configuration, SQLite rows, or captured process diagnostics.
-        print('Preserving deployment failed closed; inspect the release pointer and service before any retry.', flush=True)
+            main(lock_unchanged, report)
+        if report is not None:
+            report.emit()
+    except BaseException as error:
+        if report is not None:
+            report.fail(error)
+            report.emit()
+        else:
+            # Never leak configuration, rows, or captured process diagnostics.
+            print('Preserving deployment failed closed; inspect the release pointer and service before any retry.', flush=True)
         raise SystemExit(1)
+    finally:
+        if report is not None:
+            signal.setitimer(signal.ITIMER_REAL, 0)
