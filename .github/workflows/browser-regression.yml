@@ -1,0 +1,48 @@
+name: Browser workflow regression
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: browser-regression-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED: 'false'
+      NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED: 'false'
+      NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install official test browsers
+        run: npx playwright install --with-deps chromium webkit
+      - name: Verify fixture egress guard
+        run: node --test tests/browser-egress.test.mjs
+      - name: Build production runtime for synthetic test data
+        run: npm run build
+      - name: Verify synthetic edge, logins, cookies, redirects and script assets
+        run: node tests/browser/fixture-smoke.mjs
+      - name: Run four-role journeys at mobile and desktop sizes
+        run: npm run test:browser
+      - name: Preserve synthetic browser screenshots for review
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: synthetic-browser-screenshots
+          path: test-results/browser/**/*.png
+          if-no-files-found: ignore
+          retention-days: 7

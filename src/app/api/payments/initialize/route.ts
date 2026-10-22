@@ -5,7 +5,8 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { appendSubmissionRecord, findSubmissionRecordById } from "@/lib/data-store";
 import { dispatchSubmissionNotifications } from "@/lib/notifications";
-import { initializePaystackCheckout, validateCheckoutInput } from "@/lib/payments";
+import { CheckoutInitializationError, initializePaystackCheckout, validateCheckoutInput, validCheckoutUrl } from "@/lib/payments";
+import { verifyPaymentReference } from "@/lib/payment-reconciliation";
 import { plans, type PlanName } from "@/lib/pricing";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { sameOriginJsonGuard } from "@/lib/security";
@@ -37,6 +38,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Too many checkout attempts. Try again shortly." }, { status: 429 });
   }
 
+  let releaseLock: (() => void) | undefined;
   try {
     const body = await readCheckoutPayload(request);
     if (!isObject(body)) {
@@ -48,17 +50,43 @@ export async function POST(request: NextRequest) {
     }
     const session = decodeCustomerSession(request.cookies.get(customerSessionCookieName)?.value);
     if (!session || session.orderId !== orderId) return NextResponse.json({ ok: false, error: "Verify your booking before paying." }, { status: 401 });
-    const invoice = invoiceForOrder(orderId);
+    const db = operationalDatabase();
+    db.exec("CREATE TABLE IF NOT EXISTS payment_initialization_locks (order_id TEXT PRIMARY KEY, created_at TEXT NOT NULL)");
+    const lockTime = new Date().toISOString();
+    const acquired = db.transaction(() => {
+      db.prepare("DELETE FROM payment_initialization_locks WHERE order_id = ? AND created_at < ?").run(orderId, new Date(Date.now() - 60_000).toISOString());
+      return db.prepare("INSERT OR IGNORE INTO payment_initialization_locks VALUES (?, ?)").run(orderId, lockTime).changes;
+    }).immediate();
+    if (!acquired) return NextResponse.json({ ok: false, error: "Checkout is already being prepared. Wait a moment and try again." }, { status: 409 });
+    releaseLock = () => { db.prepare("DELETE FROM payment_initialization_locks WHERE order_id = ? AND created_at = ?").run(orderId, lockTime); };
+    const ownsLock = () => Boolean(db.prepare("SELECT 1 FROM payment_initialization_locks WHERE order_id = ? AND created_at = ?").get(orderId, lockTime)) && Date.now() - Date.parse(lockTime) < 60_000;
+    let invoice = invoiceForOrder(orderId);
     if (!invoice || invoice.balanceMinor <= 0) return NextResponse.json({ ok: false, error: "No outstanding invoice is ready for payment." }, { status: 409 });
-    const existing = operationalDatabase().prepare("SELECT data FROM submissions WHERE json_extract(data, '$.submissionType') = 'checkout-request' AND json_extract(data, '$.orderId') = ? ORDER BY created_at DESC LIMIT 1").get(orderId) as { data: string } | undefined;
-    if (existing) {
-      const prior = JSON.parse(existing.data);
-      const terminal = operationalDatabase().prepare("SELECT 1 FROM payment_verifications WHERE reference = ? AND status IN ('success', 'failed', 'abandoned', 'reversed')").get(prior.paymentReference);
+    const existing = db.prepare("SELECT data FROM submissions WHERE json_extract(data, '$.submissionType') = 'checkout-request' AND json_extract(data, '$.orderId') = ? ORDER BY created_at DESC, rowid DESC").all(orderId) as { data: string }[];
+    let reusableCheckout: { reference: string; authorizationUrl: string; amountMinor: number } | undefined;
+    for (const row of existing) {
+      const prior = JSON.parse(row.data);
+      if (prior.paymentStatus === "Checkout initialization failed") continue;
+      let terminal = db.prepare("SELECT 1 FROM payment_verifications WHERE reference = ? AND status IN ('success', 'failed', 'abandoned', 'reversed')").get(prior.paymentReference);
+      if (!terminal && !validCheckoutUrl(prior.authorizationUrl) && typeof prior.paymentReference === "string") {
+        await verifyPaymentReference(prior.paymentReference);
+        terminal = db.prepare("SELECT 1 FROM payment_verifications WHERE reference = ? AND status IN ('success', 'failed', 'abandoned', 'reversed')").get(prior.paymentReference);
+      }
       if (!terminal) {
-        if (prior.paymentAmountMinor === invoice.balanceMinor && prior.authorizationUrl) return NextResponse.json({ ok: true, payment: { authorizationUrl: prior.authorizationUrl } });
-        return NextResponse.json({ ok: false, error: "An earlier payment attempt is still being reconciled. Check its status before starting another." }, { status: 409 });
+        if (!reusableCheckout && prior.paymentAmountMinor === invoice.balanceMinor && validCheckoutUrl(prior.authorizationUrl)) {
+          reusableCheckout = { reference: prior.paymentReference, authorizationUrl: prior.authorizationUrl, amountMinor: prior.paymentAmountMinor };
+          continue;
+        }
+        return NextResponse.json({ ok: false, reference: prior.paymentReference, error: "An earlier payment attempt is still being reconciled. Check its status before starting another." }, { status: 409 });
       }
     }
+    invoice = invoiceForOrder(orderId);
+    if (!invoice || invoice.balanceMinor <= 0) return NextResponse.json({ ok: false, error: "No outstanding invoice is ready for payment." }, { status: 409 });
+    if (reusableCheckout) {
+      if (reusableCheckout.amountMinor !== invoice.balanceMinor) return NextResponse.json({ ok: false, error: "The invoice balance changed. Reconcile the earlier checkout before trying again." }, { status: 409 });
+      return NextResponse.json({ ok: true, payment: { reference: reusableCheckout.reference, authorizationUrl: reusableCheckout.authorizationUrl } });
+    }
+    if (!ownsLock()) throw new Error("Checkout preparation expired. Try again.");
     const booking = findSubmissionRecordById(orderId);
     if (!booking || text(booking.data.submissionType) !== "pickup-booking") {
       return NextResponse.json({ ok: false, error: "That reference is not linked to a customer booking." }, { status: 404 });
@@ -82,13 +110,18 @@ export async function POST(request: NextRequest) {
     if (validationError) return NextResponse.json({ ok: false, error: validationError }, { status: 400 });
 
     const paymentReference = `BW-PAY-${randomUUID().replaceAll("-", "").slice(0, 18).toUpperCase()}`;
-    const db = operationalDatabase();
-    db.exec("CREATE TABLE IF NOT EXISTS payment_initialization_locks (order_id TEXT PRIMARY KEY, created_at TEXT NOT NULL)");
-    if (!db.prepare("INSERT OR IGNORE INTO payment_initialization_locks VALUES (?, ?)").run(orderId, new Date().toISOString()).changes) return NextResponse.json({ ok: false, error: "Checkout is already being prepared. Wait a moment and try again." }, { status: 409 });
     const pendingRecord = { id: `BW-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`, createdAt: new Date().toISOString(), source: "bubblewash-paystack-checkout", data: { submissionType: "checkout-request", orderId, paymentReference, paymentAmountMinor: invoice.balanceMinor, paymentCurrency: "GHS", paymentStatus: "Checkout preparing", name: input.name, email: input.email, phone: input.phone, company: input.company } };
     appendSubmissionRecord(pendingRecord);
     let checkout;
-    try { checkout = await initializePaystackCheckout(input, paymentReference); } finally { db.prepare("DELETE FROM payment_initialization_locks WHERE order_id = ?").run(orderId); }
+    try {
+      checkout = await initializePaystackCheckout(input, paymentReference);
+      if (!ownsLock()) throw new Error("Checkout preparation expired. Try again.");
+    } catch (error) {
+      const paymentStatus = error instanceof CheckoutInitializationError && error.retryable
+        ? "Checkout initialization failed" : "Checkout reconciliation required";
+      db.prepare("UPDATE submissions SET data = json_set(data, '$.paymentStatus', ?) WHERE id = ?").run(paymentStatus, pendingRecord.id);
+      throw error;
+    }
     const record = {
       id: pendingRecord.id,
       createdAt: new Date().toISOString(),
@@ -113,7 +146,9 @@ export async function POST(request: NextRequest) {
     };
 
     db.prepare("UPDATE submissions SET data = ? WHERE id = ?").run(JSON.stringify(record.data), pendingRecord.id);
-    await dispatchSubmissionNotifications(record);
+    // The checkout remains usable even when a secondary notification fails.
+    try { await dispatchSubmissionNotifications(record); }
+    catch { console.error("Bubble Wash checkout notification failed"); }
     return NextResponse.json({
       ok: true,
       message: "Secure checkout created. Complete payment on the protected Paystack page.",
@@ -125,5 +160,7 @@ export async function POST(request: NextRequest) {
     console.error("Bubble Wash checkout initialization failed", { message });
     const status = message.includes("PAYSTACK_SECRET_KEY") ? 503 : 502;
     return NextResponse.json({ ok: false, error: status === 503 ? "Online checkout is temporarily unavailable." : "Unable to initialize checkout." }, { status });
+  } finally {
+    releaseLock?.();
   }
 }

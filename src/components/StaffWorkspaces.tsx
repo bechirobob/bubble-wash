@@ -6,6 +6,7 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import { Activity as ActivityIcon, ClipboardList, Gauge, HeartPulse, History, LayoutDashboard, Map as MapIcon, MessagesSquare, Route as RouteIcon, Users } from "lucide-react";
 import type { StaffRole } from "@/lib/auth";
 import { automationActionsForOrder, paymentReadyForCloseout } from "@/lib/order-workflow";
+import { stageCountdown } from "@/lib/stage-countdown";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import { BrandLink } from "@/components/BrandLink";
 
@@ -426,27 +427,27 @@ function StageCountdown({ order }: { order: OrderSummary }) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+    let timer: number | undefined;
+    const tick = () => {
+      const current = Date.now();
+      const next = stageCountdown(order.updatedAt, order.stageTimer.targetMinutes, current);
+      setNow(current);
+      if (next.state !== "running" && timer !== undefined) window.clearInterval(timer);
+      return next.state;
+    };
+    if (tick() === "running") timer = window.setInterval(tick, 1000);
+    return () => { if (timer !== undefined) window.clearInterval(timer); };
+  }, [order.updatedAt, order.stageTimer.targetMinutes]);
 
-  if (!order.stageTimer.targetMinutes) {
-    return <div className="stageClock timer-paused" aria-label="Phase timer complete"><span>Phase timer</span><b>Complete</b><small>{workflowPhaseLabel(order.workflowStage.key)} · {order.priority}</small></div>;
-  }
-
-  const startedAt = new Date(order.updatedAt).getTime();
-  const targetMs = order.stageTimer.targetMinutes * 60_000;
-  const remainingSeconds = Math.ceil((startedAt + targetMs - now) / 1000);
-  const overdue = remainingSeconds < 0;
-  const dueSoon = !overdue && remainingSeconds <= 20 * 60;
-  const tone = overdue ? "breached" : dueSoon ? "due" : "ok";
-  const label = overdue ? "Overdue" : "SLA";
-  const duration = formatDuration(Math.abs(remainingSeconds));
+  const countdown = stageCountdown(order.updatedAt, order.stageTimer.targetMinutes, now);
+  const value = countdown.state === "running" ? formatDuration(countdown.remainingSeconds)
+    : countdown.state === "overdue" ? "Overdue"
+    : countdown.state === "complete" ? "Complete" : "Unavailable";
 
   return (
-    <div className={`stageClock countdown timer-${tone}`} aria-label={`${label} ${duration}`}>
-      <span>{label === "SLA" ? "Phase timer" : label}</span>
-      <b>{duration}</b>
+    <div className={`stageClock countdown timer-${countdown.tone}`} aria-label={`Phase timer ${value}`}>
+      <span>Phase timer</span>
+      <b>{value}</b>
       <small>{workflowPhaseLabel(order.workflowStage.key)} · {order.priority}</small>
     </div>
   );
@@ -823,18 +824,18 @@ function AutomatedOrderActions({ order, role, userName, onSaved }: { order: Orde
   return (
     <div className="automationPanel">
       <div className="automationSummary">
-        <b>{actions.length ? "Available actions" : "No action"}</b>
-        <span>{actions.length ? `${actions.length} available` : "Waiting"}</span>
+        <b>{actions.length ? "Available actions" : order.workflowStage.key === "closed" ? "Order closed" : order.workflowStage.key === "cancelled" ? "Order cancelled" : "No action available"}</b>
+        <span>{actions.length ? `${actions.length} available` : isClosedOrder(order) ? "No further action required." : "No action is currently available for this role."}</span>
       </div>
-      <div className="automationActions">
-        {actions.length ? actions.map((action, index) => <button className={`button ${index === 0 ? "primary" : "secondary"}`} disabled={Boolean(pendingLabel)} key={action.label} onClick={() => action.key === "vendor-decline-job" ? setDeclineOpen(true) : ["admin-schedule-pickup", "support-log-customer-contact", "admin-confirm-bank-transfer", "admin-approve-invoice", "vendor-log-intake", "vendor-mark-ready", "driver-mark-picked-up", "driver-drop-at-vendor", "driver-mark-delivered", "driver-update-eta", "driver-report-delay"].includes(action.key) ? setStructuredAction(action.key) : void run(action)} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>) : <span className="status">Waiting</span>}
-      </div>
+      {actions.length ? <div className="automationActions">
+        {actions.map((action, index) => <button className={`button ${index === 0 ? "primary" : "secondary"}`} disabled={Boolean(pendingLabel)} key={action.label} onClick={() => action.key === "vendor-decline-job" ? setDeclineOpen(true) : ["admin-schedule-pickup", "support-log-customer-contact", "admin-confirm-bank-transfer", "admin-approve-invoice", "vendor-log-intake", "vendor-mark-ready", "driver-mark-picked-up", "driver-drop-at-vendor", "driver-mark-delivered", "driver-update-eta", "driver-report-delay"].includes(action.key) ? setStructuredAction(action.key) : void run(action)} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>)}
+      </div> : null}
       {declineOpen ? <form className="declineReasonForm" onSubmit={(event) => { event.preventDefault(); const decline = actions.find((action) => action.key === "vendor-decline-job"); if (decline && declineReason.trim()) void run(decline, { reason: declineReason.trim() }); }}><label>Reason for admin reassignment<textarea value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} maxLength={300} placeholder="Capacity, machine issue, service mismatch, or timing conflict" required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={!declineReason.trim() || Boolean(pendingLabel)}>Confirm decline</button><button className="button secondary" type="button" onClick={() => { setDeclineOpen(false); setDeclineReason(""); }}>Cancel</button></div></form> : null}
       {structuredAction === "admin-schedule-pickup" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Confirmed pickup date<input type="date" name="confirmedPickupDate" required /></label><label>Confirmed pickup window<select name="confirmedPickupWindow" required>{["8:00–10:00", "10:00–12:00", "12:00–14:00", "14:00–16:00", "16:00–18:00"].map((window) => <option key={window}>{window}</option>)}</select></label><label>Scheduling note<textarea name="operatorNote" placeholder="Who confirmed the window and any access or collection instructions" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save pickup window</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "support-log-customer-contact" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Contact channel<select name="contactChannel" required><option>Phone call</option><option>Email</option></select></label><label>Outcome<select name="contactOutcome" required><option>Reached customer</option><option>No answer</option><option>Message left</option><option>Email sent</option><option>Follow-up required</option></select></label></div><label>Next follow-up<input name="nextFollowUpAt" type="datetime-local" required /></label><label>Operator note<textarea name="operatorNote" placeholder="What was discussed, promised, or left unresolved" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save contact log</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {["admin-confirm-bank-transfer", "admin-approve-invoice"].includes(structuredAction) ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>{structuredAction === "admin-approve-invoice" ? "Invoice number" : "Transfer reference"}<input name="paymentReference" maxLength={120} required /></label><label>Amount (GHS)<input name="paymentAmount" type="number" min="0.01" max="250000" step="0.01" inputMode="decimal" required /></label></div><label>{structuredAction === "admin-approve-invoice" ? "Approval date" : "Received date"}<input name="paymentReceivedAt" type="date" required /></label><label>Reconciliation note<textarea name="operatorNote" placeholder="Account checked, approver, payer name, or exception reviewed" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>{structuredAction === "admin-approve-invoice" ? "Save invoice approval" : "Confirm bank transfer"}</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "vendor-log-intake" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Bag tag<input name="bagTag" defaultValue={`${order.orderId}-BAG`} maxLength={120} required /></label><label>Bag/item count<input name="intakeBagCount" type="number" min="1" max="10000" step="1" required /></label></div><div className="two"><label>Verified received weight (kg)<input name="receivedWeightKg" required type="number" min="0.01" max="10000" step="0.01" inputMode="decimal" /></label><label>Intake condition<select name="intakeCondition" required><option>Count and condition matched</option><option>Stain or special care flagged</option><option>Count mismatch</option><option>Damage risk flagged</option></select></label></div><label>Intake note<textarea name="operatorNote" placeholder="Count check, visible condition, special care, or discrepancy" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm intake</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
-      {structuredAction === "vendor-mark-ready" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Ready bag/item count<input name="readyBagCount" type="number" min="1" max="10000" step="1" required /></label><label>Quality check<select name="qualityCheck" required><option>Count, finish, and packaging checked</option><option>Ready with noted exception</option></select></label></div><label>Dispatch note<textarea name="operatorNote" placeholder="Packaging, storage point, collection instructions, or exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Mark ready</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
+      {structuredAction === "vendor-mark-ready" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Ready bag/item count<input name="readyBagCount" type="number" min="1" max="10000" step="1" required /></label><label>Quality check<select name="qualityCheck" aria-describedby={`quality-check-help-${order.orderId}`} required><option value="Count, finish, and packaging checked">Checks complete</option><option value="Ready with noted exception">Noted exception</option></select><small id={`quality-check-help-${order.orderId}`}>Check count, finish, and packaging. Record any exception in the dispatch note.</small></label></div><label>Dispatch note<textarea name="operatorNote" placeholder="Packaging, storage point, collection instructions, or exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Mark ready</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "driver-mark-picked-up" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Collected bag/item count<input name="pickupBagCount" type="number" min="1" max="10000" step="1" required /></label><label>Customer handoff note<textarea name="operatorNote" placeholder="Who released the order, collection point, and any count or access exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm pickup</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "driver-drop-at-vendor" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Vendor recipient<input name="vendorRecipient" maxLength={160} required /></label><label>Handed-over bag/item count<input name="handoffBagCount" type="number" min="1" max="10000" step="1" required /></label></div><label>Vendor handoff note<textarea name="operatorNote" placeholder="Handoff point, time, recipient confirmation, or discrepancy" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm vendor handoff</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "driver-mark-delivered" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Recipient name<input name="recipientName" maxLength={160} required /></label><label>Returned bag/item count<input name="bagCount" type="number" min="1" max="10000" step="1" required /></label></div><label>Customer handoff code<input name="deliveryCode" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" required /></label><label>Handoff note<textarea name="operatorNote" placeholder="Where and to whom the order was handed over; note any exception" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Confirm delivery</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
@@ -1380,7 +1381,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
 
   return (
     <section className="staffContentSection sharedBoardSection" aria-busy={!hasLoaded}>
-      {role === "driver" && !selectedOrderId ? <DispatchBoard orders={orders} role="driver" basePath={basePath} hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={/unable/i.test(status) ? status : ""} embedded /> : null}
+      {role === "driver" && !selectedOrderId ? <details className="staffRouteDisclosure"><summary>Route map and stops</summary><DispatchBoard orders={orders} role="driver" basePath={basePath} hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={/unable/i.test(status) ? status : ""} embedded /></details> : null}
       {selectedOrderId ? selectedOrder ? <article className="staffDetailView orderDetail">
         <Link className="staffBackLink" href={basePath}>← Back to order list</Link>
         <header className="staffDetailHeader">
@@ -1454,7 +1455,7 @@ function PortalShell({ title, role, pageRole = role, userName, currentView, navi
     <main className="portalPage">
       <header className="staffTopbar">
         <BrandLink />
-        <div className="staffAccount"><span><strong>{userName}</strong><small>{title}</small></span><button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button></div>
+        <div className="staffAccount">{role === "admin" && pageRole !== "admin" ? <Link className="staffAdminHome" href="/admin">Admin home</Link> : null}<span><strong>{userName}</strong><small>{title}</small></span><button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button></div>
       </header>
       <nav className="staffSectionNav" aria-label={`${pageRole} workspace sections`}>
         {navigation.map((item) => {

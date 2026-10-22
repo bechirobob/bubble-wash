@@ -1,0 +1,31 @@
+name: Read-only Production Inventory
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  inventory:
+    if: github.repository == 'bechirobob/bubble-wash'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Connect to existing production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Read aggregate inventory without modifying production
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The existing service configuration supplies the exact database path.
+          # Never print or export configuration values to the CI runner.
+          cat scripts/inventory-stale-data.py | tailscale ssh root@hermes "bash -c 'set -a; source /home/ubuntu/.config/bubblewash/env; set +a; exec python3 - \"\$BUBBLEWASH_DATABASE_PATH\"'"

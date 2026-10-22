@@ -705,7 +705,7 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .staffOrderListHeader,
 .staffOrderRow {
   display: grid;
-  grid-template-columns: minmax(160px, 1.1fr) minmax(135px, .8fr) minmax(155px, 1fr) minmax(180px, 1.05fr) auto;
+  grid-template-columns: minmax(160px, 1.1fr) minmax(135px, .8fr) minmax(155px, 1fr) minmax(180px, 1.05fr) 7rem;
   align-items: center;
   gap: 24px;
 }
@@ -1707,4 +1707,71 @@ input, select, textarea { font-size: 1rem; }
   .selectedPlanDetails { grid-template-columns: 1fr; gap: 18px; }
   .estimateInputs { grid-template-columns: 1fr; gap: 18px; }
   .estimateWeight { max-width: 280px; }
+}
+
+/* Worker workspaces: compact shared rhythm, visible navigation and readable queues. */
+.portalPage .staffTopbar { margin-top: 8px; padding-bottom: 8px; gap: 16px; }
+.portalPage .staffAccount { min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: 8px 16px; }
+.portalPage .staffAccount > span { min-width: 0; }
+.portalPage .staffAccount strong { max-width: none; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+.portalPage .staffAdminHome { display: inline-flex; align-items: center; min-height: 44px; font-size: .88rem; font-weight: 600; }
+.portalPage .staffSectionNav { flex-wrap: wrap; gap: 0 24px; overflow: visible; margin-inline: 0; padding-inline: 0; }
+.portalPage .staffSectionNav a { min-width: 0; min-height: 44px; padding-block: 8px; font-size: .88rem; line-height: 1.35; }
+.portalPage .staffSectionNav a span { overflow-wrap: normal; }
+.portalPage .staffViewHeader { padding-block: 20px 16px; }
+.portalPage .staffViewHeader h1 { font-size: clamp(1.4rem, 2.5vw, 1.75rem); }
+.portalPage .staffViewHeader > p:last-child { max-width: 64ch; font-size: .9rem; }
+.portalPage .staffContentSection { padding-block: 24px; }
+.portalPage .staffSectionHeader { margin-bottom: 16px; gap: 12px; }
+.portalPage .staffSectionHeader h2 { font-size: 1.2rem; }
+.portalPage .staffSectionHeader p { font-size: .88rem; }
+.portalPage .staffFilterBar { margin-bottom: 16px; gap: 16px; }
+.portalPage .staffTextFilters { flex-wrap: wrap; gap: 4px 18px; overflow: visible; margin-inline: 0; padding-inline: 0; }
+.portalPage .staffTextFilters button { min-height: 44px; }
+.portalPage .structuredActionForm .two { align-items: start; }
+.portalPage .staffOrderRow { min-height: 68px; padding-block: 14px; }
+.portalPage .staffPriorityRow, .portalPage .staffSimpleRow, .portalPage .overviewRow { padding-block: 14px; }
+.portalPage .staffDetailHeader { gap: 16px; padding-bottom: 20px; }
+.portalPage .staffDetailHeader > div { min-width: 0; overflow-wrap: anywhere; }
+.portalPage .staffPrimaryAction { padding-block: 20px; gap: 16px; }
+.portalPage .staffDetailDisclosure > summary, .portalPage .staffRosterEditor > summary { min-height: 44px; padding-block: 14px; }
+.portalPage .staffDetailDisclosure > summary > span, .portalPage .staffRosterEditor > summary > span { min-width: 0; overflow-wrap: anywhere; }
+.portalPage .staffRouteDisclosure { margin-bottom: 20px; border-block: 1px solid var(--line); }
+.portalPage .staffRouteDisclosure > summary { min-height: 44px; padding-block: 12px; color: var(--brand); font-size: .9rem; font-weight: 600; cursor: pointer; }
+.portalPage .staffRouteDisclosure[open] > summary { margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.portalPage .staffRouteDisclosure .dispatchEmbedded { margin-bottom: 0; padding-bottom: 16px; border-bottom: 0; }
+.portalPage .staffRouteDisclosure .dispatchBoard { min-width: 0; }
+.portalPage .staffAccountPanel, .portalPage .invoicePanel { padding: 16px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; margin-block: 16px; }
+.portalPage .stageClock { display: grid; gap: 3px; font-variant-numeric: tabular-nums; }
+.portalPage .stageClock > span, .portalPage .stageClock > small { font-size: .8rem; color: var(--muted); }
+.portalPage .stageClock > b { font-size: 1.5rem; line-height: 1.2; color: var(--brand-dark); }
+.portalPage .stageClock.timer-due > b { color: var(--warning); }
+.portalPage .stageClock.timer-breached > b { color: var(--danger); }
+.portalPage .stageClock.timer-paused > b { color: var(--muted); }
+@media (min-width: 721px) and (max-width: 980px) {
+  .portalPage .staffOrderListHeader, .portalPage .staffOrderRow { grid-template-columns: minmax(0, 1.1fr) minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1fr) 7rem; gap: 16px; }
+  .portalPage .staffPriorityRow { grid-template-columns: minmax(0, .8fr) minmax(0, 1.35fr) minmax(0, 1fr) auto; gap: 16px; }
+}
+@media (max-width: 720px) {
+  .portalPage .staffTopbar { flex-wrap: wrap; gap: 4px 12px; }
+  .portalPage .staffTopbar .brandArtwork { width: 64px; height: 46px; flex: 0 0 64px; }
+  .portalPage .staffTopbar .brandMark { width: 102px; height: 102px; }
+  .portalPage .staffAccount { flex: 1 1 180px; gap: 8px 12px; }
+  .portalPage .staffAccount > span { flex: 1 1 100px; }
+  .portalPage .staffAccount > span small { display: block; }
+  .portalPage .staffAdminHome { flex-basis: 100%; justify-content: flex-end; }
+  .portalPage .staffSectionNav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 12px; }
+  .portalPage .staffSectionNav a { gap: 6px; font-size: .82rem; }
+  .portalPage .staffSectionNav a svg { width: 16px; height: 16px; }
+  .portalPage .staffViewHeader { padding-block: 18px 14px; }
+  .portalPage .staffContentSection { padding-block: 20px; }
+  .portalPage .staffSectionHeader { margin-bottom: 14px; }
+  .portalPage .staffDetailHeader { gap: 12px; padding-bottom: 16px; }
+  .portalPage .staffPrimaryAction { padding-block: 16px; }
+  .portalPage .staffRosterEditor > summary { gap: 12px; }
+  .portalPage .staffRosterEditor > summary b { white-space: normal; }
+}
+
+@media (max-width: 400px) {
+  .portalPage .staffSectionNav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

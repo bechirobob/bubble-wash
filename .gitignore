@@ -49,3 +49,5 @@ next-env.d.ts
 # local mission logs / agent working memory (never commit)
 /knowledge/
 /.hermes/
+
+/tooling/**/node_modules/

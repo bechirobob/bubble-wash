@@ -12,9 +12,16 @@ export function createPasswordHash(password: string, salt = randomBytes(16).toSt
   return `scrypt$${salt}$${hash}`;
 }
 
+export function validPasswordHash(passwordHash: string) {
+  if (typeof passwordHash !== "string") return false;
+  const [scheme, salt, hash, ...extra] = passwordHash.split("$");
+  return scheme === "scrypt" && Boolean(salt) && /^[A-Za-z0-9_-]{86}$/.test(hash ?? "") &&
+    Buffer.from(hash, "base64url").toString("base64url") === hash && extra.length === 0;
+}
+
 export function verifyPasswordHash(password: string, passwordHash: string) {
-  const [scheme, salt, expectedHash, ...extra] = passwordHash.split("$");
-  if (scheme !== "scrypt" || !salt || !expectedHash || extra.length > 0) return false;
+  if (!validPasswordHash(passwordHash)) return false;
+  const [, salt, expectedHash] = passwordHash.split("$");
 
   const expected = Buffer.from(expectedHash, "base64url");
   if (expected.length !== 64) return false;
@@ -23,6 +30,12 @@ export function verifyPasswordHash(password: string, passwordHash: string) {
   return timingSafeEqual(actual, expected);
 }
 
+const demoHashCache = new Map<string, boolean>();
 export function matchesKnownDemoPassword(passwordHash: string) {
-  return knownDemoPasswords.some((password) => verifyPasswordHash(password, passwordHash));
+  const cached = demoHashCache.get(passwordHash);
+  if (cached !== undefined) return cached;
+  const matches = knownDemoPasswords.some((password) => verifyPasswordHash(password, passwordHash));
+  if (demoHashCache.size >= 256) demoHashCache.clear();
+  demoHashCache.set(passwordHash, matches);
+  return matches;
 }

@@ -27,8 +27,11 @@ for (const [role, , password] of credentials) {
 process.env.BUBBLEWASH_VENDOR_ENTITY_ID = "vendor-http-role-test";
 process.env.BUBBLEWASH_DRIVER_ENTITY_ID = "driver-http-role-test";
 
+// Existing environment-backed accounts must authenticate without account migration.
 const { POST } = await import("../src/app/api/login/route.ts");
 
+// Replay the exact accepted value, even if these requests cross a TOTP step.
+const acceptedAdminTotp = totpCode(process.env.BUBBLEWASH_ADMIN_TOTP_SECRET);
 for (const [role, expectedRole, password] of credentials) {
   const response = await POST(new Request("https://bubblewash.co/api/login", {
     method: "POST",
@@ -40,7 +43,7 @@ for (const [role, expectedRole, password] of credentials) {
     body: JSON.stringify({
       email: process.env[`BUBBLEWASH_${role}_EMAIL`],
       password,
-      ...(role === "ADMIN" ? { totp: totpCode(process.env.BUBBLEWASH_ADMIN_TOTP_SECRET) } : {}),
+      ...(role === "ADMIN" ? { totp: acceptedAdminTotp } : {}),
     }),
   }));
   assert.equal(response.status, 200, `${role} unique credential must authenticate`);
@@ -54,7 +57,7 @@ const replay = await POST(new Request("https://bubblewash.co/api/login", {
   body: JSON.stringify({
     email: process.env.BUBBLEWASH_ADMIN_EMAIL,
     password: credentials[0][2],
-    totp: totpCode(process.env.BUBBLEWASH_ADMIN_TOTP_SECRET),
+    totp: acceptedAdminTotp,
   }),
 }));
 assert.equal(replay.status, 401, "an accepted admin TOTP step must not be replayed");

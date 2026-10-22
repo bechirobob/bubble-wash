@@ -66,9 +66,26 @@ export function validateCheckoutInput(input: CheckoutInput) {
   return null;
 }
 
+export class CheckoutInitializationError extends Error {
+  retryable: boolean;
+  constructor(message: string, retryable: boolean) {
+    super(message);
+    this.retryable = retryable;
+  }
+}
+
+export function validCheckoutUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "checkout.paystack.com"
+      && !url.username && !url.password && !url.port;
+  } catch { return false; }
+}
+
 export async function initializePaystackCheckout(input: CheckoutInput, requestedReference?: string) {
   const secret = envText("PAYSTACK_SECRET_KEY");
-  if (!secret) throw new Error("PAYSTACK_SECRET_KEY is not configured.");
+  if (!secret) throw new CheckoutInitializationError("PAYSTACK_SECRET_KEY is not configured.", true);
 
   const reference = requestedReference || `BW-PAY-${randomUUID().replaceAll("-", "").slice(0, 18).toUpperCase()}`;
   const amount = Math.round(input.amountGhs * 100);
@@ -102,10 +119,18 @@ export async function initializePaystackCheckout(input: CheckoutInput, requested
     }),
   });
 
-  const data = (await response.json().catch(() => ({}))) as PaystackInitializeResponse;
-  if (!response.ok || !data.status || !data.data?.authorization_url || !data.data.reference) {
-    throw new Error(data.message || "Unable to initialize Paystack checkout.");
+  const payload = await response.json().catch(() => null);
+  const data = (payload && typeof payload === "object" ? payload : {}) as PaystackInitializeResponse;
+  if (!response.ok || data.status !== true || !validCheckoutUrl(data.data?.authorization_url)
+    || typeof data.data?.reference !== "string") {
+    // A timeout, malformed success, server failure, or duplicate reference can hide
+    // a live provider transaction. Only an explicit ordinary rejection permits retry.
+    const message = typeof data.message === "string" ? data.message : "Unable to initialize Paystack checkout.";
+    const retryable = response.status === 400 && data.status === false
+      && !/duplicate|reference|already|exist/i.test(message);
+    throw new CheckoutInitializationError(message, retryable);
   }
+  if (data.data.reference !== reference) throw new CheckoutInitializationError("Checkout reference did not match.", false);
   return {
     reference: data.data.reference,
     authorizationUrl: data.data.authorization_url,

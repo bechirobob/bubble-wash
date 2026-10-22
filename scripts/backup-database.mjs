@@ -9,6 +9,9 @@ const primaryDir = process.env.BUBBLEWASH_BACKUP_PRIMARY_DIR;
 const offsiteDir = process.env.BUBBLEWASH_BACKUP_OFFSITE_DIR;
 const statusPath = process.env.BUBBLEWASH_BACKUP_STATUS_PATH;
 const key = Buffer.from(process.env.BUBBLEWASH_BACKUP_ENCRYPTION_KEY ?? "", "base64");
+const args = process.argv.slice(2);
+if (args.length && (args.length !== 1 || args[0] !== "--fresh-start")) throw new Error("Usage: backup-database.mjs [--fresh-start]");
+const freshStart = args[0] === "--fresh-start";
 const deferStatus = process.env.BUBBLEWASH_BACKUP_DEFER_STATUS === "true";
 const primaryRetentionDays = parseRetentionDays("BUBBLEWASH_BACKUP_PRIMARY_RETENTION_DAYS", 7);
 const stagingRetentionDays = parseRetentionDays("BUBBLEWASH_BACKUP_STAGING_RETENTION_DAYS", 2);
@@ -19,6 +22,8 @@ for (const [name, value] of Object.entries({ BUBBLEWASH_DATABASE_PATH: source, B
 if (key.length !== 32) throw new Error("BUBBLEWASH_BACKUP_ENCRYPTION_KEY must be a base64-encoded 32-byte key.");
 if (!existsSync(source)) throw new Error(`Database does not exist: ${source}`);
 if (path.resolve(primaryDir) === path.resolve(offsiteDir)) throw new Error("Primary and off-site backup directories must be different.");
+
+if (freshStart && !deferStatus) throw new Error("Fresh-start backup requires deferred status until verified private off-host storage.");
 
 const magic = Buffer.from("BWBACKUP1");
 const stamp = new Date().toISOString().replaceAll(":", "-");
@@ -72,9 +77,30 @@ function prune(directory, retentionDays = 35) {
 try {
   const live = new Database(source, { readonly: true, fileMustExist: true });
   try {
+    if (freshStart) {
+      const { inspectFreshReset, deletedTables, verifyStoppedRuntime } = await import("./reset-fresh-start.mjs");
+      verifyStoppedRuntime(process.cwd());
+      const inventory = inspectFreshReset(live, process.env, process.cwd());
+      if ([...deletedTables, "staff_accounts"].some((table) => inventory.counts[table] > 0)) {
+        throw new Error("Fresh-start backup refused: operational or nonadmin records remain.");
+      }
+    }
     await live.backup(plainPath);
   } finally {
     live.close();
+  }
+  if (freshStart) {
+    // Compact only the disposable snapshot. Never alter the live database or
+    // copy deleted SQLite free-page contents into the new encrypted archive.
+    const snapshot = new Database(plainPath, { fileMustExist: true });
+    try { snapshot.exec("VACUUM"); } finally { snapshot.close(); }
+    const { inspectFreshReset, deletedTables, verifyStoppedRuntime } = await import("./reset-fresh-start.mjs");
+    verifyStoppedRuntime(process.cwd());
+    const snapshotDb = new Database(plainPath, { readonly: true, fileMustExist: true });
+    try {
+      const inventory = inspectFreshReset(snapshotDb, { ...process.env, BUBBLEWASH_DATABASE_PATH: plainPath }, process.cwd());
+      if ([...deletedTables, "staff_accounts"].some((table) => inventory.counts[table] > 0)) throw new Error("Fresh-start snapshot contains operational data.");
+    } finally { snapshotDb.close(); }
   }
   verifyDatabase(plainPath);
   const encrypted = encrypt(readFileSync(plainPath));
@@ -95,8 +121,10 @@ try {
   const temporaryStatus = `${destinationStatus}.${process.pid}.tmp`;
   writeFileSync(temporaryStatus, JSON.stringify(result), { flag: "wx", mode: 0o600 });
   renameSync(temporaryStatus, destinationStatus);
-  prune(primaryDir, primaryRetentionDays);
-  prune(offsiteDir, stagingRetentionDays);
+  if (!freshStart) {
+    prune(primaryDir, primaryRetentionDays);
+    prune(offsiteDir, stagingRetentionDays);
+  }
   console.log(JSON.stringify(result));
 } finally {
   rmSync(workDir, { recursive: true, force: true });

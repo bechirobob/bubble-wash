@@ -1,24 +1,15 @@
 import "server-only";
+import { environmentStaffUsers, resolveStaffUsers, type StaffRole, type StaffUser } from "./staff-identity.ts";
 import { listStaffAccounts } from "./staff-accounts.ts";
 
-import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers.js";
 import { readStaffCredentialOverride } from "./data-store.ts";
-import { createPasswordHash, matchesKnownDemoPassword, verifyPasswordHash } from "./passwords.ts";
+import { verifyPasswordHash } from "./passwords.ts";
 
 export { createPasswordHash } from "./passwords.ts";
 
-export type StaffRole = "admin" | "vendor" | "driver" | "support";
-
-export type StaffUser = {
-  name: string;
-  email: string;
-  passwordHash: string;
-  credentialVersion: string;
-  role: StaffRole;
-  entityId?: string;
-};
-
+export type { StaffRole, StaffUser } from "./staff-identity.ts";
 export type StaffSession = Pick<StaffUser, "email" | "role" | "name" | "entityId" | "credentialVersion"> & {
   issuedAt: number;
   expiresAt: number;
@@ -28,65 +19,18 @@ export type StaffSession = Pick<StaffUser, "email" | "role" | "name" | "entityId
 export const sessionCookieName = "bubblewash_staff_session";
 const sessionMaxAgeSeconds = 60 * 60 * 8;
 const staffSessionVersion = "v2";
-const demoPassword = "Admin123!";
 
 export function staffAccessDisabled(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env) {
   return env.BUBBLEWASH_STAFF_AUTH_DISABLED === "true";
 }
 
-function demoCredentialFallbackEnabled() {
-  if (process.env.NODE_ENV === "production") return false;
-  return process.env.BUBBLEWASH_DISABLE_DEMO_LOGIN !== "true";
-}
-
-function environmentCredentialVersion(passwordHash: string) {
-  return createHash("sha256").update(passwordHash).digest("base64url");
-}
-
-function staffCredential(role: StaffRole, demoEmail: string, displayName: string): StaffUser | null {
-  const prefix = `BUBBLEWASH_${role.toUpperCase()}`;
-  const configuredHash = process.env[`${prefix}_PASSWORD_HASH`];
-  const allowDemoFallback = demoCredentialFallbackEnabled();
-  const email = process.env[`${prefix}_EMAIL`] ?? (allowDemoFallback ? demoEmail : "");
-  const entityId = role === "vendor"
-    ? process.env.BUBBLEWASH_VENDOR_ENTITY_ID?.trim()
-    : role === "driver"
-      ? process.env.BUBBLEWASH_DRIVER_ENTITY_ID?.trim()
-      : undefined;
-  const devPassword = process.env[`${prefix}_PASSWORD`] ?? (role === "admin" ? demoPassword : `${role[0].toUpperCase()}${role.slice(1)}123!`);
-
-  if (!email) return null;
-  if (configuredHash) {
-    if (process.env.NODE_ENV === "production" && matchesKnownDemoPassword(configuredHash)) return null;
-    return { name: displayName, email, passwordHash: configuredHash, credentialVersion: environmentCredentialVersion(configuredHash), role, entityId };
-  }
-  if (process.env.NODE_ENV === "production") return null;
-  const passwordHash = createPasswordHash(devPassword);
-  return { name: displayName, email, passwordHash, credentialVersion: environmentCredentialVersion(passwordHash), role, entityId };
-}
-
-export const staffUsers: StaffUser[] = [
-  staffCredential("admin", "admin@bubblewash.local", "Admin Operator"),
-  staffCredential("vendor", "vendor@bubblewash.local", "Vendor Partner"),
-  staffCredential("driver", "driver@bubblewash.local", "Route Driver"),
-  staffCredential("support", "support@bubblewash.local", "Support Agent"),
-].filter((user): user is StaffUser => Boolean(user));
+// Preserve configured legacy staff alongside managed accounts. Resolve managed
+// status on each request so invited/suspended rows shadow fallback and revoke sessions.
+export const staffUsers = environmentStaffUsers(process.env);
 
 export function currentStaffUsers(): StaffUser[] {
   if (staffAccessDisabled()) return [];
-  const override = readStaffCredentialOverride();
-  const managed = listStaffAccounts();
-  const merge = (users: StaffUser[]) => [...users.filter((user) => !managed.some((account) => account.email.toLowerCase() === user.email.toLowerCase())), ...managed.filter((account) => account.status === "active").map((account) => ({ ...account, entityId: account.entityId || undefined }))];
-  if (!override) return merge(staffUsers);
-  const admin: StaffUser = {
-    name: "Master Administrator",
-    email: override.login,
-    passwordHash: override.passwordHash,
-    credentialVersion: override.credentialVersion,
-    role: "admin",
-  };
-  const nonAdmins = staffUsers.filter((user) => user.role !== "admin");
-  return merge([admin, ...nonAdmins]);
+  return resolveStaffUsers(process.env, readStaffCredentialOverride(), listStaffAccounts(), staffUsers);
 }
 
 const allowedNextPaths = new Set(["/admin", "/vendors", "/drivers", "/support"]);

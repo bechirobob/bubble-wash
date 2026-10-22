@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server.js";
 import type { OrderSummary } from "@/lib/submissions";
 import { privateNoStoreHeaders, securityHeaders } from "./security-headers.js";
-import { matchesKnownDemoPassword } from "./passwords.ts";
+import { resolveStaffUsers, type StaffUser } from "./staff-identity.ts";
 import { validTotpSecret } from "./totp.ts";
 
 export { privateNoStoreHeaders, securityHeaders };
@@ -53,7 +53,7 @@ export function staffWriteGuard(headers: Headers) {
   return sameOriginJsonGuard(headers, "staff action");
 }
 
-export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env) {
+export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env, effectiveStaff?: StaffUser[]) {
   const errors: string[] = [];
   if (env.NODE_ENV !== "production") return errors;
   if (env.BUBBLEWASH_ENABLE_DEMO_LOGIN === "true") {
@@ -99,21 +99,12 @@ export function productionReadinessErrors(env: NodeJS.ProcessEnv | Record<string
   } catch {
     errors.push("Set BUBBLEWASH_PUBLIC_URL to the public HTTPS site origin.");
   }
-  for (const role of ["ADMIN", "VENDOR", "DRIVER", "SUPPORT"]) {
-    if (!env[`BUBBLEWASH_${role}_EMAIL`]) errors.push(`Set BUBBLEWASH_${role}_EMAIL in production.`);
-    const passwordHash = env[`BUBBLEWASH_${role}_PASSWORD_HASH`];
-    if (!passwordHash) {
-      errors.push(`Set BUBBLEWASH_${role}_PASSWORD_HASH in production.`);
-    } else if (matchesKnownDemoPassword(passwordHash)) {
-      errors.push(`Rotate BUBBLEWASH_${role}_PASSWORD_HASH; known demo credentials are prohibited in production.`);
-    }
+  const staff = effectiveStaff ?? resolveStaffUsers(env, null, []);
+  if (!staff.some((user) => user.role === "admin")) {
+    errors.push("Configure an effective active admin with valid non-demo credentials; disabled or shadowed admin access is not ready.");
   }
-  if (!env.BUBBLEWASH_VENDOR_ENTITY_ID?.trim()) {
-    errors.push("Set BUBBLEWASH_VENDOR_ENTITY_ID to the exact approved vendor roster ID in production.");
-  }
-  if (!env.BUBBLEWASH_DRIVER_ENTITY_ID?.trim()) {
-    errors.push("Set BUBBLEWASH_DRIVER_ENTITY_ID to the exact approved driver roster ID in production.");
-  }
+  // Empty worker rosters are valid after a fresh reset. Production workers use
+  // managed accounts, never legacy environment credentials or demo identities.
   const publicWhatsApp = (env.NEXT_PUBLIC_BUBBLEWASH_WHATSAPP ?? "").replace(/\D/g, "");
   if (publicWhatsApp && (publicWhatsApp.length < 8 || publicWhatsApp.length > 15 || /000000/.test(publicWhatsApp))) {
     errors.push("NEXT_PUBLIC_BUBBLEWASH_WHATSAPP must be a real international-format customer WhatsApp number or remain unset.");
