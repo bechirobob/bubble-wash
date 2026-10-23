@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test';
 
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus || page.isClosed()) return;
+  if (!['/services'].includes(new URL(page.url()).pathname)) return;
+  await page.screenshot({ path: testInfo.outputPath('failure.png'), fullPage: true, animations: 'disabled', timeout: 5000 }).catch(() => {});
+});
+
 test.beforeEach(async ({ page }) => {
   await page.context().route('**/*', route => new URL(route.request().url()).hostname === 'localhost' ? route.continue() : route.abort());
 });
@@ -25,13 +31,20 @@ test('native frequency keyboard navigation updates the selected plan and support
   const first = catalogue.getByRole('radio', { name: 'Weekly, 1 pickup / week', exact: true });
   await expect(first).toBeChecked();
   await expect(catalogue.getByRole('article')).toHaveCount(1);
-  await first.focus();
+  // Enter the native group with the keyboard, not programmatic focus.
+  for (let step = 0; step < 30 && !(await first.evaluate(node => node === document.activeElement)); step++) await page.keyboard.press('Tab');
+  await expect(first).toBeFocused();
   await page.keyboard.press('ArrowRight');
   await expect(catalogue.getByRole('radio', { name: 'Twice weekly, 2 pickups / week', exact: true })).toBeChecked();
   await expect(catalogue.locator('.focusedPlanCard h3')).toHaveText('Twice weekly');
   await expect(catalogue.locator('.focusedPlanPrice strong')).toContainText('2,250');
   await expect(catalogue.getByRole('status')).toContainText('Twice weekly selected');
-  await expect.poll(() => catalogue.locator('.focusedPlanSegment:has(input:focus-visible)').count()).toBe(1);
+  const second = catalogue.getByRole('radio', { name: 'Twice weekly, 2 pickups / week', exact: true });
+  await expect(second).toBeFocused();
+  await expect.poll(() => second.evaluate(input => {
+    const style = getComputedStyle(input.closest('label'));
+    return style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2 && style.outlineColor !== 'transparent';
+  })).toBe(true);
   await page.keyboard.press('ArrowRight');
   await expect(catalogue.locator('.focusedPlanCard h3')).toHaveText('Three times weekly');
   await page.keyboard.press('ArrowRight');
@@ -70,7 +83,7 @@ test('comparison selections preserve estimate inputs and send the unchanged quot
   await catalogue.getByRole('button', { name: /^Choose Twice weekly,/ }).click();
   await expect(weight).toHaveValue('60.5');
   await expect(form.getByRole('checkbox').first()).toBeChecked();
-  await expect(form.getByLabel('Collection plan', { exact: true })).toHaveValue('Twice weekly');
+  await expect(form.getByRole('combobox', { name: 'Collection plan', exact: true })).toHaveValue('Twice weekly');
   await catalogue.getByRole('link', { name: 'Estimate my cost' }).click();
   await expect(page).toHaveURL(/#estimate-heading$/);
   const request = page.waitForRequest(req => req.url().endsWith('/api/quote') && req.method() === 'POST');

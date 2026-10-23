@@ -184,11 +184,11 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
     await detail('driver'); await save(driver, 'Start return delivery');
     await form(driver, 'Mark delivered', { recipientName: `Synthetic customer ${fixture}`, bagCount: '1', deliveryCode: booking.deliveryCode, operatorNote: 'Synthetic recipient checked bag.' }, 'Confirm delivery', testInfo, 'driver-delivery');
     await detail('admin');
-    await admin.getByText('Reconcile payment, credit or refund', { exact: true }).click();
+    await admin.getByText('Record a payment, credit or refund', { exact: true }).click();
     const invoice = admin.locator('.invoicePanel');
     await invoice.getByLabel('Amount (GHS)').fill('1700');
-    await invoice.getByLabel('Unique bank/provider reference').fill(`SYNTHETIC-${fixture}`);
-    await invoice.getByLabel('Reconciliation note').fill('Synthetic ledger fixture only; no money transferred.');
+    await invoice.getByLabel('Bank or payment service reference (must be unique)').fill(`SYNTHETIC-${fixture}`);
+    await invoice.getByLabel('Payment note').fill('Synthetic ledger fixture only; no money transferred.');
     await save(admin, 'Record entry', '/api/orders/invoice');
     await detail('admin');
     admin.once('dialog', dialog => dialog.accept());

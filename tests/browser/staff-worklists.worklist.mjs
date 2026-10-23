@@ -1,4 +1,10 @@
 import { test, expect } from '@playwright/test';
+
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus || page.isClosed()) return;
+  if (!['/staff/worklist', '/admin', '/support', '/vendors', '/drivers'].includes(new URL(page.url()).pathname)) return;
+  await page.screenshot({ path: testInfo.outputPath('failure.png'), fullPage: true, animations: 'disabled', timeout: 5000 }).catch(() => {});
+});
 import { randomUUID } from 'node:crypto';
 
 async function login(page, role, testInfo) {
@@ -24,7 +30,7 @@ test('real staff worklist, safe writes, conflict recovery and admin reviews',asy
   const item=page.getByRole('region',{name:'Worklist',exact:true}).getByRole('listitem').filter({has:page.getByText('BW-WORKLISTCASE',{exact:true})});
   await item.getByText('Owner and follow-up deadline',{exact:true}).click();
   const form=item.getByRole('form');
-  await form.getByLabel('Owner',{exact:true}).selectOption('support@example.invalid');
+  await form.getByRole('combobox',{name:'Owner',exact:true}).selectOption('support@example.invalid');
   const future=new Date(Date.now()+3600000).toISOString().slice(0,16);
   await form.getByLabel('Follow-up deadline',{exact:false}).fill(future);
   const draft=`Call after reviewing the case (${testInfo.project.name})`;
@@ -93,11 +99,17 @@ test('staff scopes and retry state',async({page},testInfo)=>{
   await screenshot(page,testInfo,'support-scoped');
   await page.route('**/api/staff/automation/worklist?**',route=>route.abort());
   await page.getByRole('button',{name:'Refresh',exact:true}).click();
-  await expect(page.getByRole('alert')).toBeVisible();
+  const loadError=page.locator('main').getByRole('alert').filter({has:page.getByRole('button',{name:'Retry',exact:true})});
+  await expect(loadError).toBeVisible();
   await expect(item.getByLabel('Next step')).toHaveValue('Saved elsewhere');
   await page.unroute('**/api/staff/automation/worklist?**');
-  await page.getByRole('button',{name:'Retry',exact:true}).click();
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  const recovered=page.waitForResponse(response=>response.url().includes('/api/staff/automation/worklist?')&&response.request().method()==='GET');
+  await loadError.getByRole('button',{name:'Retry',exact:true}).click();
+  expect((await recovered).ok()).toBe(true);
+  await expect(loadError).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Refresh',exact:true})).toBeEnabled();
+  await expect(item.getByLabel('Next step')).toHaveValue('Saved elsewhere');
+  await expect(item.getByRole('button',{name:'Save owner and deadline'})).toBeDisabled();
   for(const role of ['vendor','driver']) {
     await page.context().clearCookies();await login(page,role,testInfo);
     await expect(page.getByText('BW-WORKLISTCASE',{exact:true})).toHaveCount(0);
@@ -109,22 +121,26 @@ test('staff scopes and retry state',async({page},testInfo)=>{
 test('Back and Forward preserve a revised draft after an earlier request finishes',async({page},testInfo)=>{
  await login(page,'admin',testInfo);
  await page.getByRole('link',{name:'Follow-ups',exact:true}).click();
- let releaseResponse,upstreamCommitted;
+ let releaseResponse,upstreamCommitted,deliveredResponse,failedResponse;
  const committed=new Promise(resolve=>{upstreamCommitted=resolve;});
  const release=new Promise(resolve=>{releaseResponse=resolve;});
+ const delivered=new Promise((resolve,reject)=>{deliveredResponse=resolve;failedResponse=reject;});
  const findForm=()=>page.getByRole('region',{name:'Worklist',exact:true}).getByRole('listitem').filter({has:page.getByText('BW-WORKLISTCASE',{exact:true})}).getByRole('form');
  await page.getByRole('region',{name:'Worklist',exact:true}).getByRole('listitem').filter({has:page.getByText('BW-WORKLISTCASE',{exact:true})}).getByText('Owner and follow-up deadline',{exact:true}).click();
  let form=findForm();
  await form.getByLabel('Follow-up deadline',{exact:false}).fill(new Date(Date.now()+3600000).toISOString().slice(0,16));
  await form.getByLabel('Next step').fill('Submitted before browser Back');
  await page.route('**/api/staff/automation/ownership',async route=>{
-   const response=await route.fetch();upstreamCommitted();await release;await route.fulfill({response});
+   try {
+     const response=await route.fetch();expect(response.ok()).toBe(true);upstreamCommitted();await release;
+     await route.fulfill({response});deliveredResponse();
+   } catch(error) { failedResponse(error); }
  });
- await form.getByRole('button',{name:'Save owner and deadline',exact:true}).click();await committed;
+ await form.getByRole('button',{name:'Save owner and deadline',exact:true}).click();await Promise.race([committed,delivered]);
  await page.goBack();form=findForm();
  await expect(form.getByLabel('Next step')).toHaveValue('Submitted before browser Back');
  await form.getByLabel('Next step').fill('Revised draft survives old response');
- releaseResponse();await page.unroute('**/api/staff/automation/ownership');
+ releaseResponse();await delivered;await page.unroute('**/api/staff/automation/ownership');
  await page.goForward();form=findForm();
  await expect(form.getByLabel('Next step')).toHaveValue('Revised draft survives old response');
  await form.getByRole('button',{name:/Load latest values/}).click();

@@ -119,7 +119,7 @@ test('scoped layout uses bounded lists, full-width touch targets and no decorati
   }
   assert.match(focusedCSS, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
   assert.match(focusedCSS, /min-height: 48px/);
-  assert.match(focusedCSS, /:has\(input:focus-visible\)/);
+  assert.match(focusedCSS, /\.focusedPlanSegment:focus-within/);
   assert.match(focusedCSS, /@media \(forced-colors: active\)/);
   assert.doesNotMatch(focusedCSS, /(?:box-shadow|text-shadow|drop-shadow|gradient)\s*[:(]/);
 });

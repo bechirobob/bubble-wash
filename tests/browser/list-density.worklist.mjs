@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test';
 
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus || page.isClosed()) return;
+  if (!['/staff/worklist', '/manage'].includes(new URL(page.url()).pathname)) return;
+  await page.screenshot({ path: testInfo.outputPath('failure.png'), fullPage: true, animations: 'disabled', timeout: 5000 }).catch(() => {});
+});
+
 // These intercepted responses are presentation fixtures only. The unchanged
 // staff-worklists suite exercises actual cookie authorization and safe commands.
 const tasks=()=>Array.from({length:51},(_,i)=>({id:`case-followup:SYNTHETIC-${i}`,kind:'case-followup',targetId:`SYNTHETIC-${i}`,title:`Synthetic task ${i+1}`,detail:'Synthetic list layout fixture. No customer data.',priority:'normal',dueAt:'',signalVersion:`synthetic-${i}`,ownerEmail:'',note:'',revision:0,updatedAt:'',overdue:false,canManage:true}));
@@ -65,7 +71,7 @@ test('51 tasks page by keyboard, keep drafts, clamp refresh and retain focus',as
 test('customer history, invoice and references are bounded independently of the request form',async({page},testInfo)=>{
  await page.context().route('**/*',route=>new URL(route.request().url()).hostname==='localhost'?route.continue():route.abort());
  const date='2026-10-23T10:00:00Z';
- await page.route('**/api/customer/order',route=>route.fulfill({json:{order:{orderId:'SYNTHETIC-CUSTOMER',customer:'Synthetic customer',createdAt:date,updatedAt:date,status:'Washing',nextStep:'We will update you when it is ready.',area:'Synthetic area',pickupAddress:'Synthetic pickup address',plan:'Weekly',service:'Wash + fold',pickupDate:'2026-10-23',pickupWindow:'8:00–10:00',invoice:{invoiceId:'SYNTHETIC-INVOICE',lines:Array.from({length:50},(_,i)=>({label:`Synthetic item ${i+1}`,amountMinor:100})),balanceMinor:5000,status:'Open'},timeline:Array.from({length:50},(_,i)=>({createdAt:date,status:`Synthetic update ${i+1}`,type:'synthetic'}))},references:Array.from({length:50},(_,i)=>({orderId:`SYNTHETIC-BOOKING-${i+1}`,createdAt:date}))}}));
+ await page.route('**/api/customer/order',route=>route.fulfill({json:{order:{orderId:'SYNTHETIC-CUSTOMER',customer:'Synthetic customer',createdAt:date,updatedAt:date,status:'Washing',nextStep:'We will update you when it is ready.',area:'Synthetic area',pickupAddress:'Synthetic pickup address',plan:'Weekly',service:'Wash + fold',pickupDate:'2026-10-23',pickupWindow:'8:00–10:00',invoice:{invoiceId:'SYNTHETIC-INVOICE',lines:Array.from({length:50},(_,i)=>({label:`Synthetic item ${i+1}`,amountMinor:100})),balanceMinor:5000,status:'Open'},timeline:Array.from({length:50},(_,i)=>({createdAt:date,status:`Synthetic update ${i+1}. The team checked the collection, counted each item and recorded the care instructions. The laundry is being prepared for its next scheduled step, and a further update will appear after the next check.`,type:'synthetic'}))},references:Array.from({length:50},(_,i)=>({orderId:`SYNTHETIC-BOOKING-${i+1}`,createdAt:date}))}}));
  await page.goto('/manage');
  const history=page.getByRole('region',{name:'Order history',exact:true});await expect(history.getByRole('listitem')).toHaveCount(10);
  const invoice=page.getByRole('region',{name:'Invoice items',exact:true});await expect(invoice.locator('dl')).toHaveCount(1);await expect(invoice.locator('dl > div:not([hidden])')).toHaveCount(10);await expect(invoice.getByRole('list')).toHaveCount(0);

@@ -7,7 +7,7 @@ import type { StaffRole } from "@/lib/auth";
 import type { dispatchRecommendations } from "@/lib/operations-automation";
 import { PortalShell } from "./StaffWorkspaces";
 import { LoadingSkeleton } from "./LoadingSkeleton";
-import { createWorklistDraftCache, mergeWorklistRefresh, shouldGuardWorklistLink } from "@/lib/staff-worklist-state";
+import { createWorklistDraftCache, createWorklistFocusHandoff, mergeWorklistRefresh, shouldGuardWorklistLink, shouldRestoreWorklistFilterFocus } from "@/lib/staff-worklist-state";
 import { notificationStatusLabel } from "@/lib/notification-presentation";
 import styles from "./StaffWorklistWorkspace.module.css";
 
@@ -15,6 +15,7 @@ type User = { email: string; name: string; role: StaffRole; allStaffAccess?: boo
 type WorkItem = { outOfView?: boolean; id: string; kind: string; targetId: string; title: string; detail: string; priority: string; dueAt: string; operationalDueAt?: string; signalVersion: string; ownerEmail: string; ownerActive?: boolean; note: string; revision: number; updatedAt: string; overdue: boolean; canManage: boolean };
 type OwnershipDraft = { snapshot: WorkItem; owner: string; due: string; note: string; command: { fingerprint: string; body: Record<string, unknown> } | null };
 const draftCache = createWorklistDraftCache<OwnershipDraft>();
+const filterFocus = createWorklistFocusHandoff();
 const actorScope = (user: User) => `${user.email.toLowerCase()}:${user.role}`;
 type Assignee = { name: string; email: string; role: string };
 type Worklist = { items: WorkItem[]; nextOffset: number | null; scope: string; generatedAt: string };
@@ -114,6 +115,19 @@ export function StaffWorklistWorkspace({ user, view, filter, offset, orderId }: 
   const [error, setError] = useState("");
   const [generation, setGeneration] = useState(0);
   const dirtyItems = useRef(new Set<string>());
+  const filterNavigation = useRef<HTMLElement>(null);
+  const scope = actorScope(user);
+  useEffect(() => {
+    if (view !== "worklist" || !filterFocus.take(scope, window.location.href)) return;
+    const frame = requestAnimationFrame(() => {
+      const active = document.activeElement;
+      // Do not steal focus if another control was used while navigation loaded.
+      if (!shouldRestoreWorklistFilterFocus(active)) return;
+      const target = [...(filterNavigation.current?.querySelectorAll<HTMLAnchorElement>("a") ?? [])].find(link => link.href === window.location.href);
+      target?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [scope, view]);
   const onDirty = useCallback((id: string, dirty: boolean) => { if (dirty) dirtyItems.current.add(id); else dirtyItems.current.delete(id); }, []);
   const refresh = useCallback(() => { if (view === "dispatch" && !orderId) return; setPending(true); setGeneration((value) => value + 1); }, [view, orderId]);
   const endpoint = `/api/staff/automation/${view}?offset=${offset}&filter=${filter}${view === "dispatch" ? `&orderId=${encodeURIComponent(orderId)}` : ""}`;
@@ -123,7 +137,7 @@ export function StaffWorklistWorkspace({ user, view, filter, offset, orderId }: 
     function beforeNavigate(event: MouseEvent) {
       const target = event.target instanceof Element ? event.target.closest("a") : null;
       if (!target || !shouldGuardWorklistLink({ currentHref: window.location.href, nextHref: target.href, target: target.target, download: target.hasAttribute("download"), button: event.button, defaultPrevented: event.defaultPrevented, metaKey: event.metaKey, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey }) || !(dirtyItems.current.size || draftCache.entries(actorScope(user)).length)) return;
-      if (!window.confirm("Leave this worklist and discard unsaved owner/deadline changes?")) { event.preventDefault(); event.stopPropagation(); }
+      if (!window.confirm("Leave this worklist and discard unsaved owner/deadline changes?")) { filterFocus.clear(); event.preventDefault(); event.stopPropagation(); }
       else { for (const [id] of draftCache.entries(actorScope(user))) draftCache.delete(actorScope(user), id); dirtyItems.current.clear(); }
     }
     window.addEventListener("beforeunload", beforeUnload); document.addEventListener("click", beforeNavigate, true);
@@ -150,7 +164,10 @@ export function StaffWorklistWorkspace({ user, view, filter, offset, orderId }: 
   return <PortalShell heading={view === "dispatch" ? { eyebrow: "Dispatch review", title: "Available assignment options", subtitle: "Check service areas, available slots, and when capacity was last confirmed." } : undefined} role={user.role} allStaffAccess={user.allStaffAccess} userName={user.name} title="Staff worklist" currentView={view} navigation={navigation}>
     <section className={`staffContentSection ${styles.workspace}`}>
       <div className={styles.toolbar}><h2>{view === "worklist" ? "Tasks and follow-ups" : view === "dispatch" ? "Assignment options" : view === "reconciliation" ? "Payments to check" : "Messages needing review"}</h2><button className="button" type="button" onClick={refresh} disabled={pending}>{pending ? "Refreshing…" : "Refresh"}</button></div>
-      {view === "worklist" ? <nav className={styles.filters} aria-label="Worklist filters">{[...[{ value: "action", label: "Needs action" }, { value: "all", label: "All" }, { value: "overdue", label: "Overdue" }], ...(["admin", "support"].includes(user.role) ? [{ value: "mine", label: "Mine" }, { value: "unassigned", label: "Unassigned" }, { value: "followups", label: "Follow-ups" }] : [])].map(({ value, label }) => <Link key={value} href={`/staff/worklist?filter=${value}`} aria-current={filter === value ? "page" : undefined}>{label}</Link>)}</nav> : null}
+      {view === "worklist" ? <nav ref={filterNavigation} className={styles.filters} aria-label="Worklist filters">{[...[{ value: "action", label: "Needs action" }, { value: "all", label: "All" }, { value: "overdue", label: "Overdue" }], ...(["admin", "support"].includes(user.role) ? [{ value: "mine", label: "Mine" }, { value: "unassigned", label: "Unassigned" }, { value: "followups", label: "Follow-ups" }] : [])].map(({ value, label }) => <Link key={value} href={`/staff/worklist?filter=${value}`} scroll={false} onClick={(event) => {
+        filterFocus.clear();
+        if (event.currentTarget === document.activeElement && shouldGuardWorklistLink({ currentHref: window.location.href, nextHref: event.currentTarget.href, button: event.button, defaultPrevented: event.defaultPrevented, metaKey: event.metaKey, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey })) filterFocus.remember(scope, event.currentTarget.href);
+      }} aria-current={filter === value ? "page" : undefined}>{label}</Link>)}</nav> : null}
       {view === "dispatch" ? <form action="/staff/worklist" className={styles.lookup}><input type="hidden" name="view" value="dispatch" /><label>Order reference<input name="order" defaultValue={orderId} placeholder="BW-…" required maxLength={160} /></label><button className="button primary" type="submit">Show available options</button></form> : null}
       {assigneeError && view === "worklist" ? <p className="status warning" role="status">{assigneeError}</p> : null}
       {error ? <p className="status error" role="alert">{error} <button type="button" onClick={refresh}>Retry</button></p> : null}

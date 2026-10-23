@@ -26,3 +26,21 @@ export function shouldGuardWorklistLink(input: { currentHref: string; nextHref: 
   const current = new URL(input.currentHref), next = new URL(input.nextHref, current);
   return ["http:", "https:"].includes(next.protocol) && (current.origin !== next.origin || current.pathname !== next.pathname || current.search !== next.search);
 }
+
+/** Restore a filter's focus across its keyed route remount, without browser storage. */
+export function createWorklistFocusHandoff() {
+  let pending: { scope: string; href: string } | null = null;
+  return {
+    remember(scope: string, href: string) { pending = { scope, href }; },
+    clear() { pending = null; },
+    take(scope: string, href: string) {
+      const matches = pending?.scope === scope && pending.href === href;
+      pending = null;
+      return matches;
+    },
+  };
+}
+
+export function shouldRestoreWorklistFilterFocus(active: Pick<Element, "matches"> | null) {
+  return !active?.matches("a, button, input, select, textarea, summary, [contenteditable], [tabindex]");
+}

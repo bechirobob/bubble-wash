@@ -1800,7 +1800,7 @@ input, select, textarea { font-size: 1rem; }
 .focusedPlanSegment:first-child { border-radius: calc(var(--radius-md) - 1px) 0 0 calc(var(--radius-md) - 1px); }
 .focusedPlanSegment:last-child { border-radius: 0 calc(var(--radius-md) - 1px) calc(var(--radius-md) - 1px) 0; }
 .focusedPlanSegment:has(input:checked) { background: var(--brand); color: #fff; }
-.focusedPlanSegment:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 3px; z-index: 1; }
+.focusedPlanSegment:focus-within { outline: 2px solid var(--ink); outline-offset: 3px; z-index: 1; }
 .focusedPlanCard { min-width: 0; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--paper); }
 .focusedPlanCard .sectionLabel { margin-bottom: 9px; }
 .publicSite .focusedPlanCard h3 { margin-bottom: 14px; font-size: clamp(1.35rem, 2.4vw, 1.65rem); overflow-wrap: anywhere; }

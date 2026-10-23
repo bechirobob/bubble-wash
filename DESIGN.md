@@ -71,10 +71,10 @@
 - Gestalt/Fitts/cognitive load: use a strong dark operations shell, bright high-contrast CTAs, grouped ticket/card modules, and large touch targets. Repeat the same action pattern: check, estimate, book, track.
 - Typography tokens: use a sharper display face for headings and a calmer UI face for forms/body. Headings should feel engineered and local-operator serious; body copy must stay readable on phones.
 - Spacing/radii/shadows: keep compact command-card spacing, slightly squared radii, stronger borders, and fewer soft template bubbles. Cards should feel like dispatch tickets rather than generic marketing cards.
-- Color roles: navy command background, cyan action, lime/mint live-status accents, cream page warmth, blue-gray text. Avoid default purple/gradient AI slop.
+- Color roles: navy command background, cyan action, lime/mint live-status accents, cream page warmth, blue-gray text. Avoid generic purple-gradient styling.
 - Interaction/motion: small transform/opacity only, no large paint-heavy mobile animations; reduced-motion keeps everything static.
 - Component map/data shape: hero coverage checker, route preview, quote calculator, booking forms, tracking panel, staff login, and role dashboards stay intact while the skin becomes more distinctive.
-- Memorable homepage layer: Bubble Wash should carry its icon and bubble motif everywhere — browser tab, install metadata, nav, hero, footer, and share previews. Bubbles are used as spatial memory: floating foam, lens-like route orbs, soap trails, section foam seams, and handwritten operational notes; never as generic AI confetti.
+- Memorable homepage layer: Bubble Wash should carry its icon and bubble motif everywhere — browser tab, install metadata, nav, hero, footer, and share previews. Bubbles are used as spatial memory: floating foam, lens-like route orbs, soap trails, section foam seams, and handwritten operational notes; never as unrelated decorative clutter.
 - Long-page navigation: a persistent back-to-top control must be available after scrolling distance so visitors can recover quickly from the long homepage without hunting for the nav.
 - Interaction/motion: bubble effects drift with opacity/transform only, pause on hover where useful, and shut off under `prefers-reduced-motion`. The hero should feel alive, but not slow the booking form.
 - Critique risk: visual experiments cannot break forms, role auth, or mobile nav. If a redesign makes actions less obvious, it failed.
@@ -93,7 +93,7 @@
 - Timers: show elapsed time in the current stage plus SLA state. Internal staff see due/overdue labels; customer tracking keeps it simpler with delivery windows and next step.
 - Maps: the pilot uses privacy-safe Google Maps URL search/directions plus explicit, rider-authorized foreground GPS for the currently bound rider. Dispatch stores only the latest accepted point, exposes it only to Admin and that rider, clears or redacts it when stopped/stale/unassigned/completed, and never claims background tracking, live traffic, or optimized routing. HTTPS, rider consent/training, and the approved retention policy are release requirements.
 
-## 2026-07-09 public homepage correction — prototype-first, no speed-run
+## 2026-07-09 prototype-based public homepage correction
 
 ### User goal and attention model
 
@@ -132,7 +132,7 @@
 - If a full-page screenshot still resembles the old long pricing/calculator homepage, the pass failed.
 - If the first visible scroll after the hero is a giant old menu desk, the pass failed.
 - If controls are decorative or disabled without explanation, the pass failed.
-- If forbidden hotel/Lagos/AI-dashboard terms appear in source or data, the pass failed.
+- If unrelated hospitality, non-Accra location or generic dashboard terminology appears in source or data, the pass failed.
 - If protected staff interiors are not verified after auth, the pass is incomplete.
 
 ## Critique checklist
@@ -163,8 +163,8 @@
 - What: tighten Bubble Wash release UX and public API validation without replacing the existing build.
 - Why: frontend standards require every visible action to complete a real user flow, preserve accessible feedback, and avoid stale decorative state; backend standards require typed request bodies, allowlisted public fields, bounded values, and safe JSON errors.
 - Files likely touched: `src/app/page.tsx`, `src/app/globals.css`, `src/app/api/submit/route.ts`, and this blueprint.
-- Expected outcome: vendor request cards carry the chosen vendor into the booking payload, pickup date/window/payment inputs expose safer client-side constraints, public submit rejects non-object/unknown/staff-only fields instead of silently accepting cursed payloads, and successful bookings keep the same customer/order data contract.
-- Approved sleep-mode scope: preserve the existing public/staff/product flows, validate concrete pickup windows, turn saved pickup references into immediate tracking guidance, reject malformed JSON and oversized public fields with safe `400` responses, and validate phone/window inputs server-side.
+- Expected outcome: vendor request cards carry the chosen vendor into the booking payload, pickup date/window/payment inputs expose safer client-side constraints, public submit rejects non-object/unknown/staff-only fields instead of silently accepting malformed payloads, and successful bookings keep the same customer/order data contract.
+- Validation scope: preserve the existing public/staff/product flows, validate concrete pickup windows, turn saved pickup references into immediate tracking guidance, reject malformed JSON and oversized public fields with safe `400` responses, and validate phone/window inputs server-side.
 - Risks and mitigation: keep changes targeted, preserve current auth/payment/order routes, avoid new dependencies, and verify with lint, tests, build, and API smoke checks.
 - Verification: run `npm run lint`, `npm test`, `npm run build`; smoke `/api/quote`, `/api/submit` valid payload with `requestedVendor`, and `/api/submit` invalid payload with staff-only/public-forbidden fields.
 
@@ -199,7 +199,7 @@
 - Staff workflow now presents the real operational model up front: one customer Order ID moves through Received → Schedule → Assign → Accept → Pickup → Wash → Ready → Deliver → Close.
 - Automation-first rule: staff should use action-rail buttons before manual forms. Manual tools stay collapsed for exceptions, capacity changes, support cases, declines, delays, and count/payment issues.
 - Admin cross-role access separates auth role from page/workflow role so an admin can preview vendor/driver/support lanes and still navigate back to Admin home without logging out.
-- PDF/handoff alignment check: current staff pages still match the boss handoff scope — admin oversight, vendor capacity/job acceptance/decline, driver route updates, support ticket lifecycle, shared Order IDs, `/api/orders/advance`, availability, and role-scoped access.
+- Operational scope alignment: staff pages cover the documented requirements — admin oversight, vendor capacity/job acceptance/decline, driver route updates, support ticket lifecycle, shared Order IDs, `/api/orders/advance`, availability, and role-scoped access.
 
 ## 2026-06-04 color, opacity, and foam-motion polish
 
@@ -222,7 +222,7 @@
 
 ## Hero integration and design references
 
-- Start design and copy work with the relevant installed skills and this blueprint. Read the actual instructions; report a missing reference clearly rather than assuming its contents. Current user directions take precedence.
+- Use this blueprint and the current project design requirements for design and copy work. Read referenced materials directly and identify missing references rather than assuming their contents. Current project requirements take precedence.
 - Hero artwork sits directly on the white canvas on tablet and desktop. Use a seamless white background, preserve the original brand mark, and show complete objects. Hide the figure at 600px and below so the phone introduction leads directly into pickup coverage without an image section or reserved space. No rectangular blue backdrop, container, decorative frame or forced crop.
 
 ## Colour without containers

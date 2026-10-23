@@ -45,3 +45,29 @@ test('draft discard applies only to real same-tab route exits', async () => {
  assert.equal(shouldGuardWorklistLink(link),true);
  for(const override of [{ctrlKey:true},{metaKey:true},{shiftKey:true},{altKey:true},{button:1},{target:'_blank'},{download:true},{defaultPrevented:true},{nextHref:'mailto:support@example.invalid'},{nextHref:link.currentHref+'#section'}])assert.equal(shouldGuardWorklistLink({...link,...override}),false);
 });
+
+
+test('filter focus handoff is exact, one-use and isolated to the authenticated actor', async () => {
+ const { createWorklistFocusHandoff }=await import('../src/lib/staff-worklist-state.ts');
+ const focus=createWorklistFocusHandoff();
+ const href='https://example.invalid/staff/worklist?filter=overdue';
+ assert.equal(focus.take('alice:admin',href),false);
+ focus.remember('alice:admin',href);assert.equal(focus.take('alice:admin',href),true);
+ assert.equal(focus.take('alice:admin',href),false);
+ focus.remember('alice:admin',href);assert.equal(focus.take('bob:support',href),false);
+ assert.equal(focus.take('alice:admin',href),false);
+ focus.remember('alice:admin',href);assert.equal(focus.take('alice:admin',href+'&offset=100'),false);
+ focus.remember('alice:admin',href);focus.remember('alice:admin',href+'&offset=100');
+ assert.equal(focus.take('alice:admin',href+'&offset=100'),true);
+ focus.remember('alice:admin',href);focus.clear();assert.equal(focus.take('alice:admin',href),false);
+});
+
+
+test('filter restoration never steals focus from native or custom focusable controls', async () => {
+ const { shouldRestoreWorklistFilterFocus }=await import('../src/lib/staff-worklist-state.ts');
+ for(const selector of ['a','button','input','select','textarea','summary','[contenteditable]','[tabindex]']) {
+  assert.equal(shouldRestoreWorklistFilterFocus({matches:value=>value.split(', ').includes(selector)}),false,selector);
+ }
+ assert.equal(shouldRestoreWorklistFilterFocus({matches:()=>false}),true);
+ assert.equal(shouldRestoreWorklistFilterFocus(null),true);
+});
