@@ -236,3 +236,25 @@ for (const mode of ['complete','absent','partial','extra-index','invalid-vendor-
     if (!['complete','absent'].includes(mode)) {const verified=new Database(file);assert.deepEqual(verified.serialize(),before);verified.close();}
   });
 }
+
+
+test('linked event display projection resolves authoritative labels without rewriting audit data', () => {
+  const events = [
+    record('linked-payment-display', { submissionType: 'payment-update', orderId: 'direct', paymentReference: 'BANK-UNCHANGED', bookingReference: 'BW-999' }),
+    record('linked-legacy-display', { submissionType: 'payment-update', orderId: 'BW-1234567812344234', bookingReference: 'BW-999' }),
+    record('linked-unknown-display', { submissionType: 'support-ticket-action', orderId: 'unknown-private-order', ticketId: 'CASE-LEGACY-REFERENCE', bookingReference: 'BW-999' }),
+  ];
+  // Persisted spoofed labels are ignored on every read, without a write-side backfill.
+  for (const event of events) db.prepare('INSERT INTO submissions VALUES (?, ?, ?, ?)').run(event.id, event.createdAt, event.source, JSON.stringify(event.data));
+  const before = db.serialize();
+  for (const event of events) {
+    for (const projected of [store.findSubmissionRecordById(event.id), store.readSubmissionRecords().find(row => row.id === event.id), store.readSubmissionRecordsForOrder(event.data.orderId).find(row => row.id === event.id)]) {
+      assert.equal(projected.id, event.id);
+      assert.equal(projected.data.orderId, event.data.orderId);
+      assert.equal(projected.data.bookingReference, event.id === 'linked-payment-display' ? 'BW-003' : null);
+      assert.equal(projected.data.paymentReference, event.data.paymentReference);
+      assert.equal(projected.data.ticketId, event.data.ticketId);
+    }
+  }
+  assert.deepEqual(db.serialize(), before, 'display lookups do not change stored rows, labels, sequence, owner or audit state');
+});

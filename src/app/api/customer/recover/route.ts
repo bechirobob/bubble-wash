@@ -1,3 +1,4 @@
+import { bookingReferenceForOrder } from "@/lib/booking-references";
 import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getDatabase, enqueueNotification, readSubmissionRecordsForOrder } from "@/lib/data-store";
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest) {
         if (!references[0]) return null;
         const records = readSubmissionRecordsForOrder(references[0].orderId);
         const order = buildOrderSummaries(records)[0];
-        return { email: recovery.email, order: customerOrderView(order, records), references };
+        return { email: recovery.email, order: customerOrderView(order, records), references: references.map((reference) => ({ ...reference, bookingReference: bookingReferenceForOrder(db, reference.orderId) })) };
       }).immediate();
       if (!recovered) return NextResponse.json({ ok: false, error: "This recovery link expired or was already used. Request a new link." }, { status: 400 });
       const response = NextResponse.json({ ok: true, order: recovered.order, references: recovered.references }, { headers: { "Cache-Control": "no-store" } });
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest) {
     }
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 160) throw new Error("Enter your booking email.");
-    if (!process.env.RESEND_API_KEY) return NextResponse.json({ ok: false, error: "Email recovery is temporarily unavailable. Use your booking reference and contact details, or contact operations for identity review." }, { status: 503 });
+    if (!process.env.RESEND_API_KEY) return NextResponse.json({ ok: false, error: "Email recovery is temporarily unavailable. Use your saved private tracking code and booking contact, or contact operations for identity review." }, { status: 503 });
     if (isRateLimited(`recovery-email:${createHash('sha256').update(email).digest('hex')}`, 3, 3600000)) return NextResponse.json({ ok: true, message: "If that email has bookings, a recovery link will be sent shortly." });
     const found = db.prepare("SELECT 1 FROM submissions WHERE json_extract(data, '$.submissionType') = 'pickup-booking' AND lower(json_extract(data, '$.email')) = ? LIMIT 1").get(email);
     if (found) db.transaction(() => {

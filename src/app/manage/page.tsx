@@ -9,5 +9,5 @@ export const metadata: Metadata = {
 };
 
 export default function ManageOrderPage() {
-  return <PublicChrome><PageIntro eyebrow="Your laundry" title="Your order, all in one place." summary="Check your pickup, view your bill, or request a change. Use your booking reference and the contact details you booked with." icon="manage" /><section className="policyContent manageOrderContent pageShell"><CustomerOrderManager /></section></PublicChrome>;
+  return <PublicChrome><PageIntro eyebrow="Your laundry" title="Your order, all in one place." summary="Check your pickup, view your bill, or request a change. Use your saved private tracking code and booking contact, or recover access through your booking email." icon="manage" /><section className="policyContent manageOrderContent pageShell"><CustomerOrderManager /></section></PublicChrome>;
 }

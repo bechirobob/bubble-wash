@@ -30,6 +30,8 @@ export type DispatchProjection = {
 
 export type OrderSummary = {
   orderId: string;
+  bookingReference?: string | null;
+  vendorCode?: string | null;
   createdAt: string;
   updatedAt: string;
   activityUpdatedAt: string;
@@ -509,7 +511,8 @@ export function buildOrderSummaries(records: SubmissionRecord[]) {
     const locationNote = dispatch.checkpoint || "No driver checkpoint yet";
     const summary: OrderSummary = {
       orderId,
-      createdAt: first.createdAt,
+      bookingReference: text(bookingRecord?.data.bookingReference) || null,
+      vendorCode: text([...chronological].reverse().find((record) => text(record.data.vendorId) === findLatest("vendorId"))?.data.vendorCode) || null,      createdAt: first.createdAt,
       updatedAt: fulfillmentRecord.createdAt,
       activityUpdatedAt: latest.createdAt,
       customer: findCustomer(),

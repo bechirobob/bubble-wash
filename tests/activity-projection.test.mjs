@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { projectStaffActivityRecord } from "../src/lib/staff-activity-projection.ts";
+import { projectStaffActivityRecord, staffActivitySubject } from "../src/lib/staff-activity-projection.ts";
 
 const source = {
   id: "BW-ACTIVITY-PRIVACY",
@@ -143,4 +143,26 @@ test("admin receives a full deep clone and projections never mutate their source
   admin.data.serviceZones.push("Airport");
   vendor.data.serviceZones.push("Cantonments");
   assert.deepEqual(source, snapshot);
+});
+
+
+test("linked activity headings use visible references while audit identities remain intact", () => {
+  const event = { id: "BW-EVENT-INTERNAL", createdAt: source.createdAt, data: { submissionType: "payment-update", orderId: "BW-RA1B2C3D4E5F6A7B8", bookingReference: "BW-1000000", paymentReference: "BANK-REFERENCE" } };
+  const snapshot = structuredClone(event);
+  for (const role of ["admin", "support", "vendor", "driver"]) {
+    const projected = projectStaffActivityRecord(event, role);
+    assert.equal(projected.data.bookingReference, "BW-1000000", "long references must not be redacted as phone numbers");
+    assert.equal(staffActivitySubject(projected), "BW-1000000");
+    assert.equal(projected.id, event.id);
+    assert.equal(projected.data.orderId, event.data.orderId);
+  }
+  assert.deepEqual(event, snapshot);
+  assert.equal(staffActivitySubject({ ...event, data: { ...event.data, bookingReference: null } }), "Legacy test booking");
+  assert.equal(staffActivitySubject({ ...event, data: { ...event.data, bookingReference: event.data.orderId } }), "Legacy test booking");
+  assert.equal(staffActivitySubject({ ...event, data: { ...event.data, company: "Laundry customer" } }), "Laundry customer");
+  assert.equal(staffActivitySubject({ ...event, data: { ticketId: "CASE-LEGACY-REFERENCE" } }), "CASE-LEGACY-REFERENCE");
+  assert.equal(staffActivitySubject({ ...event, data: {} }), "Bubble Wash request");
+  for (const role of ["support", "vendor", "driver"]) {
+    assert.equal(projectStaffActivityRecord({ ...event, data: { ...event.data, bookingReference: "customer@example.invalid" } }, role).data.bookingReference, null);
+  }
 });

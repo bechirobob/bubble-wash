@@ -1,3 +1,4 @@
+import { bookingLabel } from "@/lib/booking-label";
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
@@ -297,31 +298,39 @@ function customerBookingMessage(record: SubmissionRecord): NotificationMessage {
   const data = record.data;
   const name = text(data.name) || "there";
   const area = text(data.area) || text(data.zone) || "your area";
+  if (text(data.submissionType) === "client-onboarding") return {
+    target: "customer", toEmail: text(data.email), toWhatsApp: text(data.phone),
+    subject: "Bubble Wash account request received",
+    text: `Hi ${name}, Bubble Wash received your account request. Our team will confirm the next step.`,
+    purpose: "booking", whatsappTemplateParameters: [name, "Account request", area],
+  };
   const publicUrl = configuredPublicUrl();
-  const body = `Hi ${name}, Bubble Wash received your request ${record.id}.\n\nArea: ${area}\nPayment: ${text(data.paymentPreference) || text(data.paymentMethod) || "To be confirmed"}\n\nTrack it here: ${publicUrl}/track?id=${encodeURIComponent(record.id)}\nUse reference: ${record.id}`;
+  const body = `Hi ${name}, Bubble Wash received your request ${bookingLabel({ bookingReference: typeof record.data.bookingReference === "string" ? record.data.bookingReference : null })}.\n\nArea: ${area}\nPayment: ${text(data.paymentPreference) || text(data.paymentMethod) || "To be confirmed"}\n\nTrack it here: ${publicUrl}/track#tracking=${encodeURIComponent(record.id)}\nUse reference: ${bookingLabel({ bookingReference: typeof record.data.bookingReference === "string" ? record.data.bookingReference : null })}`;
   return {
     target: "customer",
     toEmail: text(data.email),
     toWhatsApp: text(data.phone),
-    subject: `Bubble Wash request received: ${record.id}`,
+    subject: `Bubble Wash request received: ${bookingLabel({ bookingReference: typeof record.data.bookingReference === "string" ? record.data.bookingReference : null })}`,
     text: body,
     purpose: "booking",
-    whatsappTemplateParameters: [name, record.id, area],
+    whatsappTemplateParameters: [name, bookingLabel({ bookingReference: text(data.bookingReference) }), area],
   };
 }
 
 function operationsMessage(record: SubmissionRecord): NotificationMessage {
   const data = record.data;
   const type = text(data.submissionType) || "request";
-  const body = `New Bubble Wash ${type}\n\nReference: ${record.id}\nCustomer: ${text(data.name) || "Unknown"}\nPhone: ${text(data.phone) || "Missing"}\nEmail: ${text(data.email) || "Missing"}\nArea: ${text(data.area) || text(data.zone) || "Not supplied"}\nPayment: ${text(data.paymentPreference) || text(data.paymentMethod) || "Not supplied"}\n\nNote: ${text(data.message) || "No note supplied."}`;
+  const label = ["pickup-booking", "checkout-request"].includes(type) || text(data.orderId)
+    ? bookingLabel({ bookingReference: text(data.bookingReference) }) : "Customer request";
+  const body = `New Bubble Wash ${type}\n\nReference: ${label}\nCustomer: ${text(data.name) || "Unknown"}\nPhone: ${text(data.phone) || "Missing"}\nEmail: ${text(data.email) || "Missing"}\nArea: ${text(data.area) || text(data.zone) || "Not supplied"}\nPayment: ${text(data.paymentPreference) || text(data.paymentMethod) || "Not supplied"}\n\nNote: ${text(data.message) || "No note supplied."}`;
   return {
     target: "operations",
     toEmail: envText("BUBBLEWASH_OPERATIONS_EMAIL"),
     toWhatsApp: envText("BUBBLEWASH_OPERATIONS_WHATSAPP"),
-    subject: `New Bubble Wash ${type}: ${record.id}`,
+    subject: `New Bubble Wash ${type}: ${label}`,
     text: body,
     purpose: "operations",
-    whatsappTemplateParameters: [type, record.id],
+    whatsappTemplateParameters: [type, label],
   };
 }
 
@@ -371,11 +380,12 @@ export function queueSubmissionNotifications(record: SubmissionRecord): Notifica
   const orderRecords = text(record.data.orderId) ? readSubmissionRecordsForOrder(text(record.data.orderId)) : [];
   const seed = orderRecords.find((item) => text(item.data.submissionType) === "pickup-booking");
   const preference = text(seed?.data.alertPreference) || text(record.data.alertPreference);
-  const messages = [operationsMessage(record)];
+  const displayRecord = seed ? { ...record, data: { ...record.data, bookingReference: seed.data.bookingReference } } : record;
+  const messages = [operationsMessage(displayRecord)];
   if (["pickup-booking", "client-onboarding"].includes(type)) messages.push(customerBookingMessage(record));
   else if (seed && ["admin-operation", "vendor-job-update", "driver-route-log", "qr-bag-intake", "payment-update"].includes(type)) {
     const order = buildOrderSummaries(orderRecords)[0];
-    messages.push({ target: "customer", toEmail: text(seed.data.email), toWhatsApp: text(seed.data.phone), subject: `Bubble Wash ${seed.id}: ${order.status}`, text: `Your order ${seed.id}: ${order.status}. View your current schedule and invoice at ${configuredPublicUrl()}/manage.`, purpose: "operations" });
+    messages.push({ target: "customer", toEmail: text(seed.data.email), toWhatsApp: text(seed.data.phone), subject: `Bubble Wash ${bookingLabel(order)}: ${order.status}`, text: `Your order ${bookingLabel(order)}: ${order.status}. View your current schedule and invoice at ${configuredPublicUrl()}/manage.`, purpose: "operations" });
   }
   const results: NotificationResult[] = [];
   for (const message of messages) for (const channel of ["email", "whatsapp"] as const) {

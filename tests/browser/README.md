@@ -9,3 +9,9 @@ Because this fixture deliberately uses local HTTP, its edge removes only the `up
 This is transport emulation, not production TLS validation. The suite does not test certificate trust, HTTPS upgrades, HSTS enforcement or HTTPS Secure-cookie enforcement, and does not ignore certificate errors or bypass browser warnings. Production transport requires separate verification.
 
 After building, run `node tests/browser/fixture-smoke.mjs` before `npm run test:browser`. The preflight checks real HTTP script assets, four logins, cookie-backed workspaces, redirects and cross-origin rejection. The rendered suite retains all four viewport/browser projects, complete saved workflows and no-JavaScript login safety checks.
+
+## Bounded lists and plain-language UI
+
+`npm run test:browser-worklists` also runs `list-density.worklist.mjs` at 390px and 1440px. These additional presentation tests use 50–51 synthetic tasks, invoice lines, bookings and history entries. They check keyboard paging, visible ranges, independent scroll regions, retained drafts, refresh reordering, focus recovery when a row disappears, empty filters, definition-list semantics and the absence of CSS shadows, then save synthetic-only screenshots. No real account, customer information, handoff code or provider secret is captured. The original worklist command and permission tests still run against the real temporary database fixture.
+
+A successful fixture HTTP smoke test is not graphical acceptance. This suite must execute in the browser CI job before claiming visual verification.

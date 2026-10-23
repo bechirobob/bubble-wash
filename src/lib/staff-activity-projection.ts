@@ -1,3 +1,5 @@
+import { bookingLabel } from "./booking-label.ts";
+
 export type StaffActivityRole = "admin" | "vendor" | "driver" | "support";
 
 export type StaffActivityRecord = {
@@ -6,6 +8,15 @@ export type StaffActivityRecord = {
   source?: string;
   data: Record<string, unknown>;
 };
+
+/** Ordinary activity headings never fall back to a private order identity. */
+export function staffActivitySubject(record: StaffActivityRecord) {
+  const value = (key: string) => typeof record.data[key] === "string" ? (record.data[key] as string).trim() : "";
+  const name = ["company", "staffName", "driverName", "name"].map(value).find(Boolean);
+  if (name) return name;
+  if (value("orderId") || value("bookingReference")) return bookingLabel({ bookingReference: value("bookingReference") });
+  return value("ticketId") || "Bubble Wash request";
+}
 
 const supportFields = new Set([
   "submissionType",
@@ -169,6 +180,12 @@ function allowlistedData(record: StaffActivityRecord, role: "vendor" | "driver" 
     data[key] = role === "support" ? cloneValue(value) : sanitizeOperationalValue(value, sensitiveValues);
   }
 
+  // This field comes from the authoritative read projection, not stored input.
+  // Keep only canonical display labels, without phone-number text redaction.
+  if (Object.hasOwn(record.data, "bookingReference")) {
+    const reference = typeof record.data.bookingReference === "string" ? record.data.bookingReference : "";
+    data.bookingReference = reference && bookingLabel({ bookingReference: reference }) === reference ? reference : null;
+  }
   if (role === "vendor" || role === "driver") data.message = safeOperationalSummary(record, role);
   return data;
 }

@@ -6,7 +6,7 @@ import ts from 'typescript';
 import { plans, zones, addons, calculateQuote } from '../src/lib/pricing.ts';
 
 // Exercise the component's edit and submit handlers without a browser dependency.
-function calculator({ deferred = false } = {}) {
+function calculator({ deferred = false, hydrated = true } = {}) {
   const slots = [];
   const requests = [];
   const responses = [];
@@ -23,13 +23,14 @@ function calculator({ deferred = false } = {}) {
       return slots[index];
     },
     useMemo: fn => fn(),
+    useSyncExternalStore: (_subscribe, clientReady, serverReady) => hydrated ? clientReady() : serverReady(),
   };
   const jsx = (type, props) => ({ type, props });
   const modules = {
     react,
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'fragment' },
     'next/link': { default: 'a' },
-    'lucide-react': { Calculator: 'icon', CalendarPlus: 'icon', BadgeCheck: 'icon' },
+    'lucide-react': { Calculator: 'icon', CalendarPlus: 'icon', BadgeCheck: 'icon', ArrowRight: 'icon', CalendarDays: 'icon', ChevronDown: 'icon', Info: 'icon' },
     '@/lib/pricing': { plans, zones, addons },
     '@/lib/public-ui': {
       formatMoney: value => `GHS ${value}`,
@@ -66,7 +67,12 @@ function calculator({ deferred = false } = {}) {
   return {
     requests,
     responses,
+    hydrate: () => { hydrated = true; },
+    form: () => find(render(), n => n.type === "form"),
+    zone: () => find(render(), n => n.type === "select" && n.props.value === "core"),
+    submitButton: () => find(render(), n => n.type === "button" && n.props.type === "submit"),
     select: name => find(render(), n => n.type === 'input' && n.props.type === 'radio' && n.props.value === name),
+    compare: name => find(render(), n => n.type === 'button' && n.props.className === 'focusedPlanCompareChoice' && n.props['aria-label'].startsWith(`Choose ${name},`)),
     plan: () => find(render(), n => n.type === 'select' && plans.some(p => p.name === n.props.value)),
     extra: () => find(render(), n => n.type === 'input' && n.props.type === 'checkbox'),
     total: () => find(render(), n => n.props?.className === 'quotePeriod').props.children,
@@ -132,4 +138,50 @@ test('changing a plan discards an in-flight estimate for the previous plan', asy
   await pending;
   assert.equal(view.plan().props.value, 'Contract');
   assert.equal(view.total(), 'monthly service fee, before processing');
+});
+
+test('comparison selection preserves calculator inputs and discards an old in-flight estimate', async () => {
+  const view = calculator({ deferred: true });
+  view.weight().props.onChange({ target: { value: '60.5' } });
+  view.extra().props.onChange();
+  const pending = view.submit();
+  view.compare('Three times weekly').props.onClick();
+  assert.equal(view.select('Three times weekly').props.checked, true);
+  assert.equal(view.plan().props.value, 'Three times weekly');
+  assert.equal(view.weight().props.value, '60.5');
+  assert.equal(view.extra().props.checked, true);
+  assert.equal(view.requests.length, 1, 'choosing a comparison plan must not submit a quote');
+  view.responses[0]();
+  await pending;
+  assert.equal(view.total(), 'monthly service fee, before processing');
+  const next = view.submit();
+  assert.equal(view.requests.at(-1).payload.plan, 'Three times weekly');
+  assert.equal(view.requests.at(-1).payload.kg, 60.5);
+  assert.equal(view.requests.at(-1).payload.addons.length, 1);
+  view.responses[1]();
+  await next;
+  assert.equal(view.total(), 'estimated monthly total');
+});
+
+
+test('server-rendered pricing controls remain disabled until handlers are ready', async () => {
+  const view = calculator({ hydrated: false });
+  assert.equal(view.form().props['aria-busy'], true);
+  for (const control of [view.weight(), view.plan(), view.zone(), view.extra(), view.submitButton(), ...plans.flatMap(plan => [view.select(plan.name), view.compare(plan.name)])]) {
+    assert.equal(control.props.disabled, true);
+  }
+  await view.submit();
+  assert.equal(view.requests.length, 0);
+  view.hydrate();
+  assert.equal(view.form().props['aria-busy'], false);
+  for (const control of [view.weight(), view.plan(), view.zone(), view.extra(), view.submitButton(), ...plans.flatMap(plan => [view.select(plan.name), view.compare(plan.name)])]) {
+    assert.equal(control.props.disabled, false);
+  }
+  view.weight().props.onChange({ target: { value: '60.5' } });
+  view.extra().props.onChange();
+  view.compare('Twice weekly').props.onClick();
+  assert.equal(view.weight().props.value, '60.5');
+  assert.equal(view.extra().props.checked, true);
+  await view.submit();
+  assert.deepEqual(JSON.parse(JSON.stringify(view.requests[0].payload)), { plan: 'Twice weekly', kg: 60.5, addons: ['ironing'], zone: 'core', discount: 'none' });
 });
