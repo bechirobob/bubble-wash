@@ -2,7 +2,7 @@ import './block-egress.mjs';
 import assert from 'node:assert/strict';
 import { createFixtureEdge } from './fixture-edge.mjs';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createPasswordHash } from '../../src/lib/passwords.ts';
@@ -12,6 +12,7 @@ for (const filename of ['.env', '.env.local', '.env.production', '.env.productio
   if (existsSync(filename)) throw new Error(`Browser fixture refuses ${filename}; use a clean test checkout.`);
 }
 
+const researchFixture = process.env.BUBBLEWASH_TEST_RESEARCH_OPEN === 'true';
 // No inherited application credentials, live database path or provider keys.
 const platformEnv = Object.fromEntries(['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'SYSTEMROOT'].filter(key => process.env[key]).map(key => [key, process.env[key]]));
 for (const key of Object.keys(process.env)) delete process.env[key];
@@ -29,6 +30,7 @@ Object.assign(process.env, platformEnv, {
   BUBBLEWASH_PUBLIC_URL: 'http://localhost:3100',
   NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED: 'false', NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED: 'false',
 });
+if (researchFixture) Object.assign(process.env, { BUBBLEWASH_RESEARCH_OPEN: 'true', BUBBLEWASH_RESEARCH_EMAIL_ENABLED: 'true', BUBBLEWASH_RESEARCH_RESEND_KEY: 'synthetic-egress-blocked-key' });
 for (const role of ['admin']) {
   process.env[`BUBBLEWASH_${role.toUpperCase()}_EMAIL`] = `${role}@example.invalid`;
   process.env[`BUBBLEWASH_${role.toUpperCase()}_PASSWORD_HASH`] = createPasswordHash(`synthetic-${role}-password-123`);
@@ -44,6 +46,7 @@ availability.upsertVendorAvailability({ vendorId: 'vendor-browser', vendorName: 
 availability.upsertDriverAvailability({ driverId: 'driver-browser', driverName: 'Synthetic Rider', serviceZones: ['Osu'], capacityRemaining: 10, availabilityStatus: 'active', updatedBy: 'synthetic-fixture' });
 const { appendSubmissionRecord, getDatabase } = await import('../../src/lib/data-store.ts');
 appendSubmissionRecord({ id: 'BW-BROWSEROVERDUE01', createdAt: new Date(Date.now() - 3600000).toISOString(), source: 'synthetic-browser-fixture', data: { submissionType: 'pickup-booking', name: 'Synthetic overdue customer', company: 'Synthetic overdue account', email: 'overdue@example.invalid', phone: '0200000000', pickupAddress: 'Synthetic reception, Osu, Accra', pickupDate: new Date().toISOString().slice(0, 10), pickupWindow: '8:00–10:00', plan: 'Weekly', paymentPreference: 'Invoice me', alertPreference: 'Call me' } });
+if (researchFixture) getDatabase().exec(readFileSync(resolve('db/proposed/research-v1.sql'), 'utf8'));
 const server = spawn(process.execPath, ['--import', resolve('tests/browser/block-egress.mjs'), 'node_modules/next/dist/bin/next', 'start', '-H', 'localhost', '-p', '3101'], { env: process.env, stdio: 'inherit' });
 const edge = createFixtureEdge();
 edge.listen(3100, 'localhost');

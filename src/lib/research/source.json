@@ -1,0 +1,1583 @@
+{
+  "version": "research-3",
+  "forms": [
+    {
+      "title": "Consumer Survey Questionnaire",
+      "questions": [
+        {
+          "id": "A1",
+          "section": "Section A — About you (screener)",
+          "prompt": "How old are you?",
+          "answer_specification": "Under 18 / 18 to 24 / 25 to 34 / 35 to 44 / 45 to 54 / 55 or over",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "A1. How old are you?\nUnder 18 / 18 to 24 / 25 to 34 / 35 to 44 / 45 to 54 / 55 or over",
+          "options": [
+            "Under 18",
+            "18 to 24",
+            "25 to 34",
+            "35 to 44",
+            "45 to 54",
+            "55 or over"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "A2",
+          "section": "Section A — About you (screener)",
+          "prompt": "Do you live or work in Accra?",
+          "answer_specification": "I live in Accra / I work in Accra / Both / Neither",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "A2. Do you live or work in Accra?\nI live in Accra / I work in Accra / Both / Neither",
+          "options": [
+            "I live in Accra",
+            "I work in Accra",
+            "Both",
+            "Neither"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "A3",
+          "section": "Section A — About you (screener)",
+          "prompt": "Which of these areas do you live in or spend most of your working/studying time in?",
+          "answer_specification": "Tse Addo / East Legon / Airport / Cantonments / Achimota / Haatso / Other (specify) / None of these",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "A3. Which of these areas do you live in or spend most of your working/studying time in?\nTse Addo / East Legon / Airport / Cantonments / Achimota / Haatso / Other (specify) / None of these",
+          "options": [
+            "Tse Addo",
+            "East Legon",
+            "Airport",
+            "Cantonments",
+            "Achimota",
+            "Haatso",
+            "Other (specify)",
+            "None of these"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "A4",
+          "section": "Section A — About you (screener)",
+          "prompt": "Which of these best describes you?",
+          "answer_specification": "Student living in a hall, hostel or shared accommodation / Business owner or self-employed / Employed in an office or corporate role / Employed in another role / Not currently working / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "A4. Which of these best describes you?\nStudent living in a hall, hostel or shared accommodation / Business owner or self-employed / Employed in an office or corporate role / Employed in another role / Not currently working / Other",
+          "options": [
+            "Student living in a hall, hostel or shared accommodation",
+            "Business owner or self-employed",
+            "Employed in an office or corporate role",
+            "Employed in another role",
+            "Not currently working",
+            "Other"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "A5",
+          "section": "Section A — About you (screener)",
+          "prompt": "Gender",
+          "answer_specification": "Woman / Man / Prefer not to say",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "A5. Gender\nWoman / Man / Prefer not to say",
+          "options": [
+            "Woman",
+            "Man",
+            "Prefer not to say"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "A6",
+          "section": "Section A — About you (screener)",
+          "prompt": "How many people live in your household, including you?",
+          "answer_specification": "1 / 2 / 3 to 4 / 5 or more",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "A6. How many people live in your household, including you?\n1 / 2 / 3 to 4 / 5 or more",
+          "options": [
+            "1",
+            "2",
+            "3 to 4",
+            "5 or more"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "A7",
+          "section": "Section A — About you (screener)",
+          "prompt": "What is your household’s approximate total monthly income from all sources, before expenses? (GH¢)",
+          "answer_specification": "Under GH₵2,000 / GH₵2,000–4,999 / GH₵5,000–9,999 / GH₵10,000–15,000 / Above GH₵15,000 / Don’t know / Prefer not to say",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "A7. What is your household’s approximate total monthly income from all sources, before expenses? (GH¢)\nUnder GH₵2,000 / GH₵2,000–4,999 / GH₵5,000–9,999 / GH₵10,000–15,000 / Above GH₵15,000 / Don’t know / Prefer not to say",
+          "options": [
+            "Under GH₵2,000",
+            "GH₵2,000–4,999",
+            "GH₵5,000–9,999",
+            "GH₵10,000–15,000",
+            "Above GH₵15,000",
+            "Don’t know",
+            "Prefer not to say"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "A8",
+          "section": "Section A — About you (screener)",
+          "prompt": "Who mainly looks after household chores in your home?",
+          "answer_specification": "Me / My partner / Shared equally / Another family member / House help / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "A8. Who mainly looks after household chores in your home?\nMe / My partner / Shared equally / Another family member / House help / Other",
+          "options": [
+            "Me",
+            "My partner",
+            "Shared equally",
+            "Another family member",
+            "House help",
+            "Other"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "A8a",
+          "section": "Section A — About you (screener)",
+          "prompt": "[ONLY IF A8 = HOUSE HELP] Roughly how much does your household pay the house help each month, in GH¢?",
+          "answer_specification": "Enter amount / Don’t know / Prefer not to say. Include salary only; exclude groceries and other expenses.",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "A8a. [ONLY IF A8 = HOUSE HELP] Roughly how much does your household pay the house help each month, in GH¢?\nEnter amount / Don’t know / Prefer not to say. Include salary only; exclude groceries and other expenses.",
+          "options": [
+            "Don’t know",
+            "Prefer not to say"
+          ],
+          "suggested_input_type": "number_or_nonresponse_choice",
+          "number_choice_label": "Enter amount",
+          "units": "GH¢",
+          "instruction": "Include salary only; exclude groceries and other expenses."
+        },
+        {
+          "id": "F1a",
+          "section": "Section F1 — Students (conditional)",
+          "prompt": "Which university or college do you attend?",
+          "answer_specification": "University of Ghana / Kwame Nkrumah University of Science and Technology (KNUST) / Central University / Lancaster University Ghana / Wisconsin International University College Ghana / Other university or college (please specify)",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F1a. Which university or college do you attend?\nUniversity of Ghana / Kwame Nkrumah University of Science and Technology (KNUST) / Central University / Lancaster University Ghana / Wisconsin International University College Ghana / Other university or college (please specify)",
+          "options": [
+            "University of Ghana",
+            "Kwame Nkrumah University of Science and Technology (KNUST)",
+            "Central University",
+            "Lancaster University Ghana",
+            "Wisconsin International University College Ghana",
+            "Other university or college (please specify)"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F1b",
+          "section": "Section F1 — Students (conditional)",
+          "prompt": "Is there a washing machine you can use where you live?",
+          "answer_specification": "Yes, free / Yes, paid / No",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F1b. Is there a washing machine you can use where you live?\nYes, free / Yes, paid / No",
+          "options": [
+            "Yes, free",
+            "Yes, paid",
+            "No"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F1c",
+          "section": "Section F1 — Students (conditional)",
+          "prompt": "Who pays for things like your laundry?",
+          "answer_specification": "Me / My parents or family / Shared / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F1c. Who pays for things like your laundry?\nMe / My parents or family / Shared / Other",
+          "options": [
+            "Me",
+            "My parents or family",
+            "Shared",
+            "Other"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F1d",
+          "section": "Section F1 — Students (conditional)",
+          "prompt": "Would you use a laundry drop-off point on or near campus?",
+          "answer_specification": "Yes / Maybe / No",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F1d. Would you use a laundry drop-off point on or near campus?\nYes / Maybe / No",
+          "options": [
+            "Yes",
+            "Maybe",
+            "No"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F1e",
+          "section": "Section F1 — Students (conditional)",
+          "prompt": "Would your parents or family consider paying for a laundry package for the whole term?",
+          "answer_specification": "Yes / Maybe / No / Not sure",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F1e. Would your parents or family consider paying for a laundry package for the whole term?\nYes / Maybe / No / Not sure",
+          "options": [
+            "Yes",
+            "Maybe",
+            "No",
+            "Not sure"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F2a",
+          "section": "Section F2 — Business owners and self-employed (conditional)",
+          "prompt": "How often do you travel outside Ghana?",
+          "answer_specification": "Never / Once or twice a year / Every few months / Monthly or more",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F2a. How often do you travel outside Ghana?\nNever / Once or twice a year / Every few months / Monthly or more",
+          "options": [
+            "Never",
+            "Once or twice a year",
+            "Every few months",
+            "Monthly or more"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F2b",
+          "section": "Section F2 — Business owners and self-employed (conditional)",
+          "prompt": "Which of these would you pay extra for? (tick all)",
+          "answer_specification": "Faster turnaround / Care for delicate or designer items / A dedicated contact person / Pickup from my office / Pickup arranged around my travel / None",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F2b. Which of these would you pay extra for? (tick all)\nFaster turnaround / Care for delicate or designer items / A dedicated contact person / Pickup from my office / Pickup arranged around my travel / None",
+          "options": [
+            "Faster turnaround",
+            "Care for delicate or designer items",
+            "A dedicated contact person",
+            "Pickup from my office",
+            "Pickup arranged around my travel",
+            "None"
+          ],
+          "suggested_input_type": "checkboxes"
+        },
+        {
+          "id": "F2c",
+          "section": "Section F2 — Business owners and self-employed (conditional)",
+          "prompt": "Would you prefer someone else (for example an assistant) to book for you?",
+          "answer_specification": "Yes / No",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F2c. Would you prefer someone else (for example an assistant) to book for you?\nYes / No",
+          "options": [
+            "Yes",
+            "No"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F2d",
+          "section": "Section F2 — Business owners and self-employed (conditional)",
+          "prompt": "On a typical working day, where do you spend most of your time?",
+          "answer_specification": "At home / In an office or shop / Visiting customers or sites / Travelling between locations / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F2d. On a typical working day, where do you spend most of your time?\nAt home / In an office or shop / Visiting customers or sites / Travelling between locations / Other",
+          "options": [
+            "At home",
+            "In an office or shop",
+            "Visiting customers or sites",
+            "Travelling between locations",
+            "Other"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F2e",
+          "section": "Section F2 — Business owners and self-employed (conditional)",
+          "prompt": "How many days a week do you typically work?",
+          "answer_specification": "1–2 / 3–4 / 5 / 6–7 / Varies significantly",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F2e. How many days a week do you typically work?\n1–2 / 3–4 / 5 / 6–7 / Varies significantly",
+          "options": [
+            "1–2",
+            "3–4",
+            "5",
+            "6–7",
+            "Varies significantly"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F2f",
+          "section": "Section F2 — Business owners and self-employed (conditional)",
+          "prompt": "How predictable is your daily schedule?",
+          "answer_specification": "Very predictable / Somewhat predictable / Changes often / Highly unpredictable",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F2f. How predictable is your daily schedule?\nVery predictable / Somewhat predictable / Changes often / Highly unpredictable",
+          "options": [
+            "Very predictable",
+            "Somewhat predictable",
+            "Changes often",
+            "Highly unpredictable"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F2g",
+          "section": "Section F2 — Business owners and self-employed (conditional)",
+          "prompt": "How often are you away from home for most of the day?",
+          "answer_specification": "Rarely / 1–2 days per week / 3–4 days per week / Almost every day",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F2g. How often are you away from home for most of the day?\nRarely / 1–2 days per week / 3–4 days per week / Almost every day",
+          "options": [
+            "Rarely",
+            "1–2 days per week",
+            "3–4 days per week",
+            "Almost every day"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F2h",
+          "section": "Section F2 — Business owners and self-employed (conditional)",
+          "prompt": "How often do you travel within Ghana for work?",
+          "answer_specification": "Never / A few times a year / Monthly / Weekly or more",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F2h. How often do you travel within Ghana for work?\nNever / A few times a year / Monthly / Weekly or more",
+          "options": [
+            "Never",
+            "A few times a year",
+            "Monthly",
+            "Weekly or more"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F2i",
+          "section": "Section F2 — Business owners and self-employed (conditional)",
+          "prompt": "When work is busy or you are travelling, who usually handles your laundry?",
+          "answer_specification": "I do / Partner or family / House help / Laundry provider / It waits until I return / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F2i. When work is busy or you are travelling, who usually handles your laundry?\nI do / Partner or family / House help / Laundry provider / It waits until I return / Other",
+          "options": [
+            "I do",
+            "Partner or family",
+            "House help",
+            "Laundry provider",
+            "It waits until I return",
+            "Other"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F2j",
+          "section": "Section F2 — Business owners and self-employed (conditional)",
+          "prompt": "Which routine services do you currently pay for to save time? (select all)",
+          "answer_specification": "Food delivery / Cleaning or house help / Grocery delivery / Transport or driver / Laundry / Personal assistant / None / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F2j. Which routine services do you currently pay for to save time? (select all)\nFood delivery / Cleaning or house help / Grocery delivery / Transport or driver / Laundry / Personal assistant / None / Other",
+          "options": [
+            "Food delivery",
+            "Cleaning or house help",
+            "Grocery delivery",
+            "Transport or driver",
+            "Laundry",
+            "Personal assistant",
+            "None",
+            "Other"
+          ],
+          "suggested_input_type": "checkboxes"
+        },
+        {
+          "id": "F2k",
+          "section": "Section F2 — Business owners and self-employed (conditional)",
+          "prompt": "How do you usually arrange personal services?",
+          "answer_specification": "WhatsApp / Phone / Website / App / Through assistant or family / In person / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F2k. How do you usually arrange personal services?\nWhatsApp / Phone / Website / App / Through assistant or family / In person / Other",
+          "options": [
+            "WhatsApp",
+            "Phone",
+            "Website",
+            "App",
+            "Through assistant or family",
+            "In person",
+            "Other"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F2l",
+          "section": "Section F2 — Business owners and self-employed (conditional)",
+          "prompt": "Which is more important when booking a laundry service?",
+          "answer_specification": "Flexible pickup times / Guaranteed return time / Quality for delicate items / Ability to delegate booking / Lowest price / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F2l. Which is more important when booking a laundry service?\nFlexible pickup times / Guaranteed return time / Quality for delicate items / Ability to delegate booking / Lowest price / Other",
+          "options": [
+            "Flexible pickup times",
+            "Guaranteed return time",
+            "Quality for delicate items",
+            "Ability to delegate booking",
+            "Lowest price",
+            "Other"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F2m",
+          "section": "Section F2 — Business owners and self-employed (conditional)",
+          "prompt": "What would most likely cause you to use a pickup laundry service regularly?",
+          "answer_specification": "Saving time / Reducing travel-day stress / Reliability / Clothing care / Convenience / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F2m. What would most likely cause you to use a pickup laundry service regularly?\nSaving time / Reducing travel-day stress / Reliability / Clothing care / Convenience / Other",
+          "options": [
+            "Saving time",
+            "Reducing travel-day stress",
+            "Reliability",
+            "Clothing care",
+            "Convenience",
+            "Other"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F3a",
+          "section": "Section F3 — Office and corporate workers (conditional)",
+          "prompt": "On a typical workday, how long is your commute each way?",
+          "answer_specification": "Under 30 min / 30 to 60 min / 1 to 2 hours / Over 2 hours",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F3a. On a typical workday, how long is your commute each way?\nUnder 30 min / 30 to 60 min / 1 to 2 hours / Over 2 hours",
+          "options": [
+            "Under 30 min",
+            "30 to 60 min",
+            "1 to 2 hours",
+            "Over 2 hours"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F3b",
+          "section": "Section F3 — Office and corporate workers (conditional)",
+          "prompt": "On a typical week, how many hours do you spend at work?",
+          "answer_specification": "Under 40 / 40 to 50 / 50 to 60 / Over 60",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F3b. On a typical week, how many hours do you spend at work?\nUnder 40 / 40 to 50 / 50 to 60 / Over 60",
+          "options": [
+            "Under 40",
+            "40 to 50",
+            "50 to 60",
+            "Over 60"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F3c",
+          "section": "Section F3 — Office and corporate workers (conditional)",
+          "prompt": "Would you use laundry pickup and drop-off at your workplace?",
+          "answer_specification": "Yes / Maybe / No",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F3c. Would you use laundry pickup and drop-off at your workplace?\nYes / Maybe / No",
+          "options": [
+            "Yes",
+            "Maybe",
+            "No"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F3d",
+          "section": "Section F3 — Office and corporate workers (conditional)",
+          "prompt": "How would you feel if your employer offered laundry service as a staff benefit?",
+          "answer_specification": "Very interested / Somewhat interested / Not interested",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F3d. How would you feel if your employer offered laundry service as a staff benefit?\nVery interested / Somewhat interested / Not interested",
+          "options": [
+            "Very interested",
+            "Somewhat interested",
+            "Not interested"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "F4a",
+          "section": "Section F4 — Working women managing household responsibilities (conditional)",
+          "prompt": "Alongside paid work, how much responsibility do you have for arranging or doing laundry at home?",
+          "answer_specification": "All or almost all / More than half / About half / Less than half / None",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F4a. Alongside paid work, how much responsibility do you have for arranging or doing laundry at home?\nAll or almost all / More than half / About half / Less than half / None",
+          "suggested_input_type": "single_choice",
+          "options": [
+            "All or almost all",
+            "More than half",
+            "About half",
+            "Less than half",
+            "None"
+          ]
+        },
+        {
+          "id": "F4b",
+          "section": "Section F4 — Working women managing household responsibilities (conditional)",
+          "prompt": "Which household laundry tasks do you personally handle? (tick all that apply)",
+          "answer_specification": "Sorting / Washing / Drying / Ironing / Folding / Arranging a laundry service / None",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F4b. Which household laundry tasks do you personally handle? (tick all that apply)\nSorting / Washing / Drying / Ironing / Folding / Arranging a laundry service / None",
+          "suggested_input_type": "checkboxes",
+          "options": [
+            "Sorting",
+            "Washing",
+            "Drying",
+            "Ironing",
+            "Folding",
+            "Arranging a laundry service",
+            "None"
+          ]
+        },
+        {
+          "id": "F4c",
+          "section": "Section F4 — Working women managing household responsibilities (conditional)",
+          "prompt": "What makes laundry most difficult to fit around your responsibilities? (choose up to 2)",
+          "answer_specification": "Work hours / Childcare or caring responsibilities / Other household chores / Lack of help / Water or electricity / Cost / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F4c. What makes laundry most difficult to fit around your responsibilities? (choose up to 2)\nWork hours / Childcare or caring responsibilities / Other household chores / Lack of help / Water or electricity / Cost / Other",
+          "suggested_input_type": "checkboxes",
+          "options": [
+            "Work hours",
+            "Childcare or caring responsibilities",
+            "Other household chores",
+            "Lack of help",
+            "Water or electricity",
+            "Cost",
+            "Other"
+          ]
+        },
+        {
+          "id": "F4d",
+          "section": "Section F4 — Working women managing household responsibilities (conditional)",
+          "prompt": "If a reliable pickup service handled your laundry, what would be the biggest benefit?",
+          "answer_specification": "Saving time / Reducing stress / More time with family / More rest / Better garment care / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F4d. If a reliable pickup service handled your laundry, what would be the biggest benefit?\nSaving time / Reducing stress / More time with family / More rest / Better garment care / Other",
+          "suggested_input_type": "single_choice",
+          "options": [
+            "Saving time",
+            "Reducing stress",
+            "More time with family",
+            "More rest",
+            "Better garment care",
+            "Other"
+          ]
+        },
+        {
+          "id": "F4e",
+          "section": "Section F4 — Working women managing household responsibilities (conditional)",
+          "prompt": "What would make you hesitate to use such a service?",
+          "answer_specification": "Cost / Trust and privacy / Quality / Pickup timing / Clothes being lost or damaged / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F4e. What would make you hesitate to use such a service?\nCost / Trust and privacy / Quality / Pickup timing / Clothes being lost or damaged / Other",
+          "suggested_input_type": "single_choice",
+          "options": [
+            "Cost",
+            "Trust and privacy",
+            "Quality",
+            "Pickup timing",
+            "Clothes being lost or damaged",
+            "Other"
+          ]
+        },
+        {
+          "id": "B1",
+          "section": "Section B — How you do laundry today",
+          "prompt": "How is your laundry mainly done today? (tick all that apply)",
+          "answer_specification": "I do it by hand / I use my own washing machine / A family member does it / House help does it / A washer comes to my home / I take it to a laundry or dry cleaner / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "B1. How is your laundry mainly done today? (tick all that apply)\nI do it by hand / I use my own washing machine / A family member does it / House help does it / A washer comes to my home / I take it to a laundry or dry cleaner / Other",
+          "options": [
+            "I do it by hand",
+            "I use my own washing machine",
+            "A family member does it",
+            "House help does it",
+            "A washer comes to my home",
+            "I take it to a laundry or dry cleaner",
+            "Other"
+          ],
+          "suggested_input_type": "checkboxes"
+        },
+        {
+          "id": "B2",
+          "section": "Section B — How you do laundry today",
+          "prompt": "How often is laundry done in your home?",
+          "answer_specification": "Daily / A few times a week / Weekly / Every two weeks / Less often",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "B2. How often is laundry done in your home?\nDaily / A few times a week / Weekly / Every two weeks / Less often",
+          "options": [
+            "Daily",
+            "A few times a week",
+            "Weekly",
+            "Every two weeks",
+            "Less often"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "B3",
+          "section": "Section B — How you do laundry today",
+          "prompt": "Do you use dry cleaning?",
+          "answer_specification": "Weekly / Monthly / A few times a year / Never",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "B3. Do you use dry cleaning?\nWeekly / Monthly / A few times a year / Never",
+          "options": [
+            "Weekly",
+            "Monthly",
+            "A few times a year",
+            "Never"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "B4",
+          "section": "Section B — How you do laundry today",
+          "prompt": "Roughly how much do you spend on laundry and dry cleaning services per month, in GH¢?",
+          "answer_specification": "Number / Don’t know / Prefer not to say. Exclude general house-help salary already captured in A8a, to avoid double-counting.",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "B4. Roughly how much do you spend on laundry and dry cleaning services per month, in GH¢?\nNumber / Don’t know / Prefer not to say. Exclude general house-help salary already captured in A8a, to avoid double-counting.",
+          "options": [
+            "Don’t know",
+            "Prefer not to say"
+          ],
+          "suggested_input_type": "number_or_nonresponse_choice",
+          "number_choice_label": "Number",
+          "units": "GH¢",
+          "instruction": "Exclude general house-help salary already captured in A8a, to avoid double-counting."
+        },
+        {
+          "id": "B5",
+          "section": "Section B — How you do laundry today",
+          "prompt": "Roughly how many hours a week do you personally spend on laundry, including ironing?",
+          "answer_specification": "Number",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "B5. Roughly how many hours a week do you personally spend on laundry, including ironing?\nNumber",
+          "suggested_input_type": "number"
+        },
+        {
+          "id": "B6",
+          "section": "Section B — How you do laundry today",
+          "prompt": "How reliable is the water supply at your home?",
+          "answer_specification": "Very reliable / Somewhat reliable / Unreliable / Very unreliable / No direct water connection",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "B6. How reliable is the water supply at your home?\nVery reliable / Somewhat reliable / Unreliable / Very unreliable / No direct water connection",
+          "options": [
+            "Very reliable",
+            "Somewhat reliable",
+            "Unreliable",
+            "Very unreliable",
+            "No direct water connection"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "B6a",
+          "section": "Section B — How you do laundry today",
+          "prompt": "When your normal water supply is insufficient, what do you do? (Select all that apply.)",
+          "answer_specification": "Use stored water / Buy water delivered by tanker / Buy water delivered in containers / Buy water from a nearby vendor and collect it / Fetch water elsewhere / Delay laundry / Other / Not applicable",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "B6a. When your normal water supply is insufficient, what do you do? (Select all that apply.)\nUse stored water / Buy water delivered by tanker / Buy water delivered in containers / Buy water from a nearby vendor and collect it / Fetch water elsewhere / Delay laundry / Other / Not applicable",
+          "options": [
+            "Use stored water",
+            "Buy water delivered by tanker",
+            "Buy water delivered in containers",
+            "Buy water from a nearby vendor and collect it",
+            "Fetch water elsewhere",
+            "Delay laundry",
+            "Other",
+            "Not applicable"
+          ],
+          "suggested_input_type": "checkboxes"
+        },
+        {
+          "id": "B6b",
+          "section": "Section B — How you do laundry today",
+          "prompt": "Do you purchase additional water for household use?",
+          "answer_specification": "Yes, regularly / Yes, occasionally / No",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "B6b. Do you purchase additional water for household use?\nYes, regularly / Yes, occasionally / No",
+          "options": [
+            "Yes, regularly",
+            "Yes, occasionally",
+            "No"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "B6c",
+          "section": "Section B — How you do laundry today",
+          "prompt": "[IF B6b = YES] Approximately how much does your household spend per month on additional purchased water (delivered or collected)?",
+          "answer_specification": "Under GH₵100 / GH₵100–299 / GH₵300–499 / GH₵500–999 / GH₵1,000 or more / Don’t know / Prefer not to say",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "B6c. [IF B6b = YES] Approximately how much does your household spend per month on additional purchased water (delivered or collected)?\nUnder GH₵100 / GH₵100–299 / GH₵300–499 / GH₵500–999 / GH₵1,000 or more / Don’t know / Prefer not to say",
+          "options": [
+            "Under GH₵100",
+            "GH₵100–299",
+            "GH₵300–499",
+            "GH₵500–999",
+            "GH₵1,000 or more",
+            "Don’t know",
+            "Prefer not to say"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "B6d",
+          "section": "Section B — How you do laundry today",
+          "prompt": "How often does water availability affect your ability to do laundry?",
+          "answer_specification": "Always / Often / Sometimes / Rarely / Never",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "B6d. How often does water availability affect your ability to do laundry?\nAlways / Often / Sometimes / Rarely / Never",
+          "options": [
+            "Always",
+            "Often",
+            "Sometimes",
+            "Rarely",
+            "Never"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "B7",
+          "section": "Section B — How you do laundry today",
+          "prompt": "How reliable is the electricity supply at your home?",
+          "answer_specification": "Always / Mostly / Sometimes / Rarely",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "B7. How reliable is the electricity supply at your home?\nAlways / Mostly / Sometimes / Rarely",
+          "options": [
+            "Always",
+            "Mostly",
+            "Sometimes",
+            "Rarely"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "C1",
+          "section": "Section C — Frustrations",
+          "prompt": "What are your biggest frustrations with getting laundry done? (choose up to 3)",
+          "answer_specification": "Takes too much time / Costs too much / Poor quality / Clothes damaged or lost / No water / No power / Nowhere to dry clothes / Unreliable washer or help / Ironing / None / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "C1. What are your biggest frustrations with getting laundry done? (choose up to 3)\nTakes too much time / Costs too much / Poor quality / Clothes damaged or lost / No water / No power / Nowhere to dry clothes / Unreliable washer or help / Ironing / None / Other",
+          "options": [
+            "Takes too much time",
+            "Costs too much",
+            "Poor quality",
+            "Clothes damaged or lost",
+            "No water",
+            "No power",
+            "Nowhere to dry clothes",
+            "Unreliable washer or help",
+            "Ironing",
+            "None",
+            "Other"
+          ],
+          "suggested_input_type": "checkboxes"
+        },
+        {
+          "id": "C2",
+          "section": "Section C — Frustrations",
+          "prompt": "Have you ever had clothes damaged or lost by a laundry or washer?",
+          "answer_specification": "Yes / No",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "C2. Have you ever had clothes damaged or lost by a laundry or washer?\nYes / No",
+          "options": [
+            "Yes",
+            "No"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "C3",
+          "section": "Section C — Frustrations",
+          "prompt": "What is the most frustrating thing about getting your laundry done?",
+          "answer_specification": "Short paragraph; optional",
+          "required": false,
+          "required_status": "explicit_optional",
+          "source_text": "C3. What is the most frustrating thing about getting your laundry done?\nShort paragraph; optional",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "D1",
+          "section": "Section D — Trust",
+          "prompt": "How comfortable would you be letting a service collect your laundry from your home?",
+          "answer_specification": "Scale 1 (not at all) to 5 (completely)",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "D1. How comfortable would you be letting a service collect your laundry from your home?\nScale 1 (not at all) to 5 (completely)",
+          "suggested_input_type": "linear_scale",
+          "scale": {
+            "min": 1,
+            "max": 5,
+            "min_label": "not at all",
+            "max_label": "completely"
+          }
+        },
+        {
+          "id": "D2",
+          "section": "Section D — Trust",
+          "prompt": "What would make you trust a laundry pickup service? (tick all)",
+          "answer_specification": "Compensation if items are damaged or lost / Good reviews / A friend recommends it / A well-known brand / Tracking my order / The same driver each time / Knowing which laundry cleans my clothes / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "D2. What would make you trust a laundry pickup service? (tick all)\nCompensation if items are damaged or lost / Good reviews / A friend recommends it / A well-known brand / Tracking my order / The same driver each time / Knowing which laundry cleans my clothes / Other",
+          "options": [
+            "Compensation if items are damaged or lost",
+            "Good reviews",
+            "A friend recommends it",
+            "A well-known brand",
+            "Tracking my order",
+            "The same driver each time",
+            "Knowing which laundry cleans my clothes",
+            "Other"
+          ],
+          "suggested_input_type": "checkboxes"
+        },
+        {
+          "id": "D3",
+          "section": "Section D — Trust",
+          "prompt": "Is there anything you would never send to a laundry service?",
+          "answer_specification": "Short answer; optional",
+          "required": false,
+          "required_status": "explicit_optional",
+          "source_text": "D3. Is there anything you would never send to a laundry service?\nShort answer; optional",
+          "suggested_input_type": "short_text"
+        },
+        {
+          "id": "E1",
+          "section": "Section E — The idea and pricing",
+          "prompt": "How likely would you be to use a service like this?",
+          "answer_specification": "Scale 1 (very unlikely) to 5 (very likely)",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E1. How likely would you be to use a service like this?\nScale 1 (very unlikely) to 5 (very likely)",
+          "suggested_input_type": "linear_scale",
+          "scale": {
+            "min": 1,
+            "max": 5,
+            "min_label": "very unlikely",
+            "max_label": "very likely"
+          }
+        },
+        {
+          "id": "E2",
+          "section": "Section E — The idea and pricing",
+          "prompt": "Which pricing would you prefer?",
+          "answer_specification": "Per item / Per bag / Monthly subscription / No preference",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E2. Which pricing would you prefer?\nPer item / Per bag / Monthly subscription / No preference",
+          "options": [
+            "Per item",
+            "Per bag",
+            "Monthly subscription",
+            "No preference"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "E3",
+          "section": "Section E — The idea and pricing",
+          "prompt": "At what price would it be so cheap that you'd doubt the quality?",
+          "answer_specification": "Number, GH¢",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E3. At what price would it be so cheap that you'd doubt the quality?\nNumber, GH¢",
+          "suggested_input_type": "number"
+        },
+        {
+          "id": "E4",
+          "section": "Section E — The idea and pricing",
+          "prompt": "At what price would it be a bargain?",
+          "answer_specification": "Number, GH¢",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E4. At what price would it be a bargain?\nNumber, GH¢",
+          "suggested_input_type": "number"
+        },
+        {
+          "id": "E5",
+          "section": "Section E — The idea and pricing",
+          "prompt": "At what price would it start to feel expensive, but you'd still consider it?",
+          "answer_specification": "Number, GH¢",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E5. At what price would it start to feel expensive, but you'd still consider it?\nNumber, GH¢",
+          "suggested_input_type": "number"
+        },
+        {
+          "id": "E6",
+          "section": "Section E — The idea and pricing",
+          "prompt": "At what price would it be too expensive to consider?",
+          "answer_specification": "Number, GH¢",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E6. At what price would it be too expensive to consider?\nNumber, GH¢",
+          "suggested_input_type": "number"
+        },
+        {
+          "id": "E7",
+          "section": "Section E — The idea and pricing",
+          "prompt": "How quickly would you want your laundry back?",
+          "answer_specification": "Within 24 hours / Within 48 hours / Within 3 days / I'm flexible",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E7. How quickly would you want your laundry back?\nWithin 24 hours / Within 48 hours / Within 3 days / I'm flexible",
+          "options": [
+            "Within 24 hours",
+            "Within 48 hours",
+            "Within 3 days",
+            "I'm flexible"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "E8",
+          "section": "Section E — The idea and pricing",
+          "prompt": "When would pickups suit you best? (tick all)",
+          "answer_specification": "Weekday mornings / Weekday evenings / Saturdays / Sundays",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E8. When would pickups suit you best? (tick all)\nWeekday mornings / Weekday evenings / Saturdays / Sundays",
+          "options": [
+            "Weekday mornings",
+            "Weekday evenings",
+            "Saturdays",
+            "Sundays"
+          ],
+          "suggested_input_type": "checkboxes"
+        },
+        {
+          "id": "E9",
+          "section": "Section E — The idea and pricing",
+          "prompt": "How would you prefer to book?",
+          "answer_specification": "App / Website / WhatsApp / Phone call",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E9. How would you prefer to book?\nApp / Website / WhatsApp / Phone call",
+          "options": [
+            "App",
+            "Website",
+            "WhatsApp",
+            "Phone call"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "E10",
+          "section": "Section E — The idea and pricing",
+          "prompt": "How would you prefer to pay?",
+          "answer_specification": "Mobile money / Card / Cash on delivery / Bank transfer",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E10. How would you prefer to pay?\nMobile money / Card / Cash on delivery / Bank transfer",
+          "options": [
+            "Mobile money",
+            "Card",
+            "Cash on delivery",
+            "Bank transfer"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "G1",
+          "section": "Section G — Where you find new services",
+          "prompt": "Where do you usually hear about new services? (tick all)",
+          "answer_specification": "WhatsApp / Instagram / TikTok / Facebook / X / LinkedIn / Snapchat / YouTube / Friends or family / At work / Radio or TV / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "G1. Where do you usually hear about new services? (tick all)\nWhatsApp / Instagram / TikTok / Facebook / X / LinkedIn / Snapchat / YouTube / Friends or family / At work / Radio or TV / Other",
+          "options": [
+            "WhatsApp",
+            "Instagram",
+            "TikTok",
+            "Facebook",
+            "X",
+            "LinkedIn",
+            "Snapchat",
+            "YouTube",
+            "Friends or family",
+            "At work",
+            "Radio or TV",
+            "Other"
+          ],
+          "suggested_input_type": "checkboxes"
+        },
+        {
+          "id": "G2",
+          "section": "Section G — Where you find new services",
+          "prompt": "How did you find this survey?",
+          "answer_specification": "Facebook / Instagram / TikTok / WhatsApp / A friend sent it / Other",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "G2. How did you find this survey?\nFacebook / Instagram / TikTok / WhatsApp / A friend sent it / Other",
+          "options": [
+            "Facebook",
+            "Instagram",
+            "TikTok",
+            "WhatsApp",
+            "A friend sent it",
+            "Other"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "H1",
+          "section": "Section H — Stay in touch (all optional)",
+          "prompt": "Would you like to join the Bubblewash waitlist and hear when we launch?",
+          "answer_specification": "Yes / No",
+          "required": false,
+          "required_status": "explicit_optional",
+          "source_text": "H1. Would you like to join the Bubblewash waitlist and hear when we launch?\nYes / No",
+          "options": [
+            "Yes",
+            "No"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "H2",
+          "section": "Section H — Stay in touch (all optional)",
+          "prompt": "Would you be happy to talk to us for 30 minutes about your answers? No incentive is offered.",
+          "answer_specification": "Yes / No",
+          "required": false,
+          "required_status": "explicit_optional",
+          "source_text": "H2. Would you be happy to talk to us for 30 minutes about your answers? No incentive is offered.\nYes / No",
+          "options": [
+            "Yes",
+            "No"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "H3",
+          "section": "Section H — Stay in touch (all optional)",
+          "prompt": "Would you like to try the service early, in a small pilot?",
+          "answer_specification": "Yes / No",
+          "required": false,
+          "required_status": "explicit_optional",
+          "source_text": "H3. Would you like to try the service early, in a small pilot?\nYes / No",
+          "options": [
+            "Yes",
+            "No"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "H4",
+          "section": "Section H — Stay in touch (all optional)",
+          "prompt": "Name, phone (WhatsApp) and email",
+          "answer_specification": "Optional; show only when a respondent opts into the waitlist, interview or pilot. Capture separate consent for each purpose and explain contact retention.",
+          "required": false,
+          "required_status": "explicit_optional",
+          "source_text": "H4. Name, phone (WhatsApp) and email\nOptional; show only when a respondent opts into the waitlist, interview or pilot. Capture separate consent for each purpose and explain contact retention.",
+          "suggested_input_type": "optional_contact_group",
+          "fields": [
+            "Name",
+            "phone (WhatsApp)",
+            "email"
+          ],
+          "separate_purpose_consent_required": true
+        }
+      ]
+    },
+    {
+      "title": "Consumer Interview Guide",
+      "questions": [
+        {
+          "id": "1",
+          "section": "Warm-up",
+          "prompt": "Tell me a little about yourself: where you live, what you do, who's at home.",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "1. Tell me a little about yourself: where you live, what you do, who's at home.",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "2",
+          "section": "Warm-up",
+          "prompt": "Walk me through a typical week. Where does laundry fit in?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "2. Walk me through a typical week. Where does laundry fit in?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "3",
+          "section": "Current behaviour",
+          "prompt": "Who does the laundry in your home, and how?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "3. Who does the laundry in your home, and how?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "4",
+          "section": "Current behaviour",
+          "prompt": "Tell me about the last time you did or arranged laundry. What happened, step by step?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "4. Tell me about the last time you did or arranged laundry. What happened, step by step?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "5",
+          "section": "Current behaviour",
+          "prompt": "Roughly what does it cost you each month, in money and in time?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "5. Roughly what does it cost you each month, in money and in time?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "6",
+          "section": "Frustrations",
+          "prompt": "What's the most frustrating part? Can you give me an example?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "6. What's the most frustrating part? Can you give me an example?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "7",
+          "section": "Frustrations",
+          "prompt": "Has anything ever gone wrong, like damaged or lost items? What did you do?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "7. Has anything ever gone wrong, like damaged or lost items? What did you do?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "8",
+          "section": "Frustrations",
+          "prompt": "How do water and electricity supply affect your laundry?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "8. How do water and electricity supply affect your laundry?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "9",
+          "section": "Trust",
+          "prompt": "Have you ever used a laundry or dry cleaner? Why did you choose that one?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "9. Have you ever used a laundry or dry cleaner? Why did you choose that one?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "10",
+          "section": "Trust",
+          "prompt": "How would you feel about someone collecting your laundry from your home? What would worry you?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "10. How would you feel about someone collecting your laundry from your home? What would worry you?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "11",
+          "section": "Trust",
+          "prompt": "What would they need to do to earn your trust?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "11. What would they need to do to earn your trust?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "12",
+          "section": "Reaction to the idea",
+          "prompt": "What's your first reaction?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "12. What's your first reaction?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "13",
+          "section": "Reaction to the idea",
+          "prompt": "What would make you try it? What would stop you?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "13. What would make you try it? What would stop you?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "14",
+          "section": "Reaction to the idea",
+          "prompt": "How would you expect to pay: per item, per bag or a subscription? What feels fair?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "14. How would you expect to pay: per item, per bag or a subscription? What feels fair?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "15",
+          "section": "Reaction to the idea",
+          "prompt": "How would you want to book it?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "15. How would you want to book it?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "16",
+          "section": "Close",
+          "prompt": "Is there anything I haven't asked that you think matters?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "16. Is there anything I haven't asked that you think matters?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "17",
+          "section": "Close",
+          "prompt": "Can we contact you about a small pilot later?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "17. Can we contact you about a small pilot later?",
+          "suggested_input_type": "paragraph"
+        }
+      ],
+      "persona_probes": [
+        "Working woman: If laundry was off your plate, what would you do with that time?",
+        "Corporate worker: Would a pickup at your workplace be useful? Would you want it as a work benefit?",
+        "Entrepreneur: How do you handle laundry when you travel? What would 'reliable' mean to you?",
+        "Student: Who pays for laundry? Would you use a campus drop-off point? Would your parents pay for a term?"
+      ]
+    },
+    {
+      "title": "B2B Interview Guide",
+      "questions": [
+        {
+          "id": "1",
+          "section": "Business interview questions",
+          "prompt": "Tell me about your role and your organisation (size, beds, members, units).",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "1. Tell me about your role and your organisation (size, beds, members, units).",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "2",
+          "section": "Business interview questions",
+          "prompt": "What needs laundering, and roughly how much each week?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "2. What needs laundering, and roughly how much each week?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "3",
+          "section": "Business interview questions",
+          "prompt": "Is it done in-house or outsourced? Who by?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "3. Is it done in-house or outsourced? Who by?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "4",
+          "section": "Business interview questions",
+          "prompt": "What does it cost you today, including staff, equipment, water and power?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "4. What does it cost you today, including staff, equipment, water and power?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "5",
+          "section": "Business interview questions",
+          "prompt": "What goes wrong? Tell me about the last problem.",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "5. What goes wrong? Tell me about the last problem.",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "6",
+          "section": "Business interview questions",
+          "prompt": "What standards must laundry meet (hygiene, presentation, turnaround)? Hospitals: ask about infection control and compliance documents.",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "6. What standards must laundry meet (hygiene, presentation, turnaround)? Hospitals: ask about infection control and compliance documents.",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "7",
+          "section": "Business interview questions",
+          "prompt": "How do volumes change, for example peak occupancy or busy seasons?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "7. How do volumes change, for example peak occupancy or busy seasons?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "8",
+          "section": "Business interview questions",
+          "prompt": "Who decides on a laundry supplier, and who else needs to approve it?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "8. Who decides on a laundry supplier, and who else needs to approve it?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "9",
+          "section": "Business interview questions",
+          "prompt": "How do you choose and pay suppliers (contracts, terms, invoicing)?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "9. How do you choose and pay suppliers (contracts, terms, invoicing)?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "10",
+          "section": "Business interview questions",
+          "prompt": "What would make you consider changing your current arrangement?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "10. What would make you consider changing your current arrangement?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "11",
+          "section": "Business interview questions",
+          "prompt": "What would a new supplier have to prove first?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "11. What would a new supplier have to prove first?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "12",
+          "section": "Business interview questions",
+          "prompt": "Would you be open to a short paid pilot if a service met your needs?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "12. Would you be open to a short paid pilot if a service met your needs?",
+          "suggested_input_type": "paragraph"
+        }
+      ]
+    },
+    {
+      "title": "Laundry Vendor Interview Guide",
+      "questions": [
+        {
+          "id": "1",
+          "section": "Vendor interview questions",
+          "prompt": "How long have you been running, and how many staff do you have?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "1. How long have you been running, and how many staff do you have?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "2",
+          "section": "Vendor interview questions",
+          "prompt": "What equipment do you use? How many loads can you do in a day?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "2. What equipment do you use? How many loads can you do in a day?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "3",
+          "section": "Vendor interview questions",
+          "prompt": "How busy are you on a typical week? Which days are quiet?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "3. How busy are you on a typical week? Which days are quiet?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "4",
+          "section": "Vendor interview questions",
+          "prompt": "Who are your customers today, and how do they find you?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "4. Who are your customers today, and how do they find you?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "5",
+          "section": "Vendor interview questions",
+          "prompt": "Do you deliver? How?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "5. Do you deliver? How?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "6",
+          "section": "Vendor interview questions",
+          "prompt": "What are your prices for common items? (Ask for a price list or photograph it, with permission.)",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "6. What are your prices for common items? (Ask for a price list or photograph it, with permission.)",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "7",
+          "section": "Vendor interview questions",
+          "prompt": "How do you handle damaged or lost items?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "7. How do you handle damaged or lost items?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "8",
+          "section": "Vendor interview questions",
+          "prompt": "How do water and power cuts affect you? Do you have storage tanks or a generator?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "8. How do water and power cuts affect you? Do you have storage tanks or a generator?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "9",
+          "section": "Vendor interview questions",
+          "prompt": "Would you want more orders? How many more could you handle?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "9. Would you want more orders? How many more could you handle?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "10",
+          "section": "Vendor interview questions",
+          "prompt": "How would you feel about getting orders through a platform like Bubblewash?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "10. How would you feel about getting orders through a platform like Bubblewash?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "11",
+          "section": "Vendor interview questions",
+          "prompt": "Would you pay to be listed? Would you prefer a yearly fee, a monthly fee or a commission per order?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "11. Would you pay to be listed? Would you prefer a yearly fee, a monthly fee or a commission per order?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "12",
+          "section": "Vendor interview questions",
+          "prompt": "What would worry you about working with a platform?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "12. What would worry you about working with a platform?",
+          "suggested_input_type": "paragraph"
+        },
+        {
+          "id": "13",
+          "section": "Vendor interview questions",
+          "prompt": "(Hotel laundries only) Does your laundry have spare capacity outside guest needs? Who would approve taking outside work?",
+          "answer_specification": null,
+          "required": false,
+          "required_status": "consent_script_allows_skipping",
+          "source_text": "13. (Hotel laundries only) Does your laundry have spare capacity outside guest needs? Who would approve taking outside work?",
+          "suggested_input_type": "paragraph"
+        }
+      ]
+    }
+  ],
+  "service_description": "Imagine a service where you book a laundry pickup from your phone. A vetted laundry washes, irons and folds your items, and they are returned to your door within an agreed time. You pay by mobile money or card.",
+  "pricing_description": "For E3–E6, think about one standard laundry bag of everyday laundry, collected, washed, ironed and returned. Answer in GH₵.",
+  "organisation": {
+    "name": "Bubble Wash Technologies Ltd.",
+    "address": "Eugene’s Place, Accra, Ghana",
+    "privacy_contact": "info@bubblewash.co"
+  }
+}

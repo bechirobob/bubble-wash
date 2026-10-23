@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readBoundedJson,createAdmissionGuard} from '../src/lib/research/request.ts';
+const stream=(...parts)=>new ReadableStream({start(c){for(const s of parts)c.enqueue(Buffer.from(s));c.close();}});
+test('exact byte ceiling accepts valid JSON, not character count',async()=>{assert.equal(await readBoundedJson(stream('"é"'),null,4),'é');await assert.rejects(readBoundedJson(stream('"é"'),null,3),{status:413});});
+test('content length oversized rejected before reading body',async()=>{let read=false;const body={getReader(){read=true;throw Error();}};await assert.rejects(readBoundedJson(body,'65537'),{status:413});assert.equal(read,false);});
+test('chunk overflow cancels before JSON parsing',async()=>{let cancelled=false;const body=new ReadableStream({start(c){c.enqueue(Buffer.alloc(10));},cancel(){cancelled=true;}});await assert.rejects(readBoundedJson(body,null,9),{status:413});assert.equal(cancelled,true);});
+test('invalid JSON is bounded and rejected',async()=>{await assert.rejects(readBoundedJson(stream('{oops'),null),{status:400});});
+test('slow body is cancelled at deadline',async()=>{let cancelled=false;const body=new ReadableStream({cancel(){cancelled=true;}});await assert.rejects(readBoundedJson(body,null,100,5),{status:408});assert.equal(cancelled,true);});
+test('invalid requests consume non-identifying admission budget, resetting each window',()=>{const admit=createAdmissionGuard(2,100);assert.equal(admit(100),true);assert.equal(admit(101),true);assert.equal(admit(102),false);assert.equal(admit(200),true);});
