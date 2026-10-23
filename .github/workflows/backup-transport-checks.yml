@@ -56,6 +56,10 @@ on:
       - tests/personal-owner-mfa.integration.mjs
       - tests/personal-owner.integration.mjs
       - tests/worker-workspaces.test.mjs
+      - tests/readiness-readonly.fixture.mjs
+      - tests/readiness-readonly.test.mjs
+      - tests/owner-enrollment-preservation.fixture.mjs
+      - tests/owner-enrollment-preservation.test.mjs
   push:
     branches: [main]
     paths:
@@ -112,6 +116,10 @@ on:
       - tests/personal-owner-mfa.integration.mjs
       - tests/personal-owner.integration.mjs
       - tests/worker-workspaces.test.mjs
+      - tests/readiness-readonly.fixture.mjs
+      - tests/readiness-readonly.test.mjs
+      - tests/owner-enrollment-preservation.fixture.mjs
+      - tests/owner-enrollment-preservation.test.mjs
   workflow_dispatch:
 permissions:
   contents: read

@@ -6,6 +6,10 @@ import json
 import hashlib
 from pathlib import Path
 import posixpath
+import os
+import stat
+import time
+import selectors
 import pwd
 import re
 from urllib.parse import quote
@@ -70,6 +74,25 @@ def configuration(env):
         'legacyWorkerCredentialsAbsent': not any(env.get(f'BUBBLEWASH_{role}_{field}') for role in ('VENDOR', 'DRIVER', 'SUPPORT') for field in ('EMAIL', 'PASSWORD', 'PASSWORD_HASH', 'ENTITY_ID')),
     }
 
+def regular_sidecar(target, suffix):
+    fd = None
+    try:
+        path = Path(str(target) + suffix)
+        if not path.is_absolute():
+            return False
+        fd = retained_open(None, '/', True)
+        for part in path.parts[1:-1]:
+            child = retained_open(fd, part, True)
+            os.close(fd)
+            fd = child
+        return stat.S_ISREG(os.stat(path.name, dir_fd=fd, follow_symlinks=False).st_mode)
+    except (OSError, ValueError, RuntimeError):
+        return False
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
 def database_report(database_path):
     target = Path(database_path)
     if not target.is_absolute() or target.is_symlink() or not target.is_file():
@@ -81,7 +104,10 @@ def database_report(database_path):
     # mode=ro can create WAL shared-memory files. Never use immutable=1 on a
     # running database: that would ignore committed WAL data and misreport it.
     if header[18] == 2 or header[19] == 2 or Path(str(target) + '-wal').exists() or Path(str(target) + '-journal').exists():
-        return {'inspected': False, 'journalModeRequiresSeparateSafeInspection': True}
+        return {'inspected': False, 'journalModeRequiresSeparateSafeInspection': True,
+                'headerUsesWal': header[18] == 2 or header[19] == 2,
+                'walSidecarRegularNoSymlink': regular_sidecar(target, '-wal'),
+                'shmSidecarRegularNoSymlink': regular_sidecar(target, '-shm')}
     # Host-memory diagnostic only: never connect SQLite to the live source.
     if target.stat().st_size > 64 * 1024 * 1024:
         return {'inspected': False, 'databaseExceedsInspectionBound': True}
@@ -276,6 +302,124 @@ def runtime_flags(pid):
     return values
 
 
+# Fixed historical window; never emit host timestamps or process identifiers.
+FAILED_ATTEMPT_START = datetime.datetime(2026, 10, 22, 20, 23, 20, tzinfo=datetime.timezone.utc).timestamp()
+FAILED_ATTEMPT_END = datetime.datetime(2026, 10, 22, 20, 26, 56, tzinfo=datetime.timezone.utc).timestamp()
+
+
+def process_start_report(pid, expected_identity=None):
+    result = {'classification': 'inconclusive', 'stableDuringRead': False,
+              'clockConsistentDuringRead': False, 'historicalClockAccuracyProven': False}
+    try:
+        monotonic = time.monotonic()
+        now = time.time()
+        identity = process_identity(pid)
+        if expected_identity is not None and identity != expected_identity:
+            return result
+        ticks = int(identity[1])
+        hz = os.sysconf('SC_CLK_TCK')
+        if not 0 <= ticks < 2**63 or not 1 <= hz <= 1000000:
+            return result
+        boot_raw = bounded_bytes(PROC / 'stat', 1048576)
+        boots = re.findall(rb'^btime ([0-9]{1,12})$', boot_raw, re.MULTILINE)
+        uptime_raw = bounded_bytes(PROC / 'uptime', 128)
+        if len(boots) != 1 or not re.fullmatch(rb'[0-9]{1,12}\.[0-9]{1,3} [0-9]{1,15}\.[0-9]{1,3}\n?', uptime_raw):
+            return result
+        boot = int(boots[0])
+        uptime = float(uptime_raw.split()[0])
+        elapsed = time.monotonic() - monotonic
+        clock_elapsed = time.time() - now
+        result['stableDuringRead'] = identity == process_identity(pid)
+        # /proc btime is whole seconds. Reject inconsistent clocks, slow reads,
+        # impossible process ages and observations near either time boundary.
+        consistent = (0 <= elapsed <= 1 and abs(clock_elapsed - elapsed) <= 0.25
+                      and abs(now - uptime - boot) <= 2 and ticks / hz <= uptime)
+        result['clockConsistentDuringRead'] = consistent
+        if not result['stableDuringRead'] or not consistent:
+            return result
+        started = boot + ticks / hz
+        if started < FAILED_ATTEMPT_START - 2:
+            result['classification'] = 'before-attempt'
+        elif FAILED_ATTEMPT_START + 2 < started < FAILED_ATTEMPT_END - 2:
+            result['classification'] = 'during-attempt'
+        elif started > FAILED_ATTEMPT_END + 2:
+            result['classification'] = 'after-attempt'
+        return result
+    except Exception:
+        return result
+
+
+PROBE_PROPERTIES = {
+    'LoadState': frozenset(('loaded', 'not-found', 'error', 'bad-setting', 'masked', 'stub', 'merged')),
+    'ActiveState': frozenset(('active', 'reloading', 'inactive', 'failed', 'activating', 'deactivating', 'maintenance', 'refreshing')),
+    'SubState': frozenset(('dead', 'running', 'exited', 'failed', 'start-pre', 'start', 'start-post', 'stop', 'stop-watchdog', 'stop-sigterm', 'stop-sigkill', 'stop-post', 'final-watchdog', 'final-sigterm', 'final-sigkill', 'auto-restart', 'auto-restart-queued', 'cleaning', 'condition')),
+    'Result': frozenset(('success', 'resources', 'timeout', 'exit-code', 'signal', 'core-dump', 'watchdog', 'start-limit-hit', 'oom-kill', 'exec-condition', 'protocol', 'skip-condition')),
+}
+PROBE_FIELDS = (*PROBE_PROPERTIES, 'ExecMainCode', 'ExecMainStatus')
+
+
+def read_probe_properties():
+    # Fixed metadata request only. Bound bytes while capturing, not afterwards;
+    # discard stderr and terminate only our own metadata-reader on overflow.
+    args = ['systemctl', 'show',
+            'bubblewash-preserving-' + FAILED_CANDIDATE + '-probe.service',
+            '--property=' + ','.join(PROBE_FIELDS)]
+    with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
+        try:
+            deadline = time.monotonic() + 10
+            raw = bytearray()
+            with selectors.DefaultSelector() as selector:
+                selector.register(process.stdout, selectors.EVENT_READ)
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or not selector.select(remaining):
+                        raise ValueError('metadata timeout')
+                    block = os.read(process.stdout.fileno(), 8193 - len(raw))
+                    if not block:
+                        break
+                    raw.extend(block)
+                    if len(raw) > 8192:
+                        raise ValueError('metadata overflow')
+            if process.wait(timeout=max(0.01, deadline - time.monotonic())) != 0:
+                raise ValueError('metadata unavailable')
+            return raw.decode('utf8')
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+
+
+def exact_probe_metadata():
+    # --collect may have removed the unit. Missing metadata cannot establish
+    # whether the rehearsal ran; even available state is not a historical trace.
+    result = {'inspection': 'inconclusive', 'historicalOutcomeProven': False}
+    try:
+        raw = read_probe_properties()
+        if len(raw) > 8192:
+            return result
+        values = {}
+        for line in raw.splitlines():
+            key, separator, value = line.partition('=')
+            if not separator or key not in PROBE_FIELDS or key in values:
+                return result
+            values[key] = value
+        if values.get('LoadState') == 'not-found':
+            return {**result, 'unitMissingOrCollected': True}
+        if set(values) != set(PROBE_FIELDS):
+            return result
+        for key, allowed in PROBE_PROPERTIES.items():
+            if values[key] not in allowed:
+                return result
+        for key, maximum in (('ExecMainCode', 6), ('ExecMainStatus', 255)):
+            if not re.fullmatch(r'[0-9]{1,3}', values[key]) or int(values[key]) > maximum:
+                return result
+            values[key] = int(values[key])
+        return {**result, 'inspection': 'available', 'unitMissingOrCollected': False,
+                'properties': values}
+    except Exception:
+        return result
+
+
 def release_login_inspection(env):
     result = {'readOnly': True, 'configuredFlags': operational_flags(env),
               'sourceToBuildProven': False, 'bookingPolicySemanticsProven': False,
@@ -341,10 +485,175 @@ def release_login_inspection(env):
                 'listenerFlags': operational_flags(effective),
                 'listenerFlagsMatchConfiguration': all(effective.get(k) == env.get(k) for k in (*LOGIN_FLAGS, 'NODE_ENV')),
                 'listenerStableDuringRead': listener_before == process_identity(listener)})
+        result['runtime']['mainStartRelativeToFailedAttempt'] = process_start_report(pid, before)
+        if len(listener_pids) == 1:
+            result['runtime']['listenerStartRelativeToFailedAttempt'] = process_start_report(listener, listener_before)
         result['runtime']['mainStableDuringRead'] = before == process_identity(pid)
         result['currentTargetStableDuringRead'] = CURRENT.resolve(strict=True) == target
     except Exception:
         result['runtime'] = {'inspectionSupported': False}
+    return result
+
+
+# Temporary, exact failed-candidate inspection. Never follow a directory/file
+# symlink, execute candidate code, or emit content-derived strings.
+FAILED_CANDIDATE = '20261022T202316Z-d17defa9bb75'
+FAILED_SHA = 'd17defa9bb7511843681945cdf2d3e7ec3536eae'
+BUILD_STAGES = frozenset(('start', 'compile', 'compile-server',
+    'webpack-compile-edge-server', 'webpack-compile-client', 'type-checking', 'static-generation'))
+NPM_CODES = frozenset(('EACCES', 'EPERM', 'ENOENT', 'ENOSPC', 'ENOMEM', 'EIO',
+    'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN',
+    'ERESOLVE', 'EUSAGE', 'ELIFECYCLE', 'EBADENGINE', 'EINTEGRITY', 'E404', 'E401', 'E403'))
+
+
+def retained_open(parent, name, directory=False):
+    # O_PATH traverses directories without reading entries or changing atime,
+    # and does not require ownership of root-owned ancestors. Actual content
+    # reads retain O_NOATIME and fail closed if that protection is unavailable.
+    flags = (os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW) if directory else (
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOATIME)
+    return os.open(name, flags, dir_fd=parent)
+
+
+def retained_read(parent, relative, limit):
+    """Descriptor-relative read, with bounds and unchanged-inode metadata."""
+    parts = relative.split('/')
+    fd = os.dup(parent)
+    try:
+        for part in parts[:-1]:
+            child = retained_open(fd, part, True)
+            os.close(fd)
+            fd = child
+        child = retained_open(fd, parts[-1])
+        try:
+            before = os.fstat(child)
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > limit:
+                raise ValueError('unsupported artifact')
+            raw = b''
+            while len(raw) <= limit:
+                chunk = os.read(child, min(65536, limit + 1 - len(raw)))
+                if not chunk:
+                    break
+                raw += chunk
+            after = os.fstat(child)
+            if len(raw) > limit or (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                raise ValueError('unstable artifact')
+            return raw
+        finally:
+            os.close(child)
+    finally:
+        os.close(fd)
+
+
+def retained_json(raw):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate diagnostic key')
+            result[key] = value
+        return result
+    def invalid_constant(_):
+        raise ValueError('invalid diagnostic constant')
+    return json.loads(raw, object_pairs_hook=unique, parse_constant=invalid_constant)
+
+
+def retained_candidate_report():
+    result = {'readOnly': True, 'candidateExecuted': False, 'exactCauseProven': False}
+    fd = None
+    try:
+        # Walk from the filesystem root, refusing symlinks at every level.
+        fd = retained_open(None, '/', True)
+        for part in (*HOME.parts[1:], 'bubblewash-releases', FAILED_CANDIDATE):
+            child = retained_open(fd, part, True)
+            os.close(fd)
+            fd = child
+        marker = retained_read(fd, '.release-sha', 41)
+        if marker not in (FAILED_SHA.encode(), (FAILED_SHA + '\n').encode()):
+            raise ValueError('candidate pin mismatch')
+        result['candidatePinMatches'] = True
+        for key, name, limit in (
+            ('buildId', '.next/BUILD_ID', 129),
+            ('buildManifest', '.next/build-manifest.json', 1048576),
+            ('requiredServerFiles', '.next/required-server-files.json', 1048576)):
+            try:
+                raw = retained_read(fd, name, limit)
+                if key == 'buildId':
+                    valid = bool(re.fullmatch(rb'[A-Za-z0-9_-]{1,128}\n?', raw))
+                else:
+                    valid = isinstance(retained_json(raw), dict)
+                result[key] = 'present-valid' if valid else 'rejected'
+            except FileNotFoundError:
+                result[key] = 'missing'
+            except Exception:
+                result[key] = 'rejected'
+        try:
+            value = retained_json(retained_read(fd, '.next/diagnostics/build-diagnostics.json', 65536))
+            stage = value.get('buildStage') if isinstance(value, dict) else None
+            result['buildStage'] = stage if isinstance(stage, str) and stage in BUILD_STAGES else 'unknown'
+        except FileNotFoundError:
+            result['buildStage'] = 'missing'
+        except Exception:
+            result['buildStage'] = 'rejected'
+        # HOME for the sandboxed npm command was the exact candidate. Inspect
+        # only its standard debug-log leaves, at most 16 files / 1 MiB each.
+        npm = None
+        logs = None
+        try:
+            npm = retained_open(fd, '.npm', True)
+            logs = retained_open(npm, '_logs', True)
+            # scandir needs a readable fd, not O_PATH. Reopen the pinned
+            # directory itself, preserving no-follow and no-atime safeguards.
+            readable = os.open('.', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW |
+                               os.O_NONBLOCK | os.O_NOATIME, dir_fd=logs)
+            os.close(logs)
+            logs = readable
+            names = []
+            with os.scandir(logs) as entries:
+                for entry in entries:
+                    if len(names) == 16:
+                        raise ValueError('too many logs')
+                    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}_\d{2}_\d{2}_\d{3}Z-debug-0\.log', entry.name):
+                        raise ValueError('unexpected log name')
+                    names.append(entry.name)
+            codes = set()
+            exits = set()
+            commands = set()
+            for name in sorted(names):
+                raw = retained_read(logs, name, 1048576).decode('utf8')
+                for line in raw.splitlines():
+                    # Exact known command forms only; titles/argv never escape.
+                    match = re.fullmatch(r'\d+ verbose title npm (ci --no-audit --no-fund|run build|prune --omit dev --no-audit --no-fund|ci|prune)', line)
+                    if match:
+                        commands.add('build' if match[1] == 'run build' else 'ci' if match[1].startswith('ci') else 'prune')
+                    match = re.fullmatch(r'\d+ error code ([A-Z0-9_]+)', line)
+                    if match:
+                        codes.add(match[1] if match[1] in NPM_CODES else 'other')
+                    match = re.fullmatch(r'\d+ verbose (?:exit|code) ([0-9]{1,3})', line)
+                    if match and int(match[1]) <= 255:
+                        exits.add(int(match[1]))
+            result['npm'] = {'inspection': 'completed', 'logCount': len(names),
+                             'errorCodes': sorted(codes), 'exitCodes': sorted(exits),
+                             'commandCategories': sorted(commands)}
+        except FileNotFoundError:
+            result['npm'] = {'inspection': 'missing'}
+        except Exception:
+            result['npm'] = {'inspection': 'rejected'}
+        finally:
+            if logs is not None:
+                os.close(logs)
+            if npm is not None:
+                os.close(npm)
+        if retained_read(fd, '.release-sha', 41) != marker:
+            raise ValueError('candidate changed')
+        result['inspection'] = 'completed'
+    except FileNotFoundError:
+        return {'readOnly': True, 'inspection': 'missing', 'exactCauseProven': False}
+    except Exception:
+        return {'readOnly': True, 'inspection': 'rejected', 'exactCauseProven': False}
+    finally:
+        if fd is not None:
+            os.close(fd)
     return result
 
 
@@ -359,6 +668,9 @@ def collect(owner_email="", expected_live_sha=""):
         env = parse_env(bounded_text(ENV_FILE))
     except Exception:
         return {**result, 'environmentInspectionSupported': False}
+    if not owner_email:
+        result['retainedCandidateInspection'] = retained_candidate_report()
+        result['failedCandidateProbeMetadata'] = exact_probe_metadata()
     result['environmentInspectionSupported'] = True
     result['configuration'] = configuration(env)
     try:

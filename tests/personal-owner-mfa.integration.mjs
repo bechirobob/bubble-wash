@@ -8,7 +8,7 @@ import { totpCode } from "../src/lib/totp.ts";
 const globalMfa = process.argv.includes("--global-off") ? "false" : "true";
 const dir = mkdtempSync(join(tmpdir(), "bw-owner-mfa-"));
 Object.assign(process.env, { BUBBLEWASH_TRUST_PROXY_HEADERS: "true", NODE_ENV: "production", BUBBLEWASH_DATABASE_PATH: join(dir, "auth.sqlite"), BUBBLEWASH_DISABLE_DEMO_LOGIN: "true", BUBBLEWASH_ADMIN_EMAIL: "master@example.invalid", BUBBLEWASH_ADMIN_TOTP_SECRET: "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP", BUBBLEWASH_ADMIN_MFA_REQUIRED: globalMfa, NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED: globalMfa, BUBBLEWASH_ADMIN_PASSWORD_HASH: createPasswordHash("synthetic-master-long-password"), BUBBLEWASH_SESSION_SECRET: "synthetic-session-key-long-enough-12345", BUBBLEWASH_MFA_ENCRYPTION_KEY: Buffer.alloc(32, 23).toString("base64") });
-const { inviteOwnerAccount } = await import("../src/lib/staff-accounts.ts");
+const { inviteOwnerAccount, initializeStaffAccountsSchema } = await import("../src/lib/staff-accounts.ts");
 const mfa = await import("../src/lib/admin-mfa.ts");
 const { getDatabase } = await import("../src/lib/data-store.ts");
 const { POST: activate } = await import("../src/app/api/staff/activate/route.ts");
@@ -19,6 +19,8 @@ function request(path, body) { return new NextRequest(`https://bubblewash.co${pa
 const auth = await import("../src/lib/auth.ts");
 const ownerCredentials = { email: "owner@example.invalid", password: "synthetic-owner-long-password" };
 try {
+  // Fixture setup is explicit; owner enrollment refuses missing schema.
+  initializeStaffAccountsSchema(getDatabase());
   const token = inviteOwnerAccount({ email: "owner@example.invalid", name: "Personal Owner" }, "fixture");
   const activated = await activate(request("/api/staff/activate", { token, password: ownerCredentials.password }));
   assert.equal(activated.status, 200); assert.equal(activated.headers.get("set-cookie"), null);

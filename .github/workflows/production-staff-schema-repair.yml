@@ -1,0 +1,109 @@
+name: Missing Staff Schema Repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Inspect path prerequisites first; repair adds only the exact missing empty staff table after copy rehearsal'
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - repair
+      candidate_sha:
+        description: 'Reviewed full SHA of the retained built candidate; never deployed by this workflow'
+        required: true
+        type: string
+      retained_release:
+        description: 'Exact existing release basename, YYYYMMDDTHHMMSSZ-12hex'
+        required: true
+        type: string
+      expected_live_sha:
+        description: 'Full currently deployed SHA; drift aborts'
+        required: true
+        type: string
+      backup_sha256:
+        description: 'Verified encrypted archive SHA-256; no new backup is created'
+        required: true
+        type: string
+      receipt_run:
+        description: 'Verified private backup run ID, no older than 30 hours'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REPAIR_OPERATION: ${{ inputs.operation }}
+      TARGET_SHA: ${{ inputs.candidate_sha }}
+      RETAINED_RELEASE: ${{ inputs.retained_release }}
+      EXPECTED_LIVE: ${{ inputs.expected_live_sha }}
+      BACKUP_SHA: ${{ inputs.backup_sha256 }}
+      RECEIPT_RUN: ${{ inputs.receipt_run }}
+      BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+      BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+    steps:
+      - name: Validate exact repair and retained-candidate pins
+        run: |
+          set -euo pipefail
+          [[ "$REPAIR_OPERATION" == inspect || "$REPAIR_OPERATION" == repair ]]
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ && "$EXPECTED_LIVE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RETAINED_RELEASE" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$ ]]
+          [[ "${RETAINED_RELEASE:17}" == "${TARGET_SHA:0:12}" ]]
+          [[ "$BACKUP_SHA" =~ ^[0-9a-f]{64}$ && "$RECEIPT_RUN" =~ ^[1-9][0-9]*$ ]]
+          [[ "$BACKUP_STORE_SHA" =~ ^[0-9a-f]{40}$ && "$BACKUP_STORE_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,19}$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,5}$ ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Test exact reviewed repair and preserving engine
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          python3 -m unittest discover -s tests -p 'test_preserving_deploy.py' -v
+          python3 -m unittest discover -s tests -p 'test_staff_schema_repair.py' -v
+          python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
+      - name: Require successful exact-main CI for runner and retained candidate
+        run: |
+          set -euo pipefail
+          TARGET_SHA="$GITHUB_SHA" python3 ops/check-release-ci.py
+          python3 ops/check-release-ci.py
+      - name: Verify existing private backup destination without creating access
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+        run: python3 .github/backup/check_store.py
+      - name: Connect through existing production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Inspect or narrowly repair missing staff schema without activation
+        run: |
+          set -euo pipefail
+          # Only public reviewed code is bundled; no environment or credentials.
+          # Default inspect emits aggregate path flags and never opens SQLite.
+          # Repair first requires the full private-copy rehearsal to pass.
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import os
+          engine = Path('ops/deploy-preserving.py').read_text()
+          repair = Path('ops/repair-staff-schema.py').read_text()
+          bundle = "import types\ndeploy_preserving = types.ModuleType('deploy_preserving')\nexec(" + repr(engine) + ", deploy_preserving.__dict__)\n" + "REPAIR_SOURCE = " + repr(repair) + "\nexec(REPAIR_SOURCE)\n"
+          Path(os.environ['RUNNER_TEMP'], 'staff-schema-repair.py').write_text(bundle)
+          PYTHON
+          tailscale ssh root@hermes "python3 -I -B - --repair-staff-schema --operation '$REPAIR_OPERATION' --run-id '$GITHUB_RUN_ID' --run-attempt '$GITHUB_RUN_ATTEMPT' --candidate '/home/ubuntu/bubblewash-releases/$RETAINED_RELEASE' --sha '$TARGET_SHA' --expected-live '$EXPECTED_LIVE' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < "$RUNNER_TEMP/staff-schema-repair.py" 2>/dev/null

@@ -50,7 +50,7 @@ def enrollment_source_matches(release, pins):
     required = {'scripts/invite-additional-owner.mjs', 'src/lib/staff-accounts.ts', 'src/lib/admin-mfa.ts',
                 'src/lib/auth.ts', 'src/app/api/login/route.ts', 'src/app/api/admin/mfa/enroll/route.ts', 'src/components/LoginPage.tsx',
                 'src/lib/data-store.ts', 'src/lib/passwords.ts', 'src/lib/mfa-encryption.ts', 'src/lib/dispatch-location.ts', 'package-lock.json'}
-    if not required.issubset(pins) or pins.get('src/lib/staff-accounts.ts') != '2a2b8ad36790308070ab0d0c9451bd959c5ed647900033e3b0153713b74a423c':
+    if not required.issubset(pins) or pins.get('src/lib/staff-accounts.ts') != 'ad91d3738399529d58ef14894f6f12a15a123905c8b7a5e2eedbd5a9df37ce85':
         return False
     for relative, digest in pins.items():
         path = release / relative

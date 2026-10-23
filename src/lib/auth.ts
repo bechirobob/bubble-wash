@@ -29,9 +29,9 @@ export function staffAccessDisabled(env: NodeJS.ProcessEnv | Record<string, stri
 // status on each request so invited/suspended rows shadow fallback and revoke sessions.
 export const staffUsers = environmentStaffUsers(process.env);
 
-export function currentStaffUsers(): StaffUser[] {
+export function currentStaffUsers(database?: Parameters<typeof readStaffCredentialOverride>[1]): StaffUser[] {
   if (staffAccessDisabled()) return [];
-  return resolveStaffUsers(process.env, readStaffCredentialOverride(), listStaffAccounts(), staffUsers);
+  return resolveStaffUsers(process.env, readStaffCredentialOverride("admin", database), listStaffAccounts(database), staffUsers);
 }
 
 const allowedNextPaths = new Set(["/admin", "/vendors", "/drivers", "/support"]);
@@ -62,8 +62,8 @@ export function findStaffUser(identifier: string, password: string) {
   return currentStaffUsers().find((user) => user.email.toLowerCase() === identifier.trim().toLowerCase() && verifyPasswordHash(password, user.passwordHash)) ?? null;
 }
 
-function ownerMfaProof(user: StaffUser) {
-  const setting = readAdminMfaSetting(user.email);
+function ownerMfaProof(user: StaffUser, database?: Parameters<typeof readAdminMfaSetting>[1]) {
+  const setting = readAdminMfaSetting(user.email, database);
   return setting?.status === "enrolled" ? createHash("sha256").update(setting.encryptedSecret).digest("base64url") : "";
 }
 
@@ -87,7 +87,7 @@ export function encodeSession(user: StaffUser, mfaVerified = false) {
   return `${payload}.${signPayload(payload)}`;
 }
 
-export function decodeSession(value?: string) {
+export function decodeSession(value?: string, users?: StaffUser[], database?: Parameters<typeof readAdminMfaSetting>[1]) {
   if (staffAccessDisabled()) return null;
   if (!value) return null;
   try {
@@ -95,11 +95,11 @@ export function decodeSession(value?: string) {
     if (!payload || !signature || !safeEqual(signature, signPayload(payload))) return null;
     const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as StaffSession;
     if (!session.expiresAt || session.expiresAt < Math.floor(Date.now() / 1000)) return null;
-    const user = currentStaffUsers().find((item) => item.email.toLowerCase() === session.email.toLowerCase() && item.role === session.role);
+    const user = (users ?? currentStaffUsers(database)).find((item) => item.email.toLowerCase() === session.email.toLowerCase() && item.role === session.role);
     if (!user || session.entityId !== user.entityId) return null;
     if (session.credentialVersion !== user.credentialVersion) return null;
     if (user.role === "admin" && user.allStaffAccess === true) {
-      const proof = ownerMfaProof(user);
+      const proof = ownerMfaProof(user, database);
       if (!proof || !session.ownerMfaProof || !safeEqual(session.ownerMfaProof, proof)) return null;
     }
     return { email: session.email, role: session.role, name: user.name, entityId: user.entityId, allStaffAccess: user.role === "admin" && user.allStaffAccess === true };

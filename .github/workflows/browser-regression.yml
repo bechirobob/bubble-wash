@@ -28,6 +28,50 @@ jobs:
           node-version: 22
       - name: Install locked dependencies
         run: npm ci
+      - name: Prefer the existing official Ubuntu archive mirror
+        timeout-minutes: 1
+        run: |
+          sudo python3 - <<'PY'
+          import os
+          import re
+          import stat
+
+          def checked_open(path, mode):
+              flags = os.O_RDONLY if mode == 'r' else os.O_RDWR
+              fd = os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK)
+              try:
+                  info = os.fstat(fd)
+                  if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                      raise RuntimeError('Expected a root-owned regular APT file without group/other write access')
+                  return os.fdopen(fd, mode, encoding='utf-8', newline='')
+              except BaseException:
+                  os.close(fd)
+                  raise
+
+          with checked_open('/etc/apt/sources.list.d/ubuntu.sources', 'r') as source:
+              text = source.read(65537)
+          fields = re.findall(r'^URIs:[^\n]*(?:\n[ \t]+[^\n]*)*', text, re.MULTILINE | re.IGNORECASE)
+          if len(text) > 65536 or not fields or any(
+              field.split(':', 1)[1].split() != ['mirror+file:/etc/apt/apt-mirrors.txt'] for field in fields
+          ):
+              raise RuntimeError('Unexpected Ubuntu APT mirror reference')
+
+          # Runner image ubuntu24/20261012.334: preserve all existing sources and trust.
+          expected = (
+              'http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n'
+              'https://archive.ubuntu.com/ubuntu/\tpriority:2\n'
+              'https://security.ubuntu.com/ubuntu/\tpriority:3\n'
+          )
+          preferred = expected.replace('priority:1', 'priority:2', 1).replace(
+              'https://archive.ubuntu.com/ubuntu/\tpriority:2',
+              'https://archive.ubuntu.com/ubuntu/\tpriority:1', 1
+          )
+          with checked_open('/etc/apt/apt-mirrors.txt', 'r+') as mirrors:
+              if mirrors.read(len(expected) + 1) != expected:
+                  raise RuntimeError('Unexpected Ubuntu APT mirrors or priorities')
+              mirrors.seek(0)
+              mirrors.write(preferred)
+          PY
       - name: Install official test browsers
         run: npx playwright install --with-deps chromium webkit
       - name: Verify fixture egress guard

@@ -43,7 +43,7 @@ export async function runOwnerEnrollment({ send = false, env = process.env, tran
   if (!ready) throw new Error("Existing approved email and required MFA configuration must be ready before enrollment.");
   if (env.BUBBLEWASH_OWNER_INVITE_CONFIRM?.trim().toLowerCase() !== email) throw new Error("Explicit private recipient confirmation is required.");
   const { inviteOwnerAccount } = await import("../src/lib/staff-accounts.ts");
-  const token = inviteOwnerAccount({ email, name }, actor);
+  const token = inviteOwnerAccount({ email, name }, actor, env);
   // No durable outbox: it must never store plaintext account-activation credentials.
   // If delivery is uncertain, stop. Never reset/reissue an existing invitation.
   let response;

@@ -58,10 +58,10 @@ function recoveryCodeHash(adminEmail: string, code: string) {
   return createHmac("sha256", encryptionKey()).update(`${adminEmail.trim().toLowerCase()}:${code}`).digest("base64url");
 }
 
-function configuredEnvironmentSecret(adminEmail: string) {
+function configuredEnvironmentSecret(adminEmail: string, database?: Parameters<typeof readAdminMfaSetting>[1]) {
   // An additional personal owner must enroll their own authenticator. Never
   // inherit the legacy master's environment seed or recovery state.
-  if (listStaffAccounts().some((account) => account.email.toLowerCase() === adminEmail.trim().toLowerCase() && account.allStaffAccess)) return "";
+  if (listStaffAccounts(database).some((account) => account.email.toLowerCase() === adminEmail.trim().toLowerCase() && account.allStaffAccess)) return "";
   const secret = process.env.BUBBLEWASH_ADMIN_TOTP_SECRET?.trim() ?? "";
   return validTotpSecret(secret) ? secret : "";
 }
@@ -71,10 +71,10 @@ export function adminMfaEnrollmentExists(adminEmail: string) {
   return readAdminMfaSetting(adminEmail)?.status === "enrolled";
 }
 
-export function adminTotpSecret(adminEmail: string) {
-  const environmentSecret = configuredEnvironmentSecret(adminEmail);
+export function adminTotpSecret(adminEmail: string, database?: Parameters<typeof readAdminMfaSetting>[1]) {
+  const environmentSecret = configuredEnvironmentSecret(adminEmail, database);
   if (environmentSecret) return environmentSecret;
-  const setting = readAdminMfaSetting(adminEmail);
+  const setting = readAdminMfaSetting(adminEmail, database);
   if (!setting || setting.status !== "enrolled") return "";
   try {
     const secret = decrypt(setting.encryptedSecret);
@@ -84,8 +84,8 @@ export function adminTotpSecret(adminEmail: string) {
   }
 }
 
-export function adminMfaConfigured(adminEmail: string) {
-  return Boolean(adminTotpSecret(adminEmail));
+export function adminMfaConfigured(adminEmail: string, database?: Parameters<typeof readAdminMfaSetting>[1]) {
+  return Boolean(adminTotpSecret(adminEmail, database));
 }
 
 export async function startAdminMfaEnrollment(adminEmail: string) {

@@ -17,12 +17,7 @@ spec = importlib.util.spec_from_file_location('owner_release', ROOT / 'ops/deplo
 owner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(owner)
 
-ORIGINAL_GATE = '''    verify_source_transition(current, candidate)
-    # Additional schema/health byte-identity checks remain in force.
-    for relative in ('src/lib/data-store.ts', 'src/lib/operational-store.ts',
-                     'src/lib/availability-store.ts', 'src/lib/staff-accounts.ts', 'src/app/api/health/route.ts'):
-        require(digest(current / relative) == digest(candidate / relative), 'database or health implementation requires separate review')
-'''
+ORIGINAL_GATE = '    verify_source_transition(current, candidate)\n    verify_critical_transition(current, candidate)\n'
 
 
 class OwnerRoute(unittest.TestCase):
@@ -52,9 +47,46 @@ class OwnerRoute(unittest.TestCase):
         }
 
     def test_pins_cover_exact_reviewed_owner_mfa_correction(self):
-        self.assertEqual(len(owner.OWNER_CANDIDATE_SOURCE_SHA256), 25)
+        self.assertEqual(len(owner.OWNER_CANDIDATE_SOURCE_SHA256), 29)
         normalized = '\n'.join(f'{key} {value}' for key, value in sorted(owner.OWNER_CANDIDATE_SOURCE_SHA256.items()))
-        self.assertEqual(hashlib.sha256(normalized.encode()).hexdigest(), 'cf8b8efe53b09bbea35e3d239d68fa5983750b09586adb84489d993b41ba76ab')
+        self.assertEqual(hashlib.sha256(normalized.encode()).hexdigest(), '05d691cf06d676748b724943792b94b272712f3e3c59702ac4fb727f38d14a17')
+
+    def test_owner_diagnostic_extracts_real_candidate_ddl_and_rejects_stale_reader_pin(self):
+        namespace = {'__name__': 'owner_diagnostic_regression'}
+        exec(owner.SCHEMA_READER, namespace)
+        pins = owner.OWNER_DIAGNOSTIC_SOURCE_SHA256
+        self.assertEqual(set(pins), {'src/lib/data-store.ts', 'src/lib/staff-accounts.ts'})
+        self.assertEqual(pins['src/lib/staff-accounts.ts'], owner.OWNER_STAFF_NEW_SHA256)
+        for relative, expected in pins.items():
+            self.assertEqual(owner.digest(ROOT / relative), expected)
+        statements = namespace['reference_ddl'](ROOT, pins)
+        self.assertEqual(len(statements), 2)
+        with sqlite3.connect(':memory:') as database:
+            for statement in statements:
+                database.executescript(statement)
+            self.assertIsNotNone(database.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'staff_accounts'"
+            ).fetchone())
+        stale = {**pins, 'src/lib/staff-accounts.ts': owner.OWNER_STAFF_OLD_SHA256}
+        with self.assertRaisesRegex(ValueError, '^pin$'):
+            namespace['reference_ddl'](ROOT, stale)
+
+    def test_wrong_live_commit_rejected_before_candidate_access_or_host_commands(self):
+        arguments = ['owner-release', '--candidate', '/unvisited-candidate', '--sha', 'a' * 40,
+                     '--expected-live', 'b' * 40, '--backup-sha256', 'c' * 64,
+                     '--receipt-run', '123', '--store-sha', 'd' * 40, '--store-id', '456']
+        self.assertEqual(owner.OWNER_LIVE_COMMIT, 'a47697dd444225c8bbc0d5c11a17c3c2a02567d4')
+        with patch.object(sys, 'argv', arguments), patch.object(owner.os, 'geteuid', return_value=0), \
+                patch.object(owner, 'Path', side_effect=AssertionError('candidate accessed')) as path, \
+                patch.object(owner, 'command', side_effect=AssertionError('host command')) as command, \
+                patch.object(owner, 'require_owner_pins', side_effect=AssertionError('pins accessed')) as pins, \
+                patch.object(owner, 'activate', side_effect=AssertionError('activation attempted')) as activate:
+            with self.assertRaisesRegex(ValueError, '^owner release requires exact reviewed live commit$'):
+                owner.main(lambda: self.fail('release callback reached'))
+            path.assert_not_called()
+            command.assert_not_called()
+            pins.assert_not_called()
+            activate.assert_not_called()
 
     def test_only_exact_reviewed_pair_accepted(self):
         with patch.multiple(owner, **self.pins):
@@ -151,7 +183,9 @@ class OwnerRoute(unittest.TestCase):
         stripped = stripped.replace('    verify_owner_code(current, candidate)\n', ORIGINAL_GATE, 1)
         stripped = stripped.replace("unit = 'bubblewash-owner-'", "unit = 'bubblewash-preserving-'", 1)
         stripped = stripped.replace('        require_no_owner_enrollment(snapshot)\n', '', 1)
-        stripped = stripped.replace('        verify_owner_code(current, candidate)\n', '        verify_source_transition(current, candidate)\n', 1)
+        stripped = stripped.replace('        verify_owner_code(current, candidate)\n', '        verify_source_transition(current, candidate)\n        verify_critical_transition(current, candidate)\n', 1)
+        stripped = stripped.replace("    require(args.expected_live == OWNER_LIVE_COMMIT, 'owner release requires exact reviewed live commit')\n", '', 1)
+        stripped = stripped.replace("'pins': OWNER_DIAGNOSTIC_SOURCE_SHA256", "'pins': {name: pair[1] for name, pair in REVIEWED_READER_TRANSITIONS.items()}", 1)
         stripped = stripped.replace(", 'ownerEnrollmentPerformed': False}", '}', 1)
         stripped = stripped.replace('Owner code-only deployment failed closed;', 'Preserving deployment failed closed;', 1)
         self.assertEqual(hashlib.sha256(stripped.encode()).hexdigest(), owner.PRESERVING_ROUTE_SHA256)
@@ -194,13 +228,13 @@ class OwnerRoute(unittest.TestCase):
             with self.assertRaises(ValueError): owner.require_owner_pins(self.candidate)
         source = (ROOT / 'ops/deploy-personal-owner.py').read_text()
         self.assertNotIn('__file__', source)
-        main = source.split('def main(lock_unchanged):', 1)[1]
+        main = source.split('def main(lock_unchanged, report=None, repair_action=None):', 1)[1]
         self.assertLess(main.index("'invalid candidate directory'"), main.index('require_owner_pins(candidate)'))
 
     def test_runner_stdin_isolated_from_app_owned_script_and_import_shadow(self):
         source = (ROOT / 'ops/deploy-personal-owner.py').read_text()
         # Exercise the real imports and argument parser without opening a host lock.
-        program = source.replace("if __name__ == '__main__':", 'if False:', 1) + """
+        program = source.rsplit("if __name__ == '__main__':", 1)[0] + """
 os.geteuid = lambda: 1
 try:
     main(lambda: None)
@@ -220,9 +254,11 @@ except ValueError as error:
                                 cwd=self.candidate, capture_output=True, timeout=10)
         self.assertNotEqual(unsafe.returncode, 0)
         self.assertIn('UNTRUSTED IMPORT EXECUTED', unsafe.stderr)
-        missing = subprocess.run([sys.executable, '-I', '-B', '-', *arguments[:-2]], input=program, text=True,
+        missing_program = program.replace("assert str(error) == 'root host execution required'", "assert str(error) == 'unsupported release arguments'").replace('trusted-stdin-and-cli-ok', 'missing-required-argument-rejected')
+        missing = subprocess.run([sys.executable, '-I', '-B', '-', *arguments[:-2]], input=missing_program, text=True,
                                  cwd=self.candidate, capture_output=True, timeout=10)
-        self.assertEqual(missing.returncode, 2)
+        self.assertEqual(missing.returncode, 0, missing.stderr)
+        self.assertEqual(missing.stdout.strip(), 'missing-required-argument-rejected')
 
     def test_manual_workflow_exact_pins_same_lock_and_no_enrollment(self):
         text = (ROOT / '.github/workflows/owner-code-deploy.yml').read_text()

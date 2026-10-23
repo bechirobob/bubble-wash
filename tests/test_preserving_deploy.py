@@ -215,6 +215,66 @@ class PrivateNetwork(unittest.TestCase):
             run.assert_called_once_with(['ss'], timeout=30)
 
 
+class ProbeStartupGuard(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.candidate = self.root / 'candidate'; self.candidate.mkdir()
+        self.proc = self.root / 'proc'; (self.proc / '321/ns').mkdir(parents=True)
+        self.cwd = self.proc / '321/cwd'; self.cwd.symlink_to(self.candidate)
+        (self.proc / '321/ns/net').write_text('synthetic namespace inode')
+        self.host_net = self.root / 'host-net'; self.host_net.write_text('different inode')
+
+    def path(self, value):
+        return self.proc if value == '/proc' else self.host_net if value == '/proc/self/ns/net' else Path(value)
+
+    def verify(self, state='active', pid='321', expected=None, links=None, routes=None):
+        output = f'ActiveState={state}\nMainPID={pid}\n'
+        links = [{'ifname': 'lo'}] if links is None else links
+        routes = [[], []] if routes is None else routes
+        with patch.object(deploy, 'command', return_value=output), patch.object(deploy, 'Path', side_effect=self.path), \
+                patch.object(deploy, 'network_command', side_effect=[json.dumps(links), *map(json.dumps, routes)]) as network:
+            if expected is None:
+                self.assertEqual(deploy.verify_private_network('synthetic.service', self.candidate), 321)
+                self.assertEqual(network.call_count, 3)
+            else:
+                with self.assertRaises(ValueError) as caught:
+                    deploy.verify_private_network('synthetic.service', self.candidate)
+                report = deploy.RehearsalReport(); report.fail(caught.exception)
+                self.assertEqual(report.failure['error'], expected)
+                if expected not in ('PROBE_SHARED_NETWORK', 'PROBE_EXTERNAL_LINKS', 'PROBE_EXTERNAL_ROUTES'):
+                    network.assert_not_called()
+
+    def test_terminal_state_is_not_confused_with_startup_pending(self):
+        for state in ('inactive', 'failed'):
+            with self.subTest(state=state):
+                self.verify(state=state, pid='0', expected='PROBE_TERMINAL_STATE')
+        self.verify(state='deactivating', pid='0', expected='PROBE_PROCESS_STOPPING')
+        self.verify(state='activating', pid='0', expected='PROBE_STARTUP_PENDING')
+        self.verify(state='unknown', expected='PROBE_STATE_UNSUPPORTED')
+
+    def test_active_state_still_requires_valid_pid_and_exact_available_cwd(self):
+        for pid in ('0', '1'):
+            with self.subTest(pid=pid): self.verify(pid=pid, expected='PROBE_PID_UNAVAILABLE')
+        self.cwd.unlink(); self.verify(expected='PROBE_CWD_UNAVAILABLE')
+        self.cwd.symlink_to(self.root); self.verify(expected='PROBE_CWD_MISMATCH')
+
+    def test_fork_return_before_cwd_setup_fails_then_completed_setup_passes(self):
+        # Models the documented Type=simple ordering, not a live systemd run.
+        # The exact same process can fail before setup and pass after setup.
+        self.cwd.unlink(); self.cwd.symlink_to(self.root)
+        self.verify(expected='PROBE_CWD_MISMATCH')
+        self.cwd.unlink(); self.cwd.symlink_to(self.candidate)
+        self.verify()
+
+    def test_setup_barrier_does_not_replace_private_network_checks(self):
+        self.verify(links=[{'ifname': 'lo'}, {'ifname': 'eth0'}], expected='PROBE_EXTERNAL_LINKS')
+        self.verify(routes=[[{'dev': 'eth0', 'dst': 'default'}], []], expected='PROBE_EXTERNAL_ROUTES')
+        net = self.proc / '321/ns/net'; net.unlink(); os.link(self.host_net, net)
+        self.verify(expected='PROBE_SHARED_NETWORK')
+
+
 class IsolatedEntrypoint(unittest.TestCase):
     def test_workflow_streams_reviewed_source_with_all_existing_arguments(self):
         root = Path(__file__).resolve().parents[1]
@@ -330,6 +390,28 @@ class ReleaseSafety(unittest.TestCase):
                     elif kind == 'directory_symlink': (root / 'src/link').symlink_to(root, target_is_directory=True)
                     else: (root / 'package.json').write_text('{"changed":true}')
                     with self.assertRaises(ValueError): deploy.verify_source_transition(root, root)
+
+
+
+class ReviewedReaderTransition(unittest.TestCase):
+    def test_exact_pair_and_unchanged_critical_files_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            current = Path(directory) / 'old'; candidate = Path(directory) / 'new'
+            for root in (current, candidate):
+                for relative in deploy.CRITICAL_FILES:
+                    file = root / relative; file.parent.mkdir(parents=True, exist_ok=True); file.write_text('old')
+            changed = 'src/lib/data-store.ts'
+            (candidate / changed).write_text('reviewed')
+            pins = {changed: (deploy.digest(current / changed), deploy.digest(candidate / changed))}
+            with patch.object(deploy, 'REVIEWED_READER_TRANSITIONS', pins):
+                deploy.verify_critical_transition(current, candidate)
+                for relative in deploy.CRITICAL_FILES:
+                    for root in (current, candidate):
+                        file = root / relative; previous = file.read_bytes(); file.write_text('unreviewed')
+                        with self.assertRaises(ValueError): deploy.verify_critical_transition(current, candidate)
+                        file.write_bytes(previous)
+                (candidate / changed).write_text('old')
+                with self.assertRaises(ValueError): deploy.verify_critical_transition(current, candidate)
 
 
 class ExactCi(unittest.TestCase):
@@ -585,6 +667,886 @@ class ExactCi(unittest.TestCase):
             self.assertIn(guard, source)
 
 
+
+
+
+class RehearsalOnly(unittest.TestCase):
+    """Synthetic host only: no services, credentials, network, or external writes."""
+    def setUp(self):
+        from types import SimpleNamespace
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.runtime = self.root / 'bubblewash-runtime'; self.runtime.mkdir()
+        self.releases = self.root / 'bubblewash-releases'; self.releases.mkdir()
+        self.old_sha = 'a' * 40; self.sha = 'b' * 40
+        self.old = self.releases / ('20261022T190000Z-' + self.old_sha[:12]); self.old.mkdir()
+        self.candidate = self.releases / ('20261022T200000Z-' + self.sha[:12]); self.candidate.mkdir()
+        for release in (self.old, self.candidate):
+            (release / '.next').mkdir(); (release / '.next/BUILD_ID').write_text('synthetic-build')
+            for name in ('src/lib/data-store.ts', 'src/lib/operational-store.ts',
+                         'src/lib/availability-store.ts', 'src/lib/staff-accounts.ts', 'src/app/api/health/route.ts'):
+                path = release / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text('identical synthetic source')
+        (self.candidate / '.release-sha').write_text(self.sha)
+        self.current = self.root / 'bubblewash-pilot'; self.current.symlink_to(self.old)
+        (self.runtime / 'current-release').write_text(f'sha={self.old_sha}\npath={self.old}\n')
+        self.db = self.root / 'live.sqlite'
+        self.live = sqlite3.connect(self.db); self.addCleanup(self.live.close)
+        self.live.execute('PRAGMA journal_mode=WAL')
+        self.live.execute('CREATE TABLE synthetic(id INTEGER PRIMARY KEY, value TEXT)')
+        self.live.execute("INSERT INTO synthetic VALUES(1, 'DO_NOT_PRINT_DATABASE_CONTENT')"); self.live.commit()
+        self.before = deploy.database_fingerprint(self.db)
+        self.status = self.root / 'status.json'
+        self.archive = self.root / 'bubblewash-2026-10-22T09:00:00.sqlite.enc'; self.archive.write_bytes(b'synthetic encrypted archive')
+        sha256 = deploy.digest(self.archive)
+        stamp = deploy.dt.datetime.now(deploy.dt.timezone.utc).isoformat()
+        status = dict(ok=True, filename=self.archive.name, sha256=sha256, createdAt=stamp,
+                      restoreVerifiedAt=stamp, offsiteStoredAt=stamp)
+        self.status.write_text(json.dumps(status))
+        receipt = dict(schema='becore-encrypted-backup-release/v2', repository='bechirobob/bubble-wash',
+                       storageRepository='bechirobob/becore-backups', storage='private-github-release',
+                       storageSha='c' * 40, storageRepositoryId=12, runId='99', encrypted=True,
+                       restoreTested=True, downloadVerified=True, automaticExpiry=False, retentionDays=None,
+                       filename=self.archive.name, sha256=sha256, sourceSha=self.old_sha,
+                       size=self.archive.stat().st_size, verifiedAt=stamp)
+        self.receipt = self.root / 'receipt.json'; self.receipt.write_text(json.dumps(receipt))
+        self.env = self.root / 'env'
+        self.env.write_text(f'NODE_ENV=production\nBUBBLEWASH_DISABLE_DEMO_LOGIN=true\n'
+                            f'BUBBLEWASH_STAFF_AUTH_DISABLED=false\nBUBBLEWASH_BOOKINGS_DISABLED=true\n'
+                            f'BUBBLEWASH_DATABASE_PATH={self.db}\nBUBBLEWASH_BACKUP_STATUS_PATH={self.status}\n'
+                            f'BUBBLEWASH_BACKUP_OFFSITE_DIR={self.root}\nSECRET=DO_NOT_PRINT_CONFIGURATION\n')
+        self.args = ['deploy-preserving.py', '--rehearsal-only', '--run-id', '123', '--run-attempt', '1',
+                     '--candidate', str(self.candidate), '--sha', self.sha, '--expected-live', self.old_sha,
+                     '--backup-sha256', sha256, '--receipt-run', '99', '--store-sha', 'c' * 40, '--store-id', '12']
+        self.owner = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+        self.commands = []
+        self.routes = []
+        self.stages = []
+        self.snapshot = None
+        self.started = False
+        self.stopped = False
+        self.fail_stage = None
+        self.fail_error = ValueError('DO_NOT_PRINT_EXCEPTION')
+        self.bad_stop = False
+        self.launch_timeout = False
+        self.final_probe_pid = 321
+        self.mutate_copy = False
+        self.change_env = False
+        self.ready_error = False
+        self.diagnostic_result = None
+        self.diagnostic_error = None
+        self.schema_result = {'state': 'SCHEMA_UNAVAILABLE', 'error': 'OTHER'}
+        self.schema_calls = []
+        self.original_marker = (self.runtime / 'current-release').read_bytes()
+
+    def stage(self, report, stage):
+        if report is not None:
+            report.stage = stage
+        self.stages.append(stage)
+        if stage == self.fail_stage:
+            raise self.fail_error
+
+    def command(self, args, timeout=30):
+        self.commands.append(args)
+        if args[0] == 'systemd-run':
+            self.assertNotIn('--wait', args, 'no build allowed')
+            self.assertIn('--property=PrivateNetwork=true', args)
+            self.assertIn('--property=KillMode=control-group', args)
+            self.assertEqual(args.count('--property=Type=exec'), 1)
+            self.assertIn('--property=ProtectHome=tmpfs', args)
+            self.assertIn('--property=ProtectSystem=strict', args)
+            self.assertIn('--property=StandardOutput=null', args)
+            self.assertIn('--property=StandardError=null', args)
+            self.assertIn('--property=BindReadOnlyPaths=' + str(self.candidate) + ' ' + str(self.status), args)
+            self.snapshot = Path(next(arg.split('=', 1)[1] for arg in args if arg.startswith('BUBBLEWASH_DATABASE_PATH=')))
+            self.assertNotEqual(self.snapshot, self.db)
+            with sqlite3.connect(self.snapshot) as copied:
+                self.assertEqual(copied.execute('SELECT count(*) FROM synthetic').fetchone(), (1,))
+                if self.mutate_copy:
+                    copied.execute('DELETE FROM synthetic')
+            if self.launch_timeout:
+                raise subprocess.TimeoutExpired('DO_NOT_PRINT_COMMAND', 30, output=b'DO_NOT_PRINT_OUTPUT')
+            self.started = True
+            return ''
+        self.assertEqual(args, ['systemctl', 'stop', 'bubblewash-rehearsal-123-1-probe.service'])
+        if self.bad_stop:
+            raise subprocess.CalledProcessError(1, args, output=b'DO_NOT_PRINT_COMMAND_OUTPUT')
+        self.stopped = True
+        return ''
+
+    def state(self, unit):
+        self.assertEqual(unit, 'bubblewash-rehearsal-123-1-probe.service')
+        return ({'LoadState': 'loaded', 'ActiveState': 'active', 'MainPID': '321'} if self.started and not self.stopped else
+                {'LoadState': 'not-found', 'ActiveState': 'inactive', 'MainPID': '0'})
+
+    def network(self, args, pid=None, timeout=30):
+        self.assertEqual(pid, 321)
+        self.assertEqual(args[0], 'curl')
+        self.routes.append(args[-1])
+        if self.ready_error and args[-1].endswith('/api/ready'):
+            raise subprocess.CalledProcessError(22, 'DO_NOT_PRINT_COMMAND', output=b'DO_NOT_PRINT_BODY')
+        if self.change_env:
+            self.env.write_text(self.env.read_text() + 'CHANGED=true\n'); self.change_env = False
+        return ''
+
+    def run_rehearsal(self):
+        import contextlib
+        import io
+        report = deploy.RehearsalReport()
+        output = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            for name, value in [('HOME', self.root), ('CURRENT', self.current), ('ENV', self.env),
+                                ('RUNTIME', self.runtime), ('RECEIPT', self.receipt)]:
+                stack.enter_context(patch.object(deploy, name, value))
+            stack.enter_context(patch.object(sys, 'argv', self.args))
+            stack.enter_context(patch.object(deploy.os, 'geteuid', return_value=0))
+            stack.enter_context(patch.object(deploy.pwd, 'getpwnam', return_value=self.owner))
+            stack.enter_context(patch.object(deploy, 'verify_source_transition'))
+            stack.enter_context(patch.object(deploy, 'REVIEWED_READER_TRANSITIONS', {}))
+            stack.enter_context(patch.object(deploy, 'check_runtime'))
+            stack.enter_context(patch.object(deploy, 'health'))
+            stack.enter_context(patch.object(deploy, 'verify_private_network', side_effect=[321, self.final_probe_pid]))
+            stack.enter_context(patch.object(deploy, 'command', side_effect=self.command))
+            stack.enter_context(patch.object(deploy, 'network_command', side_effect=self.network))
+            stack.enter_context(patch.object(deploy, 'probe_state', side_effect=self.state))
+            diagnostic = stack.enter_context(patch.object(deploy, 'readiness_diagnostic', return_value=self.diagnostic_result, side_effect=self.diagnostic_error))
+            def inspect_stopped_copy(candidate, snapshot, directory_identity, snapshot_identity, timeout):
+                self.assertTrue(self.stopped); self.assertTrue(report.safe_to_remove)
+                self.assertEqual(snapshot, self.snapshot); self.assertNotEqual(snapshot, self.db)
+                self.assertTrue(snapshot.is_file()); self.schema_calls.append(snapshot)
+                self.assertEqual(directory_identity, report.directory_identity); self.assertEqual(snapshot_identity, report.snapshot_identity)
+                return self.schema_result
+            stack.enter_context(patch.object(deploy, 'schema_diagnostic', side_effect=inspect_stopped_copy))
+            stack.enter_context(patch.object(deploy, 'rehearsal_stage', side_effect=self.stage))
+            stack.enter_context(patch.object(deploy.signal, 'setitimer'))
+            for name in ('activate', 'ctl', 'public_health'):
+                stack.enter_context(patch.object(deploy, name, side_effect=AssertionError('forbidden production action')))
+            stack.enter_context(patch.object(deploy.os, 'replace', side_effect=AssertionError('forbidden marker/pointer write')))
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                try:
+                    deploy.main(lambda: None, report)
+                except BaseException as error:
+                    report.fail(error)
+                report.emit()
+        self.diagnostic_calls = diagnostic.call_count
+        text = output.getvalue()
+        for sentinel in ('DO_NOT_PRINT', str(self.db), str(self.env), str(self.root)):
+            self.assertNotIn(sentinel, text)
+        self.assertEqual(deploy.database_fingerprint(self.db), self.before)
+        self.assertEqual(self.current.resolve(), self.old)
+        self.assertEqual((self.runtime / 'current-release').read_bytes(), self.original_marker)
+        return json.loads(text)
+
+    def test_success_has_no_activation_and_removes_only_disposable_copy(self):
+        sibling = self.runtime / 'unrelated'; sibling.mkdir(); (sibling / 'keep').write_text('keep')
+        result = self.run_rehearsal()
+        self.assertTrue(result['ok']); self.assertTrue(result['cleanup']); self.assertFalse(result['activationAttempted'])
+        self.assertTrue(self.stopped); self.assertFalse(self.snapshot.parent.exists())
+        self.assertTrue((sibling / 'keep').is_file())
+        self.assertEqual(len(self.routes), 7)
+        self.assertEqual(self.routes[-1], 'http://127.0.0.1:3001/api/ready')
+        self.assertEqual(len([cmd for cmd in self.commands if cmd[0] == 'systemd-run']), 1)
+
+    def test_ready_failure_adds_categories_but_remains_fatal_and_cleans_up(self):
+        self.ready_error = True
+        self.diagnostic_result = {'state': 'BLOCKED', 'http': 'HTTP_503', 'categories': ['DB_CHECK']}
+        result = self.run_rehearsal()
+        self.assertEqual(result['stage'], 'ROUTE_READY')
+        self.assertEqual(result['error'], 'COMMAND_FAILED')
+        self.assertEqual(result['readinessDiagnostic'], self.diagnostic_result)
+        self.assertEqual(self.diagnostic_calls, 1)
+        self.assertFalse(result['ok']); self.assertFalse(result['activationAttempted'])
+        self.assertTrue(result['cleanup']); self.assertTrue(self.stopped)
+        self.assertFalse(self.snapshot.parent.exists())
+
+    def test_schema_detail_runs_only_after_verified_stop_and_before_cleanup(self):
+        self.ready_error = True
+        self.diagnostic_result = {'state': 'BLOCKED', 'http': 'HTTP_503', 'categories': ['ADMIN', 'DB_CHECK', 'STAFF_STORE']}
+        result = self.run_rehearsal()
+        self.assertEqual(result['schemaDiagnostic'], self.schema_result)
+        self.assertEqual(len(self.schema_calls), 1); self.assertTrue(result['cleanup'])
+        self.assertEqual(result['stage'], 'ROUTE_READY'); self.assertEqual(result['error'], 'COMMAND_FAILED')
+        self.assertFalse(self.snapshot.parent.exists())
+
+    def test_schema_detail_never_runs_if_stop_fails_or_only_configuration_is_blocked(self):
+        self.ready_error = self.bad_stop = True
+        self.diagnostic_result = {'state': 'BLOCKED', 'http': 'HTTP_503', 'categories': ['STAFF_STORE']}
+        result = self.run_rehearsal()
+        self.assertEqual(self.schema_calls, []); self.assertNotIn('schemaDiagnostic', result)
+        self.assertFalse(result['cleanup']); self.assertTrue(self.snapshot.exists())
+        self.started = self.stopped = self.bad_stop = False
+        self.diagnostic_result['categories'] = ['CONFIG']
+        result = self.run_rehearsal()
+        self.assertEqual(self.schema_calls, []); self.assertNotIn('schemaDiagnostic', result)
+        self.assertTrue(result['cleanup'])
+
+    def test_ready_after_anonymous_failure_never_forgives_failure(self):
+        self.ready_error = True
+        self.diagnostic_result = {'state': 'READY', 'http': 'HTTP_200', 'categories': []}
+        result = self.run_rehearsal()
+        self.assertFalse(result['ok']); self.assertEqual(result['error'], 'COMMAND_FAILED')
+        self.assertTrue(result['cleanup']); self.assertEqual(self.diagnostic_calls, 1)
+
+    def test_diagnostic_exception_or_cancellation_keeps_primary_failure_and_cleanup(self):
+        self.ready_error = True
+        for error in (RuntimeError('DO_NOT_PRINT'), deploy.RehearsalDeadline(), deploy.RehearsalInterrupted()):
+            self.started = self.stopped = False; self.diagnostic_error = error
+            result = self.run_rehearsal()
+            self.assertEqual(result['stage'], 'ROUTE_READY'); self.assertEqual(result['error'], 'COMMAND_FAILED')
+            self.assertTrue(result['cleanup']); self.assertTrue(self.stopped)
+            self.assertFalse(result['activationAttempted']); self.assertEqual(self.diagnostic_calls, 1)
+
+    def test_non_ready_failure_and_success_never_collect_detail(self):
+        result = self.run_rehearsal()
+        self.assertNotIn('readinessDiagnostic', result); self.assertEqual(self.diagnostic_calls, 0)
+        self.fail_stage = 'ROUTE_HOME'; self.started = self.stopped = False
+        result = self.run_rehearsal()
+        self.assertNotIn('readinessDiagnostic', result); self.assertEqual(self.diagnostic_calls, 0)
+
+    def test_each_boundary_fails_without_activation_or_sensitive_output(self):
+        stages = ('BUILD_ARTIFACT', 'PROBE_ABSENT', 'SNAPSHOT', 'FINGERPRINT_BEFORE', 'PROBE_START',
+                  'NAMESPACE_BEFORE', 'HEALTH', 'RUNTIME_BEFORE', 'ROUTE_HOME', 'ROUTE_SERVICES',
+                  'ROUTE_BOOK', 'ROUTE_TRACK', 'ROUTE_MANAGE', 'ROUTE_EARLY_ACCESS', 'ROUTE_READY',
+                  'RUNTIME_AFTER', 'NAMESPACE_AFTER', 'PROBE_STOP', 'FINGERPRINT_AFTER', 'CLEANUP', 'UNCHANGED')
+        for stage in stages:
+            with self.subTest(stage=stage):
+                self.started = self.stopped = False; self.fail_stage = stage
+                result = self.run_rehearsal()
+                self.assertFalse(result['ok']); self.assertEqual(result['stage'], stage)
+                self.assertFalse(result['activationAttempted'])
+                if stage not in ('PROBE_STOP', 'CLEANUP'):
+                    self.assertTrue(result['cleanup'])
+
+    def test_unknown_probe_stop_retains_private_copy_and_primary_error(self):
+        self.fail_stage = 'ROUTE_READY'; self.bad_stop = True
+        result = self.run_rehearsal()
+        self.assertEqual(result['stage'], 'ROUTE_READY'); self.assertFalse(result['cleanup'])
+        self.assertTrue(self.snapshot.is_file())
+        self.assertEqual(self.snapshot.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_uncertain_launch_failed_stop_and_absent_unit_retain_snapshot(self):
+        self.launch_timeout = self.bad_stop = True
+        result = self.run_rehearsal()
+        self.assertEqual(result['stage'], 'PROBE_START'); self.assertEqual(result['error'], 'TIMEOUT')
+        self.assertFalse(result['cleanup']); self.assertTrue(self.snapshot.is_file())
+        self.assertFalse(self.started); self.assertFalse(self.stopped)
+
+    def test_timeout_and_cancellation_cleanup_and_codes(self):
+        for error, expected in [(TimeoutError('DO_NOT_PRINT_TIMEOUT'), 'TIMEOUT'),
+                                (KeyboardInterrupt('DO_NOT_PRINT_INTERRUPT'), 'INTERRUPTED'),
+                                (deploy.RehearsalDeadline(), 'TIMEOUT'),
+                                (deploy.RehearsalInterrupted(), 'INTERRUPTED')]:
+            with self.subTest(expected=expected):
+                self.started = self.stopped = False; self.fail_stage = 'HEALTH'; self.fail_error = error
+                result = self.run_rehearsal()
+                self.assertEqual(result['error'], expected); self.assertTrue(result['cleanup']); self.assertTrue(self.stopped)
+
+    def test_snapshot_change_is_detected_without_source_change(self):
+        self.mutate_copy = True
+        result = self.run_rehearsal()
+        self.assertFalse(result['ok']); self.assertEqual(result['stage'], 'FINGERPRINT_AFTER')
+        self.assertEqual(result['error'], 'FINGERPRINT_MUTATION')
+        self.assertTrue(result['cleanup'])
+
+    def test_environment_drift_aborts_after_rehearsal_without_activation(self):
+        self.change_env = True
+        result = self.run_rehearsal()
+        self.assertFalse(result['ok']); self.assertEqual(result['stage'], 'UNCHANGED'); self.assertTrue(result['cleanup'])
+
+    def test_final_namespace_revalidation_rejects_changed_process_without_retry(self):
+        self.final_probe_pid = 322
+        result = self.run_rehearsal()
+        self.assertEqual(result['stage'], 'NAMESPACE_AFTER')
+        self.assertEqual(result['error'], 'PROBE_NAMESPACE_CHANGED')
+        self.assertFalse(result['ok']); self.assertTrue(result['cleanup']); self.assertTrue(self.stopped)
+
+    def test_wrong_retained_sha_rejected_before_any_probe_or_snapshot(self):
+        (self.candidate / '.release-sha').write_text('f' * 40)
+        result = self.run_rehearsal()
+        self.assertFalse(result['ok']); self.assertEqual(result['stage'], 'PREFLIGHT')
+        self.assertFalse(self.commands); self.assertFalse(list(self.runtime.glob('release-rehearsal-*')))
+
+    def test_wrong_backup_pin_rejected_before_any_probe_or_snapshot(self):
+        self.args[self.args.index('--backup-sha256') + 1] = 'f' * 64
+        result = self.run_rehearsal()
+        self.assertFalse(result['ok']); self.assertEqual(result['stage'], 'PREFLIGHT'); self.assertFalse(self.commands)
+
+    def test_invalid_arguments_never_print_argument_or_usage(self):
+        self.args += ['--DO_NOT_PRINT_UNKNOWN', 'DO_NOT_PRINT_ARGUMENT']
+        result = self.run_rehearsal()
+        self.assertFalse(result['ok']); self.assertEqual(result['stage'], 'PREFLIGHT'); self.assertFalse(self.commands)
+
+
+class RehearsalCleanup(unittest.TestCase):
+    def test_inode_swap_symlink_and_owner_changes_are_rejected_without_deletion(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            original = root / 'release-rehearsal-original'; original.mkdir(mode=0o700)
+            (original / 'original').write_text('preserve')
+            st = original.stat(); identity = (st.st_dev, st.st_ino)
+            owner = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+            moved = root / 'moved'; original.rename(moved)
+            original.mkdir(mode=0o700); (original / 'replacement').write_text('preserve')
+            with patch.object(deploy, 'RUNTIME', root):
+                with self.assertRaises(ValueError): deploy.remove_rehearsal_directory(original, identity, owner)
+                self.assertTrue((original / 'replacement').is_file()); self.assertTrue((moved / 'original').is_file())
+                replacement = root / 'replacement'; original.rename(replacement); original.symlink_to(moved)
+                with self.assertRaises(ValueError): deploy.remove_rehearsal_directory(original, identity, owner)
+                self.assertTrue((moved / 'original').is_file())
+                original.unlink(); moved.rename(original)
+                wrong_owner = SimpleNamespace(pw_uid=os.getuid() + 1, pw_gid=os.getgid())
+                with self.assertRaises(ValueError): deploy.remove_rehearsal_directory(original, identity, wrong_owner)
+                self.assertTrue((original / 'original').is_file())
+
+    def test_unexpected_nested_entries_are_retained_without_deletion(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); outside = root / 'outside'; outside.mkdir(); (outside / 'keep').write_text('keep')
+            disposable = root / 'release-rehearsal-test'; disposable.mkdir(mode=0o700)
+            (disposable / 'nested').mkdir(); (disposable / 'nested/link').symlink_to(outside)
+            (disposable / 'file-link').symlink_to(outside / 'keep')
+            st = disposable.stat(); owner = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+            with patch.object(deploy, 'RUNTIME', root):
+                with self.assertRaises(ValueError):
+                    deploy.remove_rehearsal_directory(disposable, (st.st_dev, st.st_ino), owner)
+            self.assertTrue(disposable.exists()); self.assertEqual((outside / 'keep').read_text(), 'keep')
+
+    def test_collected_unit_requires_explicit_inactive_zero_pid_properties(self):
+        for code, output, accepted in [(0, b'LoadState=loaded\nActiveState=inactive\nMainPID=0\n', True),
+                                       (1, b'LoadState=not-found\nActiveState=inactive\nMainPID=0\n', True),
+                                       (1, b'', False), (2, b'LoadState=not-found\nActiveState=inactive\nMainPID=0\n', False)]:
+            with self.subTest(code=code, output=output):
+                result = subprocess.CompletedProcess([], code, stdout=output, stderr=b'DO_NOT_PRINT_STDERR')
+                with patch.object(deploy.subprocess, 'run', return_value=result):
+                    if accepted: self.assertTrue(deploy.probe_stopped(deploy.probe_state('synthetic.service')))
+                    else:
+                        with self.assertRaises(ValueError): deploy.probe_state('synthetic.service')
+
+
+class RehearsalErrorCodes(unittest.TestCase):
+    def test_normal_deployment_interruption_preserves_exception_derived_handler(self):
+        with self.assertRaises(RuntimeError) as caught:
+            deploy.release_interrupted(None)
+        self.assertIsInstance(caught.exception, Exception)
+        with self.assertRaises(deploy.RehearsalInterrupted):
+            deploy.release_interrupted(deploy.RehearsalReport())
+
+    def test_allowlisted_guards_are_fixed_and_unknown_text_is_not_emitted(self):
+        import contextlib
+        import io
+        for message, code in deploy.REHEARSAL_GUARD_CODES.items():
+            with self.subTest(code=code):
+                report = deploy.RehearsalReport(); report.fail(ValueError(message))
+                self.assertEqual(report.failure['error'], code)
+                self.assertRegex(code, r'^[A-Z_]+$')
+        output = io.StringIO(); report = deploy.RehearsalReport()
+        report.fail(ValueError('DO_NOT_PRINT_SECRET_DB_ROW_OR_PATH'))
+        with contextlib.redirect_stdout(output): report.emit()
+        self.assertEqual(json.loads(output.getvalue())['error'], 'CHECK_FAILED')
+        self.assertNotIn('DO_NOT_PRINT', output.getvalue())
+
+    def test_deadline_and_cancellation_escape_health_retry(self):
+        for error in (deploy.RehearsalDeadline(), deploy.RehearsalInterrupted()):
+            with self.subTest(error=type(error).__name__):
+                with patch.object(deploy, 'network_command', side_effect=error) as command, patch.object(deploy.time, 'sleep') as sleep:
+                    with self.assertRaises(type(error)): deploy.health(3001, 321)
+                    self.assertEqual(command.call_count, 1); sleep.assert_not_called()
+
+
+class RehearsalWorkflow(unittest.TestCase):
+    def test_separate_runner_candidate_pins_and_no_stage_build_or_deploy_option(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / '.github/workflows/production-rehearsal.yml').read_text()
+        self.assertIn('ref: ${{ github.sha }}', workflow)
+        self.assertIn('[[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]', workflow)
+        self.assertIn('TARGET_SHA="$GITHUB_SHA" python3 ops/check-release-ci.py', workflow)
+        self.assertEqual(workflow.count('python3 ops/check-release-ci.py'), 2)
+        self.assertIn('group: bubblewash-production', workflow)
+        self.assertIn('environment: backup-storage', workflow)
+        self.assertNotIn('schedule:', workflow); self.assertNotIn('push:', workflow)
+        for forbidden in ('git archive', 'tar -xf', 'npm ci', 'npm run build', 'upload-artifact', 'continue-on-error'):
+            self.assertNotIn(forbidden, workflow)
+        launch = next(line.strip() for line in workflow.splitlines() if 'python3 -I -B -' in line)
+        words = shlex.split(launch)
+        remote = shlex.split(words[3])
+        self.assertEqual(remote[:4], ['python3', '-I', '-B', '-'])
+        self.assertEqual(remote.count('--rehearsal-only'), 1)
+        self.assertIn('/home/ubuntu/bubblewash-releases/$RETAINED_RELEASE', remote)
+        production = (root / '.github/workflows/production-deploy.yml').read_text()
+        self.assertIn('[[ "$TARGET_SHA" == "$GITHUB_SHA" ]]', production)
+        self.assertNotIn('--rehearsal-only', production)
+
+
+
+
+class ReadinessCategoryDiagnostic(unittest.TestCase):
+    token = 'SYNTHETIC_ONLY_TOKEN_NOT_REAL_0123456789'
+
+    def setUp(self):
+        from types import SimpleNamespace
+        self.namespace = {'__name__': 'readiness_fixture', 'CATEGORIES': deploy.READINESS_BLOCKER_CATEGORIES}
+        exec(deploy.READINESS_READER, self.namespace)
+        self.report = deploy.RehearsalReport()
+        self.candidate = Path('/synthetic/candidate')
+        self.values = {'BUBBLEWASH_MAINTENANCE_TOKEN': self.token}
+        self.result = {'state': 'BLOCKED', 'http': 'HTTP_503', 'categories': ['DB_CHECK']}
+        self.completed = SimpleNamespace(returncode=0, stdout=json.dumps(self.result).encode())
+
+    def body(self, checks, ok=False):
+        return json.dumps({'ok': ok, 'service': 'Bubble Wash operations app',
+                           'readiness': 'ready' if ok else 'blocked', 'checks': checks}).encode()
+
+    def test_all_allowlisted_messages_map_only_to_fixed_categories(self):
+        classify = self.namespace['classify']
+        for message, category in deploy.READINESS_BLOCKER_CATEGORIES.items():
+            with self.subTest(category=category):
+                value = classify(503, self.body([message]))
+                self.assertEqual(value, {'state': 'BLOCKED', 'http': 'HTTP_503', 'categories': [category]})
+                self.assertNotIn(message, json.dumps(value))
+
+    def test_multiple_categories_deduplicate_and_unknown_values_never_escape(self):
+        checks = ['The operations database did not pass its integrity/read check.',
+                  'The operations database did not pass its integrity/read check.',
+                  'The managed staff account store is unavailable.', 'DO_NOT_PRINT_ROW_IDENTITY_OR_SECRET']
+        value = self.namespace['classify'](503, self.body(checks))
+        self.assertEqual(value['categories'], ['DB_CHECK', 'STAFF_STORE', 'UNKNOWN'])
+        self.assertNotIn('DO_NOT_PRINT', json.dumps(value))
+
+    def test_ready_and_anonymous_or_early_database_open_failure_are_distinct(self):
+        classify = self.namespace['classify']
+        self.assertEqual(classify(200, self.body([], True))['state'], 'READY')
+        body = json.loads(self.body(['irrelevant'])); del body['checks']
+        value = classify(503, json.dumps(body).encode())
+        self.assertEqual(value['state'], 'DETAIL_UNAVAILABLE'); self.assertEqual(value['categories'], [])
+
+    def test_malformed_oversized_and_unexpected_responses_fail_closed(self):
+        classify = self.namespace['classify']
+        for raw in (b'not-json-DO_NOT_PRINT', b'[]', self.body([]), self.body([1]),
+                    self.body(['x'] * 65), self.body(['x' * 513]), self.body(['x'], True)):
+            with self.subTest(length=len(raw)):
+                value = classify(503, raw)
+                self.assertEqual(value['state'], 'RESPONSE_INVALID'); self.assertEqual(value['categories'], [])
+        self.assertEqual(classify(503, b'x' * 8193)['state'], 'RESPONSE_TOO_LARGE')
+        self.assertEqual(classify(302, b'DO_NOT_PRINT_LOCATION'),
+                         {'state': 'HTTP_UNEXPECTED', 'http': 'OTHER_HTTP', 'categories': []})
+
+    def test_reader_uses_exact_loopback_endpoint_stdin_and_bounded_body(self):
+        import io
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        response = MagicMock(status=503); response.read.return_value = self.body(['The operations database is unavailable.'])
+        connection = MagicMock(); connection.getresponse.return_value = response
+        with patch('http.client.HTTPConnection', return_value=connection) as connect, \
+                patch.object(sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(self.token.encode()))):
+            value = self.namespace['read_ready']()
+        connect.assert_called_once_with('127.0.0.1', 3001, timeout=3)
+        connection.request.assert_called_once_with('GET', '/api/ready', headers={'Authorization': 'Bearer ' + self.token})
+        response.read.assert_called_once_with(8193); connection.close.assert_called_once()
+        self.assertEqual(value['categories'], ['DB_UNAVAILABLE'])
+        self.assertNotIn(self.token, json.dumps(value))
+
+    def test_reader_transport_errors_and_invalid_tokens_never_expose_exception(self):
+        import io
+        from types import SimpleNamespace
+        with patch('http.client.HTTPConnection', side_effect=RuntimeError('DO_NOT_PRINT_SECRET')), \
+                patch.object(sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(self.token.encode()))):
+            value = self.namespace['read_ready']()
+        self.assertEqual(value['state'], 'TRANSPORT_FAILED'); self.assertNotIn('DO_NOT_PRINT', json.dumps(value))
+        for token in (b'', b'short', b'x' * 4097, b'x' * 32 + b'\nInjected: yes', b'x' * 32 + b'\x7f'):
+            with patch('http.client.HTTPConnection') as connect, \
+                    patch.object(sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(token))):
+                self.assertEqual(self.namespace['read_ready']()['state'], 'TOKEN_UNAVAILABLE')
+                connect.assert_not_called()
+
+    def collect(self):
+        return deploy.readiness_diagnostic(self.candidate, self.values, 'synthetic-probe.service', 321, self.report)
+
+    def test_parent_stdin_only_timeout_capture_and_namespace_reverification(self):
+        with patch.object(deploy, 'verify_private_network', return_value=321) as verify, \
+                patch.object(deploy.subprocess, 'run', return_value=self.completed) as run:
+            self.assertEqual(self.collect(), self.result)
+        args, kwargs = run.call_args
+        self.assertEqual(args[0][:6], ['nsenter', '--target', '321', '--net', '--', 'python3'])
+        self.assertNotIn(self.token, repr(args)); self.assertNotIn('env', kwargs)
+        self.assertEqual(kwargs['input'], self.token.encode()); self.assertLessEqual(kwargs['timeout'], 7)
+        self.assertEqual(kwargs['stderr'], subprocess.DEVNULL); self.assertFalse(kwargs['check'])
+        self.assertEqual(verify.call_count, 2)
+        verify.assert_called_with('synthetic-probe.service', self.candidate)
+
+    def test_missing_token_or_namespace_failure_prevents_request(self):
+        for token in ('', 'short', self.token + '\n'):
+            self.values['BUBBLEWASH_MAINTENANCE_TOKEN'] = token
+            with patch.object(deploy.subprocess, 'run') as run:
+                self.assertEqual(self.collect()['state'], 'TOKEN_UNAVAILABLE'); run.assert_not_called()
+        self.values['BUBBLEWASH_MAINTENANCE_TOKEN'] = self.token
+        for value in (0, 322):
+            with patch.object(deploy, 'verify_private_network', return_value=value), patch.object(deploy.subprocess, 'run') as run:
+                self.assertEqual(self.collect()['state'], 'NAMESPACE_UNVERIFIED'); run.assert_not_called()
+        with patch.object(deploy, 'verify_private_network', side_effect=ValueError('DO_NOT_PRINT_NAMESPACE')):
+            self.assertEqual(self.collect()['state'], 'NAMESPACE_UNVERIFIED')
+
+    def test_changed_namespace_discards_result_and_timeout_still_reverifies(self):
+        with patch.object(deploy, 'verify_private_network', side_effect=[321, 322]), \
+                patch.object(deploy.subprocess, 'run', return_value=self.completed):
+            self.assertEqual(self.collect()['state'], 'NAMESPACE_UNVERIFIED')
+        with patch.object(deploy, 'verify_private_network', return_value=321) as verify, \
+                patch.object(deploy.subprocess, 'run', side_effect=subprocess.TimeoutExpired('DO_NOT_PRINT_TOKEN', 7, output=b'DO_NOT_PRINT_BODY')):
+            self.assertEqual(self.collect()['state'], 'TIMEOUT'); self.assertEqual(verify.call_count, 2)
+
+    def test_parent_rejects_arbitrary_child_output_and_values(self):
+        from types import SimpleNamespace
+        for body in (b'DO_NOT_PRINT', b'x' * 1025, b'null', b'[]',
+                     json.dumps({**self.result, 'raw': 'DO_NOT_PRINT'}).encode(),
+                     json.dumps({**self.result, 'categories': ['DO_NOT_PRINT']}).encode(),
+                     json.dumps({**self.result, 'state': ['BLOCKED']}).encode()):
+            with patch.object(deploy, 'verify_private_network', return_value=321), \
+                    patch.object(deploy.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=body)):
+                value = self.collect()
+                self.assertEqual(value['state'], 'DIAGNOSTIC_FAILED'); self.assertNotIn('DO_NOT_PRINT', json.dumps(value))
+
+    def test_deadline_and_cancellation_are_not_swallowed(self):
+        for error in (deploy.RehearsalDeadline(), deploy.RehearsalInterrupted(), KeyboardInterrupt()):
+            with patch.object(deploy, 'verify_private_network', return_value=321), \
+                    patch.object(deploy.subprocess, 'run', side_effect=error), self.assertRaises(type(error)):
+                self.collect()
+
+    def test_real_child_invalid_token_emits_only_fixed_json_without_traceback(self):
+        script = 'CATEGORIES = ' + repr(deploy.READINESS_BLOCKER_CATEGORIES) + '\n' + deploy.READINESS_READER
+        result = subprocess.run([sys.executable, '-I', '-B', '-c', script], input=b'DO_NOT_PRINT',
+                                capture_output=True, timeout=5, check=True)
+        self.assertEqual(result.stderr, b'')
+        self.assertEqual(json.loads(result.stdout), {'state': 'TOKEN_UNAVAILABLE', 'http': 'UNAVAILABLE', 'categories': []})
+
+    def test_normal_deployment_rehearsal_does_not_collect_readiness_details(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            candidate = root / 'candidate'; (candidate / '.next').mkdir(parents=True)
+            (candidate / '.next/BUILD_ID').write_text('synthetic')
+            db = root / 'source.sqlite'
+            with sqlite3.connect(db) as connection:
+                connection.execute('CREATE TABLE synthetic (id INTEGER)')
+            def network(args, *unused):
+                if args[-1].endswith('/api/ready'):
+                    raise subprocess.CalledProcessError(22, 'synthetic')
+                return ''
+            with patch.object(deploy, 'RUNTIME', root), \
+                    patch.object(deploy, 'verify_private_network', return_value=321), \
+                    patch.object(deploy, 'check_runtime'), patch.object(deploy, 'health'), \
+                    patch.object(deploy, 'command', return_value='') as command, \
+                    patch.object(deploy, 'network_command', side_effect=network), \
+                    patch.object(deploy, 'readiness_diagnostic') as diagnostic:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    deploy.rehearse(candidate, self.values, db, root / 'status',
+                                    SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid()), 'normal', None)
+                diagnostic.assert_not_called()
+                self.assertEqual(command.call_args.args[0], ['systemctl', 'stop', 'normal-probe.service'])
+
+
+
+
+class SchemaOnlyDiagnostic(unittest.TestCase):
+    core = "CREATE TABLE staff_credential_overrides (role TEXT PRIMARY KEY, login TEXT NOT NULL, password_hash TEXT NOT NULL, credential_version TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE synthetic_core (id TEXT PRIMARY KEY, detail TEXT); CREATE INDEX synthetic_core_idx ON synthetic_core(detail);"
+    staff = "CREATE TABLE IF NOT EXISTS staff_accounts (email TEXT PRIMARY KEY COLLATE NOCASE, name TEXT NOT NULL, role TEXT NOT NULL, entity_id TEXT NOT NULL, password_hash TEXT NOT NULL, credential_version TEXT NOT NULL, status TEXT NOT NULL, token_hash TEXT NOT NULL, token_expires_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+
+    def setUp(self):
+        import hashlib
+        self.temporary = tempfile.TemporaryDirectory(); self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name); self.candidate = self.root / 'candidate'
+        (self.candidate / 'src/lib').mkdir(parents=True)
+        self.pins = {}
+        for relative, initializer, receiver, ddl in (
+                ('src/lib/data-store.ts', 'initializeDatabaseSchema', 'db', self.core),
+                ('src/lib/staff-accounts.ts', 'initializeStaffAccountsSchema', 'database', self.staff)):
+            raw = ('function ' + initializer + '(db: Synthetic) {\n  ' + receiver + '.exec(`' + ddl + '`);\n}').encode()
+            (self.candidate / relative).write_bytes(raw)
+            self.pins[relative] = ('old', hashlib.sha256(raw).hexdigest())
+        self.copy_directory = self.root / 'copy'; self.copy_directory.mkdir()
+        self.snapshot = self.copy_directory / 'rehearsal.sqlite'
+        with sqlite3.connect(self.snapshot) as db:
+            db.executescript(self.core + self.staff)
+            db.execute("INSERT INTO synthetic_core VALUES ('synthetic', 'DO_NOT_PRINT_ROW_VALUE')")
+        directory_stat = self.copy_directory.stat(); snapshot_stat = self.snapshot.stat()
+        self.directory_identity = (directory_stat.st_dev, directory_stat.st_ino)
+        self.snapshot_identity = (snapshot_stat.st_dev, snapshot_stat.st_ino)
+        patcher = patch.object(deploy, 'REVIEWED_READER_TRANSITIONS', self.pins)
+        patcher.start(); self.addCleanup(patcher.stop)
+        self.namespace = {'__name__': 'schema_fixture'}; exec(deploy.SCHEMA_READER, self.namespace)
+
+    def collect_schema(self, path=None, timeout=5):
+        return deploy.schema_diagnostic(self.candidate, path or self.snapshot, self.directory_identity, self.snapshot_identity, timeout)
+
+    def inspect_direct(self):
+        directory = os.open(self.copy_directory, os.O_RDONLY | os.O_DIRECTORY)
+        descriptor = os.open(self.snapshot, os.O_RDONLY)
+        try:
+            return self.namespace['inspect_schema'](directory, descriptor, str(self.candidate), {k:v[1] for k,v in self.pins.items()})
+        finally:
+            os.close(descriptor); os.close(directory)
+
+    def run_schema(self):
+        before = deploy.database_fingerprint(self.snapshot)
+        result = self.collect_schema()
+        self.assertEqual(deploy.database_fingerprint(self.snapshot), before)
+        text = json.dumps(result)
+        for sentinel in ('DO_NOT_PRINT', str(self.root), 'staff_accounts', 'password_hash', 'synthetic_core'):
+            self.assertNotIn(sentinel, text)
+        return result
+
+    def test_exact_schema_and_query_shapes_pass_without_changing_copy(self):
+        value = self.run_schema()
+        self.assertEqual(value['state'], 'COMPLETE'); self.assertEqual(value['missingObjects'], 0)
+        self.assertEqual(value['mismatchedObjects'], 0); self.assertEqual(value['integrity'], 'OK')
+        self.assertTrue(value['readable']); self.assertEqual(value['expectedObjects'], 4)
+        for label in ('staffAccounts', 'credentialOverrides'):
+            self.assertEqual(value[label], {'object': 'TABLE', 'definition': 'MATCH', 'missingSchemaColumns': 0,
+                                           'missingQueryColumns': 0, 'query': 'PREPARES', 'error': 'NONE'})
+
+    def test_missing_staff_and_override_tables_are_distinct(self):
+        for name, label, count in (('staff_accounts', 'staffAccounts', 8), ('staff_credential_overrides', 'credentialOverrides', 5)):
+            with sqlite3.connect(self.snapshot) as db:
+                db.execute('DROP TABLE ' + name)
+            value = self.run_schema()
+            self.assertEqual(value[label]['object'], 'MISSING'); self.assertEqual(value[label]['definition'], 'MISSING')
+            self.assertEqual(value[label]['missingQueryColumns'], count)
+            self.assertEqual(value[label]['query'], 'NOT_CHECKED'); self.assertGreater(value['missingObjects'], 0)
+
+    def test_missing_query_column_differs_from_unselected_schema_column(self):
+        with sqlite3.connect(self.snapshot) as db:
+            db.execute('ALTER TABLE staff_accounts RENAME COLUMN name TO old_name')
+        value = self.run_schema()['staffAccounts']
+        self.assertEqual(value['definition'], 'MISMATCH'); self.assertEqual(value['missingSchemaColumns'], 1)
+        self.assertEqual(value['missingQueryColumns'], 1); self.assertEqual(value['query'], 'FAILED')
+        self.assertEqual(value['error'], 'SQL_ERROR')
+        with sqlite3.connect(self.snapshot) as db:
+            db.execute('ALTER TABLE staff_accounts RENAME COLUMN old_name TO name')
+            db.execute('ALTER TABLE staff_accounts RENAME COLUMN token_hash TO old_token_hash')
+        value = self.run_schema()['staffAccounts']
+        self.assertEqual(value['definition'], 'MISMATCH'); self.assertEqual(value['missingSchemaColumns'], 1)
+        self.assertEqual(value['missingQueryColumns'], 0); self.assertEqual(value['query'], 'PREPARES')
+
+    def test_missing_core_index_and_extra_schema_preserve_exact_scope(self):
+        with sqlite3.connect(self.snapshot) as db:
+            db.execute('DROP INDEX synthetic_core_idx'); db.execute('CREATE TABLE allowed_extra (id TEXT)')
+        value = self.run_schema()
+        self.assertEqual(value['missingObjects'], 1); self.assertEqual(value['mismatchedObjects'], 0)
+        self.assertEqual(value['staffAccounts']['definition'], 'MATCH')
+
+    def test_wrong_object_type_is_not_queried(self):
+        with sqlite3.connect(self.snapshot) as db:
+            db.execute('DROP TABLE staff_accounts')
+            db.execute("CREATE VIEW staff_accounts AS SELECT detail AS email FROM synthetic_core")
+        value = self.run_schema()['staffAccounts']
+        self.assertEqual(value['object'], 'OTHER'); self.assertEqual(value['query'], 'NOT_CHECKED')
+
+    def test_invalid_row_types_remain_unexamined_and_do_not_imply_schema_failure(self):
+        with sqlite3.connect(self.snapshot) as db:
+            db.execute('INSERT INTO staff_accounts VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                       ('Synthetic', 'admin', b'not-a-string', 'invalid', 'version', 'active', '', '', ''))
+        value = self.run_schema()
+        self.assertEqual(value['staffAccounts']['definition'], 'MATCH'); self.assertEqual(value['staffAccounts']['query'], 'PREPARES')
+        self.assertEqual(value['integrity'], 'OK')
+
+    def test_copy_sql_is_metadata_explain_or_integrity_only_and_query_only_blocks_writes(self):
+        real_connect = sqlite3.connect; observed = []
+        class Recording(sqlite3.Connection):
+            def execute(self, sql, *args):
+                observed.append(sql)
+                if sql == 'PRAGMA query_only=ON':
+                    result = super().execute(sql, *args)
+                    with self_test.assertRaises(sqlite3.OperationalError):
+                        super().execute("CREATE TABLE forbidden_write(id TEXT)")
+                    return result
+                return super().execute(sql, *args)
+        self_test = self
+        connections = []
+        def connect(path, *args, **kwargs):
+            self.assertEqual(path, ':memory:')
+            if connections: kwargs['factory'] = Recording
+            connections.append(path)
+            return real_connect(path, *args, **kwargs)
+        with patch.object(sqlite3, 'connect', side_effect=connect):
+            value = self.inspect_direct()
+        self.assertEqual(value['state'], 'COMPLETE')
+        for sql in observed:
+            self.assertTrue(sql.startswith(('PRAGMA ', 'EXPLAIN ', 'SELECT sql FROM sqlite_master',
+                                            'SELECT type FROM sqlite_master', 'SELECT 1')), sql)
+        self.assertEqual(sum(sql.startswith('EXPLAIN ') for sql in observed), 2)
+
+    def test_reference_hash_mismatch_and_missing_file_fail_closed(self):
+        file = self.candidate / 'src/lib/staff-accounts.ts'; file.write_text(file.read_text() + '\n')
+        self.assertEqual(self.run_schema()['state'], 'REFERENCE_UNAVAILABLE')
+        file.unlink()
+        self.assertEqual(self.run_schema()['state'], 'REFERENCE_UNAVAILABLE')
+
+    def test_copy_symlink_missing_or_invalid_database_never_produces_detail(self):
+        missing = self.root / 'missing.sqlite'
+        self.assertEqual(self.collect_schema(missing)['state'], 'SCHEMA_UNAVAILABLE')
+        self.assertFalse(missing.exists())
+        link = self.root / 'link.sqlite'; link.symlink_to(self.snapshot)
+        self.assertEqual(self.collect_schema(link)['state'], 'SCHEMA_UNAVAILABLE')
+        self.snapshot.write_bytes(b'DO_NOT_PRINT_INVALID_FILE')
+        value = self.collect_schema()
+        self.assertEqual(value, {'state': 'COPY_UNAVAILABLE', 'error': 'SIZE_BOUND'})
+
+    def test_hard_timeout_and_bad_child_output_are_fixed_and_deadline_is_bounded(self):
+        from types import SimpleNamespace
+        with patch.object(deploy.subprocess, 'run', side_effect=subprocess.TimeoutExpired('DO_NOT_PRINT', 5)) as run:
+            self.assertEqual(self.collect_schema(timeout=0.1), {'state': 'TIMEOUT', 'error': 'TIMEOUT'})
+            self.assertEqual(run.call_args.kwargs['timeout'], 0.1)
+        for raw in (b'DO_NOT_PRINT', b'x' * 1025, b'null', b'[]', b'{"state":"DO_NOT_PRINT","error":"OTHER"}'):
+            with patch.object(deploy.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=raw)):
+                self.assertEqual(self.collect_schema(), {'state': 'SCHEMA_UNAVAILABLE', 'error': 'OTHER'})
+
+    def test_query_compile_and_integrity_failures_are_reported_without_raw_errors(self):
+        real_connect = sqlite3.connect
+        from types import SimpleNamespace
+        class Failing(sqlite3.Connection):
+            def execute(self, sql, *args):
+                if sql.startswith('EXPLAIN ') and 'FROM staff_accounts' in sql:
+                    error = sqlite3.OperationalError('DO_NOT_PRINT_QUERY_FAILURE'); error.sqlite_errorcode = sqlite3.SQLITE_LOCKED
+                    raise error
+                if sql == 'PRAGMA quick_check(1)':
+                    return SimpleNamespace(fetchone=lambda: ('DO_NOT_PRINT_INTEGRITY_CONTENT',))
+                return super().execute(sql, *args)
+        connections = []
+        def connect(path, *args, **kwargs):
+            self.assertEqual(path, ':memory:')
+            if connections: kwargs['factory'] = Failing
+            connections.append(path)
+            return real_connect(path, *args, **kwargs)
+        with patch.object(sqlite3, 'connect', side_effect=connect):
+            value = self.inspect_direct()
+        self.assertEqual(value['staffAccounts']['query'], 'FAILED'); self.assertEqual(value['staffAccounts']['error'], 'LOCKED')
+        self.assertEqual(value['credentialOverrides']['query'], 'PREPARES')
+        self.assertEqual(value['integrity'], 'FAILED'); self.assertNotIn('DO_NOT_PRINT', json.dumps(value))
+
+    def test_replaced_copy_identity_discards_otherwise_valid_result(self):
+        original_run = subprocess.run
+        def replace_after_child(*args, **kwargs):
+            value = original_run(*args, **kwargs)
+            replacement = self.root / 'replacement.sqlite'; replacement.write_bytes(self.snapshot.read_bytes())
+            replacement.replace(self.snapshot)
+            return value
+        with patch.object(deploy.subprocess, 'run', side_effect=replace_after_child):
+            value = self.collect_schema()
+        self.assertEqual(value, {'state': 'SCHEMA_UNAVAILABLE', 'error': 'OTHER'})
+
+    def test_fixed_sqlite_error_class_and_query_failure_do_not_leak_messages(self):
+        error = sqlite3.OperationalError('DO_NOT_PRINT_SQL_OR_PATH'); error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+        self.assertEqual(self.namespace['error_code'](error), 'BUSY')
+        error.sqlite_errorcode = 9999
+        self.assertEqual(self.namespace['error_code'](error), 'OTHER')
+
+
+
+    def test_leaf_and_ancestor_swaps_before_open_never_start_child(self):
+        original_open = os.open
+        replacement = self.root / 'unintended.sqlite'; replacement.write_bytes(b'DO_NOT_READ_UNINTENDED')
+        moved = self.copy_directory / 'original.sqlite'
+        def swap_leaf(path, *args, **kwargs):
+            if path == 'rehearsal.sqlite' and 'dir_fd' in kwargs:
+                self.snapshot.rename(moved); self.snapshot.symlink_to(replacement)
+            return original_open(path, *args, **kwargs)
+        with patch.object(deploy.os, 'open', side_effect=swap_leaf), patch.object(deploy.subprocess, 'run') as run:
+            self.assertEqual(self.collect_schema()['state'], 'SCHEMA_UNAVAILABLE'); run.assert_not_called()
+        self.snapshot.unlink(); moved.rename(self.snapshot)
+        old = self.root / 'original-directory'
+        def swap_directory(path, *args, **kwargs):
+            if path == self.copy_directory:
+                self.copy_directory.rename(old); self.copy_directory.mkdir()
+                self.snapshot.write_bytes(b'DO_NOT_READ_UNINTENDED')
+            return original_open(path, *args, **kwargs)
+        with patch.object(deploy.os, 'open', side_effect=swap_directory), patch.object(deploy.subprocess, 'run') as run:
+            self.assertEqual(self.collect_schema()['state'], 'SCHEMA_UNAVAILABLE'); run.assert_not_called()
+
+    def test_leaf_and_ancestor_swaps_after_pinning_cannot_redirect_sqlite(self):
+        original_run = subprocess.run
+        replacement = self.root / 'unintended.sqlite'; replacement.write_bytes(b'DO_NOT_READ_UNINTENDED')
+        moved = self.copy_directory / 'original.sqlite'
+        def swap_leaf(*args, **kwargs):
+            self.snapshot.rename(moved); self.snapshot.symlink_to(replacement)
+            return original_run(*args, **kwargs)
+        with patch.object(deploy.subprocess, 'run', side_effect=swap_leaf):
+            self.assertEqual(self.collect_schema()['state'], 'SCHEMA_UNAVAILABLE')
+        self.snapshot.unlink(); moved.rename(self.snapshot)
+        old = self.root / 'original-directory'
+        def swap_directory(*args, **kwargs):
+            self.copy_directory.rename(old); self.copy_directory.mkdir()
+            self.snapshot.write_bytes(b'DO_NOT_READ_UNINTENDED')
+            return original_run(*args, **kwargs)
+        with patch.object(deploy.subprocess, 'run', side_effect=swap_directory):
+            self.assertEqual(self.collect_schema()['state'], 'SCHEMA_UNAVAILABLE')
+        self.assertEqual(replacement.read_bytes(), b'DO_NOT_READ_UNINTENDED')
+
+    def test_nonempty_wal_and_journal_are_not_silently_ignored(self):
+        for suffix, expected in (('-wal', 'WAL_PRESENT'), ('-journal', 'JOURNAL_PRESENT')):
+            path = Path(str(self.snapshot) + suffix); path.write_bytes(b'DO_NOT_READ_PENDING_DATA')
+            self.assertEqual(self.collect_schema(), {'state': 'COPY_UNAVAILABLE', 'error': expected})
+            path.unlink()
+
+    def test_symlink_hardlink_and_nonregular_sidecars_are_rejected(self):
+        path = Path(str(self.snapshot) + '-wal'); target = self.root / 'unintended'; target.write_bytes(b'')
+        for kind in ('symlink', 'hardlink', 'fifo'):
+            if kind == 'symlink': path.symlink_to(target)
+            elif kind == 'hardlink': os.link(target, path)
+            else: os.mkfifo(path)
+            self.assertEqual(self.collect_schema(), {'state': 'COPY_UNAVAILABLE', 'error': 'UNSAFE_FILE'})
+            path.unlink()
+
+    def test_checkpointed_wal_header_is_adjusted_only_in_memory(self):
+        with sqlite3.connect(self.snapshot) as db:
+            db.execute('PRAGMA journal_mode=WAL'); db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            before = self.snapshot.read_bytes()
+            self.assertEqual(before[18:20], b'\x02\x02')
+            value = self.collect_schema()
+            self.assertEqual(value['state'], 'COMPLETE'); self.assertEqual(value['integrity'], 'OK')
+            self.assertEqual(self.snapshot.read_bytes(), before)
+            db.execute("INSERT INTO synthetic_core VALUES ('pending', 'synthetic-only')"); db.commit()
+            self.assertEqual(self.collect_schema(), {'state': 'COPY_UNAVAILABLE', 'error': 'WAL_PRESENT'})
+
+    def test_sidecar_appearance_and_main_change_during_read_fail_closed(self):
+        real_fdopen = os.fdopen
+        for mutation in ('sidecar', 'main'):
+            directory = os.open(self.copy_directory, os.O_RDONLY | os.O_DIRECTORY)
+            descriptor = os.open(self.snapshot, os.O_RDONLY)
+            class Reader:
+                def __init__(inner, fd, mode): inner.handle = real_fdopen(fd, mode)
+                def __enter__(inner): return inner
+                def __exit__(inner, *args): inner.handle.close()
+                def read(inner, limit):
+                    data = inner.handle.read(limit)
+                    if mutation == 'sidecar': Path(str(self.snapshot) + '-wal').write_bytes(b'')
+                    else:
+                        with self.snapshot.open('r+b') as changed:
+                            first = changed.read(1); changed.seek(0); changed.write(first)
+                    return data
+            try:
+                with patch.object(os, 'fdopen', Reader), self.assertRaises(self.namespace['CopyUnavailable']) as error:
+                    self.namespace['read_pinned_copy'](directory, descriptor)
+                self.assertEqual(error.exception.args, ('COPY_CHANGED',))
+            finally:
+                os.close(descriptor); os.close(directory)
+                sidecar = Path(str(self.snapshot) + '-wal')
+                if sidecar.exists(): sidecar.unlink()
+
+    def test_hard_size_bound_and_descriptor_cleanup_on_timeout_or_cancel(self):
+        original = self.snapshot.read_bytes()
+        with self.snapshot.open('r+b') as file: file.truncate(64 * 1024 * 1024 + 1)
+        self.assertEqual(self.collect_schema(), {'state': 'COPY_UNAVAILABLE', 'error': 'SIZE_BOUND'})
+        self.snapshot.write_bytes(original)
+        for failure in (subprocess.TimeoutExpired('DO_NOT_PRINT', 5), deploy.RehearsalInterrupted()):
+            captured = []
+            def fail(*args, **kwargs): captured.extend(kwargs['pass_fds']); raise failure
+            with patch.object(deploy.subprocess, 'run', side_effect=fail):
+                if isinstance(failure, deploy.RehearsalInterrupted):
+                    with self.assertRaises(deploy.RehearsalInterrupted): self.collect_schema()
+                else: self.assertEqual(self.collect_schema()['state'], 'TIMEOUT')
+            self.assertEqual(len(captured), 2)
+            for descriptor in captured:
+                with self.assertRaises(OSError): os.fstat(descriptor)
+
+
 if __name__ == '__main__':
     unittest.main()
-
