@@ -735,6 +735,8 @@ class RehearsalOnly(unittest.TestCase):
         self.ready_error = False
         self.diagnostic_result = None
         self.diagnostic_error = None
+        self.schema_result = {'state': 'SCHEMA_UNAVAILABLE', 'error': 'OTHER'}
+        self.schema_calls = []
         self.original_marker = (self.runtime / 'current-release').read_bytes()
 
     def stage(self, report, stage):
@@ -808,6 +810,13 @@ class RehearsalOnly(unittest.TestCase):
             stack.enter_context(patch.object(deploy, 'network_command', side_effect=self.network))
             stack.enter_context(patch.object(deploy, 'probe_state', side_effect=self.state))
             diagnostic = stack.enter_context(patch.object(deploy, 'readiness_diagnostic', return_value=self.diagnostic_result, side_effect=self.diagnostic_error))
+            def inspect_stopped_copy(candidate, snapshot, directory_identity, snapshot_identity, timeout):
+                self.assertTrue(self.stopped); self.assertTrue(report.safe_to_remove)
+                self.assertEqual(snapshot, self.snapshot); self.assertNotEqual(snapshot, self.db)
+                self.assertTrue(snapshot.is_file()); self.schema_calls.append(snapshot)
+                self.assertEqual(directory_identity, report.directory_identity); self.assertEqual(snapshot_identity, report.snapshot_identity)
+                return self.schema_result
+            stack.enter_context(patch.object(deploy, 'schema_diagnostic', side_effect=inspect_stopped_copy))
             stack.enter_context(patch.object(deploy, 'rehearsal_stage', side_effect=self.stage))
             stack.enter_context(patch.object(deploy.signal, 'setitimer'))
             for name in ('activate', 'ctl', 'public_health'):
@@ -849,6 +858,27 @@ class RehearsalOnly(unittest.TestCase):
         self.assertFalse(result['ok']); self.assertFalse(result['activationAttempted'])
         self.assertTrue(result['cleanup']); self.assertTrue(self.stopped)
         self.assertFalse(self.snapshot.parent.exists())
+
+    def test_schema_detail_runs_only_after_verified_stop_and_before_cleanup(self):
+        self.ready_error = True
+        self.diagnostic_result = {'state': 'BLOCKED', 'http': 'HTTP_503', 'categories': ['ADMIN', 'DB_CHECK', 'STAFF_STORE']}
+        result = self.run_rehearsal()
+        self.assertEqual(result['schemaDiagnostic'], self.schema_result)
+        self.assertEqual(len(self.schema_calls), 1); self.assertTrue(result['cleanup'])
+        self.assertEqual(result['stage'], 'ROUTE_READY'); self.assertEqual(result['error'], 'COMMAND_FAILED')
+        self.assertFalse(self.snapshot.parent.exists())
+
+    def test_schema_detail_never_runs_if_stop_fails_or_only_configuration_is_blocked(self):
+        self.ready_error = self.bad_stop = True
+        self.diagnostic_result = {'state': 'BLOCKED', 'http': 'HTTP_503', 'categories': ['STAFF_STORE']}
+        result = self.run_rehearsal()
+        self.assertEqual(self.schema_calls, []); self.assertNotIn('schemaDiagnostic', result)
+        self.assertFalse(result['cleanup']); self.assertTrue(self.snapshot.exists())
+        self.started = self.stopped = self.bad_stop = False
+        self.diagnostic_result['categories'] = ['CONFIG']
+        result = self.run_rehearsal()
+        self.assertEqual(self.schema_calls, []); self.assertNotIn('schemaDiagnostic', result)
+        self.assertTrue(result['cleanup'])
 
     def test_ready_after_anonymous_failure_never_forgives_failure(self):
         self.ready_error = True
@@ -1212,6 +1242,310 @@ class ReadinessCategoryDiagnostic(unittest.TestCase):
                                     SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid()), 'normal', None)
                 diagnostic.assert_not_called()
                 self.assertEqual(command.call_args.args[0], ['systemctl', 'stop', 'normal-probe.service'])
+
+
+
+
+class SchemaOnlyDiagnostic(unittest.TestCase):
+    core = "CREATE TABLE staff_credential_overrides (role TEXT PRIMARY KEY, login TEXT NOT NULL, password_hash TEXT NOT NULL, credential_version TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE synthetic_core (id TEXT PRIMARY KEY, detail TEXT); CREATE INDEX synthetic_core_idx ON synthetic_core(detail);"
+    staff = "CREATE TABLE IF NOT EXISTS staff_accounts (email TEXT PRIMARY KEY COLLATE NOCASE, name TEXT NOT NULL, role TEXT NOT NULL, entity_id TEXT NOT NULL, password_hash TEXT NOT NULL, credential_version TEXT NOT NULL, status TEXT NOT NULL, token_hash TEXT NOT NULL, token_expires_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+
+    def setUp(self):
+        import hashlib
+        self.temporary = tempfile.TemporaryDirectory(); self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name); self.candidate = self.root / 'candidate'
+        (self.candidate / 'src/lib').mkdir(parents=True)
+        self.pins = {}
+        for relative, initializer, receiver, ddl in (
+                ('src/lib/data-store.ts', 'initializeDatabaseSchema', 'db', self.core),
+                ('src/lib/staff-accounts.ts', 'initializeStaffAccountsSchema', 'database', self.staff)):
+            raw = ('function ' + initializer + '(db: Synthetic) {\n  ' + receiver + '.exec(`' + ddl + '`);\n}').encode()
+            (self.candidate / relative).write_bytes(raw)
+            self.pins[relative] = ('old', hashlib.sha256(raw).hexdigest())
+        self.copy_directory = self.root / 'copy'; self.copy_directory.mkdir()
+        self.snapshot = self.copy_directory / 'rehearsal.sqlite'
+        with sqlite3.connect(self.snapshot) as db:
+            db.executescript(self.core + self.staff)
+            db.execute("INSERT INTO synthetic_core VALUES ('synthetic', 'DO_NOT_PRINT_ROW_VALUE')")
+        directory_stat = self.copy_directory.stat(); snapshot_stat = self.snapshot.stat()
+        self.directory_identity = (directory_stat.st_dev, directory_stat.st_ino)
+        self.snapshot_identity = (snapshot_stat.st_dev, snapshot_stat.st_ino)
+        patcher = patch.object(deploy, 'REVIEWED_READER_TRANSITIONS', self.pins)
+        patcher.start(); self.addCleanup(patcher.stop)
+        self.namespace = {'__name__': 'schema_fixture'}; exec(deploy.SCHEMA_READER, self.namespace)
+
+    def collect_schema(self, path=None, timeout=5):
+        return deploy.schema_diagnostic(self.candidate, path or self.snapshot, self.directory_identity, self.snapshot_identity, timeout)
+
+    def inspect_direct(self):
+        directory = os.open(self.copy_directory, os.O_RDONLY | os.O_DIRECTORY)
+        descriptor = os.open(self.snapshot, os.O_RDONLY)
+        try:
+            return self.namespace['inspect_schema'](directory, descriptor, str(self.candidate), {k:v[1] for k,v in self.pins.items()})
+        finally:
+            os.close(descriptor); os.close(directory)
+
+    def run_schema(self):
+        before = deploy.database_fingerprint(self.snapshot)
+        result = self.collect_schema()
+        self.assertEqual(deploy.database_fingerprint(self.snapshot), before)
+        text = json.dumps(result)
+        for sentinel in ('DO_NOT_PRINT', str(self.root), 'staff_accounts', 'password_hash', 'synthetic_core'):
+            self.assertNotIn(sentinel, text)
+        return result
+
+    def test_exact_schema_and_query_shapes_pass_without_changing_copy(self):
+        value = self.run_schema()
+        self.assertEqual(value['state'], 'COMPLETE'); self.assertEqual(value['missingObjects'], 0)
+        self.assertEqual(value['mismatchedObjects'], 0); self.assertEqual(value['integrity'], 'OK')
+        self.assertTrue(value['readable']); self.assertEqual(value['expectedObjects'], 4)
+        for label in ('staffAccounts', 'credentialOverrides'):
+            self.assertEqual(value[label], {'object': 'TABLE', 'definition': 'MATCH', 'missingSchemaColumns': 0,
+                                           'missingQueryColumns': 0, 'query': 'PREPARES', 'error': 'NONE'})
+
+    def test_missing_staff_and_override_tables_are_distinct(self):
+        for name, label, count in (('staff_accounts', 'staffAccounts', 8), ('staff_credential_overrides', 'credentialOverrides', 5)):
+            with sqlite3.connect(self.snapshot) as db:
+                db.execute('DROP TABLE ' + name)
+            value = self.run_schema()
+            self.assertEqual(value[label]['object'], 'MISSING'); self.assertEqual(value[label]['definition'], 'MISSING')
+            self.assertEqual(value[label]['missingQueryColumns'], count)
+            self.assertEqual(value[label]['query'], 'NOT_CHECKED'); self.assertGreater(value['missingObjects'], 0)
+
+    def test_missing_query_column_differs_from_unselected_schema_column(self):
+        with sqlite3.connect(self.snapshot) as db:
+            db.execute('ALTER TABLE staff_accounts RENAME COLUMN name TO old_name')
+        value = self.run_schema()['staffAccounts']
+        self.assertEqual(value['definition'], 'MISMATCH'); self.assertEqual(value['missingSchemaColumns'], 1)
+        self.assertEqual(value['missingQueryColumns'], 1); self.assertEqual(value['query'], 'FAILED')
+        self.assertEqual(value['error'], 'SQL_ERROR')
+        with sqlite3.connect(self.snapshot) as db:
+            db.execute('ALTER TABLE staff_accounts RENAME COLUMN old_name TO name')
+            db.execute('ALTER TABLE staff_accounts RENAME COLUMN token_hash TO old_token_hash')
+        value = self.run_schema()['staffAccounts']
+        self.assertEqual(value['definition'], 'MISMATCH'); self.assertEqual(value['missingSchemaColumns'], 1)
+        self.assertEqual(value['missingQueryColumns'], 0); self.assertEqual(value['query'], 'PREPARES')
+
+    def test_missing_core_index_and_extra_schema_preserve_exact_scope(self):
+        with sqlite3.connect(self.snapshot) as db:
+            db.execute('DROP INDEX synthetic_core_idx'); db.execute('CREATE TABLE allowed_extra (id TEXT)')
+        value = self.run_schema()
+        self.assertEqual(value['missingObjects'], 1); self.assertEqual(value['mismatchedObjects'], 0)
+        self.assertEqual(value['staffAccounts']['definition'], 'MATCH')
+
+    def test_wrong_object_type_is_not_queried(self):
+        with sqlite3.connect(self.snapshot) as db:
+            db.execute('DROP TABLE staff_accounts')
+            db.execute("CREATE VIEW staff_accounts AS SELECT detail AS email FROM synthetic_core")
+        value = self.run_schema()['staffAccounts']
+        self.assertEqual(value['object'], 'OTHER'); self.assertEqual(value['query'], 'NOT_CHECKED')
+
+    def test_invalid_row_types_remain_unexamined_and_do_not_imply_schema_failure(self):
+        with sqlite3.connect(self.snapshot) as db:
+            db.execute('INSERT INTO staff_accounts VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                       ('Synthetic', 'admin', b'not-a-string', 'invalid', 'version', 'active', '', '', ''))
+        value = self.run_schema()
+        self.assertEqual(value['staffAccounts']['definition'], 'MATCH'); self.assertEqual(value['staffAccounts']['query'], 'PREPARES')
+        self.assertEqual(value['integrity'], 'OK')
+
+    def test_copy_sql_is_metadata_explain_or_integrity_only_and_query_only_blocks_writes(self):
+        real_connect = sqlite3.connect; observed = []
+        class Recording(sqlite3.Connection):
+            def execute(self, sql, *args):
+                observed.append(sql)
+                if sql == 'PRAGMA query_only=ON':
+                    result = super().execute(sql, *args)
+                    with self_test.assertRaises(sqlite3.OperationalError):
+                        super().execute("CREATE TABLE forbidden_write(id TEXT)")
+                    return result
+                return super().execute(sql, *args)
+        self_test = self
+        connections = []
+        def connect(path, *args, **kwargs):
+            self.assertEqual(path, ':memory:')
+            if connections: kwargs['factory'] = Recording
+            connections.append(path)
+            return real_connect(path, *args, **kwargs)
+        with patch.object(sqlite3, 'connect', side_effect=connect):
+            value = self.inspect_direct()
+        self.assertEqual(value['state'], 'COMPLETE')
+        for sql in observed:
+            self.assertTrue(sql.startswith(('PRAGMA ', 'EXPLAIN ', 'SELECT sql FROM sqlite_master',
+                                            'SELECT type FROM sqlite_master', 'SELECT 1')), sql)
+        self.assertEqual(sum(sql.startswith('EXPLAIN ') for sql in observed), 2)
+
+    def test_reference_hash_mismatch_and_missing_file_fail_closed(self):
+        file = self.candidate / 'src/lib/staff-accounts.ts'; file.write_text(file.read_text() + '\n')
+        self.assertEqual(self.run_schema()['state'], 'REFERENCE_UNAVAILABLE')
+        file.unlink()
+        self.assertEqual(self.run_schema()['state'], 'REFERENCE_UNAVAILABLE')
+
+    def test_copy_symlink_missing_or_invalid_database_never_produces_detail(self):
+        missing = self.root / 'missing.sqlite'
+        self.assertEqual(self.collect_schema(missing)['state'], 'SCHEMA_UNAVAILABLE')
+        self.assertFalse(missing.exists())
+        link = self.root / 'link.sqlite'; link.symlink_to(self.snapshot)
+        self.assertEqual(self.collect_schema(link)['state'], 'SCHEMA_UNAVAILABLE')
+        self.snapshot.write_bytes(b'DO_NOT_PRINT_INVALID_FILE')
+        value = self.collect_schema()
+        self.assertEqual(value, {'state': 'COPY_UNAVAILABLE', 'error': 'SIZE_BOUND'})
+
+    def test_hard_timeout_and_bad_child_output_are_fixed_and_deadline_is_bounded(self):
+        from types import SimpleNamespace
+        with patch.object(deploy.subprocess, 'run', side_effect=subprocess.TimeoutExpired('DO_NOT_PRINT', 5)) as run:
+            self.assertEqual(self.collect_schema(timeout=0.1), {'state': 'TIMEOUT', 'error': 'TIMEOUT'})
+            self.assertEqual(run.call_args.kwargs['timeout'], 0.1)
+        for raw in (b'DO_NOT_PRINT', b'x' * 1025, b'null', b'[]', b'{"state":"DO_NOT_PRINT","error":"OTHER"}'):
+            with patch.object(deploy.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=raw)):
+                self.assertEqual(self.collect_schema(), {'state': 'SCHEMA_UNAVAILABLE', 'error': 'OTHER'})
+
+    def test_query_compile_and_integrity_failures_are_reported_without_raw_errors(self):
+        real_connect = sqlite3.connect
+        from types import SimpleNamespace
+        class Failing(sqlite3.Connection):
+            def execute(self, sql, *args):
+                if sql.startswith('EXPLAIN ') and 'FROM staff_accounts' in sql:
+                    error = sqlite3.OperationalError('DO_NOT_PRINT_QUERY_FAILURE'); error.sqlite_errorcode = sqlite3.SQLITE_LOCKED
+                    raise error
+                if sql == 'PRAGMA quick_check(1)':
+                    return SimpleNamespace(fetchone=lambda: ('DO_NOT_PRINT_INTEGRITY_CONTENT',))
+                return super().execute(sql, *args)
+        connections = []
+        def connect(path, *args, **kwargs):
+            self.assertEqual(path, ':memory:')
+            if connections: kwargs['factory'] = Failing
+            connections.append(path)
+            return real_connect(path, *args, **kwargs)
+        with patch.object(sqlite3, 'connect', side_effect=connect):
+            value = self.inspect_direct()
+        self.assertEqual(value['staffAccounts']['query'], 'FAILED'); self.assertEqual(value['staffAccounts']['error'], 'LOCKED')
+        self.assertEqual(value['credentialOverrides']['query'], 'PREPARES')
+        self.assertEqual(value['integrity'], 'FAILED'); self.assertNotIn('DO_NOT_PRINT', json.dumps(value))
+
+    def test_replaced_copy_identity_discards_otherwise_valid_result(self):
+        original_run = subprocess.run
+        def replace_after_child(*args, **kwargs):
+            value = original_run(*args, **kwargs)
+            replacement = self.root / 'replacement.sqlite'; replacement.write_bytes(self.snapshot.read_bytes())
+            replacement.replace(self.snapshot)
+            return value
+        with patch.object(deploy.subprocess, 'run', side_effect=replace_after_child):
+            value = self.collect_schema()
+        self.assertEqual(value, {'state': 'SCHEMA_UNAVAILABLE', 'error': 'OTHER'})
+
+    def test_fixed_sqlite_error_class_and_query_failure_do_not_leak_messages(self):
+        error = sqlite3.OperationalError('DO_NOT_PRINT_SQL_OR_PATH'); error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+        self.assertEqual(self.namespace['error_code'](error), 'BUSY')
+        error.sqlite_errorcode = 9999
+        self.assertEqual(self.namespace['error_code'](error), 'OTHER')
+
+
+
+    def test_leaf_and_ancestor_swaps_before_open_never_start_child(self):
+        original_open = os.open
+        replacement = self.root / 'unintended.sqlite'; replacement.write_bytes(b'DO_NOT_READ_UNINTENDED')
+        moved = self.copy_directory / 'original.sqlite'
+        def swap_leaf(path, *args, **kwargs):
+            if path == 'rehearsal.sqlite' and 'dir_fd' in kwargs:
+                self.snapshot.rename(moved); self.snapshot.symlink_to(replacement)
+            return original_open(path, *args, **kwargs)
+        with patch.object(deploy.os, 'open', side_effect=swap_leaf), patch.object(deploy.subprocess, 'run') as run:
+            self.assertEqual(self.collect_schema()['state'], 'SCHEMA_UNAVAILABLE'); run.assert_not_called()
+        self.snapshot.unlink(); moved.rename(self.snapshot)
+        old = self.root / 'original-directory'
+        def swap_directory(path, *args, **kwargs):
+            if path == self.copy_directory:
+                self.copy_directory.rename(old); self.copy_directory.mkdir()
+                self.snapshot.write_bytes(b'DO_NOT_READ_UNINTENDED')
+            return original_open(path, *args, **kwargs)
+        with patch.object(deploy.os, 'open', side_effect=swap_directory), patch.object(deploy.subprocess, 'run') as run:
+            self.assertEqual(self.collect_schema()['state'], 'SCHEMA_UNAVAILABLE'); run.assert_not_called()
+
+    def test_leaf_and_ancestor_swaps_after_pinning_cannot_redirect_sqlite(self):
+        original_run = subprocess.run
+        replacement = self.root / 'unintended.sqlite'; replacement.write_bytes(b'DO_NOT_READ_UNINTENDED')
+        moved = self.copy_directory / 'original.sqlite'
+        def swap_leaf(*args, **kwargs):
+            self.snapshot.rename(moved); self.snapshot.symlink_to(replacement)
+            return original_run(*args, **kwargs)
+        with patch.object(deploy.subprocess, 'run', side_effect=swap_leaf):
+            self.assertEqual(self.collect_schema()['state'], 'SCHEMA_UNAVAILABLE')
+        self.snapshot.unlink(); moved.rename(self.snapshot)
+        old = self.root / 'original-directory'
+        def swap_directory(*args, **kwargs):
+            self.copy_directory.rename(old); self.copy_directory.mkdir()
+            self.snapshot.write_bytes(b'DO_NOT_READ_UNINTENDED')
+            return original_run(*args, **kwargs)
+        with patch.object(deploy.subprocess, 'run', side_effect=swap_directory):
+            self.assertEqual(self.collect_schema()['state'], 'SCHEMA_UNAVAILABLE')
+        self.assertEqual(replacement.read_bytes(), b'DO_NOT_READ_UNINTENDED')
+
+    def test_nonempty_wal_and_journal_are_not_silently_ignored(self):
+        for suffix, expected in (('-wal', 'WAL_PRESENT'), ('-journal', 'JOURNAL_PRESENT')):
+            path = Path(str(self.snapshot) + suffix); path.write_bytes(b'DO_NOT_READ_PENDING_DATA')
+            self.assertEqual(self.collect_schema(), {'state': 'COPY_UNAVAILABLE', 'error': expected})
+            path.unlink()
+
+    def test_symlink_hardlink_and_nonregular_sidecars_are_rejected(self):
+        path = Path(str(self.snapshot) + '-wal'); target = self.root / 'unintended'; target.write_bytes(b'')
+        for kind in ('symlink', 'hardlink', 'fifo'):
+            if kind == 'symlink': path.symlink_to(target)
+            elif kind == 'hardlink': os.link(target, path)
+            else: os.mkfifo(path)
+            self.assertEqual(self.collect_schema(), {'state': 'COPY_UNAVAILABLE', 'error': 'UNSAFE_FILE'})
+            path.unlink()
+
+    def test_checkpointed_wal_header_is_adjusted_only_in_memory(self):
+        with sqlite3.connect(self.snapshot) as db:
+            db.execute('PRAGMA journal_mode=WAL'); db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            before = self.snapshot.read_bytes()
+            self.assertEqual(before[18:20], b'\x02\x02')
+            value = self.collect_schema()
+            self.assertEqual(value['state'], 'COMPLETE'); self.assertEqual(value['integrity'], 'OK')
+            self.assertEqual(self.snapshot.read_bytes(), before)
+            db.execute("INSERT INTO synthetic_core VALUES ('pending', 'synthetic-only')"); db.commit()
+            self.assertEqual(self.collect_schema(), {'state': 'COPY_UNAVAILABLE', 'error': 'WAL_PRESENT'})
+
+    def test_sidecar_appearance_and_main_change_during_read_fail_closed(self):
+        real_fdopen = os.fdopen
+        for mutation in ('sidecar', 'main'):
+            directory = os.open(self.copy_directory, os.O_RDONLY | os.O_DIRECTORY)
+            descriptor = os.open(self.snapshot, os.O_RDONLY)
+            class Reader:
+                def __init__(inner, fd, mode): inner.handle = real_fdopen(fd, mode)
+                def __enter__(inner): return inner
+                def __exit__(inner, *args): inner.handle.close()
+                def read(inner, limit):
+                    data = inner.handle.read(limit)
+                    if mutation == 'sidecar': Path(str(self.snapshot) + '-wal').write_bytes(b'')
+                    else:
+                        with self.snapshot.open('r+b') as changed:
+                            first = changed.read(1); changed.seek(0); changed.write(first)
+                    return data
+            try:
+                with patch.object(os, 'fdopen', Reader), self.assertRaises(self.namespace['CopyUnavailable']) as error:
+                    self.namespace['read_pinned_copy'](directory, descriptor)
+                self.assertEqual(error.exception.args, ('COPY_CHANGED',))
+            finally:
+                os.close(descriptor); os.close(directory)
+                sidecar = Path(str(self.snapshot) + '-wal')
+                if sidecar.exists(): sidecar.unlink()
+
+    def test_hard_size_bound_and_descriptor_cleanup_on_timeout_or_cancel(self):
+        original = self.snapshot.read_bytes()
+        with self.snapshot.open('r+b') as file: file.truncate(64 * 1024 * 1024 + 1)
+        self.assertEqual(self.collect_schema(), {'state': 'COPY_UNAVAILABLE', 'error': 'SIZE_BOUND'})
+        self.snapshot.write_bytes(original)
+        for failure in (subprocess.TimeoutExpired('DO_NOT_PRINT', 5), deploy.RehearsalInterrupted()):
+            captured = []
+            def fail(*args, **kwargs): captured.extend(kwargs['pass_fds']); raise failure
+            with patch.object(deploy.subprocess, 'run', side_effect=fail):
+                if isinstance(failure, deploy.RehearsalInterrupted):
+                    with self.assertRaises(deploy.RehearsalInterrupted): self.collect_schema()
+                else: self.assertEqual(self.collect_schema()['state'], 'TIMEOUT')
+            self.assertEqual(len(captured), 2)
+            for descriptor in captured:
+                with self.assertRaises(OSError): os.fstat(descriptor)
 
 
 if __name__ == '__main__':
