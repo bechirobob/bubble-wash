@@ -95,7 +95,8 @@ def main(i):
     state=result()
     try:
         resource.setrlimit(resource.RLIMIT_CORE,(0,0))
-        i.require(os.geteuid()==0 and len(sys.argv)==1 and os.uname().nodename.split('.')[0].lower()=='hermes')
+        # Host identity is bound by the fixed authenticated root@hermes transport.
+        i.require(os.geteuid()==0 and len(sys.argv)==1)
         account=pwd.getpwnam('ubuntu');i.require(account.pw_uid>0)
         os.setgroups([]);os.setgid(account.pw_gid);os.setuid(account.pw_uid)
         i.require(os.geteuid()==account.pw_uid and os.getuid()==account.pw_uid)

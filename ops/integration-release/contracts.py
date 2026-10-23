@@ -101,13 +101,15 @@ def content_manifest(root, root_files):
 
 
 def verify_source(root, contract, profile):
-    require(contract.get('schema') == 'bubblewash-integration-source/v1'
+    require(contract.get('schema') == 'bubblewash-integration-source/v2'
             and contract.get('baseCommit') == BASELINE
             and set(contract.get('profiles', {})) == set(PROFILE_NAMES), 'unknown integration source contract')
     require(profile in PROFILE_NAMES, 'unknown integration profile')
     pinned = contract['profiles'][profile]
-    require(pinned.get('contentSha256') == object_digest(pinned['files']), 'source manifest identity differs')
-    require(content_manifest(Path(root).resolve(), pinned['rootFiles']) == pinned['files'], 'exact integration source differs')
+    require(type(pinned) is dict and set(pinned) == {'contentSha256', 'rootFiles', 'appInputGitTree', 'publicationCommit'}, 'invalid compact source profile')
+    require(type(pinned['contentSha256']) is str and re.fullmatch('[a-f0-9]{64}', pinned['contentSha256']), 'invalid source commitment')
+    require(type(pinned['rootFiles']) is list and all(type(name) is str for name in pinned['rootFiles']) and len(set(pinned['rootFiles'])) == len(pinned['rootFiles']), 'invalid source root pins')
+    require(object_digest(content_manifest(Path(root).resolve(), pinned['rootFiles'])) == pinned['contentSha256'], 'exact integration source differs')
     return pinned
 
 

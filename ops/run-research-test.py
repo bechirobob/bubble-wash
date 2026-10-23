@@ -204,7 +204,8 @@ def main(f, installer, preflight):
     signal.signal(signal.SIGALRM, deadline); signal.alarm(120)
     result = {'attempted': False, 'status': 'blocked'}
     try:
-        f.require(os.geteuid() == 0 and os.uname().nodename.split('.')[0].lower() == 'hermes')
+        # Host identity is bound by the fixed authenticated root@hermes transport.
+        f.require(os.geteuid() == 0)
         account = pwd.getpwnam('ubuntu'); f.require(account.pw_uid > 0)
         os.setgroups([]); os.setgid(account.pw_gid); os.setuid(account.pw_uid)
         f.require(os.geteuid() == account.pw_uid and os.getuid() == account.pw_uid)

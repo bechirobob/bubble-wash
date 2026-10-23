@@ -154,7 +154,7 @@ def install(path, key, app_uid, unchanged):
 def main():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     require(os.geteuid() == 0 and len(sys.argv) == 1)
-    require(os.uname().nodename.split('.')[0].lower() == 'hermes')
+    # Host identity is bound by the fixed authenticated root@hermes transport.
     key = sys.stdin.buffer.read(205)
     require(len(key) <= 203)
     account = pwd.getpwnam('ubuntu')

@@ -163,7 +163,7 @@ class PrivilegeBoundary(unittest.TestCase):
             yield lambda: None
         with patch.object(m.os, 'geteuid', side_effect=[0, 1000]), \
              patch.object(m.os, 'getuid', return_value=1000), \
-             patch.object(m.os, 'uname', return_value=SimpleNamespace(nodename='hermes')), \
+             patch.object(m.os, 'uname', side_effect=AssertionError('OS hostname is not the authenticated tailnet identity')), \
              patch.object(m.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=1000, pw_gid=1000)), \
              patch.object(m.os, 'setgroups', side_effect=lambda x: calls.append('groups')), \
              patch.object(m.os, 'setgid', side_effect=lambda x: calls.append('gid')), \
@@ -178,6 +178,11 @@ class PrivilegeBoundary(unittest.TestCase):
         self.assertEqual(run.call_args.args[0][0], '/usr/bin/systemctl')
         self.assertEqual(run.call_args.kwargs['env']['PATH'], '/usr/bin:/bin')
 
+    def test_nonroot_refused_before_secret_read_or_app_access(self):
+        with patch.object(m.os, 'geteuid', return_value=1000), patch.object(m.sys, 'stdin', None), patch.object(m, 'deployment_lock') as lock:
+            with self.assertRaises(ValueError): m.main()
+        lock.assert_not_called()
+
 
 class Transport(unittest.TestCase):
     def test_secret_only_on_stdin_and_fixed_status(self):
@@ -189,6 +194,7 @@ class Transport(unittest.TestCase):
         import io
         output = io.StringIO()
         def run(argv, **kwargs):
+            self.assertEqual(argv[:3], ['tailscale', 'ssh', 'root@hermes'])
             self.assertNotIn(KEY.decode(), repr(argv))
             self.assertNotIn('BUBBLEWASH_RESEARCH_RESEND_KEY', os.environ)
             self.assertEqual(kwargs['input'], KEY)
