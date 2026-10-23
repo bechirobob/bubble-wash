@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { BubbleWashOpening } from "@/components/BubbleWashOpening";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { PublicChrome } from "@/components/PublicChrome";
@@ -11,6 +12,8 @@ export const dynamic = "force-dynamic";
 export default function Home() {
   const available = bookingAvailable();
   return (
+    <>
+    <BubbleWashOpening />
     <PublicChrome>
       <section className="laundryIntro pageShell" id="main-content" aria-labelledby="home-title">
         <div className="laundryIntroCopy">
@@ -26,5 +29,6 @@ export default function Home() {
       <section className="laundryProcess pageShell" id="how-it-works" aria-labelledby="process-heading"><div className="processHeading"><p className="sectionLabel">How it works</p><h2 id="process-heading">From pickup to return.</h2></div><LaundrySteps /></section>
       <section className="publicBand publicBandSage" aria-labelledby="service-heading"><div className="laundryServices pageShell"><div><p className="sectionLabel">Choose your service</p><h2 id="service-heading">For work. Soon, for home.</h2></div><div className="serviceRows"><article><div><h3>Business laundry</h3><p>Regular pickups for restaurants, offices, guest stays and facilities.</p></div><Link className="textAction" href="/services">Compare plans <ArrowRight aria-hidden="true" /></Link></article><article><div><h3>Household laundry</h3><p>Home pickups are coming to Accra. Join the early-access list.</p></div><Link className="textAction" href="/early-access">Join early access <ArrowRight aria-hidden="true" /></Link></article></div></div></section>
     </PublicChrome>
+    </>
   );
 }

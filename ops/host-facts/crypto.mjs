@@ -9,6 +9,48 @@ const PURPOSE = 'bubblewash-host-facts/v1';
 const FLAGS = new Set(['unit-unavailable','manager-unavailable','pending-reload','unsafe-source','metadata-incomplete','space-unavailable','space-exhausted','php-incomplete','launch-executable-unresolved','operator-exclusion-unresolved','staging-capacity-unassessed','generator-overrides-unobserved','installer-env-metadata-unavailable','installer-env-owner-mode-unsafe','installer-env-attributes-present','installer-env-binding-unverified','deployment-lock-unverified','tool-unavailable','php-indicators-observed','php-no-indicators-observed-incomplete','installer-metadata-preconditions-observed','installer-metadata-preconditions-unverified']);
 const requireValue = value => { if (!value) throw Error('inspection cryptography refused'); };
 const keys = (value, expected) => requireValue(value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).sort().join(',') === expected.sort().join(','));
+const safePath = value => typeof value === 'string' && value.length > 0 && value.length <= 256 && !/[\r\n]/.test(value) && /^\/[A-Za-z0-9_./+@:-]*$/.test(value) && path.posix.normalize(value) === value && !value.split('/').some(x => x === '.' || x === '..') && (value === '/' || !value.endsWith('/')) && !value.startsWith('//');
+function binding(value) {
+  keys(value,['environmentFiles','workingDirectory','mainPidExecutable','identityScope']);
+  requireValue(value.identityScope === 'main-pid-not-listener-identity');
+  requireValue(value.workingDirectory === null || safePath(value.workingDirectory));
+  requireValue(value.environmentFiles === null || Array.isArray(value.environmentFiles) && value.environmentFiles.length <= 2);
+  for (const item of value.environmentFiles || []) {
+    keys(item,['path','ignoreErrors']); requireValue(safePath(item.path) && typeof item.ignoreErrors === 'boolean');
+  }
+  if (value.mainPidExecutable !== null) {
+    keys(value.mainPidExecutable,['path','sha256']);
+    requireValue(safePath(value.mainPidExecutable.path) && typeof value.mainPidExecutable.sha256 === 'string' && /^[a-f0-9]{64}$/.test(value.mainPidExecutable.sha256) && value.mainPidExecutable.sha256.length === 64);
+  }
+}
+export function diagnostics(value) {
+  keys(value, ['environment','units','php']);
+  const envKeys = ['accountValid','regularFile','ownerMatches','primaryGroupMatches','modePrivate','singleLink','canonicalPath','ancestorDirectories','ancestorOwners','ancestorModes','attributesAbsent'];
+  keys(value.environment, envKeys);
+  requireValue(Object.values(value.environment).every(x => x === null || typeof x === 'boolean'));
+  const ids = ['maintenance-timer','maintenance-service','application-service'];
+  requireValue(Array.isArray(value.units) && value.units.length === 3);
+  value.units.forEach((unit,i) => {
+    keys(unit,['unit','stage','unitSources','executableSource','propertyIssue','missingProperties','binding']);
+    binding(unit.binding);
+    requireValue(unit.unit === ids[i] && ['account-unavailable','command-failed','properties-invalid','inspected'].includes(unit.stage));
+    requireValue(['not-assessed','trusted','ownership-unsafe','read-or-validation-failed'].includes(unit.executableSource));
+    requireValue(['not-assessed','none','missing','duplicate','unknown','malformed','oversized'].includes(unit.propertyIssue));
+    requireValue(Array.isArray(unit.missingProperties) && unit.missingProperties.every(x => ['LoadState','ActiveState','SubState','NeedDaemonReload','FragmentPath','DropInPaths','MainPID','User','Group','WorkingDirectory','RootDirectory','EnvironmentFiles'].includes(x)) && JSON.stringify(unit.missingProperties) === JSON.stringify([...new Set(unit.missingProperties)].sort()));
+    requireValue(Array.isArray(unit.unitSources) && unit.unitSources.every(x => ['not-assessed','trusted','ownership-unsafe','read-or-validation-failed'].includes(x)) && JSON.stringify(unit.unitSources) === JSON.stringify([...new Set(unit.unitSources)].sort()));
+  });
+  const presence = ['servicesInspected','phpServicePresent','phpServiceActive','webServicePresent','listenersInspected','phpTcpListenerPresent','phpNonLoopbackListenerPresent'];
+  keys(value.php,['packages','packagesComplete',...presence]);
+  requireValue(typeof value.php.packagesComplete === 'boolean' && presence.every(k => value.php[k] === null || typeof value.php[k] === 'boolean'));
+  requireValue(Array.isArray(value.php.packages) && value.php.packages.length <= 24);
+  for (const item of value.php.packages) {
+    keys(item,['name','version']);
+    requireValue(typeof item.name === 'string' && !/[\r\n]/.test(item.name) && /^(?:php(?:[0-9]{1,2}\.[0-9]{1,2})?(?:-(?:fpm|cli|common|opcache|readline|mysql|pgsql|sqlite3|curl|mbstring|xml|zip|gd|intl|bcmath|soap|redis|imagick|dev|cgi|xdebug|apcu))?|libapache2-mod-php(?:[0-9]{1,2}\.[0-9]{1,2})?)$/.test(item.name));
+    requireValue(typeof item.version === 'string' && !/[\r\n]/.test(item.version) && /^[0-9][A-Za-z0-9.+:~_-]{0,79}$/.test(item.version));
+  }
+  const sorted = [...value.php.packages].sort((a,b) => a.name < b.name ? -1 : a.name > b.name ? 1 : a.version < b.version ? -1 : a.version > b.version ? 1 : 0);
+  requireValue(JSON.stringify(sorted) === JSON.stringify(value.php.packages));
+}
 export function header(raw) {
   requireValue(raw.length <= 8192);
   const value = JSON.parse(raw.toString('ascii'));
@@ -16,7 +58,8 @@ export function header(raw) {
   requireValue(value.schema === PURPOSE);
   keys(value.context, ['sourceSha','runId','runAttempt']);
   requireValue(/^[a-f0-9]{40}$/.test(value.context.sourceSha) && /^[1-9][0-9]{0,19}$/.test(value.context.runId) && /^[1-9][0-9]{0,19}$/.test(value.context.runAttempt));
-  keys(value.summary, ['schema','result','flags']);
+  keys(value.summary, 'diagnostics' in value.summary ? ['schema','result','flags','diagnostics'] : ['schema','result','flags']);
+  if ('diagnostics' in value.summary) diagnostics(value.summary.diagnostics);
   requireValue(value.summary.schema === 'bubblewash-host-facts-summary/v1' && value.summary.result === 'captured');
   const flags = value.summary.flags;
   requireValue(Array.isArray(flags) && flags.every(x => typeof x === 'string' && FLAGS.has(x)) && JSON.stringify(flags) === JSON.stringify([...new Set(flags)].sort()));

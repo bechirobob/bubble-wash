@@ -48,3 +48,32 @@ test('key ancestry symlink permissions and size fail closed',()=>{
     writeFileSync(file,'A'.repeat(1024));assert.throws(()=>readKey(file,process.getuid()));
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+const ordered = x => Array.isArray(x) ? x.map(ordered) : x && typeof x === 'object' ? Object.fromEntries(Object.keys(x).sort().map(k=>[k,ordered(x[k])])) : x;
+const diagnostic = () => ({environment:Object.fromEntries(['accountValid','regularFile','ownerMatches','primaryGroupMatches','modePrivate','singleLink','canonicalPath','ancestorDirectories','ancestorOwners','ancestorModes','attributesAbsent'].map(k=>[k,null])),
+  units:['maintenance-timer','maintenance-service','application-service'].map(unit=>({unit,stage:'command-failed',unitSources:['not-assessed'],executableSource:'not-assessed',propertyIssue:'not-assessed',missingProperties:[],binding:{environmentFiles:null,workingDirectory:null,mainPidExecutable:null,identityScope:'main-pid-not-listener-identity'}})),
+  php:{packages:[{name:'php8.3-fpm',version:'8.3.6-0ubuntu0.24.04.2'}],packagesComplete:true,servicesInspected:false,phpServicePresent:null,phpServiceActive:null,webServicePresent:null,listenersInspected:false,phpTcpListenerPresent:null,phpNonLoopbackListenerPresent:null}});
+const diagnosticHeader = d => Buffer.from(JSON.stringify(ordered({...meta,summary:{...meta.summary,diagnostics:d}})));
+test('diagnostic header roundtrips authenticated and altered observations fail',()=>{
+  const d=diagnostic(),h=diagnosticHeader(d),sealed=seal(h,plain,key);
+  assert.deepEqual(header(unseal(sealed,key,context).rawHeader).summary.diagnostics,d);
+  const changed=Buffer.from(sealed),pos=changed.indexOf(Buffer.from('command-failed'));
+  changed[pos]='X'.charCodeAt(0);assert.throws(()=>unseal(changed,key,context));
+});
+test('diagnostic strict privacy allowlist rejects paths identities counts and invalid packages',()=>{
+  for(const mutate of [d=>d.environment.path='/secret',d=>d.environment.ownerMatches=1001,
+    d=>d.units[0].stage='raw error',d=>d.units[0].unit='root',d=>d.units[0].unitSources=['/private'],
+    d=>d.php.phpTcpListenerPresent=10,d=>d.php.packages[0].name='php8.3-secret',
+    d=>d.php.packages[0].version='8.3/secret',d=>d.php.packages[0].version='8.3\n',d=>d.php.packages[0].name='php8.3-fpm\n',d=>d.php.packages[0].version='8.3\nsecret',
+    d=>d.php.packages=Array(25).fill(d.php.packages[0])]) {
+    const d=diagnostic();mutate(d);assert.throws(()=>header(diagnosticHeader(d)));
+  }
+});
+test('private bindings remain bounded authenticated observations, not listener identity',()=>{
+  const d=diagnostic();d.units[2].binding={environmentFiles:[{path:'/private/env',ignoreErrors:false}],workingDirectory:'/private/application',mainPidExecutable:{path:'/private/bin/node',sha256:'a'.repeat(64)},identityScope:'main-pid-not-listener-identity'};
+  const h=diagnosticHeader(d),sealed=seal(h,plain,key);
+  assert.deepEqual(header(unseal(sealed,key,context).rawHeader).summary.diagnostics.units[2].binding,d.units[2].binding);
+  for (const mutate of [b=>b.workingDirectory='relative',b=>b.workingDirectory='/a/../b',b=>b.workingDirectory='//a',b=>b.workingDirectory='/a//b',b=>b.workingDirectory='/a/',b=>b.workingDirectory='/a\n',b=>b.workingDirectory='/'+'a'.repeat(256),b=>b.mainPidExecutable.sha256='A'.repeat(64),b=>b.mainPidExecutable.sha256='a'.repeat(64)+'\n',b=>b.environmentFiles[0].ignoreErrors='no',b=>b.environmentFiles=Array(3).fill(b.environmentFiles[0]),b=>b.identityScope='listener-node',b=>b.nodeVersion='20']) {
+    const bad=structuredClone(d);mutate(bad.units[2].binding);assert.throws(()=>header(diagnosticHeader(bad)));
+  }
+});

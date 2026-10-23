@@ -61,7 +61,12 @@ class ExactProfileTests(unittest.TestCase):
         unchanged = ('scripts/invite-additional-owner.mjs', 'src/lib/admin-mfa.ts',
                      'src/lib/auth.ts', 'src/lib/passwords.ts', 'src/lib/mfa-encryption.ts', 'src/lib/staff-identity.ts',
                      'src/app/api/login/route.ts', 'src/app/api/admin/mfa/enroll/route.ts',
-                     'src/app/api/staff/accounts/route.ts', 'src/components/LoginPage.tsx', 'package-lock.json')
+                     'src/app/api/staff/accounts/route.ts', 'src/components/LoginPage.tsx')
+        # The reviewed dev-only Zod patch is candidate-only; rollback stays historical.
+        candidate_lock = '5ee351083ccf449022dfcd3f466cea7e541423294a4854458feb719a3350d966'
+        self.assertEqual(CONTRACT['profiles']['integration-candidate-v1']['sourceFiles']['package-lock.json'], candidate_lock)
+        self.assertEqual(hashlib.sha256((ROOT / 'package-lock.json').read_bytes()).hexdigest(), candidate_lock)
+        self.assertEqual(CONTRACT['profiles']['integration-fallback-v1']['sourceFiles']['package-lock.json'], historical['package-lock.json'])
         for profile in CONTRACT['profiles'].values():
             self.assertEqual({key: profile['sourceFiles'][key] for key in unchanged}, {key: historical[key] for key in unchanged})
             # Exact reviewed additive label-schema compatibility, not a generic owner exception.
