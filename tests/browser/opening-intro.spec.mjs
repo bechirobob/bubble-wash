@@ -127,7 +127,7 @@ test.describe('interim survey open-fixture acceptance',()=>{
     await page.screenshot({path:testInfo.outputPath('survey-eligibility.png'),fullPage:true});
     await page.getByRole('button',{name:'No, I am under 18',exact:true}).click();
     await expect(page.getByText('No personal details or answers have been saved or emailed.')).toBeVisible();
-    await enter(page);await page.getByRole('radio',{name:'No, I do not agree (end survey)',exact:true}).check();
+    await enter(page);await page.getByRole('radio',{name:'No, I do not agree (end survey)',exact:true}).click();
     await expect(page.getByRole('heading',{name:'You can stop here.'})).toBeVisible();expect(requests).toBe(0);
   });
   test('details persist across steps and persona questions require selection',async({page},testInfo)=>{
