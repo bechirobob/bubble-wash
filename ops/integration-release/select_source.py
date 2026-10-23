@@ -32,7 +32,7 @@ def select(root, requested=None):
             continue
         try:
             verify_source(root, contract, profile)
-        except ValueError:
+        except (ValueError, FileNotFoundError):
             continue
         matches.append(profile)
     require(len(matches) == 1, 'source matches no unique reviewed integration contract')

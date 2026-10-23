@@ -1,3 +1,5 @@
+import { bookingReferenceForOrder } from "@/lib/booking-references";
+import { getDatabase } from "@/lib/data-store";
 import { NextRequest, NextResponse } from "next/server";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { publicTrackingView } from "@/lib/security";
@@ -8,8 +10,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "Too many tracking requests. Try again shortly." }, { status: 429 });
   }
 
-  const id = request.nextUrl.searchParams.get("id")?.trim();
-  if (!id) return NextResponse.json({ ok: false, error: "Enter a Bubble Wash reference ID." }, { status: 400 });
+  const id = (request.nextUrl.searchParams.get("trackingToken") || request.nextUrl.searchParams.get("id"))?.trim();
+  if (!id || /^BW-\d+$/i.test(id)) return NextResponse.json({ ok: false, error: "Use your private tracking link, or recover access with your booking email." }, { status: 400 });
 
   const records = await readSubmissionsForOrder(id);
   const order = findOrderById(records, id);
@@ -20,6 +22,6 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    tracking: publicTrackingView(order),
-  });
+    tracking: { ...publicTrackingView(order), bookingReference: bookingReferenceForOrder(getDatabase(), order.orderId) },
+  }, { headers: { "Cache-Control": "private, no-store" } });
 }

@@ -58,12 +58,17 @@ class ExactProfileTests(unittest.TestCase):
 
     def test_owner_auth_transport_and_historical_guard_are_unchanged(self):
         historical = json.loads((ROOT / 'ops/owner-enrollment-source-pins.json').read_text())
-        unchanged = ('scripts/invite-additional-owner.mjs', 'src/lib/staff-accounts.ts', 'src/lib/admin-mfa.ts',
+        unchanged = ('scripts/invite-additional-owner.mjs', 'src/lib/admin-mfa.ts',
                      'src/lib/auth.ts', 'src/lib/passwords.ts', 'src/lib/mfa-encryption.ts', 'src/lib/staff-identity.ts',
                      'src/app/api/login/route.ts', 'src/app/api/admin/mfa/enroll/route.ts',
                      'src/app/api/staff/accounts/route.ts', 'src/components/LoginPage.tsx', 'package-lock.json')
         for profile in CONTRACT['profiles'].values():
             self.assertEqual({key: profile['sourceFiles'][key] for key in unchanged}, {key: historical[key] for key in unchanged})
+            # Exact reviewed additive label-schema compatibility, not a generic owner exception.
+            self.assertEqual(profile['sourceFiles']['src/lib/staff-accounts.ts'],
+                             'e2986ffd74a9d007a8489dc068bba9a7bcbdfd30f39b2a681c0a65c54e20960e')
+            for path in ('src/lib/booking-reference-schema.ts', 'scripts/migrate-booking-references.mjs'):
+                self.assertIn(path, profile['sourceFiles'])
             for path in ('src/lib/notification-outbox-schema.ts', 'scripts/migrate-notification-outbox.mjs',
                          'tests/owner-outbox-invitation.test.mjs', 'tests/outbox-migration-rollback.test.mjs'):
                 self.assertIn(path, profile['sourceFiles'])

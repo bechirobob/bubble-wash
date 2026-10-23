@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 sys.dont_write_bytecode = True
 from contracts import HERE, digest, require
-from host_adapter import adapter_manifest
+from host_adapter import adapter_manifest, completion_confirmation
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
@@ -14,10 +14,12 @@ if __name__ == '__main__':
     parser.add_argument('--plan-sha256', required=True)
     parser.add_argument('--candidate-sha', required=True)
     parser.add_argument('--fallback-sha', required=True)
-    parser.add_argument('--mode', choices=('inspect','execute','recover'), required=True)
+    parser.add_argument('--mode', choices=('inspect','execute','recover','complete-labels-only'), required=True)
+    parser.add_argument('--completion-confirmation', default='')
     args=parser.parse_args()
     require(re.fullmatch('[a-f0-9]{64}',args.plan_id) and re.fullmatch('[a-f0-9]{64}',args.plan_sha256), 'invalid plan identity')
     require(re.fullmatch('[a-f0-9]{40}',args.candidate_sha) and re.fullmatch('[a-f0-9]{40}',args.fallback_sha) and args.candidate_sha != args.fallback_sha, 'invalid published pair')
+    completion_confirmation(args.mode, args.completion_confirmation, args.plan_sha256)
     files=adapter_manifest()
     # The approval materialization is host-local; stdin contains only public code
     # hashes and selected review IDs, never env/backup/database content.
@@ -58,7 +60,7 @@ require(hashlib.sha256((base/'source-contracts.json').read_bytes()).hexdigest() 
 require(plan['sourceContractSha256'] == '''+repr(digest(HERE/'source-contracts.json'))+''')
 sys.path.insert(0, str(base))
 from host_adapter import main
-sys.argv = ['host_adapter', '--plan', '/var/lib/bubblewash-release/plans/'''+args.plan_id+'''.json', '--plan-sha256', '''+repr(args.plan_sha256)+''', '--mode', '''+repr(args.mode)+''']
+sys.argv = ['host_adapter', '--plan', '/var/lib/bubblewash-release/plans/'''+args.plan_id+'''.json', '--plan-sha256', '''+repr(args.plan_sha256)+''', '--mode', '''+repr(args.mode)+''', '--completion-confirmation', '''+repr(args.completion_confirmation)+''']
 try:
     main()
 except BaseException:

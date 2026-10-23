@@ -2,13 +2,11 @@
 import { StaffAccountPanel, StaffInvoicePanel, CustomerDecisionPanel } from "./StaffAdminControls";
 
 import Link from "next/link";
-import { VendorCapacityForm } from "./VendorCapacityForm";
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Activity as ActivityIcon, ClipboardList, Gauge, HeartPulse, History, LayoutDashboard, Map as MapIcon, MessagesSquare, Route as RouteIcon, Users } from "lucide-react";
 import type { StaffRole } from "@/lib/auth";
 import { automationActionsForOrder, paymentReadyForCloseout } from "@/lib/order-workflow";
 import { stageCountdown } from "@/lib/stage-countdown";
-import { locationStopCutoff, LIVE_LOCATION_MAX_FUTURE_SKEW_MS, LIVE_LOCATION_MAX_CAPTURE_AGE_MS } from "@/lib/dispatch-location";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import { BrandLink } from "@/components/BrandLink";
 
@@ -1027,27 +1025,23 @@ function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
   const [accuracyMeters, setAccuracyMeters] = useState(0);
   const watchIdRef = useRef<number | null>(null);
   const lastSentMsRef = useRef(0);
-  const lastCaptureSentMsRef = useRef(0);
-  const watchRunRef = useRef(0);
   const pendingUpdateRef = useRef<Promise<void> | null>(null);
   const sharingRef = useRef(false);
   const eligible = liveLocationStages.has(order.workflowStage.key);
 
-  async function tellServerSharingStopped(keepalive = false, stoppedAt = locationStopCutoff(lastCaptureSentMsRef.current)) {
+  async function tellServerSharingStopped(keepalive = false) {
     const response = await fetch("/api/dispatch/location", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stoppedAt }),
+      body: "{}",
       cache: "no-store",
       keepalive,
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.ok) throw new Error(data.error ?? "Dispatch could not confirm the stop.");
-    if (data.newerLocationRetained) throw new Error("A newer location share is still active. Stop that share separately.");
   }
 
   function clearLocationWatch() {
-    watchRunRef.current += 1;
     if (watchIdRef.current !== null && typeof navigator !== "undefined" && navigator.geolocation) {
       navigator.geolocation.clearWatch(watchIdRef.current);
     }
@@ -1057,15 +1051,13 @@ function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
   }
 
   useEffect(() => () => {
-    watchRunRef.current += 1;
     if (watchIdRef.current !== null && navigator.geolocation) navigator.geolocation.clearWatch(watchIdRef.current);
     const pendingUpdate = pendingUpdateRef.current;
     if (sharingRef.current || pendingUpdate) {
-      const stoppedAt = locationStopCutoff(lastCaptureSentMsRef.current);
       const clearServerLocation = () => fetch("/api/dispatch/location", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stoppedAt }),
+        body: "{}",
         cache: "no-store",
         keepalive: true,
       }).catch(() => undefined);
@@ -1078,7 +1070,6 @@ function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
 
   useEffect(() => {
     if (eligible || watchIdRef.current === null) return;
-    watchRunRef.current += 1;
     const pendingUpdate = pendingUpdateRef.current;
     navigator.geolocation.clearWatch(watchIdRef.current);
     watchIdRef.current = null;
@@ -1087,11 +1078,10 @@ function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
     setLastSentAt("");
     setAccuracyMeters(0);
     setMessage("Live location stopped because this route leg is no longer moving.");
-    const stoppedAt = locationStopCutoff(lastCaptureSentMsRef.current);
     const clearServerLocation = () => fetch("/api/dispatch/location", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stoppedAt }),
+      body: "{}",
       cache: "no-store",
       keepalive: true,
     }).catch(() => undefined);
@@ -1100,16 +1090,14 @@ function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
   }, [eligible]);
 
   function startSharing() {
-    if (!eligible || isWatching || isStopping || watchIdRef.current !== null) return;
+    if (!eligible || isWatching) return;
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       setMessage("This browser does not support location sharing. Use a current mobile browser or report your checkpoint manually.");
       return;
     }
     setMessage("Waiting for location permission and the first GPS reading…");
     lastSentMsRef.current = 0;
-    const run = ++watchRunRef.current;
     const watchId = navigator.geolocation.watchPosition((position) => {
-      if (watchRunRef.current !== run) return;
       const now = Date.now();
       if (pendingUpdateRef.current || (lastSentMsRef.current && now - lastSentMsRef.current < liveLocationCadenceMs)) return;
       const latitude = Number(position.coords.latitude);
@@ -1119,12 +1107,6 @@ function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
         setMessage("The browser returned an invalid location. Keep this page open and try again.");
         return;
       }
-      const capturedMs = position.timestamp || now;
-      if (!Number.isFinite(capturedMs) || capturedMs > now + LIVE_LOCATION_MAX_FUTURE_SKEW_MS || capturedMs < now - LIVE_LOCATION_MAX_CAPTURE_AGE_MS) {
-        setMessage("The GPS capture time is invalid. Waiting for a new reading.");
-        return;
-      }
-      lastCaptureSentMsRef.current = Math.max(lastCaptureSentMsRef.current, capturedMs);
       const update = (async () => {
         try {
           const response = await fetch("/api/dispatch/location", {
@@ -1135,33 +1117,31 @@ function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
               latitude,
               longitude,
               accuracyMeters: Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : 0,
-              capturedAt: new Date(capturedMs).toISOString(),
+              capturedAt: new Date(position.timestamp || now).toISOString(),
             }),
             cache: "no-store",
           });
           const data = await response.json().catch(() => ({}));
           if (!response.ok || !data.ok) throw new Error(data.error ?? "Dispatch could not receive this location.");
-          if (watchRunRef.current !== run) return;
+          if (watchIdRef.current !== watchId) return;
           lastSentMsRef.current = now;
           sharingRef.current = true;
           setLastSentAt(new Date().toISOString());
           setAccuracyMeters(Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : 0);
           setMessage("Live location is being shared with dispatch.");
         } catch (error) {
-          if (watchRunRef.current === run) setMessage(error instanceof Error ? `${error.message} The browser will retry while this page stays open.` : "Location could not be sent. The browser will retry while this page stays open.");
+          if (watchIdRef.current === watchId) setMessage(error instanceof Error ? `${error.message} The browser will retry while this page stays open.` : "Location could not be sent. The browser will retry while this page stays open.");
         } finally {
           pendingUpdateRef.current = null;
         }
       })();
       pendingUpdateRef.current = update;
     }, (error) => {
-      if (watchRunRef.current !== run) return;
       const pendingUpdate = pendingUpdateRef.current;
       const hadShared = sharingRef.current;
       clearLocationWatch();
       if (pendingUpdate || hadShared) {
-        const stoppedAt = locationStopCutoff(lastCaptureSentMsRef.current);
-        const clearServerLocation = () => tellServerSharingStopped(true, stoppedAt).catch(() => undefined);
+        const clearServerLocation = () => tellServerSharingStopped(true).catch(() => undefined);
         if (pendingUpdate) void pendingUpdate.finally(clearServerLocation);
         else void clearServerLocation();
       }
@@ -1179,13 +1159,12 @@ function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
   }
 
   async function stopSharing() {
-    const stoppedAt = locationStopCutoff(lastCaptureSentMsRef.current);
     setIsStopping(true);
     const pendingUpdate = pendingUpdateRef.current;
     clearLocationWatch();
     try {
       if (pendingUpdate) await pendingUpdate.catch(() => undefined);
-      await tellServerSharingStopped(false, stoppedAt);
+      await tellServerSharingStopped();
       setMessage("Live location is off and the dispatch marker was cleared.");
     } catch (error) {
       setMessage(error instanceof Error ? `${error.message} Sharing has stopped on this device and the last position will expire.` : "Sharing has stopped on this device and the last position will expire.");
@@ -1847,7 +1826,7 @@ type OperationsMetrics = {
   submissions: number;
   earlyAccess: { total: number; active: number };
   privacyRequests: { total: number; open: number };
-  notifications: { pending: number; failed: number; sent: number; queued: number; retrying: number; processing: number; accepted: number; delivered: number; skipped: number; exhausted: number; manualReview: number };
+  notifications: { pending: number; failed: number; sent: number };
 };
 
 type PrivacyOperationsRequest = {
@@ -1890,7 +1869,7 @@ function AdminOperationsHealth() {
     }
   }
 
-  return <section className="staffContentSection" aria-busy={!hasLoaded}><div className="staffSectionHeader"><div><h2>Operations health and privacy queue</h2><p>Delivery retries and retention run through the protected maintenance worker. Privacy cases require an explicit review status.</p></div><button className="button secondary" type="button" onClick={() => void load()}>Refresh</button></div>{!hasLoaded ? <LoadingSkeleton label="Loading operations health metrics" rows={4} variant="metrics" /> : metrics ? <div className="overviewGrid"><article><span className="staffFieldLabel">Order records</span><strong>{metrics.submissions}</strong><small>SQLite submission events</small></article><article><span className="staffFieldLabel">Early access</span><strong>{metrics.earlyAccess.active}</strong><small>{metrics.earlyAccess.total} total consent records</small></article><article><span className="staffFieldLabel">Privacy queue</span><strong>{metrics.privacyRequests.open}</strong><small>{metrics.privacyRequests.total} total requests</small></article><article><span className="staffFieldLabel">Notification outbox</span><strong>{metrics.notifications.queued + metrics.notifications.retrying + metrics.notifications.processing + metrics.notifications.manualReview + metrics.notifications.skipped + metrics.notifications.exhausted}</strong><small>{metrics.notifications.queued} queued · {metrics.notifications.retrying} retrying · {metrics.notifications.processing} processing · {metrics.notifications.exhausted} exhausted · {metrics.notifications.manualReview} need review · {metrics.notifications.skipped} skipped · {metrics.notifications.accepted} provider accepted (delivery unverified) · {metrics.notifications.delivered} delivery confirmed</small></article></div> : null}<p className={noticeClass(status)} role="status">{status}</p><div className="staffSectionHeader"><div><h3>Privacy and data-rights requests</h3><p>Verify identity before disclosure, correction, or deletion. Mark completion only after the requested work is recorded.</p></div></div><div className="staffSimpleList">{!hasLoaded ? <LoadingSkeleton label="Loading privacy requests" rows={4} /> : privacyRequests.length ? privacyRequests.map((request) => <article className="privacyOpsRow" key={request.id}><div><strong>{request.id}</strong><span>{request.requestType.replaceAll("_", " ")}</span></div><div><strong>{request.name}</strong><span>{request.contact}</span><small>{request.orderId || "No order supplied"}</small></div><div><strong>{request.status.replaceAll("_", " ")}</strong><time>{formatActivityTime(request.createdAt)}</time></div><div className="tableActionRow"><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "identity_review")}>Identity review</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "completed")}>Complete</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "declined")}>Decline</button></div></article>) : <p className="staffEmptyState">No privacy requests are waiting.</p>}</div></section>;
+  return <section className="staffContentSection" aria-busy={!hasLoaded}><div className="staffSectionHeader"><div><h2>Operations health and privacy queue</h2><p>Delivery retries and retention run through the protected maintenance worker. Privacy cases require an explicit review status.</p></div><button className="button secondary" type="button" onClick={() => void load()}>Refresh</button></div>{!hasLoaded ? <LoadingSkeleton label="Loading operations health metrics" rows={4} variant="metrics" /> : metrics ? <div className="overviewGrid"><article><span className="staffFieldLabel">Order records</span><strong>{metrics.submissions}</strong><small>SQLite submission events</small></article><article><span className="staffFieldLabel">Early access</span><strong>{metrics.earlyAccess.active}</strong><small>{metrics.earlyAccess.total} total consent records</small></article><article><span className="staffFieldLabel">Privacy queue</span><strong>{metrics.privacyRequests.open}</strong><small>{metrics.privacyRequests.total} total requests</small></article><article><span className="staffFieldLabel">Notification outbox</span><strong>{metrics.notifications.pending + metrics.notifications.failed}</strong><small>{metrics.notifications.pending} pending · {metrics.notifications.failed} failed · {metrics.notifications.sent} sent</small></article></div> : null}<p className={noticeClass(status)} role="status">{status}</p><div className="staffSectionHeader"><div><h3>Privacy and data-rights requests</h3><p>Verify identity before disclosure, correction, or deletion. Mark completion only after the requested work is recorded.</p></div></div><div className="staffSimpleList">{!hasLoaded ? <LoadingSkeleton label="Loading privacy requests" rows={4} /> : privacyRequests.length ? privacyRequests.map((request) => <article className="privacyOpsRow" key={request.id}><div><strong>{request.id}</strong><span>{request.requestType.replaceAll("_", " ")}</span></div><div><strong>{request.name}</strong><span>{request.contact}</span><small>{request.orderId || "No order supplied"}</small></div><div><strong>{request.status.replaceAll("_", " ")}</strong><time>{formatActivityTime(request.createdAt)}</time></div><div className="tableActionRow"><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "identity_review")}>Identity review</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "completed")}>Complete</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "declined")}>Decline</button></div></article>) : <p className="staffEmptyState">No privacy requests are waiting.</p>}</div></section>;
 }
 
 export function VendorWorkspace({ userName, role, allStaffAccess = false, initialView = "jobs", selectedOrderId, selectedActivityId }: WorkspaceProps) {
@@ -1930,7 +1909,7 @@ export function VendorWorkspace({ userName, role, allStaffAccess = false, initia
     <PortalShell role={role} allStaffAccess={allStaffAccess} pageRole="vendor" userName={userName} title="Vendor workspace" currentView={initialView} navigation={navigation}>
       {initialView === "jobs" ? <><SharedOrderBoard allStaffAccess={allStaffAccess} role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/vendors?view=jobs" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a production exception</strong><small>Open a case when the verified job actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="vendor" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
       {initialView === "capacity" && role === "admin" ? <section className="staffContentSection"><p>Manage an explicitly selected vendor from <Link href="/admin?view=people">People &amp; onboarding</Link>. Owner actions retain your identity.</p></section> : null}
-      {initialView === "capacity" && role !== "admin" ? <><AvailabilityBoard role={role} mode="vendors" refreshToken={availabilityVersion} /><VendorCapacityForm onSaved={() => setAvailabilityVersion((current) => current + 1)} /></> : null}
+      {initialView === "capacity" && role !== "admin" ? <><AvailabilityBoard role={role} mode="vendors" refreshToken={availabilityVersion} /><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Update today&apos;s capacity</strong><small>The signed-in vendor is applied automatically</small></span><b>Open form</b></summary><form className="staffForm staffNarrowForm" onSubmit={(event) => submitLead(event, "vendor-application")}><div className="two"><label>Service areas<input name="area" placeholder="Osu, Labone" required /></label><label>Order slots remaining<input name="capacity" type="number" min="0" inputMode="numeric" required /></label></div><div className="two"><label>Availability<select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited capacity</option><option>Paused today</option></select></label><label>Available service<select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></label></div><label>Capacity note<textarea name="message" placeholder="Turnaround, machine, or service restrictions" /></label><button className="button primary" type="submit" disabled={pendingType === "vendor-application"}>{pendingType === "vendor-application" ? "Updating capacity…" : "Update capacity"}</button>{formStatus["vendor-application"] ? <p className={noticeClass(formStatus["vendor-application"])} role="status">{formStatus["vendor-application"]}</p> : null}</form></details></section></> : null}
       {initialView === "activity" ? <RecentActivity filter="vendor" initialSelectedId={selectedActivityId} basePath="/vendors?view=activity" /> : null}
     </PortalShell>
   );

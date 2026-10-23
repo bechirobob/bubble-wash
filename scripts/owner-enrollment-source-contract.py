@@ -11,8 +11,8 @@ import stat
 
 HISTORICAL_ENROLLMENT_CONTRACT = 'historical-owner-v1'
 INTEGRATION_ENROLLMENT_PROFILE_SHA256 = {
-    'integration-candidate-v1': '476ab655e655c0b426c98bd1dc5d72797ef64342531a1b373a966277baf3ef11',
-    'integration-fallback-v1': '90739bbb2ca23d677aa96d97a1121db33855dad639fe5792e667b60b65b949dc',
+    'integration-candidate-v1': '34e82cf4be3a0e87e393b67da07b7fac75da1ff7d321b153c5362472d7813c80',
+    'integration-fallback-v1': 'f3ead9e67ea7f03b640c0bb7d7b9981ab52df48e443bcb06f773b702df178d5a',
 }
 ENROLLMENT_COMPLETE_SOURCE_ROOTS = ('src', 'public', 'db')
 

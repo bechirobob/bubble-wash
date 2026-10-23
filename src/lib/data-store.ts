@@ -1,6 +1,9 @@
 import "server-only";
 
 import Database from "better-sqlite3";
+import { allocateBookingReference, bookingReferenceForOrder, isRootBooking, submissionDataWithoutLabels } from "./booking-references.ts";
+import { vendorCodeForId } from "./vendor-codes.ts";
+import { bookingReferenceSchemaState, createBookingReferenceSchema } from "./booking-reference-schema.ts";
 import { randomUUID } from "node:crypto";
 import { addNotificationOutboxColumns, migrateNotificationOutbox, NOTIFICATION_OUTBOX_LEASE_INDEX_SQL, notificationOutboxSchemaSnapshot } from "./notification-outbox-schema.ts";
 import { commercialNotificationsEnabled, NOTIFICATION_LEASE_MS, NOTIFICATION_MAX_ATTEMPTS, RESEND_SAFE_RETRY_WINDOW_MS, type NotificationDeliveryState } from "./notification-policy.ts";
@@ -201,7 +204,13 @@ export function getDatabase() {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
-  initializeDatabaseSchema(db);
+  // Only brand-new stores bootstrap the additive maps. Existing stores require
+  // the explicit offline migration; a request must never silently migrate them.
+  db.transaction(() => {
+    const fresh = !db.prepare("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get();
+    initializeDatabaseSchema(db);
+    if (fresh) createBookingReferenceSchema(db);
+  }).immediate();
   database = db;
   purgeExpiredDriverLocations(db);
   migrateLegacySubmissions(db);
@@ -387,10 +396,20 @@ function migrateLegacySubmissions(db: Database.Database) {
   migratedLegacyJsonl = true;
 }
 
-export function appendSubmissionRecord(record: SubmissionRecord) {
-  getDatabase()
-    .prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
-    .run({ id: record.id, createdAt: record.createdAt, source: record.source ?? null, data: JSON.stringify(record.data) });
+export function appendSubmissionRecord(record: SubmissionRecord): SubmissionRecord {
+  const db = getDatabase();
+  const insert = () => {
+    const data = submissionDataWithoutLabels(record.data);
+    if (isRootBooking(data)) {
+      if (bookingReferenceForOrder(db, record.id)) throw new Error("A committed booking identity cannot be reused.");
+      data.bookingReference = allocateBookingReference(db, record.id);
+    }
+    const stored = { ...record, data };
+    db.prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
+      .run({ id: stored.id, createdAt: stored.createdAt, source: stored.source ?? null, data: JSON.stringify(stored.data) });
+    return stored;
+  };
+  return db.inTransaction ? insert() : db.transaction(insert).immediate();
 }
 
 export function appendSubmissionRecordWithDeliveryProof(record: SubmissionRecord, input: { orderId: string; codeHash: string; usedBy: string; recipientName: string }) {
@@ -402,10 +421,17 @@ export function appendSubmissionRecordWithDeliveryProof(record: SubmissionRecord
       WHERE order_id = @orderId COLLATE NOCASE AND code_hash = @codeHash AND used_at IS NULL
     `).run({ ...input, usedAt: record.createdAt });
     if (proof.changes !== 1) throw new Error("Delivery confirmation code is invalid or already used.");
-    db.prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
-      .run({ id: record.id, createdAt: record.createdAt, source: record.source ?? null, data: JSON.stringify(record.data) });
+    appendSubmissionRecord(record);
   });
   apply();
+}
+
+function projectedSubmissionData(row: StoredSubmissionRow): Record<string, unknown> {
+  const data = submissionDataWithoutLabels(JSON.parse(row.data) as Record<string, unknown>);
+  const db = getDatabase();
+  if (isRootBooking(data)) data.bookingReference = bookingReferenceForOrder(db, row.id);
+  if (typeof data.vendorId === "string") data.vendorCode = vendorCodeForId(db, data.vendorId);
+  return data;
 }
 
 export function readSubmissionRecords(limit = 200): SubmissionRecord[] {
@@ -417,7 +443,7 @@ export function readSubmissionRecords(limit = 200): SubmissionRecord[] {
     id: row.id,
     createdAt: row.created_at,
     source: row.source ?? undefined,
-    data: JSON.parse(row.data) as Record<string, unknown>,
+    data: projectedSubmissionData(row),
   }));
 }
 
@@ -438,7 +464,7 @@ export function readSubmissionRecordsForOrder(orderId: string): SubmissionRecord
     id: row.id,
     createdAt: row.created_at,
     source: row.source ?? undefined,
-    data: JSON.parse(row.data) as Record<string, unknown>,
+    data: projectedSubmissionData(row),
   }));
 }
 
@@ -451,7 +477,7 @@ export function findSubmissionRecordById(id: string): SubmissionRecord | null {
     id: row.id,
     createdAt: row.created_at,
     source: row.source ?? undefined,
-    data: JSON.parse(row.data) as Record<string, unknown>,
+    data: projectedSubmissionData(row),
   };
 }
 
@@ -471,7 +497,7 @@ export function findCheckoutByPaymentReference(reference: string): SubmissionRec
     id: row.id,
     createdAt: row.created_at,
     source: row.source ?? undefined,
-    data: JSON.parse(row.data) as Record<string, unknown>,
+    data: projectedSubmissionData(row),
   };
 }
 
@@ -501,13 +527,7 @@ export function appendPaymentVerificationOnce(input: {
         (@reference, @status, @transaction_id, @amount_minor, @currency, @record_id, @verified_at)
     `).run(verification);
     if (inserted.changes === 0) return false;
-    db.prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
-      .run({
-        id: input.record.id,
-        createdAt: input.record.createdAt,
-        source: input.record.source ?? null,
-        data: JSON.stringify(input.record.data),
-      });
+    appendSubmissionRecord(input.record);
     return true;
   });
   return save.immediate();
@@ -544,7 +564,9 @@ export function openReadOnlyDatabase() {
   }
 }
 
-export function databaseReadiness(db = getDatabase(), additionalSchema: ((database: Database.Database) => void)[] = []) {
+export function databaseReadiness(db = getDatabase(), additionalSchema: ((database: Database.Database) => void)[] = [], options: { allowMissingBookingReferences?: boolean } = {}) {
+  const references = bookingReferenceSchemaState(db);
+  if (references !== "ready" && !(references === "absent" && options.allowMissingBookingReferences === true)) return false;
   const quickCheck = db.pragma("quick_check", { simple: true });
   const readable = db.prepare("SELECT 1 AS ok").get() as { ok?: number } | undefined;
   if (quickCheck !== "ok" || readable?.ok !== 1) return false;
@@ -864,7 +886,7 @@ export function operationsDataMetrics() {
     submissions: submissions.total,
     earlyAccess: { total: earlyAccess.total, active: earlyAccess.active ?? 0 },
     privacyRequests: { total: privacy.total, open: privacy.open ?? 0 },
-    notifications: outbox,
+    notifications: { pending: outbox.pending ?? 0, failed: outbox.failed ?? 0, sent: outbox.sent ?? 0 },
   };
 }
 
@@ -894,9 +916,6 @@ export function purgeOperationalData(now = Date.now(), householdLaunchDate = pro
       WHERE status = 'enrolled' AND recovery_bundle_encrypted IS NOT NULL AND updated_at < ?
     `).run(isoDaysAgo(1)).changes;
     result.workflowClaims = db.prepare("DELETE FROM workflow_action_claims WHERE claimed_at < ?").run(isoDaysAgo(90)).changes;
-    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='operational_command_receipts'").get()) {
-      result.operationalCommandReceipts = db.prepare("DELETE FROM operational_command_receipts WHERE created_at < ?").run(isoDaysAgo(90)).changes;
-    }
     result.notificationLogs = db.prepare("DELETE FROM notification_outbox WHERE updated_at < ?").run(isoDaysAgo(90)).changes;
     result.optedOutSignups = db.prepare("DELETE FROM early_access_signups WHERE marketing_status = 'opted_out' AND updated_at < ?").run(isoDaysAgo(30)).changes;
     const launch = /^\d{4}-\d{2}-\d{2}$/.test(householdLaunchDate) ? new Date(`${householdLaunchDate}T00:00:00.000Z`).getTime() : Number.NaN;
@@ -923,10 +942,6 @@ export function purgeOperationalData(now = Date.now(), householdLaunchDate = pro
       db.prepare("DELETE FROM driver_live_locations WHERE order_id = ? COLLATE NOCASE").run(orderId);
       db.prepare("DELETE FROM workflow_action_claims WHERE order_id = ? COLLATE NOCASE").run(orderId);
       db.prepare("DELETE FROM delivery_proofs WHERE order_id = ? COLLATE NOCASE").run(orderId);
-      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='operational_work_ownership'").get()) {
-        const columns = db.prepare("PRAGMA table_info(operational_work_ownership)").all() as { name: string }[];
-        if (columns.some((column) => column.name === "order_id")) db.prepare("DELETE FROM operational_work_ownership WHERE order_id = ? COLLATE NOCASE").run(orderId);
-      }
       deletedOrderRecords += db.prepare(`
         DELETE FROM submissions WHERE id = @orderId COLLATE NOCASE OR json_extract(data, '$.orderId') = @orderId COLLATE NOCASE
       `).run({ orderId }).changes;
@@ -1069,26 +1084,12 @@ function driverLocationFromRow(row: StoredDriverLocationRow): StoredDriverLocati
   };
 }
 
-// Keep optional location stop schema out of ordinary startup/readiness initialization.
-// Existing production reset/backup guards continue to reject activated extended schemas.
-function driverLocationDatabase() {
-  const db = getDatabase();
-  db.exec("CREATE TABLE IF NOT EXISTS driver_location_stops (driver_id TEXT PRIMARY KEY, captured_before TEXT NOT NULL)");
-  return db;
-}
-export function readDriverLocationStop(driverId: string) {
-  const db = getDatabase();
-  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='driver_location_stops'").get()) return null;
-  const row = db.prepare("SELECT captured_before FROM driver_location_stops WHERE driver_id=?").get(driverId.trim().toLowerCase()) as { captured_before: string } | undefined;
-  return row?.captured_before ?? null;
-}
-
 export function upsertDriverLiveLocation(location: StoredDriverLocation) {
-  const result = driverLocationDatabase().prepare(`
+  const result = getDatabase().prepare(`
     INSERT INTO driver_live_locations
       (driver_id, order_id, latitude, longitude, accuracy_meters, captured_at, received_at)
-    SELECT @driverId, @orderId, @latitude, @longitude, @accuracyMeters, @capturedAt, @receivedAt
-    WHERE NOT EXISTS (SELECT 1 FROM driver_location_stops WHERE driver_id = @driverId COLLATE NOCASE AND captured_before >= @capturedAt)
+    VALUES
+      (@driverId, @orderId, @latitude, @longitude, @accuracyMeters, @capturedAt, @receivedAt)
     ON CONFLICT(driver_id) DO UPDATE SET
       order_id = excluded.order_id,
       latitude = excluded.latitude,
@@ -1118,20 +1119,6 @@ export function readDriverLiveLocations(): StoredDriverLocation[] {
     ORDER BY captured_at DESC
   `).all() as StoredDriverLocationRow[];
   return rows.map(driverLocationFromRow);
-}
-
-// A shared privacy boundary for browser and native clients. Delayed stops never erase newer shares.
-export function stopDriverLiveLocation(driverId: string, capturedBefore = new Date().toISOString()) {
-  const id = driverId.trim().toLowerCase();
-  if (!id || !Number.isFinite(Date.parse(capturedBefore))) throw new Error("A valid rider and stop cutoff are required.");
-  const cutoff = new Date(capturedBefore).toISOString();
-  const db = driverLocationDatabase();
-  return db.transaction(() => {
-    db.prepare("INSERT INTO driver_location_stops VALUES (?,?) ON CONFLICT(driver_id) DO UPDATE SET captured_before=max(captured_before,excluded.captured_before)").run(id, cutoff);
-    const newerLocationRetained = Boolean(db.prepare("SELECT 1 FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE AND captured_at > ?").get(id, cutoff));
-    const cleared = db.prepare("DELETE FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE AND captured_at <= ?").run(id, cutoff).changes > 0;
-    return { cleared, newerLocationRetained };
-  }).immediate();
 }
 
 export function deleteDriverLiveLocation(driverId: string) {
@@ -1207,7 +1194,6 @@ export function resetDataStoreForTests() {
   database.prepare("DELETE FROM workflow_action_claims").run();
   database.prepare("DELETE FROM payment_verifications").run();
   database.prepare("DELETE FROM driver_live_locations").run();
-  if (database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='driver_location_stops'").get()) database.prepare("DELETE FROM driver_location_stops").run();
   database.prepare("DELETE FROM early_access_signups").run();
   database.prepare("DELETE FROM privacy_requests").run();
   database.prepare("DELETE FROM notification_outbox").run();

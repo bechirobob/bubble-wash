@@ -23,7 +23,12 @@ on:
         required: true
         default: inspect
         type: choice
-        options: [inspect, execute, recover]
+        options: [inspect, execute, recover, complete-labels-only]
+      completion_confirmation:
+        description: 'Completion only, after explicit approval: complete-labels-only: followed by the exact full plan SHA-256. Otherwise leave empty.'
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -41,6 +46,7 @@ jobs:
       PLAN_ID: ${{ inputs.plan_id }}
       PLAN_SHA256: ${{ inputs.plan_sha256 }}
       RELEASE_MODE: ${{ inputs.mode }}
+      COMPLETION_CONFIRMATION: ${{ inputs.completion_confirmation }}
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - name: Require exact published identities and reviewed plan
@@ -49,7 +55,12 @@ jobs:
           [[ "$CANDIDATE_SHA" =~ ^[a-f0-9]{40}$ && "$FALLBACK_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$PLAN_ID" =~ ^[a-f0-9]{64}$ && "$PLAN_SHA256" =~ ^[a-f0-9]{64}$ ]]
           [[ "$CANDIDATE_SHA" == "$GITHUB_SHA" && "$CANDIDATE_SHA" != "$FALLBACK_SHA" ]]
-          [[ "$RELEASE_MODE" == inspect || "$RELEASE_MODE" == execute || "$RELEASE_MODE" == recover ]]
+          [[ "$RELEASE_MODE" == inspect || "$RELEASE_MODE" == execute || "$RELEASE_MODE" == recover || "$RELEASE_MODE" == complete-labels-only ]]
+          if [[ "$RELEASE_MODE" == complete-labels-only ]]; then
+            [[ "$COMPLETION_CONFIRMATION" == "complete-labels-only:$PLAN_SHA256" ]]
+          else
+            [[ -z "$COMPLETION_CONFIRMATION" ]]
+          fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ inputs.candidate_sha }}
@@ -73,5 +84,5 @@ jobs:
       - name: Consume pre-staged reviewed package, never install gates or resume maintenance
         run: |
           set -euo pipefail
-          python3 ops/integration-release/stream_host.py --plan-id "$PLAN_ID" --plan-sha256 "$PLAN_SHA256" --candidate-sha "$CANDIDATE_SHA" --fallback-sha "$FALLBACK_SHA" --mode "$RELEASE_MODE" |
+          python3 ops/integration-release/stream_host.py --plan-id "$PLAN_ID" --plan-sha256 "$PLAN_SHA256" --candidate-sha "$CANDIDATE_SHA" --fallback-sha "$FALLBACK_SHA" --mode "$RELEASE_MODE" --completion-confirmation "$COMPLETION_CONFIRMATION" |
             tailscale ssh root@hermes 'python3 -I -B -'
