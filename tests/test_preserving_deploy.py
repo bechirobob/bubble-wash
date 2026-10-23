@@ -732,6 +732,9 @@ class RehearsalOnly(unittest.TestCase):
         self.final_probe_pid = 321
         self.mutate_copy = False
         self.change_env = False
+        self.ready_error = False
+        self.diagnostic_result = None
+        self.diagnostic_error = None
         self.original_marker = (self.runtime / 'current-release').read_bytes()
 
     def stage(self, report, stage):
@@ -778,6 +781,8 @@ class RehearsalOnly(unittest.TestCase):
         self.assertEqual(pid, 321)
         self.assertEqual(args[0], 'curl')
         self.routes.append(args[-1])
+        if self.ready_error and args[-1].endswith('/api/ready'):
+            raise subprocess.CalledProcessError(22, 'DO_NOT_PRINT_COMMAND', output=b'DO_NOT_PRINT_BODY')
         if self.change_env:
             self.env.write_text(self.env.read_text() + 'CHANGED=true\n'); self.change_env = False
         return ''
@@ -802,6 +807,7 @@ class RehearsalOnly(unittest.TestCase):
             stack.enter_context(patch.object(deploy, 'command', side_effect=self.command))
             stack.enter_context(patch.object(deploy, 'network_command', side_effect=self.network))
             stack.enter_context(patch.object(deploy, 'probe_state', side_effect=self.state))
+            diagnostic = stack.enter_context(patch.object(deploy, 'readiness_diagnostic', return_value=self.diagnostic_result, side_effect=self.diagnostic_error))
             stack.enter_context(patch.object(deploy, 'rehearsal_stage', side_effect=self.stage))
             stack.enter_context(patch.object(deploy.signal, 'setitimer'))
             for name in ('activate', 'ctl', 'public_health'):
@@ -813,6 +819,7 @@ class RehearsalOnly(unittest.TestCase):
                 except BaseException as error:
                     report.fail(error)
                 report.emit()
+        self.diagnostic_calls = diagnostic.call_count
         text = output.getvalue()
         for sentinel in ('DO_NOT_PRINT', str(self.db), str(self.env), str(self.root)):
             self.assertNotIn(sentinel, text)
@@ -830,6 +837,41 @@ class RehearsalOnly(unittest.TestCase):
         self.assertEqual(len(self.routes), 7)
         self.assertEqual(self.routes[-1], 'http://127.0.0.1:3001/api/ready')
         self.assertEqual(len([cmd for cmd in self.commands if cmd[0] == 'systemd-run']), 1)
+
+    def test_ready_failure_adds_categories_but_remains_fatal_and_cleans_up(self):
+        self.ready_error = True
+        self.diagnostic_result = {'state': 'BLOCKED', 'http': 'HTTP_503', 'categories': ['DB_CHECK']}
+        result = self.run_rehearsal()
+        self.assertEqual(result['stage'], 'ROUTE_READY')
+        self.assertEqual(result['error'], 'COMMAND_FAILED')
+        self.assertEqual(result['readinessDiagnostic'], self.diagnostic_result)
+        self.assertEqual(self.diagnostic_calls, 1)
+        self.assertFalse(result['ok']); self.assertFalse(result['activationAttempted'])
+        self.assertTrue(result['cleanup']); self.assertTrue(self.stopped)
+        self.assertFalse(self.snapshot.parent.exists())
+
+    def test_ready_after_anonymous_failure_never_forgives_failure(self):
+        self.ready_error = True
+        self.diagnostic_result = {'state': 'READY', 'http': 'HTTP_200', 'categories': []}
+        result = self.run_rehearsal()
+        self.assertFalse(result['ok']); self.assertEqual(result['error'], 'COMMAND_FAILED')
+        self.assertTrue(result['cleanup']); self.assertEqual(self.diagnostic_calls, 1)
+
+    def test_diagnostic_exception_or_cancellation_keeps_primary_failure_and_cleanup(self):
+        self.ready_error = True
+        for error in (RuntimeError('DO_NOT_PRINT'), deploy.RehearsalDeadline(), deploy.RehearsalInterrupted()):
+            self.started = self.stopped = False; self.diagnostic_error = error
+            result = self.run_rehearsal()
+            self.assertEqual(result['stage'], 'ROUTE_READY'); self.assertEqual(result['error'], 'COMMAND_FAILED')
+            self.assertTrue(result['cleanup']); self.assertTrue(self.stopped)
+            self.assertFalse(result['activationAttempted']); self.assertEqual(self.diagnostic_calls, 1)
+
+    def test_non_ready_failure_and_success_never_collect_detail(self):
+        result = self.run_rehearsal()
+        self.assertNotIn('readinessDiagnostic', result); self.assertEqual(self.diagnostic_calls, 0)
+        self.fail_stage = 'ROUTE_HOME'; self.started = self.stopped = False
+        result = self.run_rehearsal()
+        self.assertNotIn('readinessDiagnostic', result); self.assertEqual(self.diagnostic_calls, 0)
 
     def test_each_boundary_fails_without_activation_or_sensitive_output(self):
         stages = ('BUILD_ARTIFACT', 'PROBE_ABSENT', 'SNAPSHOT', 'FINGERPRINT_BEFORE', 'PROBE_START',
@@ -1004,6 +1046,172 @@ class RehearsalWorkflow(unittest.TestCase):
         production = (root / '.github/workflows/production-deploy.yml').read_text()
         self.assertIn('[[ "$TARGET_SHA" == "$GITHUB_SHA" ]]', production)
         self.assertNotIn('--rehearsal-only', production)
+
+
+
+
+class ReadinessCategoryDiagnostic(unittest.TestCase):
+    token = 'SYNTHETIC_ONLY_TOKEN_NOT_REAL_0123456789'
+
+    def setUp(self):
+        from types import SimpleNamespace
+        self.namespace = {'__name__': 'readiness_fixture', 'CATEGORIES': deploy.READINESS_BLOCKER_CATEGORIES}
+        exec(deploy.READINESS_READER, self.namespace)
+        self.report = deploy.RehearsalReport()
+        self.candidate = Path('/synthetic/candidate')
+        self.values = {'BUBBLEWASH_MAINTENANCE_TOKEN': self.token}
+        self.result = {'state': 'BLOCKED', 'http': 'HTTP_503', 'categories': ['DB_CHECK']}
+        self.completed = SimpleNamespace(returncode=0, stdout=json.dumps(self.result).encode())
+
+    def body(self, checks, ok=False):
+        return json.dumps({'ok': ok, 'service': 'Bubble Wash operations app',
+                           'readiness': 'ready' if ok else 'blocked', 'checks': checks}).encode()
+
+    def test_all_allowlisted_messages_map_only_to_fixed_categories(self):
+        classify = self.namespace['classify']
+        for message, category in deploy.READINESS_BLOCKER_CATEGORIES.items():
+            with self.subTest(category=category):
+                value = classify(503, self.body([message]))
+                self.assertEqual(value, {'state': 'BLOCKED', 'http': 'HTTP_503', 'categories': [category]})
+                self.assertNotIn(message, json.dumps(value))
+
+    def test_multiple_categories_deduplicate_and_unknown_values_never_escape(self):
+        checks = ['The operations database did not pass its integrity/read check.',
+                  'The operations database did not pass its integrity/read check.',
+                  'The managed staff account store is unavailable.', 'DO_NOT_PRINT_ROW_IDENTITY_OR_SECRET']
+        value = self.namespace['classify'](503, self.body(checks))
+        self.assertEqual(value['categories'], ['DB_CHECK', 'STAFF_STORE', 'UNKNOWN'])
+        self.assertNotIn('DO_NOT_PRINT', json.dumps(value))
+
+    def test_ready_and_anonymous_or_early_database_open_failure_are_distinct(self):
+        classify = self.namespace['classify']
+        self.assertEqual(classify(200, self.body([], True))['state'], 'READY')
+        body = json.loads(self.body(['irrelevant'])); del body['checks']
+        value = classify(503, json.dumps(body).encode())
+        self.assertEqual(value['state'], 'DETAIL_UNAVAILABLE'); self.assertEqual(value['categories'], [])
+
+    def test_malformed_oversized_and_unexpected_responses_fail_closed(self):
+        classify = self.namespace['classify']
+        for raw in (b'not-json-DO_NOT_PRINT', b'[]', self.body([]), self.body([1]),
+                    self.body(['x'] * 65), self.body(['x' * 513]), self.body(['x'], True)):
+            with self.subTest(length=len(raw)):
+                value = classify(503, raw)
+                self.assertEqual(value['state'], 'RESPONSE_INVALID'); self.assertEqual(value['categories'], [])
+        self.assertEqual(classify(503, b'x' * 8193)['state'], 'RESPONSE_TOO_LARGE')
+        self.assertEqual(classify(302, b'DO_NOT_PRINT_LOCATION'),
+                         {'state': 'HTTP_UNEXPECTED', 'http': 'OTHER_HTTP', 'categories': []})
+
+    def test_reader_uses_exact_loopback_endpoint_stdin_and_bounded_body(self):
+        import io
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        response = MagicMock(status=503); response.read.return_value = self.body(['The operations database is unavailable.'])
+        connection = MagicMock(); connection.getresponse.return_value = response
+        with patch('http.client.HTTPConnection', return_value=connection) as connect, \
+                patch.object(sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(self.token.encode()))):
+            value = self.namespace['read_ready']()
+        connect.assert_called_once_with('127.0.0.1', 3001, timeout=3)
+        connection.request.assert_called_once_with('GET', '/api/ready', headers={'Authorization': 'Bearer ' + self.token})
+        response.read.assert_called_once_with(8193); connection.close.assert_called_once()
+        self.assertEqual(value['categories'], ['DB_UNAVAILABLE'])
+        self.assertNotIn(self.token, json.dumps(value))
+
+    def test_reader_transport_errors_and_invalid_tokens_never_expose_exception(self):
+        import io
+        from types import SimpleNamespace
+        with patch('http.client.HTTPConnection', side_effect=RuntimeError('DO_NOT_PRINT_SECRET')), \
+                patch.object(sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(self.token.encode()))):
+            value = self.namespace['read_ready']()
+        self.assertEqual(value['state'], 'TRANSPORT_FAILED'); self.assertNotIn('DO_NOT_PRINT', json.dumps(value))
+        for token in (b'', b'short', b'x' * 4097, b'x' * 32 + b'\nInjected: yes', b'x' * 32 + b'\x7f'):
+            with patch('http.client.HTTPConnection') as connect, \
+                    patch.object(sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(token))):
+                self.assertEqual(self.namespace['read_ready']()['state'], 'TOKEN_UNAVAILABLE')
+                connect.assert_not_called()
+
+    def collect(self):
+        return deploy.readiness_diagnostic(self.candidate, self.values, 'synthetic-probe.service', 321, self.report)
+
+    def test_parent_stdin_only_timeout_capture_and_namespace_reverification(self):
+        with patch.object(deploy, 'verify_private_network', return_value=321) as verify, \
+                patch.object(deploy.subprocess, 'run', return_value=self.completed) as run:
+            self.assertEqual(self.collect(), self.result)
+        args, kwargs = run.call_args
+        self.assertEqual(args[0][:6], ['nsenter', '--target', '321', '--net', '--', 'python3'])
+        self.assertNotIn(self.token, repr(args)); self.assertNotIn('env', kwargs)
+        self.assertEqual(kwargs['input'], self.token.encode()); self.assertLessEqual(kwargs['timeout'], 7)
+        self.assertEqual(kwargs['stderr'], subprocess.DEVNULL); self.assertFalse(kwargs['check'])
+        self.assertEqual(verify.call_count, 2)
+        verify.assert_called_with('synthetic-probe.service', self.candidate)
+
+    def test_missing_token_or_namespace_failure_prevents_request(self):
+        for token in ('', 'short', self.token + '\n'):
+            self.values['BUBBLEWASH_MAINTENANCE_TOKEN'] = token
+            with patch.object(deploy.subprocess, 'run') as run:
+                self.assertEqual(self.collect()['state'], 'TOKEN_UNAVAILABLE'); run.assert_not_called()
+        self.values['BUBBLEWASH_MAINTENANCE_TOKEN'] = self.token
+        for value in (0, 322):
+            with patch.object(deploy, 'verify_private_network', return_value=value), patch.object(deploy.subprocess, 'run') as run:
+                self.assertEqual(self.collect()['state'], 'NAMESPACE_UNVERIFIED'); run.assert_not_called()
+        with patch.object(deploy, 'verify_private_network', side_effect=ValueError('DO_NOT_PRINT_NAMESPACE')):
+            self.assertEqual(self.collect()['state'], 'NAMESPACE_UNVERIFIED')
+
+    def test_changed_namespace_discards_result_and_timeout_still_reverifies(self):
+        with patch.object(deploy, 'verify_private_network', side_effect=[321, 322]), \
+                patch.object(deploy.subprocess, 'run', return_value=self.completed):
+            self.assertEqual(self.collect()['state'], 'NAMESPACE_UNVERIFIED')
+        with patch.object(deploy, 'verify_private_network', return_value=321) as verify, \
+                patch.object(deploy.subprocess, 'run', side_effect=subprocess.TimeoutExpired('DO_NOT_PRINT_TOKEN', 7, output=b'DO_NOT_PRINT_BODY')):
+            self.assertEqual(self.collect()['state'], 'TIMEOUT'); self.assertEqual(verify.call_count, 2)
+
+    def test_parent_rejects_arbitrary_child_output_and_values(self):
+        from types import SimpleNamespace
+        for body in (b'DO_NOT_PRINT', b'x' * 1025, b'null', b'[]',
+                     json.dumps({**self.result, 'raw': 'DO_NOT_PRINT'}).encode(),
+                     json.dumps({**self.result, 'categories': ['DO_NOT_PRINT']}).encode(),
+                     json.dumps({**self.result, 'state': ['BLOCKED']}).encode()):
+            with patch.object(deploy, 'verify_private_network', return_value=321), \
+                    patch.object(deploy.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=body)):
+                value = self.collect()
+                self.assertEqual(value['state'], 'DIAGNOSTIC_FAILED'); self.assertNotIn('DO_NOT_PRINT', json.dumps(value))
+
+    def test_deadline_and_cancellation_are_not_swallowed(self):
+        for error in (deploy.RehearsalDeadline(), deploy.RehearsalInterrupted(), KeyboardInterrupt()):
+            with patch.object(deploy, 'verify_private_network', return_value=321), \
+                    patch.object(deploy.subprocess, 'run', side_effect=error), self.assertRaises(type(error)):
+                self.collect()
+
+    def test_real_child_invalid_token_emits_only_fixed_json_without_traceback(self):
+        script = 'CATEGORIES = ' + repr(deploy.READINESS_BLOCKER_CATEGORIES) + '\n' + deploy.READINESS_READER
+        result = subprocess.run([sys.executable, '-I', '-B', '-c', script], input=b'DO_NOT_PRINT',
+                                capture_output=True, timeout=5, check=True)
+        self.assertEqual(result.stderr, b'')
+        self.assertEqual(json.loads(result.stdout), {'state': 'TOKEN_UNAVAILABLE', 'http': 'UNAVAILABLE', 'categories': []})
+
+    def test_normal_deployment_rehearsal_does_not_collect_readiness_details(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            candidate = root / 'candidate'; (candidate / '.next').mkdir(parents=True)
+            (candidate / '.next/BUILD_ID').write_text('synthetic')
+            db = root / 'source.sqlite'
+            with sqlite3.connect(db) as connection:
+                connection.execute('CREATE TABLE synthetic (id INTEGER)')
+            def network(args, *unused):
+                if args[-1].endswith('/api/ready'):
+                    raise subprocess.CalledProcessError(22, 'synthetic')
+                return ''
+            with patch.object(deploy, 'RUNTIME', root), \
+                    patch.object(deploy, 'verify_private_network', return_value=321), \
+                    patch.object(deploy, 'check_runtime'), patch.object(deploy, 'health'), \
+                    patch.object(deploy, 'command', return_value='') as command, \
+                    patch.object(deploy, 'network_command', side_effect=network), \
+                    patch.object(deploy, 'readiness_diagnostic') as diagnostic:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    deploy.rehearse(candidate, self.values, db, root / 'status',
+                                    SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid()), 'normal', None)
+                diagnostic.assert_not_called()
+                self.assertEqual(command.call_args.args[0], ['systemctl', 'stop', 'normal-probe.service'])
 
 
 if __name__ == '__main__':
