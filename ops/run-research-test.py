@@ -15,7 +15,7 @@ HOME = Path('/home/ubuntu')
 ENV = HOME / '.config/bubblewash/env'
 CURRENT = HOME / 'bubblewash-pilot'
 RUNTIME = HOME / 'bubblewash-runtime'
-FIELDS = {'ownerEmail', 'reviewedSha', 'nodePath', 'nodeSha256', 'databasePath', 'mode', 'deliveryApproved', 'sourcePins'}
+FIELDS = {'ownerEmail', 'reviewedSha', 'runtimeSha', 'nodePath', 'nodeSha256', 'mode', 'deliveryApproved', 'sourcePins'}
 NODE_PROGRAM = """import {runSyntheticResearchTest} from './scripts/send-synthetic-research-test.mjs';
 const [mode,databasePath]=process.argv.slice(1);
 const result=await runSyntheticResearchTest({mode,databasePath,input:process.stdin});
@@ -27,9 +27,9 @@ def validate_request(value):
         raise ValueError('request refused')
     if not re.fullmatch(r'[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+', value.get('ownerEmail', '')) or len(value['ownerEmail']) > 254:
         raise ValueError('recipient refused')
-    if not re.fullmatch('[a-f0-9]{40}', value.get('reviewedSha', '')) or not re.fullmatch('[a-f0-9]{64}', value.get('nodeSha256', '')):
+    if not all(re.fullmatch('[a-f0-9]{40}', value.get(k, '')) for k in ('reviewedSha', 'runtimeSha')) or not re.fullmatch('[a-f0-9]{64}', value.get('nodeSha256', '')):
         raise ValueError('pin refused')
-    for key in ('nodePath', 'databasePath'):
+    for key in ('nodePath',):
         path = value.get(key)
         if type(path) is not str or not path.startswith('/') or len(path) > 4096 or any(c in path for c in ('\0', '\r', '\n')) or '..' in Path(path).parts:
             raise ValueError('path refused')
@@ -50,6 +50,11 @@ def retained_environment(f, installer, uid, gid):
     # Existing descriptor-relative installer pattern, but read-only: no replacement.
     parent = ENV.parent
     f.require(parent.resolve(strict=True) == parent)
+    parents = {}
+    for path in (parent, parent.parent):
+        info = path.stat()
+        f.require(stat.S_ISDIR(info.st_mode) and info.st_uid in (0, uid) and not info.st_mode & 0o022)
+        parents[path] = installer.identity(info)[:6]
     directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     fd = None
     try:
@@ -61,6 +66,8 @@ def retained_environment(f, installer, uid, gid):
         raw = os.read(fd, 65537)
         f.require(len(raw) == info.st_size)
         def unchanged():
+            for path, expected in parents.items():
+                f.require(path.resolve(strict=True) == path and installer.identity(path.stat())[:6] == expected)
             f.require(parent.resolve(strict=True) == parent and installer.identity(parent.lstat())[:6] == parent_identity)
             f.require(installer.identity(os.stat(ENV.name, dir_fd=directory, follow_symlinks=False)) == installer.identity(info))
             f.require(installer.identity(os.fstat(fd)) == installer.identity(info))
@@ -104,7 +111,7 @@ def verify_source(f, release, pins, uid):
     f.require(count > 1)
 
 
-def verify_runtime(f, preflight, release, node, uid):
+def verify_runtime(f, preflight, release, node, uid, database):
     # Bind the independently supplied executable pin to the actual listener,
     # not merely systemd MainPID, which can be npm or a launcher.
     env = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': str(HOME), 'LC_ALL': 'C',
@@ -127,19 +134,25 @@ def verify_runtime(f, preflight, release, node, uid):
               and (Path('/proc') / str(main) / 'cwd').resolve(strict=True) == release)
     f.require(preflight.bounded_bytes(proc / 'cgroup', 65536) == preflight.bounded_bytes(Path('/proc') / str(main) / 'cgroup', 65536))
     f.require(preflight.runtime_flags(listener).get('NODE_ENV') == 'production')
+    # Retain only the configured DB binding; no process values are reported.
+    database_values = [entry.partition(b'=')[2] for entry in
+                       preflight.bounded_bytes(proc / 'environ', 1024 * 1024).split(b'\0')
+                       if entry.partition(b'=')[0] == b'BUBBLEWASH_DATABASE_PATH']
+    f.require(database_values == [str(database).encode()])
     f.require(identity == preflight.process_identity(listener) and main_identity == preflight.process_identity(main))
 
 
 def run(request, f, installer, preflight, uid, gid):
     request = validate_request(request)
-    metadata, _ = f.installer_metadata(uid, gid)
-    f.require(all(metadata.get(k) is True for k in ('environmentMetadataSafe', 'deploymentLockMetadataSafe', 'toolsMetadataSafe')))
+    # Actual app-UID lock, parent, file and executable guards below are authoritative.
     attempted = False
     try:
         with installer.deployment_lock(RUNTIME, uid) as lock_unchanged, retained_environment(f, installer, uid, gid) as (raw, env_unchanged):
             configured = preflight.parse_env(raw.decode())
             f.require(configured.get('NODE_ENV', 'production') == 'production' and configured.get('BUBBLEWASH_DATABASE_DRIVER') == 'sqlite')
-            f.require(configured.get('BUBBLEWASH_DATABASE_PATH') == request['databasePath'])
+            database_path = configured.get('BUBBLEWASH_DATABASE_PATH', '')
+            f.require(database_path.startswith('/') and len(database_path) <= 4096 and
+                      not any(c in database_path for c in ('\0', '\r', '\n')) and '..' not in Path(database_path).parts)
             key = configured.get('BUBBLEWASH_RESEARCH_RESEND_KEY', '')
             f.require(re.fullmatch(r're_[A-Za-z0-9_-]{16,200}', key))
             release = CURRENT.resolve(strict=True)
@@ -147,13 +160,13 @@ def run(request, f, installer, preflight, uid, gid):
             marker_info = f.source(marker, uid, 65536); f.require(marker_info['trustedOwnership'])
             marker_raw = preflight.bounded_text(marker)
             marker_value = preflight.parse_env(marker_raw)
-            f.require(marker_value.get('sha') == request['reviewedSha'] and Path(marker_value.get('path', '')).resolve(strict=True) == release)
+            f.require(marker_value.get('sha') == request['runtimeSha'] and Path(marker_value.get('path', '')).resolve(strict=True) == release)
             verify_source(f, release, request['sourcePins'], uid)
             node = f.trusted_executable(request['nodePath'])
             f.require(node == request['nodePath'] and f.source(node, 0, 128 * 1024 * 1024)['sha256'] == request['nodeSha256'])
             clean = {'PATH': '/usr/bin:/bin', 'HOME': str(HOME), 'LC_ALL': 'C'}
             f.require(re.fullmatch(rb'v22\.\d+\.\d+\n', f.bounded([node, '--version'], env=clean, limit=128)))
-            database = Path(request['databasePath']); info = database.lstat()
+            database = Path(database_path); info = database.lstat()
             f.require(database.resolve(strict=True) == database and stat.S_ISREG(info.st_mode) and info.st_nlink == 1
                       and info.st_uid == uid and not info.st_mode & 0o022)
             f.require(all(x.get('kind') == 'directory' and x.get('uid') in (0, uid) and not x.get('mode', 0) & 0o022 for x in f.ancestry(database.parent)))
@@ -168,7 +181,7 @@ def run(request, f, installer, preflight, uid, gid):
                 f.require(CURRENT.resolve(strict=True) == release and preflight.bounded_text(marker) == marker_raw)
                 f.require(f.source(marker, uid, 65536) == marker_info)
                 f.require(database.resolve(strict=True) == database and tuple(getattr(database.lstat(), k) for k in ('st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid', 'st_nlink')) == binding)
-            verify_runtime(f, preflight, release, node, uid)
+            verify_runtime(f, preflight, release, node, uid, database)
             unchanged()
             child_env = {**clean, 'NODE_ENV': 'production', 'BUBBLEWASH_DATABASE_PATH': str(database), 'BUBBLEWASH_RESEARCH_RESEND_KEY': key}
             private = json.dumps({'ownerEmail': request['ownerEmail']}, separators=(',', ':')).encode()

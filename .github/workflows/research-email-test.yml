@@ -3,7 +3,11 @@ on:
   workflow_dispatch:
     inputs:
       reviewed_sha:
-        description: 'Exact reviewed main SHA, already deployed; source drift refuses execution'
+        description: 'Exact reviewed main control SHA; source drift refuses execution'
+        required: true
+        type: string
+      runtime_sha:
+        description: 'Exact separately reviewed deployed survey-only runtime commit, matching pinned full tree'
         required: true
         type: string
       node_path:
@@ -14,10 +18,6 @@ on:
         description: 'Independently verified SHA256 of that existing Node executable'
         required: true
         type: string
-      database_path:
-        description: 'Independently verified existing SQLite path, matched to protected service environment'
-        required: true
-        type: string
       mode:
         description: 'Check is read-only; send consumes the single synthetic email attempt'
         required: true
@@ -25,7 +25,7 @@ on:
         type: choice
         options: [check, send]
       delivery_approved:
-        description: 'True only for the approved fixed synthetic email to info@bubblewash.co with protected owner CC'
+        description: 'True only for the approved fixed synthetic email to the protected owner recipient only; no CC or BCC'
         required: true
         default: false
         type: boolean
@@ -46,6 +46,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Verify exact reviewed source and private protocol tests
         env:
           REVIEWED_SHA: ${{ inputs.reviewed_sha }}
@@ -75,9 +76,9 @@ jobs:
         env:
           BUBBLEWASH_OWNER_EMAIL: ${{ secrets.BUBBLEWASH_OWNER_EMAIL }}
           REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          RUNTIME_SHA: ${{ inputs.runtime_sha }}
           VERIFIED_NODE_PATH: ${{ inputs.node_path }}
           VERIFIED_NODE_SHA256: ${{ inputs.node_sha256 }}
-          VERIFIED_DATABASE_PATH: ${{ inputs.database_path }}
           TEST_MODE: ${{ inputs.mode }}
           DELIVERY_APPROVED: ${{ inputs.delivery_approved }}
         run: python3 -B ops/transport-research-test.py
