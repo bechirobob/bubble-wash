@@ -402,6 +402,145 @@ REHEARSAL_GUARD_CODES = {
 }
 
 
+# Diagnostic-only secondary request. Only exact fixed categories leave the child;
+# the maintenance token is supplied over stdin, never argv, environment or files.
+READINESS_BLOCKER_CATEGORIES = {
+    'The operations database did not pass its integrity/read check.': 'DB_CHECK',
+    'The operations database is unavailable.': 'DB_UNAVAILABLE',
+    'The managed staff account store is unavailable.': 'STAFF_STORE',
+    'Configure an effective active admin with valid non-demo credentials; disabled or shadowed admin access is not ready.': 'ADMIN',
+    'Set BUBBLEWASH_MFA_ENCRYPTION_KEY to a base64-encoded 32-byte key.': 'MFA_CONFIG',
+    'Keep BUBBLEWASH_ADMIN_MFA_REQUIRED and NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED aligned.': 'MFA_CONFIG',
+    'Set BUBBLEWASH_BACKUP_ENCRYPTION_KEY to a base64-encoded 32-byte key.': 'BACKUP',
+    'Set BUBBLEWASH_BACKUP_STATUS_PATH and run an encrypted backup with restore verification.': 'BACKUP',
+    'The latest encrypted database backup is missing or older than 30 hours.': 'BACKUP',
+    'The latest off-site backup has no successful restore verification.': 'BACKUP',
+    'The latest verified backup has not been confirmed in off-host storage.': 'BACKUP',
+    'The encrypted backup status file is unavailable or invalid.': 'BACKUP',
+}
+READINESS_BLOCKER_CATEGORIES.update(dict.fromkeys((
+    'Remove BUBBLEWASH_ENABLE_DEMO_LOGIN from production; demo login cannot be enabled in production.',
+    'Set BUBBLEWASH_DISABLE_DEMO_LOGIN=true in production.',
+    'Set BUBBLEWASH_SESSION_SECRET to a strong 32+ character value in production.',
+    'Primary and off-site backup directories must be different mounted destinations.',
+    'Set BUBBLEWASH_DATABASE_PATH to an absolute path on the mounted persistent volume.',
+    'Set BUBBLEWASH_DATABASE_DRIVER=sqlite for the supported single-replica pilot topology.',
+    'Set BUBBLEWASH_PUBLIC_URL to the HTTPS site origin without a path, query, or fragment.',
+    'Set BUBBLEWASH_PUBLIC_URL to the public HTTPS site origin.',
+    'NEXT_PUBLIC_BUBBLEWASH_WHATSAPP must be a real international-format customer WhatsApp number or remain unset.',
+    'NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL must be a valid customer contact email or remain unset.',
+    'Set PAYSTACK_SECRET_KEY before enabling online payments.',
+    'Enable exactly one trusted client-IP mode for the deployment edge.',
+    *('Set ' + name + ' to an absolute path.' for name in (
+        'BUBBLEWASH_BACKUP_PRIMARY_DIR', 'BUBBLEWASH_BACKUP_OFFSITE_DIR', 'BUBBLEWASH_BACKUP_STATUS_PATH')),
+    *('Set ' + name + ' before enabling automated updates.' for name in (
+        'RESEND_API_KEY', 'BUBBLEWASH_EMAIL_FROM', 'BUBBLEWASH_OPERATIONS_EMAIL', 'WHATSAPP_ACCESS_TOKEN',
+        'WHATSAPP_PHONE_NUMBER_ID', 'BUBBLEWASH_OPERATIONS_WHATSAPP', 'WHATSAPP_BOOKING_TEMPLATE',
+        'WHATSAPP_OPERATIONS_TEMPLATE')),
+), 'CONFIG'))
+READINESS_CATEGORIES = frozenset((*READINESS_BLOCKER_CATEGORIES.values(), 'UNKNOWN'))
+READINESS_STATES = frozenset(('READY', 'BLOCKED', 'DETAIL_UNAVAILABLE', 'RESPONSE_INVALID',
+    'RESPONSE_TOO_LARGE', 'HTTP_UNEXPECTED', 'TRANSPORT_FAILED', 'TOKEN_UNAVAILABLE',
+    'NAMESPACE_UNVERIFIED', 'TIMEOUT', 'DIAGNOSTIC_FAILED'))
+READINESS_HTTP_STATES = frozenset(('HTTP_200', 'HTTP_503', 'OTHER_HTTP', 'UNAVAILABLE'))
+READINESS_READER = r"""
+import http.client
+import json
+import sys
+
+def result(state, http='UNAVAILABLE', categories=()):
+    return {'state': state, 'http': http, 'categories': sorted(set(categories))}
+
+def classify(status, raw):
+    http = {200: 'HTTP_200', 503: 'HTTP_503'}.get(status, 'OTHER_HTTP')
+    if len(raw) > 8192:
+        return result('RESPONSE_TOO_LARGE', http)
+    if status not in (200, 503):
+        return result('HTTP_UNEXPECTED', http)
+    try:
+        body = json.loads(raw)
+        if (not isinstance(body, dict) or body.get('ok') is not (status == 200) or
+                body.get('service') != 'Bubble Wash operations app' or
+                body.get('readiness') != ('ready' if status == 200 else 'blocked')):
+            return result('RESPONSE_INVALID', http)
+        if 'checks' not in body:
+            return result('DETAIL_UNAVAILABLE', http)
+        checks = body['checks']
+        if (not isinstance(checks, list) or len(checks) > 64 or
+                any(type(item) is not str or len(item) > 512 for item in checks) or
+                bool(checks) != (status == 503)):
+            return result('RESPONSE_INVALID', http)
+        return result('READY' if status == 200 else 'BLOCKED', http,
+                      (CATEGORIES.get(item, 'UNKNOWN') for item in checks))
+    except Exception:
+        return result('RESPONSE_INVALID', http)
+
+def read_ready():
+    connection = None
+    try:
+        token = sys.stdin.buffer.read(4097)
+        if not 32 <= len(token) <= 4096 or any(byte < 33 or byte > 126 for byte in token):
+            return result('TOKEN_UNAVAILABLE')
+        # http.client connects directly: no proxies, redirects or retries.
+        connection = http.client.HTTPConnection('127.0.0.1', 3001, timeout=3)
+        connection.request('GET', '/api/ready', headers={'Authorization': 'Bearer ' + token.decode('ascii')})
+        response = connection.getresponse()
+        return classify(response.status, response.read(8193))
+    except Exception:
+        return result('TRANSPORT_FAILED')
+    finally:
+        if connection is not None:
+            connection.close()
+
+if __name__ == '__main__':
+    try:
+        outcome = read_ready()
+    except BaseException:
+        outcome = result('DIAGNOSTIC_FAILED')
+    print(json.dumps(outcome), flush=True)
+"""
+
+
+def readiness_diagnostic(candidate, values, unit, pid, report):
+    def fixed(state):
+        return {'state': state, 'http': 'UNAVAILABLE', 'categories': []}
+    token = values.get('BUBBLEWASH_MAINTENANCE_TOKEN', '')
+    if not re.fullmatch(r'[!-~]{32,4096}', token):
+        return fixed('TOKEN_UNAVAILABLE')
+    try:
+        if verify_private_network(unit, candidate) != pid:
+            return fixed('NAMESPACE_UNVERIFIED')
+    except Exception:
+        return fixed('NAMESPACE_UNVERIFIED')
+    outcome = fixed('DIAGNOSTIC_FAILED')
+    try:
+        script = 'CATEGORIES = ' + repr(READINESS_BLOCKER_CATEGORIES) + '\n' + READINESS_READER
+        completed = subprocess.run(['nsenter', '--target', str(pid), '--net', '--',
+                                    'python3', '-I', '-B', '-c', script], input=token.encode('ascii'),
+                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+                                   timeout=max(0.001, min(7, report.deadline - time.monotonic())))
+        if completed.returncode == 0 and len(completed.stdout) <= 1024:
+            value = json.loads(completed.stdout)
+            if (type(value) is dict and set(value) == {'state', 'http', 'categories'} and
+                    type(value['state']) is str and value['state'] in READINESS_STATES and
+                    type(value['http']) is str and value['http'] in READINESS_HTTP_STATES and
+                    type(value['categories']) is list and len(value['categories']) <= len(READINESS_CATEGORIES) and
+                    all(type(item) is str and item in READINESS_CATEGORIES for item in value['categories'])):
+                outcome = {**value, 'categories': sorted(set(value['categories']))}
+    except subprocess.TimeoutExpired:
+        outcome = fixed('TIMEOUT')
+    except Exception:
+        pass  # Never propagate child output, request details or raw exceptions.
+    # A stale/replaced process cannot contribute a trusted diagnosis. The outer
+    # rehearsal deadline still applies; cancellation goes directly to cleanup.
+    try:
+        if verify_private_network(unit, candidate) != pid:
+            return fixed('NAMESPACE_UNVERIFIED')
+    except Exception:
+        return fixed('NAMESPACE_UNVERIFIED')
+    return outcome
+
+
 class RehearsalDeadline(BaseException):
     # Must escape health's OSError/ValueError retry, unlike TimeoutError.
     pass
@@ -425,6 +564,7 @@ class RehearsalReport:
         self.cleanup = True
         self.safe_to_remove = True
         self.deadline = time.monotonic() + 300
+        self.readiness = None
 
     def fail(self, error):
         if self.failure is None:
@@ -441,7 +581,8 @@ class RehearsalReport:
         print(json.dumps({'schema': 'bubblewash-rehearsal/v1', 'ok': self.failure is None,
                           'stage': self.failure['stage'] if self.failure else 'COMPLETE',
                           'error': self.failure['error'] if self.failure else 'NONE',
-                          'cleanup': self.cleanup, 'activationAttempted': False}), flush=True)
+                          'cleanup': self.cleanup, 'activationAttempted': False,
+                          **({'readinessDiagnostic': self.readiness} if self.readiness is not None else {})}), flush=True)
 
 
 def resume_rehearsal_deadline(report):
@@ -613,8 +754,14 @@ def rehearse(candidate, values, db, status_path, owner, unit, report=None):
                       ('/manage', 'MANAGE'), ('/early-access', 'EARLY_ACCESS'), ('/api/ready', 'READY'))
             for path, label in routes:
                 rehearsal_stage(report, 'ROUTE_' + label)
-                network_command(['curl', '--fail', '--silent', '--max-time', '15', '--output', '/dev/null',
-                                 'http://127.0.0.1:3001' + path], probe_pid)
+                try:
+                    network_command(['curl', '--fail', '--silent', '--max-time', '15', '--output', '/dev/null',
+                                     'http://127.0.0.1:3001' + path], probe_pid)
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
+                    if report is not None and label == 'READY':
+                        report.fail(error)  # Diagnosis can never replace or forgive this failure.
+                        report.readiness = readiness_diagnostic(candidate, values, unit + '-probe.service', probe_pid, report)
+                    raise
             rehearsal_stage(report, 'RUNTIME_AFTER')
             check_runtime(candidate, probe_values, unit + '-probe.service', 3001, False, probe_pid)
             rehearsal_stage(report, 'NAMESPACE_AFTER')
