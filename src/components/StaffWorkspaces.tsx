@@ -1,5 +1,6 @@
 "use client";
 import { bookingLabel } from "@/lib/booking-label";
+import { staffActivitySubject as activitySubject } from "@/lib/staff-activity-projection";
 import { StaffAccountPanel, StaffInvoicePanel, CustomerDecisionPanel } from "./StaffAdminControls";
 
 import Link from "next/link";
@@ -300,12 +301,9 @@ function activityType(record: SubmissionRecord) {
   return activityValue(record, "submissionType") || "update";
 }
 
-function activitySubject(record: SubmissionRecord) {
-  return activityValue(record, "company", "staffName", "driverName", "name", "orderId", "ticketId") || "Bubble Wash request";
-}
-
 function activityEntityKey(record: SubmissionRecord) {
-  return activityValue(record, "orderId", "ticketId", "email", "phone") || `${activityType(record)}:${activitySubject(record)}`;
+  const identitySubject = activityValue(record, "company", "staffName", "driverName", "name", "orderId", "ticketId") || "Bubble Wash request";
+  return activityValue(record, "orderId", "ticketId", "email", "phone") || `${activityType(record)}:${identitySubject}`;
 }
 
 function activityCategory(record: SubmissionRecord): ActivityCategory {
@@ -750,7 +748,7 @@ function RecentActivity({ filter, initialSelectedId = "", basePath }: { filter?:
         <Link className="staffBackLink" href={basePath}>← Back to activity</Link>
         <div className="staffDetailHeader">
           <div><span className="staffFieldLabel">{activityTypeLabel(activityType(selectedRecord))}</span><h2>{activitySubject(selectedRecord)}</h2><p>{changeSummaries.get(selectedRecord.id)}</p></div>
-          <div className="staffDetailReference"><span>Reference</span><strong>{selectedRecord.id}</strong><time>{formatActivityTime(selectedRecord.createdAt)}</time></div>
+          <div className="staffDetailReference"><span>Saved</span><time>{formatActivityTime(selectedRecord.createdAt)}</time></div>
         </div>
         <div className="activityDetailActions">
           <button className="button secondary" onClick={() => void copyValue("Reference", selectedRecord.id)} type="button">Copy reference</button>
@@ -776,7 +774,7 @@ function RecentActivity({ filter, initialSelectedId = "", basePath }: { filter?:
         </div>
         <BoundedList label="Recent activity" noun="updates" className="staffActivityList" resetKey={`${category}:${scope}:${windowMode}:${sortKey}:${sortDirection}`} loading={!hasLoaded} emptyState={<p className="staffEmptyState">No activity matches these filters.</p>}>
           {visibleRecords.map((record) => <article key={record.id} role="listitem"><Link className={`staffActivityRow ${freshIds.includes(record.id) ? "is-new" : ""}`} href={`${basePath}${basePath.includes("?") ? "&" : "?"}activity=${encodeURIComponent(record.id)}`}>
-            <span><strong>{activitySubject(record)}</strong><small>{record.id}</small></span>
+            <span><strong>{activitySubject(record)}</strong></span>
             <span><strong>{activityTypeLabel(activityType(record))}</strong><small>{changeSummaries.get(record.id)}</small></span>
             <time>{formatActivityTime(record.createdAt)}</time>
             <b>View details</b>

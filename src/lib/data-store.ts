@@ -430,6 +430,7 @@ function projectedSubmissionData(row: StoredSubmissionRow): Record<string, unkno
   const data = submissionDataWithoutLabels(JSON.parse(row.data) as Record<string, unknown>);
   const db = getDatabase();
   if (isRootBooking(data)) data.bookingReference = bookingReferenceForOrder(db, row.id);
+  else if (typeof data.orderId === "string" && data.orderId.trim()) data.bookingReference = bookingReferenceForOrder(db, data.orderId.trim());
   if (typeof data.vendorId === "string") data.vendorCode = vendorCodeForId(db, data.vendorId);
   return data;
 }

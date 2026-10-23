@@ -202,6 +202,38 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
     await expect(admin.locator('.automationPanel')).toContainText('No further action required.');
     await expect(admin.locator('.automationPanel')).not.toContainText('Waiting');
     await evidence(admin, testInfo, 'admin-closed');
+    // Ordinary activity summaries use the display label, while the existing
+    // event route and explicitly opened audit identifiers retain their keys.
+    const activityResponse = await admin.request.get('/api/submissions');
+    expect(activityResponse.ok()).toBeTruthy();
+    const paymentEvent = (await activityResponse.json()).records.find(record => record.data.submissionType === 'payment-update' && record.data.orderId === booking.id);
+    expect(paymentEvent).toBeTruthy();
+    expect(paymentEvent.data.bookingReference).toBe(booking.bookingReference);
+    expect(paymentEvent.data.orderId).toBe(booking.id);
+    expect(paymentEvent.id).not.toBe(booking.bookingReference);
+    await beforeHardNavigation(admin, 'admin activity summary');
+    await admin.goto('/admin?view=overview');
+    const recent = admin.locator('section').filter({ has: admin.getByRole('heading', { name: 'Latest operational changes', exact: true }) });
+    const paymentSummary = recent.locator('.staffSimpleRow').filter({ has: admin.getByText('Payment Update', { exact: true }) }).filter({ has: admin.getByText(booking.bookingReference, { exact: true }) });
+    await expect(paymentSummary).toBeVisible();
+    await expect(paymentSummary).not.toContainText(booking.id);
+    await expect(paymentSummary).not.toContainText(paymentEvent.id);
+    await evidence(admin, testInfo, 'admin-activity-reference');
+    await beforeHardNavigation(admin, 'admin activity list');
+    await admin.goto('/admin?view=activity');
+    const activityLink = admin.locator('.staffActivityRow').filter({ has: admin.getByText(booking.bookingReference, { exact: true }) }).filter({ has: admin.getByText('Payment Update', { exact: true }) });
+    await expect(activityLink).toHaveAttribute('href', `/admin?view=activity&activity=${encodeURIComponent(paymentEvent.id)}`);
+    await expect(activityLink).not.toContainText(booking.id);
+    await expect(activityLink).not.toContainText(paymentEvent.id);
+    await activityLink.click();
+    await expect(admin.locator('.activitySection .staffDetailHeader h2')).toHaveText(booking.bookingReference);
+    await expect(admin.locator('.activitySection .staffDetailHeader')).not.toContainText(booking.id);
+    await expect(admin.locator('.activitySection .staffDetailHeader')).not.toContainText(paymentEvent.id);
+    const identifiers = admin.locator('.staffDetailDisclosure').filter({ has: admin.getByText('Identifiers', { exact: true }) });
+    await identifiers.locator('summary').click();
+    await expect(identifiers.getByText(paymentEvent.id, { exact: true })).toBeVisible();
+    await expect(identifiers.getByText(booking.id, { exact: true })).toBeVisible();
+    await evidence(admin, testInfo, 'admin-activity-audit');
     const tracking = await customer.request.get(`/api/track?id=${booking.id}`, { timeout: 15_000 });
     expect(tracking.ok(), `Tracking: HTTP ${tracking.status()}`).toBeTruthy();
     expect((await tracking.json()).tracking.status).toBe('Closed');
