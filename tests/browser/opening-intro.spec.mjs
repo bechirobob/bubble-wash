@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { fixtureRequestPolicy } from './request-policy.mjs';
 test.beforeEach(async({page})=>{await page.route('**/*',route=>fixtureRequestPolicy(route.request().url())===null?route.abort('blockedbyclient'):route.continue());});
@@ -108,6 +109,9 @@ test('survey reduced-motion entry bypasses the intro', async ({ page }) => {
 // Open-mode acceptance uses only the isolated synthetic fixture. Production flags
 // and credentials are never modified by this test file.
 test.describe('interim survey open-fixture acceptance',()=>{
+  // Distinct documentation-only clients; the existing loopback fixture trusts proxy headers.
+  // Keep production thresholds unchanged and prove the same-client limit below.
+  test.beforeEach(async({context},testInfo)=>{const suffix=createHash('sha256').update([testInfo.project.name,testInfo.testId,testInfo.retry,testInfo.repeatEachIndex].join(':')).digest('hex').slice(0,24).match(/.{4}/g).join(':');await context.setExtraHTTPHeaders({'x-forwarded-for':'2001:db8:'+suffix});});
   test.skip(process.env.BUBBLEWASH_TEST_RESEARCH_OPEN!=='true','Requires isolated open survey fixture');
   async function enter(page,instrument='consumer'){
     await page.emulateMedia({reducedMotion:'reduce'});
@@ -207,7 +211,10 @@ test.describe('interim survey open-fixture acceptance',()=>{
       await page.getByRole('button',{name:'Continue',exact:true}).click();
     }
     const saved=page.waitForResponse(r=>r.url().endsWith('/api/research/responses')&&r.request().method()==='POST');
-    await page.getByRole('button',{name:'Submit response',exact:true}).click();expect((await saved).status()).toBe(200);
+    await page.getByRole('button',{name:'Submit response',exact:true}).click();const result=await saved;expect(result.status()).toBe(200);
+    const payload=result.request().postDataJSON();const client=(await result.request().allHeaders())['x-forwarded-for'];expect(client).toMatch(/^2001:db8:/);
+    for(let attempt=0;attempt<4;attempt++){const duplicate=await page.request.post('/api/research/responses',{headers:{Origin:'http://localhost:3100','x-forwarded-for':client},data:payload});expect(duplicate.status()).toBe(200);expect((await duplicate.json()).duplicate).toBe(true);}
+    const limited=await page.request.post('/api/research/responses',{headers:{Origin:'http://localhost:3100','x-forwarded-for':client},data:payload});expect(limited.status()).toBe(429);
     await expect(page.getByRole('status')).toHaveText('✓ RESPONSE SAVED');
     await expect(page.getByRole('heading',{name:'Thank you!',exact:true})).toBeVisible();
     await expect(page.getByRole('button',{name:'Submit response',exact:true})).toHaveCount(0);
