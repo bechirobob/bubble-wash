@@ -886,7 +886,7 @@ export function operationsDataMetrics() {
     submissions: submissions.total,
     earlyAccess: { total: earlyAccess.total, active: earlyAccess.active ?? 0 },
     privacyRequests: { total: privacy.total, open: privacy.open ?? 0 },
-    notifications: { pending: outbox.pending ?? 0, failed: outbox.failed ?? 0, sent: outbox.sent ?? 0 },
+    notifications: outbox,
   };
 }
 
@@ -916,6 +916,9 @@ export function purgeOperationalData(now = Date.now(), householdLaunchDate = pro
       WHERE status = 'enrolled' AND recovery_bundle_encrypted IS NOT NULL AND updated_at < ?
     `).run(isoDaysAgo(1)).changes;
     result.workflowClaims = db.prepare("DELETE FROM workflow_action_claims WHERE claimed_at < ?").run(isoDaysAgo(90)).changes;
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='operational_command_receipts'").get()) {
+      result.operationalCommandReceipts = db.prepare("DELETE FROM operational_command_receipts WHERE created_at < ?").run(isoDaysAgo(90)).changes;
+    }
     result.notificationLogs = db.prepare("DELETE FROM notification_outbox WHERE updated_at < ?").run(isoDaysAgo(90)).changes;
     result.optedOutSignups = db.prepare("DELETE FROM early_access_signups WHERE marketing_status = 'opted_out' AND updated_at < ?").run(isoDaysAgo(30)).changes;
     const launch = /^\d{4}-\d{2}-\d{2}$/.test(householdLaunchDate) ? new Date(`${householdLaunchDate}T00:00:00.000Z`).getTime() : Number.NaN;
@@ -942,6 +945,10 @@ export function purgeOperationalData(now = Date.now(), householdLaunchDate = pro
       db.prepare("DELETE FROM driver_live_locations WHERE order_id = ? COLLATE NOCASE").run(orderId);
       db.prepare("DELETE FROM workflow_action_claims WHERE order_id = ? COLLATE NOCASE").run(orderId);
       db.prepare("DELETE FROM delivery_proofs WHERE order_id = ? COLLATE NOCASE").run(orderId);
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='operational_work_ownership'").get()) {
+        const columns = db.prepare("PRAGMA table_info(operational_work_ownership)").all() as { name: string }[];
+        if (columns.some((column) => column.name === "order_id")) db.prepare("DELETE FROM operational_work_ownership WHERE order_id = ? COLLATE NOCASE").run(orderId);
+      }
       deletedOrderRecords += db.prepare(`
         DELETE FROM submissions WHERE id = @orderId COLLATE NOCASE OR json_extract(data, '$.orderId') = @orderId COLLATE NOCASE
       `).run({ orderId }).changes;
@@ -1084,12 +1091,26 @@ function driverLocationFromRow(row: StoredDriverLocationRow): StoredDriverLocati
   };
 }
 
+// Keep optional location stop schema out of ordinary startup/readiness initialization.
+// Existing production reset/backup guards continue to reject activated extended schemas.
+function driverLocationDatabase() {
+  const db = getDatabase();
+  db.exec("CREATE TABLE IF NOT EXISTS driver_location_stops (driver_id TEXT PRIMARY KEY, captured_before TEXT NOT NULL)");
+  return db;
+}
+export function readDriverLocationStop(driverId: string) {
+  const db = getDatabase();
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='driver_location_stops'").get()) return null;
+  const row = db.prepare("SELECT captured_before FROM driver_location_stops WHERE driver_id=?").get(driverId.trim().toLowerCase()) as { captured_before: string } | undefined;
+  return row?.captured_before ?? null;
+}
+
 export function upsertDriverLiveLocation(location: StoredDriverLocation) {
-  const result = getDatabase().prepare(`
+  const result = driverLocationDatabase().prepare(`
     INSERT INTO driver_live_locations
       (driver_id, order_id, latitude, longitude, accuracy_meters, captured_at, received_at)
-    VALUES
-      (@driverId, @orderId, @latitude, @longitude, @accuracyMeters, @capturedAt, @receivedAt)
+    SELECT @driverId, @orderId, @latitude, @longitude, @accuracyMeters, @capturedAt, @receivedAt
+    WHERE NOT EXISTS (SELECT 1 FROM driver_location_stops WHERE driver_id = @driverId COLLATE NOCASE AND captured_before >= @capturedAt)
     ON CONFLICT(driver_id) DO UPDATE SET
       order_id = excluded.order_id,
       latitude = excluded.latitude,
@@ -1119,6 +1140,20 @@ export function readDriverLiveLocations(): StoredDriverLocation[] {
     ORDER BY captured_at DESC
   `).all() as StoredDriverLocationRow[];
   return rows.map(driverLocationFromRow);
+}
+
+// A shared privacy boundary for browser and native clients. Delayed stops never erase newer shares.
+export function stopDriverLiveLocation(driverId: string, capturedBefore = new Date().toISOString()) {
+  const id = driverId.trim().toLowerCase();
+  if (!id || !Number.isFinite(Date.parse(capturedBefore))) throw new Error("A valid rider and stop cutoff are required.");
+  const cutoff = new Date(capturedBefore).toISOString();
+  const db = driverLocationDatabase();
+  return db.transaction(() => {
+    db.prepare("INSERT INTO driver_location_stops VALUES (?,?) ON CONFLICT(driver_id) DO UPDATE SET captured_before=max(captured_before,excluded.captured_before)").run(id, cutoff);
+    const newerLocationRetained = Boolean(db.prepare("SELECT 1 FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE AND captured_at > ?").get(id, cutoff));
+    const cleared = db.prepare("DELETE FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE AND captured_at <= ?").run(id, cutoff).changes > 0;
+    return { cleared, newerLocationRetained };
+  }).immediate();
 }
 
 export function deleteDriverLiveLocation(driverId: string) {
@@ -1194,6 +1229,7 @@ export function resetDataStoreForTests() {
   database.prepare("DELETE FROM workflow_action_claims").run();
   database.prepare("DELETE FROM payment_verifications").run();
   database.prepare("DELETE FROM driver_live_locations").run();
+  if (database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='driver_location_stops'").get()) database.prepare("DELETE FROM driver_location_stops").run();
   database.prepare("DELETE FROM early_access_signups").run();
   database.prepare("DELETE FROM privacy_requests").run();
   database.prepare("DELETE FROM notification_outbox").run();

@@ -1,5 +1,3 @@
-import { bookingReferenceForOrder } from "@/lib/booking-references";
-import { getDatabase } from "@/lib/data-store";
 import { NextRequest, NextResponse } from "next/server";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { publicTrackingView } from "@/lib/security";
@@ -22,6 +20,6 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    tracking: { ...publicTrackingView(order), bookingReference: bookingReferenceForOrder(getDatabase(), order.orderId) },
+    tracking: publicTrackingView(order),
   }, { headers: { "Cache-Control": "private, no-store" } });
 }

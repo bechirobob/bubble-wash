@@ -187,9 +187,11 @@ function publicCustomerLabel(value: string) {
   return first || "Bubble Wash customer";
 }
 
-export function publicTrackingView(order: Pick<OrderSummary, "orderId" | "createdAt" | "updatedAt" | "lastEventType" | "customer" | "status" | "nextStep" | "area" | "routeWindow" | "eventCount" | "route">) {
+export function publicTrackingView(order: Pick<OrderSummary, "orderId" | "createdAt" | "updatedAt" | "lastEventType" | "customer" | "status" | "nextStep" | "area" | "routeWindow" | "eventCount" | "route"> & Pick<OrderSummary, "bookingReference" | "vendorCode">) {
   return {
     id: order.orderId,
+    bookingReference: order.bookingReference ?? null,
+    vendorCode: order.vendorCode ?? null,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
     type: order.lastEventType,

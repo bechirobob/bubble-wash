@@ -1,0 +1,66 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+import { NextRequest } from 'next/server';
+const candidate=resolve(import.meta.dirname,'..');
+import { verifiedCrossVersionRoots } from './owner-outbox-compat-roots.mjs';
+const roots=verifiedCrossVersionRoots();
+const temporary=mkdtempSync(join(tmpdir(),'bw-owner-outbox-'));
+for(const key of Object.keys(process.env))if(/^(BUBBLEWASH_|NEXT_PUBLIC_BUBBLEWASH_|RESEND_|PAYSTACK_|WHATSAPP_)/.test(key))delete process.env[key];
+Object.assign(process.env,{NODE_ENV:'production',BUBBLEWASH_DATABASE_PATH:join(temporary,'synthetic.sqlite'),BUBBLEWASH_SESSION_SECRET:'synthetic-owner-cross-version-session-long-123456',BUBBLEWASH_MFA_ENCRYPTION_KEY:Buffer.alloc(32,41).toString('base64'),BUBBLEWASH_DISABLE_DEMO_LOGIN:'true',BUBBLEWASH_ADMIN_MFA_REQUIRED:process.argv.includes('--global-off')?'false':'true',BUBBLEWASH_TRUST_PROXY_HEADERS:'true',NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED:'false',NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED:'false',RESEND_API_KEY:'',PAYSTACK_SECRET_KEY:''});
+const originalFetch=globalThis.fetch;globalThis.fetch=async()=>{throw Error('External network prohibited');};
+const load=(root,name)=>import(pathToFileURL(join(roots[root],'src',name)).href);
+let checks=0;const equal=(a,b)=>{assert.deepEqual(a,b);checks++;};
+const request=(path,body)=>new NextRequest('https://bubblewash.co'+path,{method:'POST',headers:{origin:'https://bubblewash.co',host:'bubblewash.co','content-type':'application/json','x-forwarded-for':'192.0.2.240'},body:JSON.stringify(body)});
+const data=await load('baseline','lib/data-store.ts');
+const db=data.getDatabase();
+const snapshot=(excludeOutbox=false)=>JSON.stringify(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().filter(row=>!excludeOutbox||!['notification_outbox','booking_references','vendor_codes'].includes(row.name)).map(({name})=>[name,db.prepare(`SELECT rowid,* FROM "${name.replaceAll('"','""')}" ORDER BY rowid`).all()]));
+const modules=[];
+try {
+ const staff=await load('baseline','lib/staff-accounts.ts');staff.initializeStaffAccountsSchema(db);
+ const email='synthetic-owner@example.invalid',password='SyntheticOwnerStrongPassword!981';
+ const token=staff.inviteOwnerAccount({email,name:'Synthetic Owner'},'synthetic-fixture');
+ const activate=await load('baseline','app/api/staff/activate/route.ts');equal((await activate.POST(request('/api/staff/activate',{token,password}))).status,200);
+ const mfa=await load('baseline','lib/admin-mfa.ts');const auth=await load('baseline','lib/auth.ts');const totp=await load('baseline','lib/totp.ts');
+ const enroll=await load('baseline','app/api/admin/mfa/enroll/route.ts');
+ const begin=await enroll.POST(request('/api/admin/mfa/enroll',{email,password,action:'start'}));equal(begin.status,200);
+ const {enrollment}=await begin.json();
+ const confirmed=await enroll.POST(request('/api/admin/mfa/enroll',{email,password,action:'confirm',code:totp.totpCode(enrollment.manualKey)}));equal(confirmed.status,200);
+ const cookie=confirmed.cookies.get(auth.sessionCookieName)?.value;assert.ok(cookie);checks++;
+ equal(auth.decodeSession(cookie).allStaffAccess,true);
+ const before=snapshot(true);const ownerBefore=db.prepare('SELECT * FROM staff_owner_capabilities').all();const mfaBefore=db.prepare('SELECT * FROM admin_mfa_settings').all();
+ for (const script of ['scripts/migrate-booking-references.mjs','scripts/migrate-notification-outbox.mjs']) {
+  const migration=spawnSync(process.execPath,['--conditions=react-server','--experimental-strip-types',script,'--database',process.env.BUBBLEWASH_DATABASE_PATH],{cwd:candidate,env:process.env,encoding:'utf8'});
+  assert.equal(migration.status,0,migration.stderr);checks++;
+ }
+ equal(db.prepare('SELECT count(*) AS count FROM booking_references').get().count,0);
+ equal(db.prepare('SELECT count(*) AS count FROM vendor_codes').get().count,0);
+ equal(db.prepare("SELECT count(*) AS count FROM sqlite_sequence WHERE name IN ('booking_references','vendor_codes')").get().count,0);
+ equal(snapshot(true),before);equal(db.prepare('SELECT * FROM staff_owner_capabilities').all(),ownerBefore);equal(db.prepare('SELECT * FROM admin_mfa_settings').all(),mfaBefore);
+ for(const kind of ['candidate','fallback']) {
+  for(const name of ['auth.ts','admin-mfa.ts'])equal(readFileSync(join(roots[kind],'src/lib',name)),readFileSync(join(roots.baseline,'src/lib',name)));
+  equal(readFileSync(join(roots[kind],'src/lib/staff-accounts.ts')),readFileSync(join(roots.candidate,'src/lib/staff-accounts.ts')));
+  const current={data:await load(kind,'lib/data-store.ts'),auth:await load(kind,'lib/auth.ts'),mfa:await load(kind,'lib/admin-mfa.ts'),staff:await load(kind,'lib/staff-accounts.ts')};modules.push(current);
+  equal(current.auth.decodeSession(cookie).allStaffAccess,true);
+  assert.throws(()=>current.auth.encodeSession(current.auth.findStaffUser(email,password)),/MFA verification/);checks++;
+  const login=await load(kind,'app/api/login/route.ts');const denied=await login.POST(request('/api/login',{email,password}));assert.notEqual(denied.status,200);equal(denied.headers.get('set-cookie'),null);
+  equal(current.data.databaseReadiness(current.data.getDatabase()),true);
+ }
+ equal(db.prepare('SELECT * FROM staff_owner_capabilities').all(),ownerBefore);equal(db.prepare('SELECT * FROM admin_mfa_settings').all(),mfaBefore);
+ modules[0].data.appendSubmissionRecord({id:'POST-MIGRATION-ORDER',createdAt:new Date().toISOString(),source:'synthetic-test',data:{submissionType:'pickup-booking',name:'Synthetic',email:'customer@example.invalid'}});
+ const afterNewOrder=snapshot();equal(modules[1].data.findSubmissionRecordById('POST-MIGRATION-ORDER').id,'POST-MIGRATION-ORDER');equal(snapshot(),afterNewOrder);
+ const recoveryCodes=mfa.pendingAdminRecoveryCodes(email);assert.ok(recoveryCodes.length>1);checks++;
+ equal(modules[0].mfa.verifyAdminMfaCredential(email,recoveryCodes[0]),true);equal(modules[1].mfa.verifyAdminMfaCredential(email,recoveryCodes[0]),false);
+ equal(modules[1].mfa.verifyAdminMfaCredential(email,recoveryCodes[1]),true);equal(modules[0].mfa.verifyAdminMfaCredential(email,recoveryCodes[1]),false);
+ const consumed=snapshot();equal(modules[1].auth.decodeSession(cookie).allStaffAccess,true);equal(snapshot(),consumed);
+ db.prepare('DELETE FROM staff_owner_capabilities WHERE email=?').run(email);
+ equal(modules[0].auth.decodeSession(cookie)?.allStaffAccess,false);equal(modules[1].auth.decodeSession(cookie)?.allStaffAccess,false);
+ modules[0].staff.suspendStaffAccount(email,'synthetic-fixture');equal(modules[0].auth.decodeSession(cookie),null);equal(modules[1].auth.decodeSession(cookie),null);
+ equal(process.env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED,'false');equal(process.env.NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED,'false');
+ console.log(JSON.stringify({checks,globalMfa:process.env.BUBBLEWASH_ADMIN_MFA_REQUIRED,ownerAndMfaPreserved:true,newOrderPreserved:true,networkCalls:0}));
+} finally {
+ for(const current of modules)current.data.resetDataStoreForTests();data.resetDataStoreForTests();globalThis.fetch=originalFetch;rmSync(temporary,{recursive:true,force:true});
+}

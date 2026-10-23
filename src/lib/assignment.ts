@@ -1,4 +1,4 @@
-import { listDriverAvailability, listVendorAvailability, listVendorDeclines, reserveAssignmentCapacity, type DriverAvailability, type VendorAvailability } from "./availability-store.ts";
+import { listDriverAvailability, listVendorAvailability, listVendorDeclines, reserveAssignmentCapacity, vendorStatusAssignable, type DriverAvailability, type VendorAvailability } from "./availability-store.ts";
 import { serviceCapability } from "./service-capabilities.ts";
 
 export type AssignmentRecord = {
@@ -79,7 +79,7 @@ function listMatches(values: string[], wanted: string) {
 }
 
 function statusAllowsVendor(vendor: VendorAvailability) {
-  return vendor.capacityRemaining > 0 && !/(paused|closed|unavailable|inactive|suspended|tomorrow)/.test(vendor.availabilityStatus.toLowerCase());
+  return vendor.capacityRemaining > 0 && vendorStatusAssignable(vendor.availabilityStatus);
 }
 
 function statusAllowsDriver(driver: DriverAvailability) {
@@ -162,4 +162,26 @@ export function assignOrderFromAvailability(order: AvailabilityAssignmentOrder):
     driverCapacityRemaining: reservedDriver?.capacityRemaining,
     reservationId,
   };
+}
+
+/** Read-only recommendations. Existing explicit assignment remains the only capacity reservation. */
+export function assignmentCandidates(order: AvailabilityAssignmentOrder) {
+  const declined = new Set(listVendorDeclines(order.orderId).map((item) => item.vendorId));
+  const vendors = listVendorAvailability().map((vendor) => {
+    const reasons = [
+      ...(!statusAllowsVendor(vendor) ? ["No available capacity or partner is paused"] : []),
+      ...(!serviceMatches(vendor, order.serviceType) ? ["Service capability does not match"] : []),
+      ...(!listMatches(vendor.serviceZones, order.area) ? ["Approved coverage does not match"] : []),
+      ...(declined.has(vendor.vendorId) ? ["Partner declined this order"] : []),
+    ];
+    return { vendorId: vendor.vendorId, name: vendor.vendorName, capacityRemaining: vendor.capacityRemaining, reasons, eligible: reasons.length === 0 };
+  });
+  const drivers = listDriverAvailability().map((driver) => {
+    const reasons = [
+      ...(!statusAllowsDriver(driver) ? ["No route slots or rider is not active"] : []),
+      ...(!listMatches(driver.serviceZones, order.area) ? ["Approved coverage does not match"] : []),
+    ];
+    return { driverId: driver.driverId, name: driver.driverName, capacityRemaining: driver.capacityRemaining, reasons, eligible: reasons.length === 0 };
+  });
+  return { vendors, drivers };
 }

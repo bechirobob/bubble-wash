@@ -1,3 +1,4 @@
+import { bookingLabel } from "@/lib/booking-label";
 import { customerSessionCookieName, decodeCustomerSession } from "@/lib/customer-session";
 import { invoiceForOrder } from "@/lib/billing";
 import { operationalDatabase } from "@/lib/operational-store";
@@ -98,13 +99,14 @@ export async function POST(request: NextRequest) {
     }
     const input = {
       orderId,
+      bookingReference: text(booking.data.bookingReference),
       name: text(booking.data.name),
       email: text(booking.data.email),
       phone: text(booking.data.phone),
       company: text(booking.data.company),
       amountGhs: invoice.balanceMinor / 100,
       paymentMethod: text(body.paymentMethod) || "Card or Mobile Money",
-      message: `Invoice ${invoice.invoiceId} outstanding balance.`,
+      message: `Invoice ${bookingLabel(invoice)} outstanding balance.`,
     };
     const validationError = validateCheckoutInput(input);
     if (validationError) return NextResponse.json({ ok: false, error: validationError }, { status: 400 });

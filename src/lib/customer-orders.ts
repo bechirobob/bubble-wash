@@ -14,6 +14,8 @@ export function customerOrderView(order: OrderSummary, records: SubmissionRecord
     .find((record) => ["pickup-booking", "checkout-request"].includes(text(record.data.submissionType)));
   return {
     orderId: order.orderId,
+    bookingReference: order.bookingReference ?? null,
+    vendorCode: order.vendorCode ?? null,
     invoice: invoiceForOrder(order.orderId),
     customer: order.customer.split(/\s+/)[0] || "Customer",
     createdAt: order.createdAt,

@@ -1,3 +1,4 @@
+import { bookingReferenceForOrder } from "./booking-references.ts";
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import { operationalDatabase } from "./operational-store.ts";
@@ -45,7 +46,7 @@ export function invoiceForOrder(orderId: string) {
   if (!invoice) return null;
   const entries = db.prepare("SELECT id, kind, amount_minor AS amountMinor, reference, created_at AS createdAt FROM billing_entries WHERE order_id = ? ORDER BY created_at").all(orderId) as { id: string; kind: string; amountMinor: number; reference: string; createdAt: string }[];
   const paidMinor = entries.reduce((sum, e) => sum + (e.kind === "refund" ? -e.amountMinor : e.amountMinor), 0);
-  return { ...invoice, lines: JSON.parse(invoice.lines) as InvoiceLine[], entries, paidMinor, balanceMinor: invoice.totalMinor - paidMinor, status: paidMinor >= invoice.totalMinor ? "paid" : paidMinor > 0 ? "partially paid" : "invoiced" };
+  return { ...invoice, bookingReference: bookingReferenceForOrder(db, orderId), lines: JSON.parse(invoice.lines) as InvoiceLine[], entries, paidMinor, balanceMinor: invoice.totalMinor - paidMinor, status: paidMinor >= invoice.totalMinor ? "paid" : paidMinor > 0 ? "partially paid" : "invoiced" };
 }
 export function recordBillingEntry(orderId: string, kind: "payment" | "credit" | "refund", amountMinor: number, reference: string, actor: string, allowOverpayment = false) {
   const db = operationalDatabase();

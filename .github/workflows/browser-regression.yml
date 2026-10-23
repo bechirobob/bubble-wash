@@ -13,7 +13,7 @@ concurrency:
 jobs:
   browser:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       NEXT_TELEMETRY_DISABLED: '1'
       NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED: 'false'
@@ -77,11 +77,18 @@ jobs:
       - name: Verify fixture egress guard
         run: node --test tests/browser-egress.test.mjs
       - name: Build production runtime for synthetic test data
+        id: build
         run: npm run build
       - name: Verify synthetic edge, logins, cookies, redirects and script assets
         run: node tests/browser/fixture-smoke.mjs
       - name: Run four-role journeys at mobile and desktop sizes
-        run: npm run test:browser
+        run: npx playwright test
+      - name: Verify synthetic worklist fixture and role boundaries
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: npm run test:worklist-fixture
+      - name: Run staff worklist interactions at mobile and desktop sizes
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: npm run test:browser-worklists
       - name: Preserve synthetic browser screenshots for review
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -89,4 +96,12 @@ jobs:
           name: synthetic-browser-screenshots
           path: test-results/browser/**/*.png
           if-no-files-found: ignore
+          retention-days: 7
+      - name: Preserve synthetic worklist screenshots for review
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: synthetic-staff-worklist-screenshots
+          path: test-results/worklists/**/*.png
+          if-no-files-found: error
           retention-days: 7
