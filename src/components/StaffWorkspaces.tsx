@@ -13,6 +13,7 @@ import { BrandLink } from "@/components/BrandLink";
 const supportTypes = ["Pickup delay", "Payment issue", "Missing item", "Quality complaint", "Vendor escalation", "General question"];
 
 type PortalShellProps = {
+  allStaffAccess?: boolean;
   title: string;
   role: StaffRole;
   pageRole?: StaffRole;
@@ -117,6 +118,7 @@ type AutomationAction = ReturnType<typeof automationActionsForOrder>[number];
 type QueueStats = { focusLabel: string; focusCount: number; automationCount: number; riskCount: number; capacityLabel: string };
 type QueueView = "action" | "active" | "all";
 type WorkspaceProps = {
+  allStaffAccess?: boolean;
   userName: string;
   role: StaffRole;
   initialView?: string;
@@ -211,17 +213,17 @@ function supportCases(records: SubmissionRecord[]) {
   });
 }
 
-function orderMatchesRoleFocus(order: OrderSummary, role: StaffRole, userName: string) {
-  const actions = automationActionsForOrder(order, role, userName);
+function orderMatchesRoleFocus(order: OrderSummary, role: StaffRole, userName: string, allStaffAccess = false) {
+  const actions = automationActionsForOrder(order, role, userName, allStaffAccess);
   if (role === "admin") return isRiskOrder(order) || actions.length > 0;
   if (role === "vendor") return actions.some((action) => action.key.includes("vendor"));
   if (role === "driver") return actions.some((action) => action.key.includes("driver"));
   return isRiskOrder(order);
 }
 
-function queueStats(orders: OrderSummary[], role: StaffRole, userName: string, availabilityCount = 0): QueueStats {
-  const automationCount = orders.reduce((count, order) => count + automationActionsForOrder(order, role, userName).length, 0);
-  const focusCount = orders.filter((order) => orderMatchesRoleFocus(order, role, userName)).length;
+function queueStats(orders: OrderSummary[], role: StaffRole, userName: string, availabilityCount = 0, allStaffAccess = false): QueueStats {
+  const automationCount = orders.reduce((count, order) => count + automationActionsForOrder(order, role, userName, allStaffAccess).length, 0);
+  const focusCount = orders.filter((order) => orderMatchesRoleFocus(order, role, userName, allStaffAccess)).length;
   const riskCount = orders.filter(isRiskOrder).length;
   return {
     focusLabel: role === "admin" ? "awaiting intervention" : role === "vendor" ? "ready for action" : role === "driver" ? "route moves" : "follow-up now",
@@ -780,14 +782,14 @@ function RecentActivity({ filter, initialSelectedId = "", basePath }: { filter?:
   );
 }
 
-function AutomatedOrderActions({ order, role, userName, onSaved }: { order: OrderSummary; role: StaffRole; userName: string; onSaved: () => Promise<void> }) {
+function AutomatedOrderActions({ order, role, userName, allStaffAccess = false, onSaved }: { allStaffAccess?: boolean; order: OrderSummary; role: StaffRole; userName: string; onSaved: () => Promise<void> }) {
   const [status, setStatus] = useState("");
   const [pendingLabel, setPendingLabel] = useState("");
   const [failed, setFailed] = useState(false);
   const [declineOpen, setDeclineOpen] = useState(false);
   const [declineReason, setDeclineReason] = useState("");
   const [structuredAction, setStructuredAction] = useState("");
-  const actions = automationActionsForOrder(order, role, userName);
+  const actions = automationActionsForOrder(order, role, userName, allStaffAccess);
 
   async function run(action: AutomationAction, overrides: Record<string, string> = {}) {
     if (action.key === "admin-close-order") {
@@ -1270,7 +1272,7 @@ function AdminDispatchWorkspace() {
   return <DispatchBoard orders={orders} role="admin" basePath="/admin?view=orders" hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={loadError} liveLocations={liveLocations} locationError={locationError} />;
 }
 
-function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { role: StaffRole; userName: string; selectedOrderId?: string; basePath: string }) {
+function SharedOrderBoard({ role, userName, allStaffAccess = false, selectedOrderId = "", basePath }: { allStaffAccess?: boolean; role: StaffRole; userName: string; selectedOrderId?: string; basePath: string }) {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [liveLocations, setLiveLocations] = useState<DispatchLiveLocation[]>([]);
   const [locationError, setLocationError] = useState("");
@@ -1364,12 +1366,12 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
   }, [role, selectedOrderId]);
 
   const activeOrders = orders.filter((order) => !isClosedOrder(order));
-  const focusOrders = activeOrders.filter((order) => orderMatchesRoleFocus(order, role, userName));
+  const focusOrders = activeOrders.filter((order) => orderMatchesRoleFocus(order, role, userName, allStaffAccess));
   const sourceOrders = queueView === "action" ? focusOrders : queueView === "active" ? activeOrders : orders;
   const normalizedQuery = query.trim().toLowerCase();
   const matchingOrders = normalizedQuery ? sourceOrders.filter((order) => [order.orderId, order.customer, order.phone, order.email, order.area, order.vendor, order.driver, order.status, order.payment].join(" ").toLowerCase().includes(normalizedQuery)) : sourceOrders;
   const visibleOrders = matchingOrders.slice(0, visibleCount);
-  const stats = queueStats(activeOrders, role, userName);
+  const stats = queueStats(activeOrders, role, userName, 0, allStaffAccess);
   const queueHeading = !hasLoaded ? "Loading order queue…" : queueView === "action" ? (stats.focusCount ? `${stats.focusCount} ${stats.focusLabel}` : "No work needs this role right now") : queueView === "active" ? `${activeOrders.length} active orders` : `${orders.length} total orders`;
   const selectedOrder = selectedOrderId ? orders.find((order) => order.orderId.toLowerCase() === selectedOrderId.toLowerCase()) : null;
   const selectedLiveLocation = role === "admin" && selectedOrder ? liveLocationForOrder(selectedOrder, liveLocations) : undefined;
@@ -1389,7 +1391,7 @@ function SharedOrderBoard({ role, userName, selectedOrderId = "", basePath }: { 
           <StageCountdown order={selectedOrder} />
         </header>
 
-        <section className="staffPrimaryAction" aria-labelledby="order-next-action"><div><span className="staffFieldLabel">Next verified action</span><h3 id="order-next-action">{selectedOrder.nextStep}</h3></div><AutomatedOrderActions order={selectedOrder} role={role} userName={userName} onSaved={() => loadOrders(false)} /></section>
+        <section className="staffPrimaryAction" aria-labelledby="order-next-action"><div><span className="staffFieldLabel">Next verified action</span><h3 id="order-next-action">{selectedOrder.nextStep}</h3></div><AutomatedOrderActions allStaffAccess={allStaffAccess} order={selectedOrder} role={role} userName={userName} onSaved={() => loadOrders(false)} /></section>
 
         <div className="staffDetailSections">
           <details className="staffDetailDisclosure"><summary><span><strong>Customer and collection</strong><small>{selectedOrder.area} · {selectedOrder.routeWindow}</small></span></summary><div className="staffDisclosureBody"><dl className="staffDefinitionList">
@@ -1440,7 +1442,7 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
   return data;
 }
 
-function PortalShell({ title, role, pageRole = role, userName, currentView, navigation, children }: PortalShellProps) {
+function PortalShell({ title, allStaffAccess = false, role, pageRole = role, userName, currentView, navigation, children }: PortalShellProps) {
   const promise = rolePromise(pageRole, currentView);
 
   async function logoutStaff() {
@@ -1455,7 +1457,7 @@ function PortalShell({ title, role, pageRole = role, userName, currentView, navi
     <main className="portalPage">
       <header className="staffTopbar">
         <BrandLink />
-        <div className="staffAccount">{role === "admin" && pageRole !== "admin" ? <Link className="staffAdminHome" href="/admin">Admin home</Link> : null}<span><strong>{userName}</strong><small>{title}</small></span><button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button></div>
+        <div className="staffAccount">{role === "admin" && allStaffAccess ? <nav aria-label="Staff workspaces"><Link href="/vendors">Vendors</Link>{" · "}<Link href="/drivers">Drivers</Link>{" · "}<Link href="/support">Support</Link></nav> : null}{role === "admin" && pageRole !== "admin" ? <Link className="staffAdminHome" href="/admin">Admin home</Link> : null}<span><strong>{userName}</strong><small>{title}</small></span><button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button></div>
       </header>
       <nav className="staffSectionNav" aria-label={`${pageRole} workspace sections`}>
         {navigation.map((item) => {
@@ -1766,7 +1768,7 @@ function SupportTicketDesk({ userName, selectedCaseId = "", basePath, refreshTok
   );
 }
 
-export function AdminWorkspace({ userName, role, initialView = "overview", selectedOrderId, selectedCaseId, selectedActivityId }: WorkspaceProps) {
+export function AdminWorkspace({ userName, role, allStaffAccess = false, initialView = "overview", selectedOrderId, selectedCaseId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const pendingSubmission = useRef(false);
   const [pendingType, setPendingType] = useState("");
@@ -1808,10 +1810,10 @@ export function AdminWorkspace({ userName, role, initialView = "overview", selec
   ];
 
   return (
-    <PortalShell role={role} userName={userName} title="Admin workspace" currentView={initialView} navigation={navigation}>
+    <PortalShell role={role} allStaffAccess={allStaffAccess} userName={userName} title="Admin workspace" currentView={initialView} navigation={navigation}>
       {initialView === "overview" ? <AdminOverview userName={userName} /> : null}
       {initialView === "dispatch" ? <AdminDispatchWorkspace /> : null}
-      {initialView === "orders" ? <SharedOrderBoard role="admin" userName={userName} selectedOrderId={selectedOrderId} basePath="/admin?view=orders" /> : null}
+      {initialView === "orders" ? <SharedOrderBoard allStaffAccess={allStaffAccess} role="admin" userName={userName} selectedOrderId={selectedOrderId} basePath="/admin?view=orders" /> : null}
       {initialView === "people" ? <><AvailabilityBoard role="admin" refreshToken={availabilityVersion} /><StaffAccessRoster refreshToken={rosterVersion} /><StaffAccountPanel /><AdminOnboardingCenter onSubmit={submitLead} status={formStatus} pendingType={pendingType} /></> : null}
       {initialView === "cases" ? <><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Open a new case</strong><small>Use when an existing case does not cover the issue</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="admin" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section><SupportTicketDesk userName={userName} selectedCaseId={selectedCaseId} basePath="/admin?view=cases" refreshToken={casesVersion} /></> : null}
       {initialView === "operations" ? <AdminOperationsHealth /> : null}
@@ -1870,7 +1872,7 @@ function AdminOperationsHealth() {
   return <section className="staffContentSection" aria-busy={!hasLoaded}><div className="staffSectionHeader"><div><h2>Operations health and privacy queue</h2><p>Delivery retries and retention run through the protected maintenance worker. Privacy cases require an explicit review status.</p></div><button className="button secondary" type="button" onClick={() => void load()}>Refresh</button></div>{!hasLoaded ? <LoadingSkeleton label="Loading operations health metrics" rows={4} variant="metrics" /> : metrics ? <div className="overviewGrid"><article><span className="staffFieldLabel">Order records</span><strong>{metrics.submissions}</strong><small>SQLite submission events</small></article><article><span className="staffFieldLabel">Early access</span><strong>{metrics.earlyAccess.active}</strong><small>{metrics.earlyAccess.total} total consent records</small></article><article><span className="staffFieldLabel">Privacy queue</span><strong>{metrics.privacyRequests.open}</strong><small>{metrics.privacyRequests.total} total requests</small></article><article><span className="staffFieldLabel">Notification outbox</span><strong>{metrics.notifications.pending + metrics.notifications.failed}</strong><small>{metrics.notifications.pending} pending · {metrics.notifications.failed} failed · {metrics.notifications.sent} sent</small></article></div> : null}<p className={noticeClass(status)} role="status">{status}</p><div className="staffSectionHeader"><div><h3>Privacy and data-rights requests</h3><p>Verify identity before disclosure, correction, or deletion. Mark completion only after the requested work is recorded.</p></div></div><div className="staffSimpleList">{!hasLoaded ? <LoadingSkeleton label="Loading privacy requests" rows={4} /> : privacyRequests.length ? privacyRequests.map((request) => <article className="privacyOpsRow" key={request.id}><div><strong>{request.id}</strong><span>{request.requestType.replaceAll("_", " ")}</span></div><div><strong>{request.name}</strong><span>{request.contact}</span><small>{request.orderId || "No order supplied"}</small></div><div><strong>{request.status.replaceAll("_", " ")}</strong><time>{formatActivityTime(request.createdAt)}</time></div><div className="tableActionRow"><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "identity_review")}>Identity review</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "completed")}>Complete</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "declined")}>Decline</button></div></article>) : <p className="staffEmptyState">No privacy requests are waiting.</p>}</div></section>;
 }
 
-export function VendorWorkspace({ userName, role, initialView = "jobs", selectedOrderId, selectedActivityId }: WorkspaceProps) {
+export function VendorWorkspace({ userName, role, allStaffAccess = false, initialView = "jobs", selectedOrderId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const pendingSubmission = useRef(false);
   const [pendingType, setPendingType] = useState("");
@@ -1904,15 +1906,16 @@ export function VendorWorkspace({ userName, role, initialView = "jobs", selected
   ];
 
   return (
-    <PortalShell role={role} pageRole="vendor" userName={userName} title="Vendor workspace" currentView={initialView} navigation={navigation}>
-      {initialView === "jobs" ? <><SharedOrderBoard role="vendor" userName={userName} selectedOrderId={selectedOrderId} basePath="/vendors?view=jobs" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a production exception</strong><small>Open a case when the verified job actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="vendor" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
-      {initialView === "capacity" ? <><AvailabilityBoard role="vendor" mode="vendors" refreshToken={availabilityVersion} /><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Update today&apos;s capacity</strong><small>The signed-in vendor is applied automatically</small></span><b>Open form</b></summary><form className="staffForm staffNarrowForm" onSubmit={(event) => submitLead(event, "vendor-application")}><div className="two"><label>Service areas<input name="area" placeholder="Osu, Labone" required /></label><label>Order slots remaining<input name="capacity" type="number" min="0" inputMode="numeric" required /></label></div><div className="two"><label>Availability<select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited capacity</option><option>Paused today</option></select></label><label>Available service<select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></label></div><label>Capacity note<textarea name="message" placeholder="Turnaround, machine, or service restrictions" /></label><button className="button primary" type="submit" disabled={pendingType === "vendor-application"}>{pendingType === "vendor-application" ? "Updating capacity…" : "Update capacity"}</button>{formStatus["vendor-application"] ? <p className={noticeClass(formStatus["vendor-application"])} role="status">{formStatus["vendor-application"]}</p> : null}</form></details></section></> : null}
+    <PortalShell role={role} allStaffAccess={allStaffAccess} pageRole="vendor" userName={userName} title="Vendor workspace" currentView={initialView} navigation={navigation}>
+      {initialView === "jobs" ? <><SharedOrderBoard allStaffAccess={allStaffAccess} role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/vendors?view=jobs" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a production exception</strong><small>Open a case when the verified job actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="vendor" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
+      {initialView === "capacity" && role === "admin" ? <section className="staffContentSection"><p>Manage an explicitly selected vendor from <Link href="/admin?view=people">People &amp; onboarding</Link>. Owner actions retain your identity.</p></section> : null}
+      {initialView === "capacity" && role !== "admin" ? <><AvailabilityBoard role={role} mode="vendors" refreshToken={availabilityVersion} /><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Update today&apos;s capacity</strong><small>The signed-in vendor is applied automatically</small></span><b>Open form</b></summary><form className="staffForm staffNarrowForm" onSubmit={(event) => submitLead(event, "vendor-application")}><div className="two"><label>Service areas<input name="area" placeholder="Osu, Labone" required /></label><label>Order slots remaining<input name="capacity" type="number" min="0" inputMode="numeric" required /></label></div><div className="two"><label>Availability<select name="availability"><option>Available today</option><option>Available tomorrow</option><option>Limited capacity</option><option>Paused today</option></select></label><label>Available service<select name="services"><option>Wash + fold</option><option>Wash + iron + fold</option><option>Ironing only</option><option>Express capable</option><option>Bulk commercial</option></select></label></div><label>Capacity note<textarea name="message" placeholder="Turnaround, machine, or service restrictions" /></label><button className="button primary" type="submit" disabled={pendingType === "vendor-application"}>{pendingType === "vendor-application" ? "Updating capacity…" : "Update capacity"}</button>{formStatus["vendor-application"] ? <p className={noticeClass(formStatus["vendor-application"])} role="status">{formStatus["vendor-application"]}</p> : null}</form></details></section></> : null}
       {initialView === "activity" ? <RecentActivity filter="vendor" initialSelectedId={selectedActivityId} basePath="/vendors?view=activity" /> : null}
     </PortalShell>
   );
 }
 
-export function DriverWorkspace({ userName, role, initialView = "route", selectedOrderId, selectedActivityId }: WorkspaceProps) {
+export function DriverWorkspace({ userName, role, allStaffAccess = false, initialView = "route", selectedOrderId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const pendingSubmission = useRef(false);
   const [pendingType, setPendingType] = useState("");
@@ -1943,14 +1946,14 @@ export function DriverWorkspace({ userName, role, initialView = "route", selecte
   ];
 
   return (
-    <PortalShell role={role} pageRole="driver" userName={userName} title="Driver route board" currentView={initialView} navigation={navigation}>
-      {initialView === "route" ? <><SharedOrderBoard role="driver" userName={userName} selectedOrderId={selectedOrderId} basePath="/drivers?view=route" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a route exception</strong><small>Use when the delay or handoff actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="driver" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
+    <PortalShell role={role} allStaffAccess={allStaffAccess} pageRole="driver" userName={userName} title="Driver route board" currentView={initialView} navigation={navigation}>
+      {initialView === "route" ? <><SharedOrderBoard allStaffAccess={allStaffAccess} role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/drivers?view=route" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a route exception</strong><small>Use when the delay or handoff actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="driver" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
       {initialView === "activity" ? <RecentActivity filter="driver-route-log" initialSelectedId={selectedActivityId} basePath="/drivers?view=activity" /> : null}
     </PortalShell>
   );
 }
 
-export function SupportWorkspace({ userName, role, initialView = "cases", selectedOrderId, selectedCaseId, selectedActivityId }: WorkspaceProps) {
+export function SupportWorkspace({ userName, role, allStaffAccess = false, initialView = "cases", selectedOrderId, selectedCaseId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const pendingSubmission = useRef(false);
   const [pendingType, setPendingType] = useState("");
@@ -1984,9 +1987,9 @@ export function SupportWorkspace({ userName, role, initialView = "cases", select
   ];
 
   return (
-    <PortalShell role={role} pageRole="support" userName={userName} title="Support workspace" currentView={initialView} navigation={navigation}>
+    <PortalShell role={role} allStaffAccess={allStaffAccess} pageRole="support" userName={userName} title="Support workspace" currentView={initialView} navigation={navigation}>
       {initialView === "cases" ? <><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Open a new case</strong><small>Use when an existing case does not cover the issue</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="support" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section><SupportTicketDesk userName={userName} selectedCaseId={selectedCaseId} basePath="/support?view=cases" refreshToken={casesVersion} /></> : null}
-      {initialView === "orders" ? <SharedOrderBoard role="support" userName={userName} selectedOrderId={selectedOrderId} basePath="/support?view=orders" /> : null}
+      {initialView === "orders" ? <SharedOrderBoard allStaffAccess={allStaffAccess} role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/support?view=orders" /> : null}
       {initialView === "activity" ? <RecentActivity filter="support" initialSelectedId={selectedActivityId} basePath="/support?view=activity" /> : null}
     </PortalShell>
   );

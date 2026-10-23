@@ -2,9 +2,9 @@ import "server-only";
 import { environmentStaffUsers, resolveStaffUsers, type StaffRole, type StaffUser } from "./staff-identity.ts";
 import { listStaffAccounts } from "./staff-accounts.ts";
 
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers.js";
-import { readStaffCredentialOverride } from "./data-store.ts";
+import { readAdminMfaSetting, readStaffCredentialOverride } from "./data-store.ts";
 import { verifyPasswordHash } from "./passwords.ts";
 
 export { createPasswordHash } from "./passwords.ts";
@@ -14,6 +14,7 @@ export type StaffSession = Pick<StaffUser, "email" | "role" | "name" | "entityId
   issuedAt: number;
   expiresAt: number;
   nonce: string;
+  ownerMfaProof?: string;
 };
 
 export const sessionCookieName = "bubblewash_staff_session";
@@ -61,7 +62,15 @@ export function findStaffUser(identifier: string, password: string) {
   return currentStaffUsers().find((user) => user.email.toLowerCase() === identifier.trim().toLowerCase() && verifyPasswordHash(password, user.passwordHash)) ?? null;
 }
 
-export function encodeSession(user: StaffUser) {
+function ownerMfaProof(user: StaffUser, database?: Parameters<typeof readAdminMfaSetting>[1]) {
+  const setting = readAdminMfaSetting(user.email, database);
+  return setting?.status === "enrolled" ? createHash("sha256").update(setting.encryptedSecret).digest("base64url") : "";
+}
+
+export function encodeSession(user: StaffUser, mfaVerified = false) {
+  const personalOwner = user.role === "admin" && user.allStaffAccess === true;
+  const proof = personalOwner ? ownerMfaProof(user) : undefined;
+  if (personalOwner && (!mfaVerified || !proof)) throw new Error("Personal owner MFA verification is required.");
   const now = Math.floor(Date.now() / 1000);
   const session: StaffSession = {
     email: user.email,
@@ -72,12 +81,13 @@ export function encodeSession(user: StaffUser) {
     issuedAt: now,
     expiresAt: now + sessionMaxAgeSeconds,
     nonce: randomUUID(),
+    ...(personalOwner ? { ownerMfaProof: proof } : {}),
   };
   const payload = Buffer.from(JSON.stringify(session), "utf8").toString("base64url");
   return `${payload}.${signPayload(payload)}`;
 }
 
-export function decodeSession(value?: string, users?: StaffUser[]) {
+export function decodeSession(value?: string, users?: StaffUser[], database?: Parameters<typeof readAdminMfaSetting>[1]) {
   if (staffAccessDisabled()) return null;
   if (!value) return null;
   try {
@@ -85,10 +95,14 @@ export function decodeSession(value?: string, users?: StaffUser[]) {
     if (!payload || !signature || !safeEqual(signature, signPayload(payload))) return null;
     const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as StaffSession;
     if (!session.expiresAt || session.expiresAt < Math.floor(Date.now() / 1000)) return null;
-    const user = (users ?? currentStaffUsers()).find((item) => item.email.toLowerCase() === session.email.toLowerCase() && item.role === session.role);
+    const user = (users ?? currentStaffUsers(database)).find((item) => item.email.toLowerCase() === session.email.toLowerCase() && item.role === session.role);
     if (!user || session.entityId !== user.entityId) return null;
     if (session.credentialVersion !== user.credentialVersion) return null;
-    return { email: session.email, role: session.role, name: user.name, entityId: user.entityId };
+    if (user.role === "admin" && user.allStaffAccess === true) {
+      const proof = ownerMfaProof(user, database);
+      if (!proof || !session.ownerMfaProof || !safeEqual(session.ownerMfaProof, proof)) return null;
+    }
+    return { email: session.email, role: session.role, name: user.name, entityId: user.entityId, allStaffAccess: user.role === "admin" && user.allStaffAccess === true };
   } catch {
     return null;
   }

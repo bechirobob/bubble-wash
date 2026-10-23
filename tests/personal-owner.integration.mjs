@@ -1,0 +1,82 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+const directory = mkdtempSync(join(tmpdir(), "bw-owner-"));
+Object.assign(process.env, { NODE_ENV: "production", BUBBLEWASH_DATABASE_PATH: join(directory, "auth.sqlite"), BUBBLEWASH_ADMIN_EMAIL: "master@example.invalid", BUBBLEWASH_VENDOR_EMAIL: "vendor@example.invalid", BUBBLEWASH_DRIVER_EMAIL: "driver@example.invalid", BUBBLEWASH_SUPPORT_EMAIL: "support@example.invalid", BUBBLEWASH_DISABLE_DEMO_LOGIN: "true", BUBBLEWASH_STAFF_AUTH_DISABLED: "false", BUBBLEWASH_SESSION_SECRET: "synthetic-private-session-key-123456789", BUBBLEWASH_MFA_ENCRYPTION_KEY: Buffer.alloc(32, 19).toString("base64") });
+const { inviteOwnerAccount, inviteStaffAccount, activateStaffAccount, listStaffAccounts } = await import("../src/lib/staff-accounts.ts");
+const { getDatabase } = await import("../src/lib/data-store.ts");
+const { runOwnerEnrollment } = await import("../scripts/invite-additional-owner.mjs");
+const db = getDatabase();
+try {
+  db.prepare("INSERT INTO staff_credential_overrides VALUES ('admin', 'override@example.invalid', 'preserved-hash', 'preserved-version', '2026-01-01')").run();
+  inviteStaffAccount({ email: "invited@example.invalid", name: "Invited", role: "support", entityId: "" }, "fixture");
+  const snapshot = JSON.stringify(listStaffAccounts());
+  for (const email of ["master@example.invalid", " VENDOR@example.invalid ", "driver@example.invalid", "support@example.invalid", "override@example.invalid", "INVITED@example.invalid"]) assert.throws(() => inviteOwnerAccount({ email, name: "Owner" }, "approved-actor"), /already belongs/);
+  assert.equal(JSON.stringify(listStaffAccounts()), snapshot);
+  const token = inviteOwnerAccount({ email: "owner@example.invalid", name: "Personal Owner" }, "approved-actor");
+  assert.equal(listStaffAccounts().filter((a) => a.status === "active").length, 0);
+  assert.throws(() => inviteOwnerAccount({ email: "OWNER@example.invalid", name: "Other" }, "approved-actor"), /already belongs/);
+  const stored = db.prepare("SELECT * FROM staff_accounts WHERE email = ?").get("owner@example.invalid");
+  assert.notEqual(stored.token_hash, token); assert.equal(stored.password_hash, "");
+  assert.ok(Date.parse(stored.token_expires_at) <= Date.now() + 3600000);
+  assert.equal(activateStaffAccount(token, "a-secure-user-chosen-test-password"), true);
+  assert.equal(activateStaffAccount(token, "a-different-test-password"), false);
+  const owner = listStaffAccounts().find((a) => a.email === "owner@example.invalid");
+  assert.equal(owner.role, "admin"); assert.equal(owner.allStaffAccess, true);
+  assert.equal(listStaffAccounts().find((a) => a.email === "invited@example.invalid").allStaffAccess, false);
+  assert.equal(db.prepare("SELECT credential_version FROM staff_credential_overrides").get().credential_version, "preserved-version");
+  const expired = inviteOwnerAccount({ email: "expired@example.invalid", name: "Expired" }, "approved-actor");
+  db.prepare("UPDATE staff_accounts SET token_expires_at = '2000-01-01' WHERE email = 'expired@example.invalid'").run();
+  assert.equal(activateStaffAccount(expired, "a-secure-user-chosen-test-password"), false);
+  assert.equal(JSON.stringify(db.prepare("SELECT data FROM submissions").all()).includes(token), false);
+  Object.assign(process.env, { BUBBLEWASH_OWNER_EMAIL: "delivered@example.invalid", BUBBLEWASH_OWNER_NAME: "Delivery Test", BUBBLEWASH_OWNER_INVITED_BY: "approved-actor", BUBBLEWASH_OWNER_RESEND_KEY: "synthetic-test-key", BUBBLEWASH_EMAIL_FROM: "sender@bubblewash.co", BUBBLEWASH_PUBLIC_URL: "https://bubblewash.co", BUBBLEWASH_OWNER_INVITE_CONFIRM: "delivered@example.invalid" });
+  const transport = async (url, options) => { assert.equal(url, "https://api.resend.com/emails"); assert.equal(options.headers.Authorization, "Bearer synthetic-test-key"); const body = JSON.parse(options.body); assert.equal(body.from, "Bubble Wash <bubblewash@becoreops.com>"); assert.deepEqual(body.to, ["delivered@example.invalid"]); assert.match(body.text, /https:\/\/bubblewash.co\/staff\/activate#[A-Za-z0-9_-]{43}/); return { ok: true }; };
+  const missingDedicated = { ...process.env, BUBBLEWASH_OWNER_RESEND_KEY: "", RESEND_API_KEY: "shared-key-must-not-work" };
+  assert.equal((await runOwnerEnrollment({ env: missingDedicated, transport })).ok, false);
+  await assert.rejects(runOwnerEnrollment({ send: true, env: missingDedicated, transport }), /required MFA configuration/);
+  const beforePreflight = Buffer.from(readFileSync(process.env.BUBBLEWASH_DATABASE_PATH));
+  const changesBefore = db.prepare("SELECT total_changes() AS n").get().n;
+  assert.equal((await runOwnerEnrollment({ transport })).accountCreated, false);
+  assert.deepEqual(readFileSync(process.env.BUBBLEWASH_DATABASE_PATH), beforePreflight);
+  assert.equal(db.prepare("SELECT total_changes() AS n").get().n, changesBefore);
+  assert.equal(listStaffAccounts().some((a) => a.email === "delivered@example.invalid"), false);
+  process.env.BUBBLEWASH_ADMIN_MFA_REQUIRED = "false";
+  process.env.BUBBLEWASH_MFA_ENCRYPTION_KEY = "invalid";
+  assert.equal((await runOwnerEnrollment({ transport })).mfaReady, false);
+  await assert.rejects(runOwnerEnrollment({ send: true, transport }), /required MFA configuration/);
+  process.env.BUBBLEWASH_MFA_ENCRYPTION_KEY = Buffer.alloc(32, 19).toString("base64");
+  assert.equal((await runOwnerEnrollment({ transport })).mfaReady, true);
+  assert.equal((await runOwnerEnrollment({ send: true, transport })).delivery, "provider-accepted");
+  const collisionStatus = await runOwnerEnrollment({ transport });
+  assert.deepEqual(collisionStatus.collisionTypes, ["managed"]); assert.equal(collisionStatus.managedStatus, "invited");
+  await assert.rejects(runOwnerEnrollment({ send: true, transport }), /already belongs/);
+  process.env.BUBBLEWASH_OWNER_EMAIL = process.env.BUBBLEWASH_OWNER_INVITE_CONFIRM = "uncertain@example.invalid";
+  await assert.rejects(runOwnerEnrollment({ send: true, transport: async () => { throw new Error("secret-provider-diagnostic"); } }), /outcome is uncertain/);
+  await assert.rejects(runOwnerEnrollment({ send: true, transport }), /already belongs/);
+  const auth = await import("../src/lib/auth.ts");
+  const ownerIdentity = auth.currentStaffUsers().find((u) => u.email === "owner@example.invalid");
+  assert.throws(() => auth.encodeSession(ownerIdentity), /MFA verification/);
+  const session = auth.encodeSession({ ...ownerIdentity, allStaffAccess: false });
+  assert.equal(auth.decodeSession(session), null);
+  db.prepare("UPDATE staff_accounts SET status = 'suspended' WHERE email = 'owner@example.invalid'").run();
+  assert.equal(auth.decodeSession(session), null);
+  db.prepare("UPDATE staff_accounts SET status = 'active', credential_version = 'changed-version' WHERE email = 'owner@example.invalid'").run();
+  assert.equal(auth.decodeSession(session), null);
+  const { appendSubmissionRecord } = await import("../src/lib/data-store.ts");
+  appendSubmissionRecord({ id: "BW-SYNTHETIC-ROSTER", createdAt: new Date().toISOString(), source: "fixture", data: { submissionType: "staff-onboarding", email: "roster@example.invalid" } });
+  assert.throws(() => inviteOwnerAccount({ email: "ROSTER@example.invalid", name: "Duplicate" }, "fixture"), /roster entry/);
+  // Actual forms: staff-onboarding uses staffEmail; vendor and driver use email.
+  // Preserve legacy/imported staff email as a collision source too. Neither
+  // conflicting field may conceal the other's normalized identifier.
+  for (const [type, field] of [["staff-onboarding", "staffEmail"], ["staff-onboarding", "email"], ["vendor-application", "email"], ["driver-onboarding", "email"]]) {
+    const address = `${type}-${field}@example.invalid`.toLowerCase();
+    appendSubmissionRecord({ id: `BW-${type}-${field}`, createdAt: new Date().toISOString(), source: "fixture", data: { submissionType: type, email: "unrelated@example.invalid", [field]: `  ${address.toUpperCase()}  ` } });
+    assert.throws(() => inviteOwnerAccount({ email: ` ${address.toUpperCase()} `, name: "Duplicate" }, "fixture"), /roster entry/);
+    process.env.BUBBLEWASH_OWNER_EMAIL = address;
+    const checked = await runOwnerEnrollment({ transport });
+    assert.ok(checked.collisionTypes.includes("roster"));
+    assert.equal(db.prepare("SELECT 1 FROM staff_accounts WHERE email=?").get(address), undefined);
+  }
+  console.log(JSON.stringify({ ok: true, scope: "insert-only collisions, preservation, single-use expiry, safe direct delivery, no retry on uncertainty" }));
+} finally { rmSync(directory, { recursive: true, force: true }); }

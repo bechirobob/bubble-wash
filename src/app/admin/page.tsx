@@ -32,6 +32,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     <AdminWorkspace
       userName={user.name}
       role={user.role}
+      allStaffAccess={user.allStaffAccess}
       initialView={adminViews.has(requestedView) ? requestedView : "overview"}
       selectedOrderId={firstSearchParam(params.order)}
       selectedCaseId={firstSearchParam(params.case)}

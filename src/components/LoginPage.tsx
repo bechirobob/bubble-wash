@@ -31,6 +31,7 @@ function LoginForm() {
   const [email, setEmail] = useState(showCredentialCards ? "admin@bubblewash.local" : "");
   const [password, setPassword] = useState("");
   const [totp, setTotp] = useState("");
+  const [mfaStep, setMfaStep] = useState<"enroll" | "verify" | null>(null);
   const [status, setStatus] = useState("Enter staff credentials to open a separate workspace.");
   const [statusTone, setStatusTone] = useState<"info" | "error">("info");
 
@@ -46,6 +47,10 @@ function LoginForm() {
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {
+        setMfaStep(data.mfaStep === "enroll" || data.mfaStep === "verify" ? data.mfaStep : null);
+        // A rate-limit or generic failure may remove the dynamic challenge.
+        // Never retain a hidden code that the user can no longer correct.
+        if (mfaStep === "verify" && data.mfaStep !== "verify") setTotp("");
         setStatus(data.error ?? "Login cannot be reached.");
         setStatusTone("error");
         return;
@@ -61,6 +66,7 @@ function LoginForm() {
     setEmail(emailValue);
     setPassword("");
     setTotp("");
+    setMfaStep(null);
     setStatus(`Loaded ${emailValue}. Enter the staff password to continue.`);
     setStatusTone("info");
   }
@@ -83,11 +89,11 @@ function LoginForm() {
           <p className="eyebrow">Sign in</p>
           <h1 id="login-title">Open your workspace</h1>
           <p>Enter your staff username or work email.</p>
-          <label>Staff username or email<input disabled={!hydrated} value={email} onChange={(event) => setEmail(event.target.value)} type="text" placeholder="Staff username or email" autoComplete="username" required /></label>
-          <label>Password<input disabled={!hydrated} value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" autoComplete="current-password" required /></label>
-          {adminMfaRequired ? <label>Admin authenticator or recovery code <small>(admin only)</small><input disabled={!hydrated} value={totp} onChange={(event) => setTotp(event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 18))} type="text" placeholder="6 digits or recovery code" inputMode="text" autoComplete="one-time-code" /></label> : null}
+          <label>Staff username or email<input disabled={!hydrated} value={email} onChange={(event) => { setEmail(event.target.value); setMfaStep(null); setTotp(""); }} type="text" placeholder="Staff username or email" autoComplete="username" required /></label>
+          <label>Password<input disabled={!hydrated} value={password} onChange={(event) => { setPassword(event.target.value); setMfaStep(null); setTotp(""); }} type="password" placeholder="Password" autoComplete="current-password" required /></label>
+          {adminMfaRequired || mfaStep === "verify" ? <label>Admin authenticator or recovery code <small>(admin only)</small><input disabled={!hydrated} value={totp} onChange={(event) => setTotp(event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 18))} type="text" placeholder="6 digits or recovery code" inputMode="text" autoComplete="one-time-code" /></label> : null}
           <button className="button primary full" disabled={!hydrated} type="submit">Sign in</button>
-          {adminMfaRequired ? <Link className="inlineIconLink" href="/admin/mfa/enroll">Set up admin authenticator</Link> : null}
+          {adminMfaRequired || mfaStep === "enroll" ? <Link className="inlineIconLink" href="/admin/mfa/enroll">Set up admin authenticator</Link> : null}
           <noscript>JavaScript is required for secure staff sign-in. Enable it and reload this page.</noscript>
           <p className="destination">Sessions expire after eight hours. Sign out when using a shared device.</p>
           <p className={`status ${statusTone}`} role={statusTone === "error" ? "alert" : "status"} aria-live={statusTone === "error" ? "assertive" : "polite"}>{status}</p>

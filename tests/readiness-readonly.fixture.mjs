@@ -30,11 +30,16 @@ if (mode === 'seed') {
   const { initializeStaffAccountsSchema } = await import('../src/lib/staff-accounts.ts');
   initializeStaffAccountsSchema(db);
   const admin = 'managed-admin@example.test';
+  const owner = scenario.startsWith('owner-');
   const hash = process.env.BUBBLEWASH_ADMIN_PASSWORD_HASH;
   db.prepare('INSERT INTO staff_accounts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(admin, 'Synthetic Admin', 'admin', '', hash, 'managed-version', 'active', '', '', now);
   db.prepare('INSERT INTO staff_credential_overrides VALUES (?, ?, ?, ?, ?)')
     .run('admin', admin, hash, 'override-version', now);
+  if (owner) {
+    db.exec('CREATE TABLE staff_owner_capabilities (email TEXT PRIMARY KEY COLLATE NOCASE REFERENCES staff_accounts(email), all_staff_access INTEGER NOT NULL CHECK (all_staff_access = 1))');
+    db.prepare('INSERT INTO staff_owner_capabilities VALUES (?, 1)').run(admin);
+  }
   const { currentStaffUsers, encodeSession } = await import('../src/lib/auth.ts');
   const resolved = currentStaffUsers();
   assert.equal(resolved.length, 1); assert.equal(resolved[0].credentialVersion, 'managed-version');
@@ -43,9 +48,11 @@ if (mode === 'seed') {
   const enrollment = await startAdminMfaEnrollment(admin);
   assert.equal(confirmAdminMfaEnrollment(admin, totpCode(enrollment.manualKey)).ok, true);
   assert.equal(adminMfaConfigured(admin), true);
-  fs.writeFileSync(path.join(directory, 'session'), encodeSession(resolved[0]));
+  fs.writeFileSync(path.join(directory, 'session'), encodeSession(resolved[0], owner));
   db.prepare('INSERT INTO driver_live_locations VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run('synthetic-driver', 'synthetic-order', 5.6, -0.1, 20, '2000-01-01T00:00:00.000Z', '2000-01-01T00:00:00.000Z');
+  if (scenario === 'owner-mfa-removed') db.prepare("DELETE FROM admin_mfa_settings WHERE admin_email = ?").run(admin);
+  if (scenario === 'owner-revoked') db.prepare("UPDATE staff_accounts SET status = 'suspended', credential_version = 'revoked'").run();
   if (scenario === 'missing-staff-table') db.exec('DROP TABLE staff_accounts');
   if (scenario === 'missing-core-table') db.exec('DROP TABLE privacy_requests');
   if (scenario === 'missing-core-index') db.exec('DROP INDEX idx_driver_live_locations_captured_at');
@@ -90,14 +97,14 @@ if (mode === 'seed') {
     const response = server ? await fetch(origin + '/api/ready', { headers })
       : await GET(new NextRequest(origin + '/api/ready', { headers }));
     const body = await response.json();
-    const ready = scenario === 'complete';
+    const ready = ['complete', 'owner-complete', 'owner-mfa-removed'].includes(scenario);
     assert.equal(response.status, ready ? 200 : 503, `${scenario}/${access}`);
     assert.equal(body.ok, ready); assert.equal(body.bookings, 'paused');
     assert.equal(response.headers.get('cache-control'), 'no-store');
     const detailed = scenario !== 'missing-database' && (access === 'maintenance' ||
-      access === 'admin-session' && !['missing-staff-table', 'revoked-admin'].includes(scenario));
+      access === 'admin-session' && !['missing-staff-table', 'revoked-admin', 'owner-revoked', 'owner-mfa-removed'].includes(scenario));
     assert.equal(Object.hasOwn(body, 'checks'), detailed, `${scenario}/${access}: detail access`);
-    if (ready && detailed) assert.ok(!body.warnings.some((warning) => warning.includes('MFA enrollment')));
+    if (ready && detailed && scenario !== 'owner-mfa-removed') assert.ok(!body.warnings.some((warning) => warning.includes('MFA enrollment')));
     assert.ok(!JSON.stringify(body).includes('managed-admin@example.test'));
     assert.ok(!JSON.stringify(body).includes(process.env.BUBBLEWASH_ADMIN_PASSWORD_HASH));
   }

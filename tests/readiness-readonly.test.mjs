@@ -15,7 +15,7 @@ function fingerprint(db) {
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
 }
-for (const scenario of ['complete', 'missing-staff-table', 'missing-core-table', 'missing-core-index', 'schema-mismatch', 'revoked-admin', 'missing-database']) {
+for (const scenario of ['complete', 'missing-staff-table', 'missing-core-table', 'missing-core-index', 'schema-mismatch', 'revoked-admin', 'missing-database', 'owner-complete', 'owner-mfa-removed', 'owner-revoked']) {
   test(`readiness is read-only and fail-closed: ${scenario}`, () => {
     const directory = mkdtempSync(path.join(os.tmpdir(), 'bubblewash-ready-'));
     try {

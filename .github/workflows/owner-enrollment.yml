@@ -1,0 +1,71 @@
+name: Private Personal Owner Enrollment
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: 'Exact deployed, independently reviewed owner-capable release SHA'
+        required: true
+        type: string
+      mode:
+        description: 'Default check-only. Send requires separate activation-link risk approval.'
+        required: true
+        default: check
+        type: choice
+        options: [check, send]
+      delivery_approved:
+        description: 'Only true after explicit approval to send the private activation link through existing Resend to the protected recipient'
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  enroll:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify reviewed source and private transport tests
+        run: |
+          python3 ops/check-owner-source.py
+          python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
+      - name: Verify existing private backup destination
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+          BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+          BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+        run: |
+          if ! python3 .github/backup/check_store.py >/dev/null 2>&1; then
+            echo 'Existing private backup destination could not be verified. No host action attempted.'
+            exit 1
+          fi
+      - name: Connect through existing production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      - name: Run the bounded private owner operation once
+        env:
+          BUBBLEWASH_OWNER_RESEND_KEY: ${{ secrets.BUBBLEWASH_OWNER_RESEND_KEY }}
+          OWNER_EMAIL: ${{ secrets.BUBBLEWASH_OWNER_EMAIL }}
+          EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+          ENROLLMENT_MODE: ${{ inputs.mode }}
+          DELIVERY_APPROVED: ${{ inputs.delivery_approved }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Protected recipient and existing host credentials never become argv,
+          # workflow inputs, files, artifacts or displayed subprocess output.
+          if ! python3 .github/backup/stream_owner_enrollment.py | tailscale ssh root@hermes 'python3 -I -B -' 2>/dev/null; then
+            echo 'Private operation did not confirm success. Stop and inspect private state before any further attempt.'
+            exit 1
+          fi

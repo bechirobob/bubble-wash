@@ -56,7 +56,7 @@ function readinessResponse(request: NextRequest, database: ReturnType<typeof ope
     if (!warning.includes("MFA enrollment")) return true;
     return !adminMfaReady;
   });
-  const detailed = maintenanceAuthorized(request.headers) || decodeSession(request.cookies.get(sessionCookieName)?.value, staff)?.role === "admin";
+  const detailed = maintenanceAuthorized(request.headers) || decodeSession(request.cookies.get(sessionCookieName)?.value, staff, database)?.role === "admin";
   return NextResponse.json({
     ok: ready,
     service: "Bubble Wash operations app",

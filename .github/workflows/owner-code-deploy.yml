@@ -1,0 +1,88 @@
+name: Personal Owner Code Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: 'Reviewed full main SHA with passing Pilot CI and browser checks'
+        required: true
+        type: string
+      expected_live_sha:
+        description: 'Full currently deployed SHA; drift aborts'
+        required: true
+        type: string
+      backup_sha256:
+        description: 'Independently verified SHA-256 of encrypted archive from pinned backup run'
+        required: true
+        type: string
+      receipt_run:
+        description: 'Verified private backup run ID, no older than 30 hours'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TARGET_SHA: ${{ inputs.candidate_sha }}
+      EXPECTED_LIVE: ${{ inputs.expected_live_sha }}
+      BACKUP_SHA: ${{ inputs.backup_sha256 }}
+      RECEIPT_RUN: ${{ inputs.receipt_run }}
+      BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+      BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+    steps:
+      - name: Require explicit reviewed main and receipt pins
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ && "$EXPECTED_LIVE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BACKUP_SHA" =~ ^[0-9a-f]{64}$ && "$RECEIPT_RUN" =~ ^[1-9][0-9]*$ ]]
+          [[ "$BACKUP_STORE_SHA" =~ ^[0-9a-f]{40}$ && "$BACKUP_STORE_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$TARGET_SHA" == "$GITHUB_SHA" ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+      - name: Verify exact checkout and release gates
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+          python3 -m unittest discover -s tests -p 'test_preserving_deploy.py' -v
+          python3 -m unittest discover -s tests -p 'test_owner_deploy.py' -v
+          python3 ops/check-owner-source.py
+          python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
+      - name: Require successful exact-main CI through public metadata
+        run: python3 ops/check-release-ci.py
+      - name: Verify existing private backup destination without creating access
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+        run: python3 .github/backup/check_store.py
+      - name: Connect through existing production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Stage exact source without data, secrets, or backup export
+        run: |
+          set -euo pipefail
+          release_id="$(date -u +%Y%m%dT%H%M%SZ)-${TARGET_SHA:0:12}"
+          release_dir="/home/ubuntu/bubblewash-releases/$release_id"
+          # git archive exports only the exact tracked commit, never .env or local files.
+          git archive --format=tar "$TARGET_SHA" > "$RUNNER_TEMP/release.tar"
+          tailscale ssh root@hermes "test ! -e '$release_dir' && install -d -o ubuntu -g ubuntu -m 0750 '$release_dir'"
+          tailscale ssh root@hermes "tar -xf - -C '$release_dir' && chown -R ubuntu:ubuntu '$release_dir' && printf '%s\n' '$TARGET_SHA' > '$release_dir/.release-sha'" < "$RUNNER_TEMP/release.tar"
+          printf 'RELEASE_DIR=%s\n' "$release_dir" >> "$GITHUB_ENV"
+      - name: Build, rehearse privately, activate, and verify rollback-capable release
+        run: |
+          set -euo pipefail
+          tailscale ssh root@hermes "python3 -I -B - --candidate '$RELEASE_DIR' --sha '$TARGET_SHA' --expected-live '$EXPECTED_LIVE' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < ops/deploy-personal-owner.py

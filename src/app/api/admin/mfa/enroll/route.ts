@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
       const response = NextResponse.json({ ok: true, recoveryCodes: confirmation.recoveryCodes }, { headers: { "Cache-Control": "no-store" } });
       response.cookies.set({
         name: sessionCookieName,
-        value: encodeSession(user),
+        value: encodeSession(user, true),
         ...sessionCookieOptions(),
       });
       return response;

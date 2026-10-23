@@ -23,7 +23,7 @@ function firstSearchParam(value: string | string[] | undefined) {
 export default async function VendorsPage({ searchParams }: VendorsPageProps) {
   const user = await getCurrentStaffUser();
   if (!user) redirect("/login?next=/vendors");
-  if (user.role !== "vendor") redirect(user.role === "admin" ? "/admin" : "/login?next=/vendors");
+  if (user.role !== "vendor" && !(user.role === "admin" && user.allStaffAccess)) redirect(user.role === "admin" ? "/admin" : "/login?next=/vendors");
 
   const params = await searchParams;
   const requestedView = firstSearchParam(params.view) as VendorView;
@@ -32,6 +32,7 @@ export default async function VendorsPage({ searchParams }: VendorsPageProps) {
     <VendorWorkspace
       userName={user.name}
       role={user.role}
+      allStaffAccess={user.allStaffAccess}
       initialView={vendorViews.has(requestedView) ? requestedView : "jobs"}
       selectedOrderId={firstSearchParam(params.order)}
       selectedCaseId={firstSearchParam(params.case)}

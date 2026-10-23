@@ -23,7 +23,7 @@ function firstSearchParam(value: string | string[] | undefined) {
 export default async function SupportPage({ searchParams }: SupportPageProps) {
   const user = await getCurrentStaffUser();
   if (!user) redirect("/login?next=/support");
-  if (user.role !== "support") redirect(user.role === "admin" ? "/admin" : "/login?next=/support");
+  if (user.role !== "support" && !(user.role === "admin" && user.allStaffAccess)) redirect(user.role === "admin" ? "/admin" : "/login?next=/support");
 
   const params = await searchParams;
   const requestedView = firstSearchParam(params.view) as SupportView;
@@ -32,6 +32,7 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
     <SupportWorkspace
       userName={user.name}
       role={user.role}
+      allStaffAccess={user.allStaffAccess}
       initialView={supportViews.has(requestedView) ? requestedView : "cases"}
       selectedOrderId={firstSearchParam(params.order)}
       selectedCaseId={firstSearchParam(params.case)}

@@ -10,6 +10,7 @@ export type StaffUser = {
   credentialVersion: string;
   role: StaffRole;
   entityId?: string;
+  allStaffAccess?: boolean;
 };
 
 type Environment = Record<string, string | undefined>;

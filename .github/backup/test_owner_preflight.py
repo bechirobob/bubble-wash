@@ -82,6 +82,31 @@ class OwnerPreflightTests(unittest.TestCase):
             db = Path(directory)/'empty.sqlite'; con = sqlite3.connect(db); con.execute('CREATE TABLE staff_accounts(email TEXT, role TEXT, status TEXT)'); con.close()
             result = {'owner': preflight.owner_database_report(str(db), 'fixture@example.test', {})}
             self.assertFalse(result['owner']['inspected'])
+            self.assertEqual(result['owner']['requiredTablePresence'], {'staff_accounts':True, 'staff_credential_overrides':False, 'submissions':False})
+            self.assertEqual(result['owner']['collisionInspectionBlockedReason'], 'required-schema-not-present-no-initialization-performed')
+
+    def test_absent_lazy_account_tables_do_not_clear_existing_roster(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db=Path(directory)/'existing.sqlite'
+            con=sqlite3.connect(db); con.execute('CREATE TABLE submissions(data TEXT)')
+            con.execute('INSERT INTO submissions VALUES (?)',(json.dumps({'submissionType':'staff-onboarding','staffEmail':'fixture@example.test'}),)); con.commit(); con.close()
+            before=db.read_bytes()
+            result=preflight.owner_database_report(str(db),'fixture@example.test',{'BUBBLEWASH_ADMIN_EMAIL':'fixture@example.test'})
+            self.assertFalse(result['inspected']); self.assertNotIn('duplicatePresent',result)
+            self.assertEqual(result['requiredTablePresence'],{'staff_accounts':False,'staff_credential_overrides':False,'submissions':True})
+            self.assertEqual(db.read_bytes(),before)
+
+    def test_roster_collision_uses_actual_form_identifier_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db, writer = self.fixture(Path(directory))
+            for kind, field in [('staff-onboarding','staffEmail'), ('staff-onboarding','email'), ('vendor-application','email'), ('driver-onboarding','email')]:
+                address = (kind + '-' + field + '@example.test').lower()
+                data = {'submissionType':kind, 'email':'unrelated@example.test', field:'  '+address.upper()+'  '}
+                writer.execute('INSERT INTO submissions VALUES (?)',(json.dumps(data),)); writer.commit()
+                result = preflight.owner_database_report(str(db),address,{})
+                self.assertTrue(result['duplicatePresent']); self.assertIn('roster',result['duplicateTypes'])
+                self.assertNotIn(address,json.dumps(result))
+            writer.close()
 
     def test_sender_and_key_values_remain_private(self):
         key = base64.b64encode(bytes(range(32))).decode()
