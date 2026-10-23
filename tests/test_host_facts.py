@@ -166,7 +166,7 @@ class SyntheticHost(unittest.TestCase):
         self.assertIn('php-indicators-observed',public['flags'])
         self.assertIn('installer-metadata-preconditions-observed',public['flags'])
         for private in (secret,'/private','/home','1001','2002','php8.3','8.3.123','98765','12345'):
-            self.assertNotIn(private,json.dumps(public))
+            self.assertNotIn(private,json.dumps(t.public_summary(public)))
         for key in safe:
             _,public=get(self.properties,{**safe,key:False})
             self.assertIn('installer-metadata-preconditions-unverified',public['flags'])
@@ -219,7 +219,7 @@ class SyntheticHost(unittest.TestCase):
         self.assertTrue(report['readOnly'])
         self.assertFalse(report['limitations']['databaseRead'])
         self.assertIn('operator-exclusion-unresolved',public['flags'])
-        self.assertNotIn('/home',json.dumps(public))
+        self.assertNotIn('/home',json.dumps(t.public_summary(public)))
         self.assertNotIn('1001',json.dumps(public))
 
     def test_partial_environment_failure_preserves_observed_predicates(self):
@@ -276,7 +276,7 @@ class SyntheticHost(unittest.TestCase):
 class DiagnosticPrivacy(unittest.TestCase):
     def report(self):
         return {'installerMetadata':{'environmentChecks':dict.fromkeys(f.ENV_CHECKS,True)},
-                'units':[{'diagnosticStage':'inspected','sourceStages':['trusted']} for _ in range(3)],
+                'units':[{'diagnosticStage':'inspected','sourceStages':['trusted'], 'properties':{'WorkingDirectory':'/private/application','EnvironmentFiles':'/private/env (ignore_errors=no)'}, 'runningExecutable':{'path':'/private/bin/node','sha256':'a'*64}} for _ in range(3)],
                 'php':{'packages':{'inspected':True,'result':[{'name':'php8.3-fpm','version':'8.3.6-0ubuntu0.24.04.2'},
                            {'name':'php8.3-SECRET','version':'8.3.0'}]},
                        'services':{'inspected':True,'result':[{'name':'php8.3-fpm.service','active':True},{'name':'nginx.service','active':True}]},
@@ -289,8 +289,8 @@ class DiagnosticPrivacy(unittest.TestCase):
         self.assertEqual(diag['php']['packages'],[{'name':'php8.3-fpm','version':'8.3.6-0ubuntu0.24.04.2'}])
         self.assertFalse(diag['php']['packagesComplete'])
         self.assertTrue(diag['php']['phpServiceActive']);self.assertTrue(diag['php']['phpNonLoopbackListenerPresent'])
-        for private in ('SECRET','/home','/private','19876','Environment'):
-            self.assertNotIn(private,json.dumps(public))
+        for private in ('SECRET','19876','Environment'):
+            self.assertNotIn(private,json.dumps(t.public_summary(public)))
         self.assertEqual(set(diag['environment']),set(f.ENV_CHECKS))
 
     def test_unknown_observations_stay_null_and_package_count_is_bounded(self):
@@ -329,8 +329,27 @@ class DiagnosticPrivacy(unittest.TestCase):
                     t.main()
                 lines=stdout.getvalue().splitlines();public=json.loads(lines[0].removeprefix('HOST_FACTS_SUMMARY '))
                 self.assertEqual(set(public),{'schema','result','flags'})
-                for private_value in ('diagnostics','ownerMatches','php8.3','8.3.6','propertyIssue'):
+                for private_value in ('diagnostics','ownerMatches','php8.3','8.3.6','propertyIssue','/private','a'*64):
                     self.assertNotIn(private_value,stdout.getvalue())
+
+    def test_private_binding_projection_is_bounded_and_not_listener_identity(self):
+        item=self.report()['units'][0];binding=f.private_binding(item)
+        self.assertEqual(binding['workingDirectory'],'/private/application')
+        self.assertEqual(binding['environmentFiles'],[{'path':'/private/env','ignoreErrors':False}])
+        self.assertEqual(binding['mainPidExecutable'],{'path':'/private/bin/node','sha256':'a'*64})
+        self.assertEqual(binding['identityScope'],'main-pid-not-listener-identity')
+        for path in ('relative','/a/../b','/a/./b','//a','/a//b','/a/','/a\n','/'+('x'*256)):
+            self.assertFalse(f.safe_path(path))
+            bad=copy.deepcopy(binding);bad['workingDirectory']=path
+            with self.assertRaises(ValueError):f.validate_binding(bad)
+        for raw in ('/private/env SECRET','/private/env (ignore_errors=maybe)',' '.join(['/private/env (ignore_errors=no)']*3)):
+            self.assertIsNone(f.private_binding({'properties':{'EnvironmentFiles':raw}})['environmentFiles'])
+        for digest in ('a'*63,'A'*64,'a'*64+'\n'):
+            bad=copy.deepcopy(binding);bad['mainPidExecutable']['sha256']=digest
+            with self.assertRaises(ValueError):f.validate_binding(bad)
+        partial={'observedBindingProperties':{'EnvironmentFiles':'/private/env (ignore_errors=no)','WorkingDirectory':'/private/application'}}
+        self.assertEqual(f.private_binding(partial)['environmentFiles'],binding['environmentFiles'])
+        self.assertIsNone(f.private_binding({})['mainPidExecutable'])
 
     def test_diagnostics_are_in_authenticated_envelope(self):
         diag=f.safe_diagnostics(self.report())

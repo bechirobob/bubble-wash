@@ -51,6 +51,39 @@ PHP_NAME = re.compile(r'(?:php(?:[0-9]{1,2}\.[0-9]{1,2})?(?:-(?:fpm|cli|common|o
 PHP_VERSION = re.compile(r'[0-9][A-Za-z0-9.+:~_-]{0,79}')
 PHP_PRESENCE = ('servicesInspected', 'phpServicePresent', 'phpServiceActive', 'webServicePresent', 'listenersInspected', 'phpTcpListenerPresent', 'phpNonLoopbackListenerPresent')
 
+def safe_path(value):
+    return (type(value) is str and 0 < len(value) <= 256 and re.fullmatch(r'/[A-Za-z0-9_./+@:-]*', value) is not None
+            and not value.startswith('//') and value == str(Path(value)) and all(part not in ('.','..') for part in value.split('/')))
+
+
+def private_binding(item):
+    props = item.get('properties', item.get('observedBindingProperties', {}))
+    raw = props.get('EnvironmentFiles')
+    files = None
+    if type(raw) is str and len(raw) <= 1024:
+        if raw == '': files = []
+        else:
+            matches = list(re.finditer(r'(/[^ ]+) \(ignore_errors=(yes|no)\)(?: |$)', raw))
+            if 0 < len(matches) <= 2 and ''.join(x.group(0) for x in matches) == raw and all(safe_path(x.group(1)) for x in matches):
+                files = [{'path':x.group(1), 'ignoreErrors':x.group(2)=='yes'} for x in matches]
+    working = props.get('WorkingDirectory')
+    executable = item.get('runningExecutable', {})
+    path, digest = executable.get('path'), executable.get('sha256')
+    observed = {'path':path,'sha256':digest} if safe_path(path) and type(digest) is str and re.fullmatch('[a-f0-9]{64}',digest) else None
+    return {'environmentFiles':files, 'workingDirectory':working if safe_path(working) else None,
+            'mainPidExecutable':observed, 'identityScope':'main-pid-not-listener-identity'}
+
+
+def validate_binding(value):
+    require(type(value) is dict and set(value)=={'environmentFiles','workingDirectory','mainPidExecutable','identityScope'})
+    require(value['identityScope']=='main-pid-not-listener-identity')
+    require(value['workingDirectory'] is None or safe_path(value['workingDirectory']))
+    files=value['environmentFiles'];require(files is None or type(files) is list and len(files)<=2)
+    for item in files or []:
+        require(type(item) is dict and set(item)=={'path','ignoreErrors'} and safe_path(item['path']) and type(item['ignoreErrors']) is bool)
+    executable=value['mainPidExecutable']
+    require(executable is None or type(executable) is dict and set(executable)=={'path','sha256'} and safe_path(executable['path']) and type(executable['sha256']) is str and re.fullmatch('[a-f0-9]{64}',executable['sha256']))
+
 def validate_diagnostics(value):
     require(type(value) is dict and set(value) == {'environment', 'units', 'php'})
     checks = value['environment']
@@ -59,7 +92,8 @@ def validate_diagnostics(value):
     units = value['units']; require(type(units) is list and len(units) == 3)
     require([u.get('unit') for u in units] == list(UNIT_IDS))
     for item in units:
-        require(set(item) == {'unit', 'stage', 'unitSources', 'executableSource', 'propertyIssue', 'missingProperties'} and item['stage'] in UNIT_STAGES)
+        require(set(item) == {'unit', 'stage', 'unitSources', 'executableSource', 'propertyIssue', 'missingProperties', 'binding'} and item['stage'] in UNIT_STAGES)
+        validate_binding(item['binding'])
         require(item['executableSource'] in SOURCE_STAGES and item['propertyIssue'] in ('not-assessed','none','missing','duplicate','unknown','malformed','oversized'))
         require(type(item['missingProperties']) is list and item['missingProperties'] == sorted(set(item['missingProperties'])) and all(x in PROPERTIES for x in item['missingProperties']))
         require(type(item['unitSources']) is list and item['unitSources'] == sorted(set(item['unitSources'])) and all(x in SOURCE_STAGES for x in item['unitSources']))
@@ -81,7 +115,7 @@ def safe_diagnostics(report):
     lr = listeners.get('result', {}) if listeners.get('inspected') is True else {}
     present = lambda k: lr[k] > 0 if type(lr.get(k)) is int else None
     value = {'environment': report['installerMetadata'].get('environmentChecks', dict.fromkeys(ENV_CHECKS)),
-             'units': [{'unit':alias, 'stage':item.get('diagnosticStage','account-unavailable'), 'unitSources':sorted(set(item.get('sourceStages') or ['not-assessed'])), 'executableSource':item.get('executableStage','not-assessed'), 'propertyIssue':item.get('propertyIssue','not-assessed'), 'missingProperties':item.get('missingProperties',[])} for alias,item in zip(UNIT_IDS,report['units'])],
+             'units': [{'unit':alias, 'stage':item.get('diagnosticStage','account-unavailable'), 'unitSources':sorted(set(item.get('sourceStages') or ['not-assessed'])), 'executableSource':item.get('executableStage','not-assessed'), 'propertyIssue':item.get('propertyIssue','not-assessed'), 'missingProperties':item.get('missingProperties',[]), 'binding':private_binding(item)} for alias,item in zip(UNIT_IDS,report['units'])],
              'php': {'packages':accepted[:24], 'packagesComplete':packages.get('inspected') is True and len(accepted)==len(rows) and len(accepted)<=24,
                      'servicesInspected':services.get('inspected') is True,
                      'phpServicePresent':any(re.fullmatch(r'php[0-9.]*-fpm\.service',x.get('name','')) for x in sr),
@@ -246,6 +280,7 @@ def collect(php, run=command):
                 key, sep, value = line.partition('=')
                 issue = 'malformed' if not sep else 'unknown' if key not in PROPERTIES else 'duplicate' if key in props else 'oversized' if len(value) >= 8192 else 'none'
                 item['propertyIssue'] = issue; require(issue == 'none'); props[key] = value
+                if key in ('EnvironmentFiles','WorkingDirectory'): item.setdefault('observedBindingProperties', {})[key] = value
             item['missingProperties'] = sorted(set(PROPERTIES) - set(props))
             item['propertyIssue'] = 'missing' if item['missingProperties'] else 'none'
             require(not item['missingProperties']); item.update(inspected=True, properties=props, unitSources=[])

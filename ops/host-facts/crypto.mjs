@@ -9,6 +9,20 @@ const PURPOSE = 'bubblewash-host-facts/v1';
 const FLAGS = new Set(['unit-unavailable','manager-unavailable','pending-reload','unsafe-source','metadata-incomplete','space-unavailable','space-exhausted','php-incomplete','launch-executable-unresolved','operator-exclusion-unresolved','staging-capacity-unassessed','generator-overrides-unobserved','installer-env-metadata-unavailable','installer-env-owner-mode-unsafe','installer-env-attributes-present','installer-env-binding-unverified','deployment-lock-unverified','tool-unavailable','php-indicators-observed','php-no-indicators-observed-incomplete','installer-metadata-preconditions-observed','installer-metadata-preconditions-unverified']);
 const requireValue = value => { if (!value) throw Error('inspection cryptography refused'); };
 const keys = (value, expected) => requireValue(value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).sort().join(',') === expected.sort().join(','));
+const safePath = value => typeof value === 'string' && value.length > 0 && value.length <= 256 && !/[\r\n]/.test(value) && /^\/[A-Za-z0-9_./+@:-]*$/.test(value) && path.posix.normalize(value) === value && !value.split('/').some(x => x === '.' || x === '..') && (value === '/' || !value.endsWith('/')) && !value.startsWith('//');
+function binding(value) {
+  keys(value,['environmentFiles','workingDirectory','mainPidExecutable','identityScope']);
+  requireValue(value.identityScope === 'main-pid-not-listener-identity');
+  requireValue(value.workingDirectory === null || safePath(value.workingDirectory));
+  requireValue(value.environmentFiles === null || Array.isArray(value.environmentFiles) && value.environmentFiles.length <= 2);
+  for (const item of value.environmentFiles || []) {
+    keys(item,['path','ignoreErrors']); requireValue(safePath(item.path) && typeof item.ignoreErrors === 'boolean');
+  }
+  if (value.mainPidExecutable !== null) {
+    keys(value.mainPidExecutable,['path','sha256']);
+    requireValue(safePath(value.mainPidExecutable.path) && typeof value.mainPidExecutable.sha256 === 'string' && /^[a-f0-9]{64}$/.test(value.mainPidExecutable.sha256) && value.mainPidExecutable.sha256.length === 64);
+  }
+}
 export function diagnostics(value) {
   keys(value, ['environment','units','php']);
   const envKeys = ['accountValid','regularFile','ownerMatches','primaryGroupMatches','modePrivate','singleLink','canonicalPath','ancestorDirectories','ancestorOwners','ancestorModes','attributesAbsent'];
@@ -17,7 +31,8 @@ export function diagnostics(value) {
   const ids = ['maintenance-timer','maintenance-service','application-service'];
   requireValue(Array.isArray(value.units) && value.units.length === 3);
   value.units.forEach((unit,i) => {
-    keys(unit,['unit','stage','unitSources','executableSource','propertyIssue','missingProperties']);
+    keys(unit,['unit','stage','unitSources','executableSource','propertyIssue','missingProperties','binding']);
+    binding(unit.binding);
     requireValue(unit.unit === ids[i] && ['account-unavailable','command-failed','properties-invalid','inspected'].includes(unit.stage));
     requireValue(['not-assessed','trusted','ownership-unsafe','read-or-validation-failed'].includes(unit.executableSource));
     requireValue(['not-assessed','none','missing','duplicate','unknown','malformed','oversized'].includes(unit.propertyIssue));

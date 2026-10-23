@@ -1,0 +1,83 @@
+name: Private One-Time Synthetic Survey Email
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_sha:
+        description: 'Exact reviewed main SHA, already deployed; source drift refuses execution'
+        required: true
+        type: string
+      node_path:
+        description: 'Independently verified canonical absolute Node 22 executable, matched to live listener'
+        required: true
+        type: string
+      node_sha256:
+        description: 'Independently verified SHA256 of that existing Node executable'
+        required: true
+        type: string
+      database_path:
+        description: 'Independently verified existing SQLite path, matched to protected service environment'
+        required: true
+        type: string
+      mode:
+        description: 'Check is read-only; send consumes the single synthetic email attempt'
+        required: true
+        default: check
+        type: choice
+        options: [check, send]
+      delivery_approved:
+        description: 'True only for the approved fixed synthetic email to info@bubblewash.co with protected owner CC'
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  test:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify exact reviewed source and private protocol tests
+        env:
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ && "$REVIEWED_SHA" == "$GITHUB_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$REVIEWED_SHA" ]]
+          python3 -B -m unittest discover -s tests -p 'test_research_test_transport.py' -v
+      - name: Verify existing private backup destination
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+          BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+          BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+        run: |
+          if ! python3 -B .github/backup/check_store.py >/dev/null 2>&1; then
+            echo '{"attempted":false,"status":"blocked"}'
+            exit 1
+          fi
+      - name: Use existing approved production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Run one bounded private synthetic operation
+        env:
+          BUBBLEWASH_OWNER_EMAIL: ${{ secrets.BUBBLEWASH_OWNER_EMAIL }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          VERIFIED_NODE_PATH: ${{ inputs.node_path }}
+          VERIFIED_NODE_SHA256: ${{ inputs.node_sha256 }}
+          VERIFIED_DATABASE_PATH: ${{ inputs.database_path }}
+          TEST_MODE: ${{ inputs.mode }}
+          DELIVERY_APPROVED: ${{ inputs.delivery_approved }}
+        run: python3 -B ops/transport-research-test.py
