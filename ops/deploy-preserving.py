@@ -956,7 +956,7 @@ def rehearsal_directory(owner, report, unit):
         resume_rehearsal_deadline(report)
 
 
-def rehearse(candidate, values, db, status_path, owner, unit, report=None):
+def rehearse(candidate, values, db, status_path, owner, unit, report=None, prepare_snapshot=None):
     rehearsal_stage(report, 'BUILD_ARTIFACT')
     require((candidate / '.next/BUILD_ID').is_file(), 'candidate build missing')
     if report is not None:
@@ -996,6 +996,10 @@ def rehearse(candidate, values, db, status_path, owner, unit, report=None):
         if report is not None:
             metadata = snapshot.lstat()
             report.snapshot_identity = (metadata.st_dev, metadata.st_ino)
+        if prepare_snapshot is not None:
+            require(report is not None, 'copy preparation requires bounded rehearsal')
+            rehearsal_stage(report, 'COPY_REPAIR')
+            prepare_snapshot(snapshot)
         rehearsal_stage(report, 'FINGERPRINT_BEFORE')
         before = database_fingerprint(snapshot)
         try:
@@ -1075,16 +1079,23 @@ class ReleaseArgumentParser(argparse.ArgumentParser):
         raise ValueError('unsupported release arguments')
 
 
-def main(lock_unchanged, report=None):
+def main(lock_unchanged, report=None, repair_action=None):
     parser = ReleaseArgumentParser()
     for key in ('candidate', 'sha', 'expected-live', 'backup-sha256', 'receipt-run', 'store-sha', 'store-id'):
         parser.add_argument('--' + key, required=True)
     parser.add_argument('--rehearsal-only', action='store_true')
     parser.add_argument('--run-id')
     parser.add_argument('--run-attempt')
+    if repair_action is not None:
+        # This flag exists only for the separately published repair runner.
+        # The normal deployment CLI cannot enter or supply this callback.
+        parser.add_argument('--repair-staff-schema', action='store_true', required=True)
     args = parser.parse_args()
-    require(args.rehearsal_only == (report is not None), 'rehearsal entrypoint mismatch')
-    if args.rehearsal_only:
+    if repair_action is not None:
+        require(not args.rehearsal_only and report is not None, 'repair entrypoint mismatch')
+    else:
+        require(args.rehearsal_only == (report is not None), 'rehearsal entrypoint mismatch')
+    if args.rehearsal_only or repair_action is not None:
         require(re.fullmatch(r'[1-9][0-9]{0,19}', args.run_id or '') and
                 re.fullmatch(r'[1-9][0-9]{0,5}', args.run_attempt or ''), 'invalid diagnostic run identity')
     else:
@@ -1144,6 +1155,20 @@ def main(lock_unchanged, report=None):
                 digest(archive) == args.backup_sha256, 'encrypted backup changed during release')
         verify_receipt(receipt, json.loads(status_path.read_bytes()), time.time(), args.receipt_run, args.store_sha, int(args.store_id))
 
+    if repair_action is not None:
+        # Exact same preflight, lock and receipt checks, but no build or
+        # activation function is reachable from this separate repair entrypoint.
+        def verify_existing():
+            unchanged()
+            require(CURRENT.resolve(strict=True) == current and (RUNTIME / 'current-release').read_bytes() == old_marker,
+                    'live release drifted during preparation')
+            check_runtime(current, values)
+            health(3000)
+            lock_unchanged()
+        repair_action(candidate, values, db, status_path, owner,
+                      'bubblewash-staff-repair-' + args.run_id + '-' + args.run_attempt,
+                      report, verify_existing)
+        return
     if args.rehearsal_only:
         # This branch returns before any build, activation, or marker writer is
         # defined/called. Its only service mutation is its own transient probe.
