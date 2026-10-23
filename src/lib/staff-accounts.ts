@@ -69,7 +69,7 @@ export function inviteOwnerAccount(input: { email: string; name: string }, actor
       // Existing triggers could turn an allowed insert into unrelated mutation.
       const capabilityExists = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE name = 'staff_owner_capabilities' COLLATE NOCASE").get());
       if (database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'trigger'").get() ||
-          !databaseReadiness(database, [initializeStaffAccountsSchema, ...(capabilityExists ? [initializeOwnerCapabilitySchema] : [])])) {
+          !databaseReadiness(database, [initializeStaffAccountsSchema, ...(capabilityExists ? [initializeOwnerCapabilitySchema] : [])], { allowMissingBookingReferences: true })) {
         throw new Error("Exact existing schema without triggers is required before owner enrollment.");
       }
       assertOwnerEmailAvailable(email, database, env);

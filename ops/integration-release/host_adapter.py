@@ -6,6 +6,7 @@ and exclusion receipt. Merely setting a boolean cannot authorize host acceptance
 """
 import argparse
 import copy
+import hashlib
 import http.client
 import json
 import os
@@ -314,9 +315,24 @@ class Host:
                          '--experimental-strip-types', *args], cwd=target, env=environment, timeout=90).strip()
 
     def migrate(self, database):
-        # The reviewed entrypoint never opens the initializing application store.
+        def acknowledgement(raw):
+            def unique(pairs):
+                value = dict(pairs)
+                require(len(value) == len(pairs), 'duplicate migration result key')
+                return value
+            # Canonical JSON distinguishes booleans from Python-equal 0/1.
+            return canonical(json.loads(raw, object_pairs_hook=unique))
+
+        # Both fixed entrypoints open only the existing database, never the
+        # initializing application store. Label maps must commit first: the new
+        # outbox preflight deliberately refuses a database missing those maps.
+        # A failure between commits remains MIGRATING/held. Recovery does not
+        # rerun this callback or restore a snapshot; completion needs separate
+        # approval while all writer holds and the deployment lock remain held.
+        result = self.node(Path(self.plan['candidate']), ['scripts/migrate-booking-references.mjs', '--database', str(database)], database)
+        require(acknowledgement(result) == canonical({'ok': True, 'migration': 'permanent-booking-vendor-labels-v1', 'historicalBackfill': False}), 'label migration result uncertain')
         result = self.node(Path(self.plan['candidate']), ['scripts/migrate-notification-outbox.mjs', '--database', str(database)], database)
-        require(json.loads(result) == {'ok': True, 'migration': 'notification-outbox-exact-additive-v1'}, 'migration result uncertain')
+        require(acknowledgement(result) == canonical({'ok': True, 'migration': 'notification-outbox-exact-additive-v1'}), 'migration result uncertain')
         return True
 
     def verify_database(self, database):
@@ -328,6 +344,24 @@ class Host:
                   "!db.prepare('PRAGMA table_info(notification_outbox)').all().some(x=>x.name==='delivery_state'))"
                   "throw Error('schema');console.log('exact-additive-ready');}finally{db.close();}")
         return self.node(Path(self.plan['fallback']), ['--input-type=module', '-e', script], database) == 'exact-additive-ready'
+
+    def completion_schema(self, database):
+        # Readiness checks exact core/staff, label schema/high-water and one of
+        # the two exact outbox schemas. A missing column alone is not evidence.
+        script = ("import Database from 'better-sqlite3';"
+                  "import {databaseReadiness} from './src/lib/data-store.ts';"
+                  "import {initializeStaffAccountsSchema} from './src/lib/staff-accounts.ts';"
+                  "const db=new Database(process.env.BUBBLEWASH_DATABASE_PATH,{readonly:true,fileMustExist:true});"
+                  "try{db.pragma('query_only=ON');if(!databaseReadiness(db,[initializeStaffAccountsSchema]))"
+                  "throw Error('schema');const complete=db.prepare('PRAGMA table_info(notification_outbox)').all()"
+                  ".some(x=>x.name==='delivery_state');if(!complete){"
+                  "for(const table of ['booking_references','vendor_codes']){"
+                  "if(db.prepare('SELECT count(*) n FROM '+table).get().n!==0||"
+                  "db.prepare('SELECT 1 FROM sqlite_sequence WHERE name=?').get(table))throw Error('consumed labels');}}"
+                  "console.log(complete?'already-complete':'labels-only');}finally{db.close();}")
+        result = self.node(Path(self.plan['candidate']), ['--input-type=module', '-e', script], database)
+        require(result in ('labels-only', 'already-complete'), 'completion schema uncertain')
+        return result
 
     def runtime_node(self):
         props = self.c.core.parse_properties(self.show('user', self.c.core.APP))
@@ -442,11 +476,116 @@ def durable_plan(plan, control):
     return result
 
 
-def run_plan(plan, mode):
+def completion_confirmation(mode, confirmation, plan_sha256):
+    if mode == 'complete-labels-only':
+        require(isinstance(plan_sha256, str) and re.fullmatch('[a-f0-9]{64}', plan_sha256)
+                and confirmation == 'complete-labels-only:' + plan_sha256,
+                'explicit completion confirmation must match the reviewed full plan digest')
+    else:
+        require(not confirmation, 'completion confirmation is not valid for this mode')
+
+
+def verify_completion_data(snapshot, database):
+    """Compare all pre-existing data with the original snapshot, without exporting it."""
+    excluded = {'booking_references', 'vendor_codes', 'sqlite_sequence'}
+    def fingerprint(path, original):
+        path = Path(path)
+        require(path.is_absolute() and path.resolve(strict=True) == path
+                and not any(char in str(path) for char in ('?', '#')), 'unsafe completion evidence path')
+        info = regular(path)
+        if original:
+            require(info.st_uid == os.geteuid() and not info.st_mode & 0o077,
+                    'snapshot evidence must remain private and controller-owned')
+        fields = ('st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid', 'st_nlink', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+        identity = tuple(getattr(info, field) for field in fields)
+        before = digest(path)
+        with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True) as db:
+            db.execute('PRAGMA query_only=ON')
+            require(db.execute('PRAGMA quick_check').fetchall() == [('ok',)], 'completion evidence integrity failed')
+            schema = db.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').fetchall()
+            if original:
+                require(not any(row[1] in excluded - {'sqlite_sequence'} or row[2] in excluded - {'sqlite_sequence'} for row in schema),
+                        'original snapshot already contains label maps')
+            sequence = [row for row in schema if row[1] == 'sqlite_sequence']
+            require(not sequence or sequence == [('table', 'sqlite_sequence', 'sqlite_sequence', 'CREATE TABLE sqlite_sequence(name,seq)')],
+                    'sequence schema differs')
+            protected_schema = [row for row in schema if row[1] not in excluded and row[2] not in excluded]
+            metadata = (db.execute('PRAGMA user_version').fetchone(), db.execute('PRAGMA application_id').fetchone())
+            value = hashlib.sha256(repr((protected_schema, metadata)).encode())
+            tables = {row[1]: row for row in db.execute('PRAGMA main.table_list') if row[0] == 'main'}
+            for kind, name, _, _ in protected_schema:
+                if kind != 'table': continue
+                table = tables.get(name)
+                require(table and table[2] == 'table' and table[4] in (0, 1), 'unsupported completion evidence table')
+                quoted = '"' + name.replace('"', '""') + '"'
+                columns = db.execute('PRAGMA main.table_xinfo(' + quoted + ')').fetchall()
+                require(columns and len(columns) == table[3], 'incomplete completion evidence columns')
+                selection = '*'
+                if table[4] == 0:
+                    names = {column[1].casefold() for column in columns}
+                    alias = next((name for name in ('rowid', '_rowid_', 'oid') if name not in names), None)
+                    require(alias is not None, 'completion rowid is shadowed')
+                    selection = '"' + alias + '",*'
+                rows = sorted(repr(row) for row in db.execute('SELECT ' + selection + ' FROM ' + quoted))
+                value.update(name.encode() + b'\0' + '\n'.join(rows).encode())
+            sequence_rows = db.execute('SELECT name,seq FROM sqlite_sequence ORDER BY name,seq').fetchall() if sequence else []
+            require(not any(row[0] in ('booking_references', 'vendor_codes') for row in sequence_rows), 'label sequence was consumed')
+            value.update(repr(sequence_rows).encode())
+        require(tuple(getattr(regular(path), field) for field in fields) == identity and digest(path) == before,
+                'completion evidence changed while reading')
+        return value.digest()
+    require(fingerprint(snapshot, True) == fingerprint(database, False), 'pre-existing data changed since the migration snapshot')
+    return True
+
+
+def complete_labels_only(control, host):
+    """Called only inside the existing HostGuards lock after explicit confirmation."""
+    state, plan = control.state, control.plan
+    control.inhibit()
+    try:
+        record = state.read()
+        require(isinstance(record, dict) and record.get('phase') in ('MIGRATING', 'MIGRATED')
+                and canonical(record) == canonical({'schema': 1, 'phase': record['phase'], 'planHash': control.plan_hash, 'target': None})
+                and state.journal.read_bytes() == json.dumps(record, sort_keys=True).encode(),
+                'completion requires the same held migration journal')
+        control.pins()
+        old = Path(plan['old'])
+        marker = f"sha={plan['oldSha']}\nrelease={old.name}\npath={old}\n".encode()
+        def unchanged():
+            control.pins()
+            require(state.app_hold.exists() and state.maintenance_hold.exists(), 'completion holds missing')
+            require(Path(plan['current']).resolve(strict=True) == old
+                    and Path(plan['marker']).read_bytes() == marker, 'completion pointer or marker differs')
+            require(control.quiescent() is True, 'completion quiescence lost')
+        unchanged()
+        database = Path(plan['database'])
+        schema = host.completion_schema(database)
+        if schema == 'already-complete':
+            require(control.verify_database(database) is True, 'complete schema not accepted by fallback')
+            unchanged()
+            return 'already-complete-held-use-recover'
+        require(record['phase'] == 'MIGRATING', 'MIGRATED journal requires a complete schema')
+        verify_completion_data(Path(plan['snapshot']), database)
+        unchanged()
+        require(control.migrate(database) is True, 'completion migration uncertain')
+        require(control.verify_database(database) is True, 'completion schema not accepted')
+        unchanged()
+        control.phase('MIGRATED')
+        return 'migration-completed-held-use-recover'
+    except BaseException:
+        control.inhibit()
+        raise
+
+
+def run_plan(plan, mode, confirmation='', plan_sha256=None):
+    require(mode in ('inspect', 'execute', 'recover', 'complete-labels-only'), 'unknown release mode')
+    # Reject a missing/wrong confirmation before constructing state or stopping
+    # anything. The confirmation is an input guard, not an approval receipt.
+    completion_confirmation(mode, confirmation, plan_sha256)
     c = load_controller()
     state = c.DurableState(STATE)
     host = Host(plan, c)
-    if mode == 'recover':
+    if mode in ('recover', 'complete-labels-only'):
         # Recovery first restores the installed holds under the shared lock,
         # even if a receipt expired or a runtime pin no longer matches. This
         # preliminary phase can only stop the three fixed existing units.
@@ -485,6 +624,8 @@ def run_plan(plan, mode):
         if mode == 'inspect':
             control.pins()
             return 'inspected-no-host-state-changed'
+        if mode == 'complete-labels-only':
+            return complete_labels_only(control, host)
         return control.recover() if mode == 'recover' else control.execute()
 
 
@@ -492,17 +633,19 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--plan-sha256', required=True)
-    parser.add_argument('--mode', choices=('inspect', 'execute', 'recover'), default='inspect')
+    parser.add_argument('--mode', choices=('inspect', 'execute', 'recover', 'complete-labels-only'), default='inspect')
+    parser.add_argument('--completion-confirmation', default='')
     args = parser.parse_args()
     protected(args.plan, parents=True)
     require(re.fullmatch('[a-f0-9]{64}', args.plan_sha256) and digest(args.plan) == args.plan_sha256, 'exact reviewed plan digest required')
+    completion_confirmation(args.mode, args.completion_confirmation, args.plan_sha256)
     plan = read_json(args.plan)
     # SIGTERM/HUP become controlled unwind; SIGKILL/reboot uses durable recovery.
     def interrupted(*_):
         raise KeyboardInterrupt()
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGHUP, interrupted)
-    print(json.dumps({'ok': True, 'result': run_plan(plan, args.mode), 'maintenanceResumed': False, 'databaseRestored': False}))
+    print(json.dumps({'ok': True, 'result': run_plan(plan, args.mode, args.completion_confirmation, args.plan_sha256), 'maintenanceResumed': False, 'databaseRestored': False}))
 
 if __name__ == '__main__':
     sys.dont_write_bytecode = True

@@ -31,6 +31,17 @@ assert.equal(adminMfaConfigured(owner.email), true);
 assert.equal(decodeSession(workerSession)?.role, "vendor");
 for (const key of ["BUBBLEWASH_VENDOR_EMAIL", "BUBBLEWASH_VENDOR_PASSWORD_HASH", "BUBBLEWASH_VENDOR_ENTITY_ID"]) delete process.env[key];
 const db = getDatabase();
+// The historical reset contract must reject the new durable label maps without
+// changing any account, MFA, mapping or sequence. Do not widen its deletion list.
+const { allocateBookingReference } = await import("../src/lib/booking-references.ts");
+db.transaction(() => allocateBookingReference(db, "synthetic-reserved-identity")).immediate();
+const beforeRejectedReset = db.serialize();
+assert.throws(() => inspectFreshReset(db, process.env, cwd), /unreviewed table/);
+assert.throws(() => applyFreshReset(db, process.env, cwd, "0".repeat(64), () => {}), /unreviewed table/);
+assert.deepEqual(db.serialize(), beforeRejectedReset);
+// This disposable fixture now models the old, pre-label schema solely to retain
+// the historical reset regression. This is not a production migration or cleanup.
+db.exec("DROP TABLE booking_references; DROP TABLE vendor_codes");
 const inventory = inspectFreshReset(db, process.env, cwd);
 applyFreshReset(db, process.env, cwd, inventory.fingerprint, () => {});
 assert.equal(findStaffUser("owner@example.test", ownerPassword)?.role, "admin");
@@ -42,4 +53,4 @@ assert.equal(verifyAdminMfaCredential(owner.email, confirmed.recoveryCodes[0]), 
 assert.equal(decodeSession(workerSession), null);
 assert.equal(findStaffUser("worker@example.test", workerPassword), null);
 db.close();
-console.log(JSON.stringify({ ok: true, checks: 17, scope: "synthetic login, session revocation, enrolled MFA and recovery-code survival; no live reset" }));
+console.log(JSON.stringify({ ok: true, checks: 20, scope: "synthetic login, session revocation, enrolled MFA and recovery-code survival; no live reset" }));

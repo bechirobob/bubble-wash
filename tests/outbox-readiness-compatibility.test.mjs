@@ -18,7 +18,7 @@ const store = await import('../src/lib/data-store.ts');
 const { initializeStaffAccountsSchema } = await import('../src/lib/staff-accounts.ts');
 const database = store.getDatabase();
 initializeStaffAccountsSchema(database);
-const legacyObjects = database.prepare('SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type DESC, name').all();
+const legacyObjects = database.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'sqlite_sequence' ORDER BY type DESC, name").all();
 const originalOutboxSql = legacyObjects.find(({name}) => name === 'notification_outbox').sql;
 // Independent golden DDL: these tests must fail if production helper DDL drifts.
 const additions = [

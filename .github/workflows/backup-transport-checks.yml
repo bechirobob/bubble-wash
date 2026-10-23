@@ -188,6 +188,7 @@ jobs:
           python3 ops/integration-release/select_source.py --release .
           python3 ops/check-owner-enrollment-source.py --verify-runner
           python3 -m unittest discover -s tests -p 'test_integration_release_adapter.py' -v
+          python3 -m unittest discover -s ops/inactive-staging -p 'test_stage.py' -v
           python3 -m py_compile .github/backup/backup_release.py ops/deploy-preserving.py ops/check-release-ci.py ops/deploy-personal-owner.py ops/check-owner-source.py
           git diff --check
 

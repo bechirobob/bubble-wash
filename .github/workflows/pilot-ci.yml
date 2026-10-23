@@ -50,6 +50,12 @@ jobs:
         run: npm run lint
       - name: Unit and integration tests
         run: npm test
+      - name: Verify guarded migration and completion
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          export BW_TEST_CANDIDATE="$PWD" BW_TEST_FALLBACK="$PWD" BW_TEST_NODE="$(command -v node)"
+          python3 -m unittest discover -s tests -p 'test_reference_*.py' -v
       - name: TypeScript
         run: npm run typecheck
       - name: Full dependency audit

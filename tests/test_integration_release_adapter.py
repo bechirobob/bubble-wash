@@ -228,10 +228,15 @@ class HostTests(unittest.TestCase):
     def test_pure_migration_runs_fixed_entrypoint_without_production_secret_environment(self):
         node=self.root/'node';node.write_text('runtime')
         self.plan['node']={'path':str(node),'sha256':k.digest(node)}
-        response={'ok':True,'migration':'notification-outbox-exact-additive-v1'}
-        def run(args,**kwargs): self.commands.append((args,kwargs));return json.dumps(response)
+        def run(args,**kwargs):
+            self.commands.append((args,kwargs))
+            if 'scripts/migrate-booking-references.mjs' in args:
+                return json.dumps({'ok':True,'migration':'permanent-booking-vendor-labels-v1','historicalBackfill':False})
+            return json.dumps({'ok':True,'migration':'notification-outbox-exact-additive-v1'})
         self.host.run=run
         with patch.object(a,'protected',return_value=()):self.assertTrue(self.host.migrate(self.root/'db.sqlite'))
+        self.assertEqual(len(self.commands),2)
+        self.assertIn('scripts/migrate-booking-references.mjs',self.commands[0][0])
         args,kw=self.commands[-1]
         self.assertIn('scripts/migrate-notification-outbox.mjs',args)
         self.assertNotIn('getDatabase',repr(args));self.assertNotIn('RESEND_API_KEY',kw['env'])
@@ -296,3 +301,21 @@ class HostTests(unittest.TestCase):
         self.assertNotIn('secrets.',text.split('      - name: Create no credentials')[0])
 
 if __name__=='__main__':unittest.main()
+
+
+class CandidateOnlyRootSelectorTests(unittest.TestCase):
+    def test_missing_candidate_root_does_not_hide_exact_fallback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root/'ops').mkdir()
+            (root/'ops/deploy-personal-owner.py').write_text('def verify_owner_candidate(root): raise ValueError("not historical")\n')
+            def verify(root, contract, profile):
+                if profile == k.PROFILE_NAMES[0]: raise FileNotFoundError('candidate-only root')
+                return {'exact': True}
+            with patch.object(selector, 'read_json', return_value={}), patch.object(selector, 'verify_source', side_effect=verify):
+                self.assertEqual(selector.select(root), k.PROFILE_NAMES[1])
+                with self.assertRaises(ValueError): selector.select(root, k.PROFILE_NAMES[0])
+            with patch.object(selector, 'read_json', return_value={}), patch.object(selector, 'verify_source', side_effect=PermissionError('unreadable')):
+                with self.assertRaises(PermissionError): selector.select(root)
+            with patch.object(selector, 'read_json', return_value={}), patch.object(selector, 'verify_source', return_value={}):
+                with self.assertRaises(ValueError): selector.select(root)

@@ -18,7 +18,7 @@ const store = await import('../src/lib/data-store.ts');
 const { initializeStaffAccountsSchema } = await import('../src/lib/staff-accounts.ts');
 const seed = store.getDatabase();
 initializeStaffAccountsSchema(seed);
-const ddl = seed.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type DESC, name").all();
+const ddl = seed.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name != 'sqlite_sequence' ORDER BY type DESC, name").all();
 seed.close();
 after(() => { process.chdir(previousCwd); rmSync(directory, { recursive: true, force: true }); });
 let index = 0;
