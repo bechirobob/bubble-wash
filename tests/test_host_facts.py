@@ -313,8 +313,33 @@ class RunnerTransport(unittest.TestCase):
         with patch.object(t.f,'bounded',return_value=encrypted()) as run,patch.object(t,'payload',return_value=b'synthetic-program'):
             raw,header=t.runner_transport(CONTEXT)
         self.assertEqual(run.call_args.args[0],['/usr/local/bin/tailscale','ssh','root@hermes','/usr/bin/python3 -I -B -'])
-        self.assertNotIn('env',run.call_args.kwargs)
+        self.assertEqual(run.call_args.kwargs['env'],t.runner_environment())
         self.assertEqual(raw,encrypted());self.assertEqual(header['context'],CONTEXT)
+
+    def test_runner_environment_is_exact_allowlist(self):
+        inherited = {'HOME': '/synthetic/runner', 'PATH': '/untrusted', 'LC_ALL': 'other',
+                     'GH_TOKEN': 'SECRET', 'BACKUP_KEY': 'SECRET', 'TS_AUTHKEY': 'SECRET', 'SSH_AUTH_SOCK': '/private/agent',
+                     'XDG_CONFIG_HOME': '/private/config', 'TS_DEBUG_SSH_EXEC': '1'}
+        with patch.dict(os.environ, inherited, clear=True):
+            env = t.runner_environment()
+            self.assertEqual(env, {'PATH':'/usr/sbin:/usr/bin:/sbin:/bin',
+                                   'LC_ALL':'C', 'HOME':'/synthetic/runner'})
+            raw = f.bounded([sys.executable, '-c',
+                'import os,json;print(json.dumps({k:os.environ.get(k) for k in '
+                '["HOME","GH_TOKEN","SSH_AUTH_SOCK","XDG_CONFIG_HOME","TS_DEBUG_SSH_EXEC"]}))'], env=env)
+            self.assertEqual(json.loads(raw), {'HOME':'/synthetic/runner', 'GH_TOKEN':None,
+                'SSH_AUTH_SOCK':None, 'XDG_CONFIG_HOME':None, 'TS_DEBUG_SSH_EXEC':None})
+            # The host/default subprocess environment remains unchanged and stripped.
+            self.assertEqual(f.bounded([sys.executable,'-c',
+                'import os;print("present" if os.getenv("HOME") else "absent")']), b'absent\n')
+
+    def test_invalid_runner_home_fails_closed_without_subprocess(self):
+        for home in ('', 'relative', '/invalid\0home', '/invalid\nhome', '/invalid\rhome', '/'+'x'*4096):
+            with patch.object(t.os, 'environ', {'HOME':home}), \
+                 patch.object(t.f,'bounded') as run, patch.object(t,'payload',return_value=b'synthetic'):
+                with self.assertRaises(t.PhaseFailure) as caught:t.runner_transport(CONTEXT)
+                self.assertEqual(str(caught.exception),'transport-failed')
+                run.assert_not_called()
 
     def test_fixed_categories_distinguish_runner_host_and_storage(self):
         with patch.object(t.f,'bounded',side_effect=FileNotFoundError('/private/SECRET')),patch.object(t,'payload',return_value=b'synthetic'):

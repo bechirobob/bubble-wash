@@ -146,10 +146,19 @@ class PhaseFailure(Exception):
         super().__init__(result)
 
 
+def runner_environment():
+    # Tailscale writeKnownHosts uses Go os.UserConfigDir, which needs HOME on Linux.
+    # Do not inherit tokens, SSH agents, XDG overrides or debug settings.
+    home = os.environ.get('HOME', '')
+    f.require(0 < len(home) <= 4096 and Path(home).is_absolute()
+              and not any(character in home for character in ('\0', '\r', '\n')))
+    return {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C', 'HOME': home}
+
+
 def runner_transport(ctx):
     try:
         # Exact location used by the pinned official Tailscale action on Linux.
-        raw=f.bounded(['/usr/local/bin/tailscale','ssh','root@hermes','/usr/bin/python3 -I -B -'],payload(ctx),timeout=180,limit=f.LIMIT+8232)
+        raw=f.bounded(['/usr/local/bin/tailscale','ssh','root@hermes','/usr/bin/python3 -I -B -'],payload(ctx),timeout=180,limit=f.LIMIT+8232,env=runner_environment())
         if raw[:8] != MAGIC:
             f.require(len(raw) <= 8192)
             failure=f.validate_summary(f.strict_json(raw))
