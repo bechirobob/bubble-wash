@@ -28,8 +28,8 @@ class ContractTests(unittest.TestCase):
         for name in ('src/lib/auth.ts', 'scripts/run.mjs', 'ops/old.py', 'package.json'):
             path = self.root/name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text(name)
         self.pins = k.content_manifest(self.root, ['package.json'])
-        self.profile = {'files': self.pins, 'rootFiles': ['package.json'], 'contentSha256': k.object_digest(self.pins)}
-        self.contract = {'schema': 'bubblewash-integration-source/v1', 'baseCommit': k.BASELINE,
+        self.profile = {'rootFiles': ['package.json'], 'contentSha256': k.object_digest(self.pins), 'appInputGitTree': 'a'*40, 'publicationCommit': None}
+        self.contract = {'schema': 'bubblewash-integration-source/v2', 'baseCommit': k.BASELINE,
                          'profiles': {name: copy.deepcopy(self.profile) for name in k.PROFILE_NAMES}}
 
     def test_exact_source_positive_and_unknown_profile(self):
@@ -57,10 +57,58 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(ValueError): k.content_manifest(self.root, ['package.json'])
 
     def test_manifest_digest_and_base_cannot_drift(self):
-        self.contract['profiles'][k.PROFILE_NAMES[0]]['files']['src/lib/auth.ts'] = '0'*64
+        self.contract['profiles'][k.PROFILE_NAMES[0]]['contentSha256'] = '0'*64
         with self.assertRaises(ValueError): k.verify_source(self.root, self.contract, k.PROFILE_NAMES[0])
         self.contract['baseCommit'] = 'a'*40
         with self.assertRaises(ValueError): k.verify_source(self.root, self.contract, k.PROFILE_NAMES[0])
+
+    def test_compact_and_v1_full_map_have_identical_content_coverage(self):
+        # v1 compared this exact traversal map; v2 commits its canonical digest.
+        def v1():
+            return k.content_manifest(self.root, self.profile['rootFiles']) == self.pins
+        def v2():
+            k.verify_source(self.root, self.contract, k.PROFILE_NAMES[0]);return True
+        def accepted(fn):
+            try:return fn()
+            except (ValueError,OSError):return False
+        self.assertTrue(v1());self.assertTrue(v2())
+        path=self.root/'src/lib/auth.ts'
+        original=path.read_bytes()
+        for change in ('mutation','omission','extra','rename','symlink','hardlink','fifo','root-file','root-dir'):
+            with self.subTest(change=change):
+                if change=='mutation':path.write_text('changed')
+                elif change=='omission':path.unlink()
+                elif change=='extra':(self.root/'src/extra.ts').write_text('extra')
+                elif change=='rename':path.rename(path.with_name('renamed.ts'))
+                elif change=='symlink':path.unlink();path.symlink_to(self.root/'package.json')
+                elif change=='hardlink':path.unlink();os.link(self.root/'package.json',path)
+                elif change=='fifo':path.unlink();os.mkfifo(path)
+                elif change=='root-file':(self.root/'unexpected').write_text('extra')
+                elif change=='root-dir':(self.root/'unexpected').mkdir()
+                self.assertEqual((accepted(v1),accepted(v2)),(False,False))
+                for extra in (path,path.with_name('renamed.ts'),self.root/'src/extra.ts',self.root/'unexpected'):
+                    if extra.is_dir() and not extra.is_symlink():extra.rmdir()
+                    elif extra.exists() or extra.is_symlink():extra.unlink()
+                path.write_bytes(original)
+        # Source mode bits were not hashed in v1 and are not newly authenticated.
+        path.chmod(0o755);self.assertTrue(v1());self.assertTrue(v2())
+
+    def test_compact_schema_digest_and_profile_keys_are_strict(self):
+        for edit in ({'contentSha256':'A'*64},{'contentSha256':None},{'contentSha256':'a'*63},
+                     {'files':self.pins},{'unexpected':True},{'rootFiles':['package.json','package.json']}):
+            value=copy.deepcopy(self.contract);value['profiles'][k.PROFILE_NAMES[0]].update(edit)
+            with self.subTest(edit=edit),self.assertRaises(ValueError):k.verify_source(self.root,value,k.PROFILE_NAMES[0])
+        old=copy.deepcopy(self.contract);old['schema']='bubblewash-integration-source/v1'
+        with self.assertRaises(ValueError):k.verify_source(self.root,old,k.PROFILE_NAMES[0])
+
+    def test_fallback_commitment_is_unchanged_and_full_tree_is_verified(self):
+        actual=k.read_json(ROOT/'ops/integration-release/source-contracts.json')
+        fallback=actual['profiles'][k.PROFILE_NAMES[1]]
+        self.assertEqual(fallback['contentSha256'],'a024ca678a0db3201676107a61145808a5e143155e10abe9ae9471808b34acb9')
+        self.assertNotIn('files',fallback)
+        self.assertEqual(k.verify_source(self.root,self.contract,k.PROFILE_NAMES[1]),self.profile)
+        (self.root/'ops/old.py').write_text('mutated fallback')
+        with self.assertRaises(ValueError):k.verify_source(self.root,self.contract,k.PROFILE_NAMES[1])
 
     def test_source_root_configs_are_pinned(self):
         (self.root/'package.json').write_text('new dependency')

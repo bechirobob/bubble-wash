@@ -72,8 +72,14 @@ class ReadOnlyState(unittest.TestCase):
         def run(installer,uid,state):
             self.assertEqual(events,['groups','gid','uid']);raise RuntimeError('re_SECRET /private')
         output=io.StringIO()
-        with patch.object(c.os,'geteuid',side_effect=[0,1000]),patch.object(c.os,'getuid',return_value=1000),patch.object(c.os,'uname',return_value=types.SimpleNamespace(nodename='hermes')),patch.object(c.sys,'argv',['checker']),patch.object(c.pwd,'getpwnam',return_value=types.SimpleNamespace(pw_uid=1000,pw_gid=1000)),patch.object(c.os,'setgroups',side_effect=lambda _:events.append('groups')),patch.object(c.os,'setgid',side_effect=lambda _:events.append('gid')),patch.object(c.os,'setuid',side_effect=lambda _:events.append('uid')),patch.object(c,'run',side_effect=run),contextlib.redirect_stdout(output):c.main(i)
+        with patch.object(c.os,'geteuid',side_effect=[0,1000]),patch.object(c.os,'getuid',return_value=1000),patch.object(c.os,'uname',side_effect=AssertionError('OS hostname is not the authenticated tailnet identity')),patch.object(c.sys,'argv',['checker']),patch.object(c.pwd,'getpwnam',return_value=types.SimpleNamespace(pw_uid=1000,pw_gid=1000)),patch.object(c.os,'setgroups',side_effect=lambda _:events.append('groups')),patch.object(c.os,'setgid',side_effect=lambda _:events.append('gid')),patch.object(c.os,'setuid',side_effect=lambda _:events.append('uid')),patch.object(c,'run',side_effect=run),contextlib.redirect_stdout(output):c.main(i)
         value=json.loads(output.getvalue());c.validate(value);self.assertTrue(value['appIdentityReady']);self.assertIsNone(value['dedicatedKeyPresent']);self.assertNotIn('SECRET',output.getvalue())
+    def test_nonroot_refused_before_app_paths(self):
+        output=io.StringIO()
+        with patch.object(c.os,'geteuid',return_value=1000),patch.object(c,'run') as run,contextlib.redirect_stdout(output):c.main(i)
+        run.assert_not_called();value=json.loads(output.getvalue())
+        self.assertFalse(value['appIdentityReady']);self.assertIsNone(value['dedicatedKeyPresent'])
+
     def test_workflow_has_no_provider_key_and_transport_no_private_input(self):
         workflow=(ROOT/'.github/workflows/research-email-state.yml').read_text();transport=(ROOT/'ops/transport-research-email-state.py').read_text()
         self.assertNotIn('RESEND_KEY',workflow);self.assertNotIn('RESEND_KEY',transport);self.assertNotIn('install(',transport)

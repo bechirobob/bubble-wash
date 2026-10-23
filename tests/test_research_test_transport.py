@@ -92,6 +92,7 @@ class Protocol(unittest.TestCase):
             if 'rev-parse' in argv: return (SHA + '\n').encode()
             if 'status' in argv: return b''
             calls.append((argv, data, kwargs))
+            self.assertEqual(argv[:3], ['/usr/local/bin/tailscale', 'ssh', 'root@hermes'])
             self.assertNotIn(OWNER, repr(argv)); self.assertNotIn(KEY, repr(argv))
             self.assertNotIn('BUBBLEWASH_OWNER_EMAIL', os.environ)
             self.assertEqual(json.loads(data)['ownerEmail'], OWNER)
@@ -246,13 +247,18 @@ class Host(unittest.TestCase):
             self.assertEqual(events, ['groups', 'gid', 'uid'])
             return {'attempted': False, 'status': 'ready'}
         with patch.object(h.os, 'geteuid', side_effect=[0, 1000]), patch.object(h.os, 'getuid', return_value=1000), \
-             patch.object(h.os, 'uname', return_value=SimpleNamespace(nodename='hermes')), \
+             patch.object(h.os, 'uname', side_effect=AssertionError('OS hostname is not the authenticated tailnet identity')), \
              patch.object(h.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=1000, pw_gid=1000)), \
              patch.object(h.os, 'setgroups', side_effect=lambda _: events.append('groups')), patch.object(h.os, 'setgid', side_effect=lambda _: events.append('gid')), \
              patch.object(h.os, 'setuid', side_effect=lambda _: events.append('uid')), patch.object(h, 'run', side_effect=operation), \
              patch.object(h.sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(json.dumps(self.value).encode()))), contextlib.redirect_stdout(io.StringIO()) as output:
             h.main(facts, i, p)
         self.assertEqual(json.loads(output.getvalue()), {'attempted': False, 'status': 'ready'})
+
+    def test_nonroot_operator_never_reads_request_or_runs_app(self):
+        with patch.object(h.os,'geteuid',return_value=1000),patch.object(h.sys,'stdin',None),patch.object(h,'run') as run,contextlib.redirect_stdout(io.StringIO()) as output:
+            h.main(self.facts,i,p)
+        run.assert_not_called();self.assertEqual(json.loads(output.getvalue()),{'attempted':False,'status':'blocked'})
 
 
 class Workflow(unittest.TestCase):

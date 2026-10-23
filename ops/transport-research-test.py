@@ -16,7 +16,7 @@ import zlib
 ROOT = Path(__file__).resolve().parents[1]
 PINS = {
     'ops/host-facts/facts.py': '42ff5948773808b941ad2c9f8a7b6a6db95329b812d9d42ff2cf92b06df0f0eb',
-    'ops/install-research-email.py': '91029c53f5b0e3160e5a8595f832a1242b0c8d454992aab199f0050f2756c583',
+    'ops/install-research-email.py': 'ceb202973d1afa05ff3c7799bba346253c5d3f4436f2f76840c64ceea4a63cbc',
 }
 RUNTIME_FILES = ('scripts/send-synthetic-research-test.mjs', 'tests/alias-loader.mjs', 'db/proposed/research-v1.sql', 'package.json', 'package-lock.json')
 
