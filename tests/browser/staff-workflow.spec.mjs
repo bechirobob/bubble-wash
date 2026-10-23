@@ -221,11 +221,16 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
     await evidence(admin, testInfo, 'admin-activity-reference');
     await beforeHardNavigation(admin, 'admin activity list');
     await admin.goto('/admin?view=activity');
+    const activitySection = admin.locator('.activitySection');
+    await expect(activitySection).toHaveAttribute('aria-busy', 'false');
+    await activitySection.getByRole('combobox', { name: 'Show', exact: true }).selectOption('all');
+    await activitySection.getByRole('combobox', { name: 'When', exact: true }).selectOption('50');
     const activityLink = admin.locator('.staffActivityRow').filter({ has: admin.getByText(booking.bookingReference, { exact: true }) }).filter({ has: admin.getByText('Payment Update', { exact: true }) });
     await expect(activityLink).toHaveAttribute('href', `/admin?view=activity&activity=${encodeURIComponent(paymentEvent.id)}`);
     await expect(activityLink).not.toContainText(booking.id);
     await expect(activityLink).not.toContainText(paymentEvent.id);
     await activityLink.click();
+    await expect(admin).toHaveURL(new URL(`/admin?view=activity&activity=${encodeURIComponent(paymentEvent.id)}`, admin.url()).href);
     await expect(admin.locator('.activitySection .staffDetailHeader h2')).toHaveText(booking.bookingReference);
     await expect(admin.locator('.activitySection .staffDetailHeader')).not.toContainText(booking.id);
     await expect(admin.locator('.activitySection .staffDetailHeader')).not.toContainText(paymentEvent.id);
@@ -234,6 +239,25 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
     await expect(identifiers.getByText(paymentEvent.id, { exact: true })).toBeVisible();
     await expect(identifiers.getByText(booking.id, { exact: true })).toBeVisible();
     await evidence(admin, testInfo, 'admin-activity-audit');
+    // Selection follows client navigation, not a stale initial-state snapshot.
+    // List choices survive because the activity workspace does not remount.
+    const expectActivityList = async () => {
+      await expect(admin).toHaveURL(new URL('/admin?view=activity', admin.url()).href);
+      await expect(activitySection.getByRole('heading', { name: 'Latest saved updates', exact: true })).toBeVisible();
+      await expect(activitySection.getByRole('combobox', { name: 'Show', exact: true })).toHaveValue('all');
+      await expect(activitySection.getByRole('combobox', { name: 'When', exact: true })).toHaveValue('50');
+    };
+    await admin.goBack();
+    await expectActivityList();
+    await admin.goForward();
+    await expect(admin.locator('.activitySection .staffDetailHeader h2')).toHaveText(booking.bookingReference);
+    await activitySection.getByRole('link', { name: '← Back to activity', exact: true }).click();
+    await expectActivityList();
+    await activityLink.click();
+    await expect(admin.locator('.activitySection .staffDetailHeader h2')).toHaveText(booking.bookingReference);
+    await activitySection.getByRole('button', { name: 'Show similar', exact: true }).click();
+    await expectActivityList();
+    await expect(activitySection.getByRole('button', { name: /^Payments \d+$/ })).toHaveAttribute('aria-pressed', 'true');
     const tracking = await customer.request.get(`/api/track?id=${booking.id}`, { timeout: 15_000 });
     expect(tracking.ok(), `Tracking: HTTP ${tracking.status()}`).toBeTruthy();
     expect((await tracking.json()).tracking.status).toBe('Closed');

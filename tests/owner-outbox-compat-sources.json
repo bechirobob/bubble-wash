@@ -208,7 +208,7 @@
     "src/components/StaffAdminControls.tsx": "852cca27abaf37e9950a3586c60ab2caeaa20cd6011669425dee8b3326cb2ee2",
     "src/components/StaffWorklistWorkspace.module.css": "b4c02074630be88f486789ed746a1f39e6b4f2f5c625058a6226ea48bfe3e518",
     "src/components/StaffWorklistWorkspace.tsx": "887a0ccc95d5700b613fe6e458853ed637a218ac50634e33384b1ed5426ddd36",
-    "src/components/StaffWorkspaces.tsx": "ad53d40e6e5bcbfffaaefc2abe7fef34114c6960ab662cb8dd7fbeb69c06dd68",
+    "src/components/StaffWorkspaces.tsx": "faa776a3345c42b7a0da5d4e6c93435e312dfa77c3cbd35dd0aac4553df16359",
     "src/components/TrackingLookup.tsx": "cc25cb0f2fee569c781981e7c760824a66a343dcd744d404c59c41b97f04d264",
     "src/components/VendorCapacityForm.tsx": "bbd97039863dbfda98d6d84a09dd1f87104d8089dfbe510b0c4024cdca387734",
     "src/lib/admin-mfa.ts": "15c78716d909d298542ce777d98b8d2dae5f67a8327aa427117f9656b6dcf4f5",

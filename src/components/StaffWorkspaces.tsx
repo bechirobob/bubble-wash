@@ -4,6 +4,7 @@ import { staffActivitySubject as activitySubject } from "@/lib/staff-activity-pr
 import { StaffAccountPanel, StaffInvoicePanel, CustomerDecisionPanel } from "./StaffAdminControls";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { BoundedList } from "./BoundedList";
 import { VendorCapacityForm } from "./VendorCapacityForm";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -559,7 +560,8 @@ function AvailabilityBoard({ role, mode = "all", refreshToken = 0 }: { role: Sta
   );
 }
 
-function RecentActivity({ filter, initialSelectedId = "", basePath }: { filter?: string; initialSelectedId?: string; basePath: string }) {
+function RecentActivity({ filter, selectedId = "", basePath }: { filter?: string; selectedId?: string; basePath: string }) {
+  const router = useRouter();
   const [records, setRecords] = useState<SubmissionRecord[]>([]);
   const [status, setStatus] = useState("Loading recent activity…");
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -568,7 +570,6 @@ function RecentActivity({ filter, initialSelectedId = "", basePath }: { filter?:
   const [windowMode, setWindowMode] = useState<ActivityWindow>("20");
   const [sortKey, setSortKey] = useState<ActivitySortKey>("saved");
   const [sortDirection, setSortDirection] = useState<ActivitySortDirection>("desc");
-  const [selectedId, setSelectedId] = useState(initialSelectedId);
   const [freshIds, setFreshIds] = useState<string[]>([]);
   const [lastUpdatedAt, setLastUpdatedAt] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
@@ -755,7 +756,7 @@ function RecentActivity({ filter, initialSelectedId = "", basePath }: { filter?:
           {activityValue(selectedRecord, "orderId") ? <button className="button secondary" onClick={() => void copyValue("Order ID", activityValue(selectedRecord, "orderId"))} type="button">Copy order ID</button> : null}
           {activityValue(selectedRecord, "phone") ? <button className="button secondary" onClick={() => void copyValue("Phone", activityValue(selectedRecord, "phone"))} type="button">Copy phone</button> : null}
           {activityValue(selectedRecord, "email") ? <button className="button secondary" onClick={() => void copyValue("Email", activityValue(selectedRecord, "email"))} type="button">Copy email</button> : null}
-          <button className="button secondary" onClick={() => { filterToSubject(selectedRecord); setSelectedId(""); window.history.replaceState(null, "", basePath); }} type="button">Show similar</button>
+          <button className="button secondary" onClick={() => { filterToSubject(selectedRecord); router.replace(basePath, { scroll: false }); }} type="button">Show similar</button>
         </div>
         {copyStatus ? <p className="activityCopyStatus" role="status">{copyStatus}</p> : null}
         <div className="staffDetailSections">
@@ -1842,7 +1843,7 @@ export function AdminWorkspace({ userName, role, allStaffAccess = false, initial
       {initialView === "people" ? <><AvailabilityBoard role="admin" refreshToken={availabilityVersion} /><StaffAccessRoster refreshToken={rosterVersion} /><StaffAccountPanel /><AdminOnboardingCenter onSubmit={submitLead} status={formStatus} pendingType={pendingType} /></> : null}
       {initialView === "cases" ? <><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Open a new case</strong><small>Use when an existing case does not cover the issue</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="admin" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section><SupportTicketDesk userName={userName} selectedCaseId={selectedCaseId} basePath="/admin?view=cases" refreshToken={casesVersion} /></> : null}
       {initialView === "operations" ? <AdminOperationsHealth /> : null}
-      {initialView === "activity" ? <RecentActivity initialSelectedId={selectedActivityId} basePath="/admin?view=activity" /> : null}
+      {initialView === "activity" ? <RecentActivity selectedId={selectedActivityId} basePath="/admin?view=activity" /> : null}
     </PortalShell>
   );
 }
@@ -1936,7 +1937,7 @@ export function VendorWorkspace({ userName, role, allStaffAccess = false, initia
       {initialView === "jobs" ? <><SharedOrderBoard allStaffAccess={allStaffAccess} role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/vendors?view=jobs" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a production exception</strong><small>Open a case when the verified job actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="vendor" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
       {initialView === "capacity" && role === "admin" ? <section className="staffContentSection"><p>Manage an explicitly selected vendor from <Link href="/admin?view=people">People &amp; onboarding</Link>. Owner actions retain your identity.</p></section> : null}
       {initialView === "capacity" && role !== "admin" ? <><AvailabilityBoard role={role} mode="vendors" refreshToken={availabilityVersion} /><VendorCapacityForm onSaved={() => setAvailabilityVersion((current) => current + 1)} /></> : null}
-      {initialView === "activity" ? <RecentActivity filter="vendor" initialSelectedId={selectedActivityId} basePath="/vendors?view=activity" /> : null}
+      {initialView === "activity" ? <RecentActivity filter="vendor" selectedId={selectedActivityId} basePath="/vendors?view=activity" /> : null}
     </PortalShell>
   );
 }
@@ -1975,7 +1976,7 @@ export function DriverWorkspace({ userName, role, allStaffAccess = false, initia
   return (
     <PortalShell role={role} allStaffAccess={allStaffAccess} pageRole="driver" userName={userName} title="Driver route board" currentView={initialView} navigation={navigation}>
       {initialView === "route" ? <><SharedOrderBoard allStaffAccess={allStaffAccess} role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/drivers?view=route" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a route exception</strong><small>Use when the delay or handoff actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="driver" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
-      {initialView === "activity" ? <RecentActivity filter="driver-route-log" initialSelectedId={selectedActivityId} basePath="/drivers?view=activity" /> : null}
+      {initialView === "activity" ? <RecentActivity filter="driver-route-log" selectedId={selectedActivityId} basePath="/drivers?view=activity" /> : null}
     </PortalShell>
   );
 }
@@ -2018,7 +2019,7 @@ export function SupportWorkspace({ userName, role, allStaffAccess = false, initi
     <PortalShell role={role} allStaffAccess={allStaffAccess} pageRole="support" userName={userName} title="Support workspace" currentView={initialView} navigation={navigation}>
       {initialView === "cases" ? <><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Open a new case</strong><small>Use when an existing case does not cover the issue</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="support" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section><SupportTicketDesk userName={userName} selectedCaseId={selectedCaseId} basePath="/support?view=cases" refreshToken={casesVersion} /></> : null}
       {initialView === "orders" ? <SharedOrderBoard allStaffAccess={allStaffAccess} role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/support?view=orders" /> : null}
-      {initialView === "activity" ? <RecentActivity filter="support" initialSelectedId={selectedActivityId} basePath="/support?view=activity" /> : null}
+      {initialView === "activity" ? <RecentActivity filter="support" selectedId={selectedActivityId} basePath="/support?view=activity" /> : null}
     </PortalShell>
   );
 }

@@ -1,0 +1,42 @@
+name: Install Disabled Survey Email Credential
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_sha:
+        description: 'Exact reviewed main commit containing this installer'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  install:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Require exact reviewed source and run installer tests
+        env:
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REVIEWED_SHA" =~ ^[0-9a-f]{40}$ && "$REVIEWED_SHA" == "$GITHUB_SHA" ]]
+          [[ "$(git rev-parse HEAD)" == "$REVIEWED_SHA" ]]
+          python3 -m unittest discover -s tests -p 'test_research_email_install.py' -v
+      - name: Connect through existing Bubble Wash tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Install dedicated survey key disabled without restarting
+        env:
+          BUBBLEWASH_RESEARCH_RESEND_KEY: ${{ secrets.BUBBLEWASH_RESEARCH_RESEND_KEY }}
+        run: python3 ops/transport-research-email.py
