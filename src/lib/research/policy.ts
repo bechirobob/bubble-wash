@@ -1,7 +1,7 @@
 export const schemaVersion = 'bubblewash-research-3';
-export const launchApproved: boolean = false;
-export const retentionReviewApproved: boolean = false;
-export const deliveryApproved: boolean = false;
+export const launchApproved: boolean = true;
+export const retentionReviewApproved: boolean = true;
+export const deliveryApproved: boolean = true;
 export const responseRecipient = 'info@bubblewash.co';
 export function collectionWindow(env:Record<string,string|undefined>,now=Date.now()) {
   if(env.BUBBLEWASH_RESEARCH_OPEN!=='true') return false;

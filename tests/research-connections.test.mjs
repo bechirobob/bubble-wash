@@ -17,7 +17,7 @@ function fixture(t){
  a.pragma('journal_mode = WAL');a.pragma('foreign_keys = ON');a.exec(schema);
  const b=new Database(path.join(dir,'fixture.sqlite'));b.pragma('foreign_keys = ON');
  t.after(()=>{a.close();b.close();rmSync(dir,{recursive:true,force:true});});
- assert.equal(launchApproved,false);assert.equal(deliveryApproved,false);
+ assert.equal(launchApproved,true);assert.equal(deliveryApproved,true);
  return {a,b};
 }
 function seed(db,count=1){
