@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import { ArrowRight, BadgeCheck } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   businessTypes,
   isCompletePlanSurvey,
@@ -14,6 +15,8 @@ import {
 } from "@/lib/plan-recommendation";
 import { addons, plans, type AddonKey, type PlanName } from "@/lib/pricing";
 import { formatMoney, postJSON, statusTone } from "@/lib/public-ui";
+
+import { checkPaymentCallback, paidCallbackUrl, paymentCallbackStillCurrent } from "@/lib/payment-callback";
 
 type BookingConfirmation = { id: string; paymentPreference: string; deliveryCode: string; plan: PlanName };
 const addonEntries = Object.entries(addons) as Array<[AddonKey, (typeof addons)[AddonKey]]>;
@@ -30,24 +33,60 @@ export function BookingExperience({ available = true, initialPlan = "", initialA
   const [selectedAddons, setSelectedAddons] = useState<AddonKey[]>(initialAddons);
   const [status, setStatus] = useState("Answer four quick questions to get a plan recommendation.");
   const [paymentStatus, setPaymentStatus] = useState("");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [checkingPayment, setCheckingPayment] = useState(false);
+  const paymentRequest = useRef<AbortController | null>(null);
+  const paymentConfirmed = useRef(false);
+  const callbackPathname = usePathname();
+  const callbackReference = useSearchParams().get("payment_reference") ?? "";
   const [confirmation, setConfirmation] = useState<BookingConfirmation | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const minPickupDate = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const maxPickupDate = useMemo(() => { const date = new Date(); date.setDate(date.getDate() + 30); return date.toISOString().slice(0, 10); }, []);
 
+  const checkPayment = useCallback(async (reference: string) => {
+    if (paymentRequest.current) return;
+    const controller = new AbortController();
+    paymentRequest.current = controller;
+    const href = window.location.href;
+    const current = () => paymentRequest.current === controller
+      && paymentCallbackStillCurrent(reference, href, window.location.href, controller.signal);
+    paymentConfirmed.current = false;
+    setCheckingPayment(true);
+    setPaymentStatus("Checking payment status…");
+    try {
+      const result = await checkPaymentCallback(reference, controller.signal);
+      if (!current()) return;
+      setPaymentStatus(result.message);
+      if (result.paid) {
+        paymentConfirmed.current = true;
+        setPaymentReference("");
+        window.history.replaceState(window.history.state, "", paidCallbackUrl(window.location.href));
+      }
+    } catch {
+      if (current()) setPaymentStatus("Unable to verify payment right now. Check its status again before starting another payment.");
+    } finally {
+      if (paymentRequest.current === controller) {
+        paymentRequest.current = null;
+        setCheckingPayment(false);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     if (!onlinePaymentsEnabled) return;
-    const reference = new URLSearchParams(window.location.search).get("payment_reference");
-    if (!reference) return;
-    fetch(`/api/payments/verify?reference=${encodeURIComponent(reference)}`, { cache: "no-store" })
-      .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
-      .then(({ ok, data }) => {
-        if (!ok || !data.ok) throw new Error(data.error ?? "Unable to verify payment.");
-        setPaymentStatus(data.payment.paid ? `Payment verified: ${formatMoney(data.payment.amountGhs)}.` : `Payment status: ${data.payment.status}.`);
-      })
-      .catch((error) => setPaymentStatus(error instanceof Error ? error.message : "Unable to verify payment."))
-      .finally(() => window.history.replaceState({}, "", window.location.pathname));
-  }, []);
+    const timer = window.setTimeout(() => {
+      setPaymentReference(callbackReference);
+      setCheckingPayment(false);
+      if (callbackReference) void checkPayment(callbackReference);
+      else if (!paymentConfirmed.current) setPaymentStatus("");
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      paymentRequest.current?.abort();
+      paymentRequest.current = null;
+    };
+  }, [callbackPathname, callbackReference, checkPayment]);
 
 
   function updateSurvey<Key extends keyof PlanSurvey>(key: Key, value: PlanSurvey[Key]) {
@@ -101,6 +140,7 @@ export function BookingExperience({ available = true, initialPlan = "", initialA
         <p className={statusTone(status)} role="status" aria-live="polite">{status}</p>
       </form>
       {confirmation ? <section className="bookingConfirmation" aria-labelledby="booking-confirmation-title"><p className="sectionLabel">Pickup requested</p><h3 id="booking-confirmation-title">Keep reference {confirmation.id}</h3><p>Your <strong>{confirmation.plan}</strong> plan and pickup window are recorded. Processing charges use the verified laundry intake.</p>{confirmation.deliveryCode ? <p className="deliveryCode"><span>Delivery handoff code</span><strong>{confirmation.deliveryCode}</strong><small>Keep this private. Give it to the rider only when the clean order is returned.</small></p> : null}<p><Link href="/manage">Manage your order</Link></p><p>Your itemized invoice and payment options will appear in <Link href="/manage">Manage my order</Link> after your laundry has been checked and weighed.</p>{paymentStatus ? <p className={statusTone(paymentStatus)} role="status">{paymentStatus}</p> : null}</section> : paymentStatus ? <p className={statusTone(paymentStatus)} role="status">{paymentStatus}</p> : null}
+      {paymentReference ? <p><button type="button" className="button secondary" disabled={checkingPayment} onClick={() => void checkPayment(paymentReference)}>{checkingPayment ? "Checking payment…" : "Check payment status again"}</button> <Link href="/manage">Manage my order</Link></p> : null}
     </section>
   );
 }

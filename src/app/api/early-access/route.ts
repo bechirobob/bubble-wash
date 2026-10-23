@@ -61,8 +61,8 @@ export async function POST(request: NextRequest) {
       updated: saved.updated,
       message: saved.updated ? "Your early-access details were updated." : "You are on the Bubble Wash early-access list.",
       confirmation: {
-        whatsapp: notifications.find((item) => item.channel === "whatsapp")?.sent ? "sent" : "queued",
-        email: email ? (notifications.find((item) => item.channel === "email")?.sent ? "sent" : "queued") : "not_requested",
+        whatsapp: notifications.find((item) => item.channel === "whatsapp")?.status || "skipped",
+        email: email ? (notifications.find((item) => item.channel === "email")?.status || "skipped") : "not_requested",
       },
     });
   } catch (error) {
