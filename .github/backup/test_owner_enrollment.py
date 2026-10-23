@@ -39,6 +39,77 @@ class EnrollmentTests(unittest.TestCase):
     def run_mode(self,mode='check',approved=False):
         return ns['run_private_enrollment']('private-fixture@example.test','a'*40,'authorized-actor',mode,approved,{},'synthetic-owner-key')
 
+    def test_check_invalid_child_output_is_fixed_and_non_mutating(self):
+        for raw in ('', 'secret-token-fixture', '[]', 'null', 'true', '{"unexpected":"secret-token-fixture"}'):
+            with self.subTest(raw=raw):
+                self.process.communicate.return_value=(raw, 'secret-provider-body-fixture')
+                self.assertEqual(self.run_mode(), {'ok':False, 'state':'check-child-invalid-output', 'accountCreated':False, 'retryPermitted':False})
+
+    def test_timeout_check_and_send_keep_separate_fixed_states(self):
+        for mode, expected in (('check','check-child-timeout'), ('send','outcome-uncertain-stop-inspect-privately')):
+            with self.subTest(mode=mode):
+                self.process.communicate.side_effect=[subprocess.TimeoutExpired('secret-command-fixture',45), ('','')]
+                with patch.object(ns['os'], 'killpg') as kill:
+                    result=self.run_mode(mode, mode=='send')
+                self.assertEqual(result['state'],expected); self.assertFalse(result['retryPermitted'])
+                if mode=='check': self.assertFalse(result['accountCreated'])
+                kill.assert_called_once_with(123, ns['signal'].SIGTERM)
+                self.assertNotIn('secret-',json.dumps(result))
+
+    def test_launch_failure_and_post_child_lock_failure_track_boundary(self):
+        diagnostic={}
+        self.popen.side_effect=FileNotFoundError('secret-launch-detail')
+        with self.assertRaises(FileNotFoundError):
+            ns['run_private_enrollment']('fixture@example.test','a'*40,'actor','check',False,{},'synthetic-key',diagnostic=diagnostic)
+        self.assertEqual(diagnostic,{'stage':'before-node'})
+        self.popen.side_effect=None
+        lock=self.root/'bubblewash-runtime/deploy.lock'
+        def replace_lock(**_):
+            lock.unlink(); lock.touch()
+            return (json.dumps({'ok':True,'stage':'preflight'}),'')
+        self.process.communicate.side_effect=replace_lock
+        with self.assertRaises(ValueError):
+            ns['run_private_enrollment']('fixture@example.test','a'*40,'actor','check',False,{},'synthetic-key',diagnostic=diagnostic)
+        self.assertEqual(diagnostic,{'stage':'child-started'})
+
+    def test_absolute_runuser_executes_with_restricted_path(self):
+        # Exercise real executable lookup, not mocked Popen. Never switch users.
+        self.run_mode()
+        executable=self.popen.call_args.args[0][0]
+        child_path=self.popen.call_args.kwargs['env']['PATH']
+        self.assertEqual(executable,'/usr/sbin/runuser')
+        self.assertEqual(child_path,'/usr/local/bin:/usr/bin:/bin')
+        if not Path(executable).is_file():
+            self.skipTest('The supported host executable /usr/sbin/runuser is absent on this test platform.')
+        self.sub.stop()
+        result=subprocess.run([executable,'--version'],env={'PATH':child_path},capture_output=True,text=True,timeout=10)
+        self.assertEqual(result.returncode,0)
+        self.assertIn('runuser',result.stdout)
+
+    def test_emitted_stream_runs_fixed_exception_branches_without_leaks(self):
+        self.sub.stop()
+        for mode in ('check','send'):
+            env={**os.environ,'BUBBLEWASH_OWNER_RESEND_KEY':'synthetic-owner-key','OWNER_EMAIL':'private-fixture@example.test','EXPECTED_LIVE_SHA':'a'*40,'GITHUB_ACTOR':'actor','ENROLLMENT_MODE':mode,'DELIVERY_APPROVED':'true'}
+            emitted=subprocess.run([sys.executable,'.github/backup/stream_owner_enrollment.py'],cwd=ROOT,env=env,capture_output=True,text=True,check=True)
+            for stage in ('before-node','child-started'):
+                with self.subTest(mode=mode,stage=stage):
+                    # Execute the real generated exception handler, injecting only
+                    # a deterministic boundary fault instead of host operations.
+                    guard='\ndef run_private_enrollment(*args, diagnostic=None):\n    diagnostic["stage"] = ' + repr(stage) + '\n    raise RuntimeError("secret-token-fixture")\n'
+                    marker='\n_diagnostic = {"stage":"before-node"}\n'
+                    self.assertEqual(emitted.stdout.count(marker),1)
+                    program=emitted.stdout.replace(marker,guard+marker)
+                    result=subprocess.run([sys.executable,'-I','-B','-'],input=program,capture_output=True,text=True,cwd=self.root,env=env)
+                    self.assertEqual(result.returncode,1); self.assertEqual(result.stderr,'')
+                    value=json.loads(result.stdout)
+                    if mode=='check':
+                        expected='check-host-pre-node-failed' if stage=='before-node' else 'check-host-post-node-failed'
+                        self.assertEqual(value,{'ok':False,'state':expected,'accountCreated':False,'retryPermitted':False})
+                    else:
+                        self.assertEqual(value,{'ok':False,'state':'outcome-uncertain-stop-inspect-privately','retryPermitted':False})
+                    for secret in ('secret-token-fixture',env['OWNER_EMAIL'],env['BUBBLEWASH_OWNER_RESEND_KEY']):
+                        self.assertNotIn(secret,result.stdout+result.stderr)
+
     def test_private_key_excludes_shared_transport(self):
         self.envtext += 'BUBBLEWASH_EMAIL_FROM=unapproved@example.test\nBUBBLEWASH_OWNER_RESEND_KEY=host-key-must-not-win\n'
         result=self.run_mode(); self.assertTrue(result['ok'])

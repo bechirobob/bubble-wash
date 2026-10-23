@@ -89,7 +89,9 @@ def selected_enrollment_source_matches(release, pins, source_contract):
     return integration_enrollment_source_matches(release, pins, source_contract)
 
 
-def run_private_enrollment(email, expected_live_sha, actor, mode, delivery_approved, pins, owner_key="", source_contract='historical-owner-v1'):
+def run_private_enrollment(email, expected_live_sha, actor, mode, delivery_approved, pins, owner_key="", source_contract='historical-owner-v1', diagnostic=None):
+    if diagnostic is not None:
+        diagnostic['stage'] = 'before-node'
     # This boolean is an explicit workflow dispatch attestation, not permission
     # inferred from the original account grant. Sender/risk approval comes first.
     if mode not in ('check', 'send') or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}(?:\[bot\])?', actor):
@@ -131,11 +133,13 @@ def run_private_enrollment(email, expected_live_sha, actor, mode, delivery_appro
             return {'ok':False, 'state':'environment-drift', 'accountCreated':False}
         if not release_pin_matches(expected_live_sha) or not selected_enrollment_source_matches(release, pins, source_contract):
             return {'ok':False, 'state':'release-or-source-drift', 'accountCreated':False}
-        command = ['runuser','-u','ubuntu','--','/usr/bin/env','node','--conditions=react-server','--experimental-strip-types',
+        command = ['/usr/sbin/runuser','-u','ubuntu','--','/usr/bin/env','node','--conditions=react-server','--experimental-strip-types',
                    'scripts/invite-additional-owner.mjs', '--' + mode]
         lock_unchanged()
         process = subprocess.Popen(command, cwd=release, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                    text=True, start_new_session=True)
+        if diagnostic is not None:
+            diagnostic['stage'] = 'child-started'
         try:
             stdout, _ = process.communicate(timeout=45)
         except subprocess.TimeoutExpired:
@@ -144,6 +148,8 @@ def run_private_enrollment(email, expected_live_sha, actor, mode, delivery_appro
                 process.communicate(timeout=5)
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL); process.communicate()
+            if mode == 'check':
+                return {'ok':False, 'state':'check-child-timeout', 'accountCreated':False, 'retryPermitted':False}
             return {'ok':False, 'state':'outcome-uncertain-stop-inspect-privately', 'retryPermitted':False}
         lock_unchanged()
         # Never forward child stdout/stderr or token/provider/error bodies.
@@ -151,11 +157,15 @@ def run_private_enrollment(email, expected_live_sha, actor, mode, delivery_appro
             value = json.loads(stdout)
         except (ValueError, TypeError):
             value = {}
+        if not isinstance(value, dict):
+            value = {}
         if mode == 'check' and value.get('stage') == 'preflight' and isinstance(value.get('ok'), bool):
             return {'ok':value['ok'] and process.returncode == 0, 'state':'check-complete', 'accountCreated':False, 'transportScope':'private-owner-only',
                     'sharedApplicationResendConfigured': owner.get('resendConfigured') is True,
                     'resendConfigured':value.get('resendConfigured') is True,
                     'officialSenderDomain':value.get('officialSenderDomain') is True, 'mfaReady':value.get('mfaReady') is True}
+        if mode == 'check':
+            return {'ok':False, 'state':'check-child-invalid-output', 'accountCreated':False, 'retryPermitted':False}
         if mode == 'send' and process.returncode == 0 and value == {'ok':True, 'stage':'invitation-created', 'delivery':'provider-accepted', 'accountActivated':False}:
             return {'ok':True, 'state':'invitation-created-provider-accepted', 'accountActivated':False, 'retryPermitted':False}
         return {'ok':False, 'state':'outcome-uncertain-stop-inspect-privately', 'retryPermitted':False}
