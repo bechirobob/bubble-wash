@@ -541,6 +541,271 @@ def readiness_diagnostic(candidate, values, unit, pid, report):
     return outcome
 
 
+# This bounded child inspects metadata and integrity only, after probe stop.
+# Reference CREATE statements run only in :memory:, never against the copy.
+SCHEMA_READER = r"""
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import stat
+import sys
+import time
+from pathlib import Path
+
+ERRORS = {sqlite3.SQLITE_ERROR: 'SQL_ERROR', sqlite3.SQLITE_BUSY: 'BUSY', sqlite3.SQLITE_LOCKED: 'LOCKED',
+          sqlite3.SQLITE_CORRUPT: 'CORRUPT', sqlite3.SQLITE_IOERR: 'IO', sqlite3.SQLITE_NOTADB: 'NOT_DATABASE',
+          sqlite3.SQLITE_INTERRUPT: 'TIMEOUT'}
+QUERIES = {
+    'staffAccounts': ('staff_accounts',
+        ('email', 'name', 'role', 'entity_id', 'password_hash', 'credential_version', 'status', 'updated_at'),
+        'SELECT email, name, role, entity_id AS entityId, password_hash AS passwordHash, credential_version AS credentialVersion, status, updated_at AS updatedAt FROM staff_accounts ORDER BY name'),
+    'credentialOverrides': ('staff_credential_overrides',
+        ('role', 'login', 'password_hash', 'credential_version', 'updated_at'),
+        "SELECT role, login, password_hash, credential_version, updated_at FROM staff_credential_overrides WHERE role = 'admin'"),
+}
+
+def error_code(error):
+    return ERRORS.get(getattr(error, 'sqlite_errorcode', 0) & 255, 'OTHER')
+
+def bounded(cursor, limit):
+    rows = cursor.fetchmany(limit + 1)
+    if len(rows) > limit:
+        raise ValueError('bound')
+    return rows
+
+def reference_ddl(candidate, pins):
+    ddl = []
+    for relative, initializer, receiver in (
+            ('src/lib/data-store.ts', 'initializeDatabaseSchema', 'db'),
+            ('src/lib/staff-accounts.ts', 'initializeStaffAccountsSchema', 'database')):
+        descriptor = os.open(Path(candidate) / relative, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, 'rb') as handle:
+            metadata = os.fstat(handle.fileno())
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ValueError('type')
+            raw = handle.read(131073)
+        if len(raw) > 131072 or hashlib.sha256(raw).hexdigest() != pins[relative]:
+            raise ValueError('pin')
+        pattern = r'function ' + initializer + r'\([^)]*\) \{\s*' + receiver + r'\.exec\(`([\s\S]*?)`\);\s*\}'
+        found = re.findall(pattern, raw.decode())
+        if len(found) != 1 or '${' in found[0]:
+            raise ValueError('literal')
+        ddl.append(found[0])
+    return ddl
+
+class CopyUnavailable(Exception):
+    pass
+
+
+def read_pinned_copy(directory, descriptor):
+    def metadata(fd):
+        value = os.fstat(fd)
+        if not stat.S_ISREG(value.st_mode) or value.st_nlink != 1:
+            raise CopyUnavailable('UNSAFE_FILE')
+        return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+    before = metadata(descriptor)
+    if not 100 <= before[2] <= 64 * 1024 * 1024:
+        raise CopyUnavailable('SIZE_BOUND')
+    sidecars = {}
+    try:
+        for suffix in ('-wal', '-journal'):
+            name = 'rehearsal.sqlite' + suffix
+            try:
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+            except FileNotFoundError:
+                sidecars[name] = None
+                continue
+            except OSError:
+                raise CopyUnavailable('UNSAFE_FILE') from None
+            try:
+                sidecars[name] = (fd, metadata(fd))
+            except BaseException:
+                os.close(fd)
+                raise
+            if sidecars[name][1][2] != 0:
+                raise CopyUnavailable('WAL_PRESENT' if suffix == '-wal' else 'JOURNAL_PRESENT')
+        with os.fdopen(os.dup(descriptor), 'rb') as handle:
+            raw = handle.read(64 * 1024 * 1024 + 1)
+        named = os.stat('rehearsal.sqlite', dir_fd=directory, follow_symlinks=False)
+        if (len(raw) != before[2] or metadata(descriptor) != before or not stat.S_ISREG(named.st_mode) or
+                (named.st_dev, named.st_ino) != before[:2]):
+            raise CopyUnavailable('COPY_CHANGED')
+        for name, pinned in sidecars.items():
+            try:
+                named = os.stat(name, dir_fd=directory, follow_symlinks=False)
+            except FileNotFoundError:
+                if pinned is not None:
+                    raise CopyUnavailable('COPY_CHANGED')
+                continue
+            if (pinned is None or not stat.S_ISREG(named.st_mode) or metadata(pinned[0]) != pinned[1] or
+                    (named.st_dev, named.st_ino, named.st_size, named.st_mtime_ns, named.st_ctime_ns) != pinned[1]):
+                raise CopyUnavailable('COPY_CHANGED')
+        if raw[:16] != b'SQLite format 3\0' or raw[18:20] not in (b'\x01\x01', b'\x02\x02'):
+            raise CopyUnavailable('FORMAT_INVALID')
+        # Official sqlite3_deserialize workaround for a checkpointed WAL-mode
+        # image. Nonempty WAL/journal is rejected above, never ignored. Only this
+        # in-memory header changes; neither private copy nor original is written.
+        return raw[:18] + b'\x01\x01' + raw[20:]
+    finally:
+        for pinned in sidecars.values():
+            if pinned is not None:
+                os.close(pinned[0])
+
+
+def inspect_schema(directory, descriptor, candidate, pins):
+    source = reference = None
+    stage = 'REFERENCE_UNAVAILABLE'
+    deadline = time.monotonic() + 3
+    try:
+        ddl = reference_ddl(candidate, pins)
+        reference = sqlite3.connect(':memory:')
+        for statement in ddl:
+            reference.executescript(statement)
+        expected = bounded(reference.execute("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL"), 128)
+        stage = 'COPY_UNAVAILABLE'
+        raw = read_pinned_copy(directory, descriptor)
+        source = sqlite3.connect(':memory:')
+        source.deserialize(raw)
+        source.execute('PRAGMA query_only=ON')
+        source.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 131072)
+        source.set_progress_handler(lambda: time.monotonic() >= deadline, 1000)
+        stage = 'SCHEMA_UNAVAILABLE'
+        missing = mismatched = 0
+        definitions = {}
+        for kind, name, sql in expected:
+            actual = source.execute('SELECT sql FROM sqlite_master WHERE type = ? AND name = ?', (kind, name)).fetchone()
+            missing += actual is None
+            mismatched += actual is not None and actual[0] != sql
+            definitions[(kind, name)] = 'MISSING' if actual is None else 'MATCH' if actual[0] == sql else 'MISMATCH'
+        output = {'state': 'COMPLETE', 'expectedObjects': len(expected), 'missingObjects': missing, 'mismatchedObjects': mismatched,
+                  'integrity': 'NOT_CHECKED', 'integrityError': 'NONE', 'readable': False}
+        for label, (name, columns, query) in QUERIES.items():
+            objects = bounded(source.execute('SELECT type FROM sqlite_master WHERE name = ? COLLATE NOCASE', (name,)), 4)
+            kinds = [row[0] for row in objects]
+            reference_columns = {row[1].lower() for row in bounded(reference.execute('PRAGMA main.table_xinfo(' + name + ')'), 64)}
+            item = {'object': 'MISSING' if not kinds else 'TABLE' if kinds == ['table'] else 'OTHER',
+                    'definition': definitions[('table', name)], 'missingSchemaColumns': len(reference_columns),
+                    'missingQueryColumns': len(columns), 'query': 'NOT_CHECKED', 'error': 'NONE'}
+            if item['object'] == 'TABLE':
+                actual_columns = {row[1].lower() for row in bounded(source.execute('PRAGMA main.table_xinfo(' + name + ')'), 64)}
+                item['missingQueryColumns'] = sum(column not in actual_columns for column in columns)
+                item['missingSchemaColumns'] = len(reference_columns - actual_columns)
+                try:
+                    # Compile only: never execute the SELECT or fetch account rows.
+                    source.execute('EXPLAIN ' + query)
+                    item['query'] = 'PREPARES'
+                except sqlite3.Error as error:
+                    item['query'] = 'FAILED'
+                    item['error'] = error_code(error)
+            output[label] = item
+        try:
+            output['readable'] = source.execute('SELECT 1').fetchone() == (1,)
+            # Page integrity scanning returns only a fixed success flag, never
+            # SQLite's error text. It does not fetch or disclose account rows.
+            deadline = min(deadline, time.monotonic() + 1)
+            output['integrity'] = 'OK' if source.execute('PRAGMA quick_check(1)').fetchone() == ('ok',) else 'FAILED'
+        except sqlite3.Error as error:
+            output['integrity'] = 'FAILED'
+            output['integrityError'] = error_code(error)
+        return output
+    except CopyUnavailable as error:
+        return {'state': 'COPY_UNAVAILABLE', 'error': error.args[0]}
+    except Exception as error:
+        return {'state': stage, 'error': error_code(error)}
+    finally:
+        if source is not None:
+            source.close()
+        if reference is not None:
+            reference.close()
+
+if __name__ == '__main__':
+    try:
+        payload = sys.stdin.buffer.read(4097)
+        if len(payload) > 4096:
+            raise ValueError('bound')
+        value = json.loads(payload)
+        result = inspect_schema(value['directory'], value['descriptor'], value['candidate'], value['pins'])
+    except BaseException:
+        result = {'state': 'SCHEMA_UNAVAILABLE', 'error': 'OTHER'}
+    print(json.dumps(result), flush=True)
+"""
+
+
+def schema_diagnostic(candidate, snapshot, directory_identity, snapshot_identity, timeout=5):
+    unavailable = {'state': 'SCHEMA_UNAVAILABLE', 'error': 'OTHER'}
+    errors = ('NONE', 'SQL_ERROR', 'BUSY', 'LOCKED', 'CORRUPT', 'IO', 'NOT_DATABASE', 'TIMEOUT', 'OTHER',
+              'UNSAFE_FILE', 'SIZE_BOUND', 'WAL_PRESENT', 'JOURNAL_PRESENT', 'COPY_CHANGED', 'FORMAT_INVALID')
+    directory = descriptor = None
+    try:
+        if snapshot.name != 'rehearsal.sqlite':
+            return unavailable
+        directory = os.open(snapshot.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        parent_stat = os.fstat(directory)
+        if (parent_stat.st_dev, parent_stat.st_ino) != directory_identity:
+            return unavailable
+        descriptor = os.open(snapshot.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        metadata = os.fstat(descriptor)
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or
+                (metadata.st_dev, metadata.st_ino) != snapshot_identity):
+            return unavailable
+        payload = json.dumps({'directory': directory, 'descriptor': descriptor, 'candidate': str(candidate),
+                             'pins': {name: pair[1] for name, pair in REVIEWED_READER_TRANSITIONS.items()}}).encode()
+        if len(payload) > 4096:
+            return unavailable
+        completed = subprocess.run(['python3', '-I', '-B', '-c', SCHEMA_READER], input=payload,
+                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False, pass_fds=(directory, descriptor),
+                                   timeout=max(0.001, min(5, timeout)))
+        after = os.fstat(descriptor)
+        named_directory = snapshot.parent.lstat()
+        if not stat.S_ISDIR(named_directory.st_mode) or (named_directory.st_dev, named_directory.st_ino) != directory_identity:
+            return unavailable
+        named = os.stat(snapshot.name, dir_fd=directory, follow_symlinks=False)
+        if not stat.S_ISREG(named.st_mode) or (named.st_dev, named.st_ino) != snapshot_identity:
+            return unavailable
+        if ((metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns) !=
+                (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+            return unavailable
+        if completed.returncode != 0 or len(completed.stdout) > 1024:
+            return unavailable
+        value = json.loads(completed.stdout)
+        if (type(value) is dict and set(value) == {'state', 'error'} and
+                type(value['state']) is str and value['state'] in ('REFERENCE_UNAVAILABLE', 'COPY_UNAVAILABLE', 'SCHEMA_UNAVAILABLE') and
+                type(value['error']) is str and value['error'] in errors):
+            return value
+        expected_keys = {'state', 'expectedObjects', 'missingObjects', 'mismatchedObjects', 'staffAccounts', 'credentialOverrides',
+                         'integrity', 'integrityError', 'readable'}
+        if type(value) is not dict or set(value) != expected_keys or value['state'] != 'COMPLETE':
+            return unavailable
+        for key in ('expectedObjects', 'missingObjects', 'mismatchedObjects'):
+            if type(value[key]) is not int or not 0 <= value[key] <= 128:
+                return unavailable
+        if (type(value['integrity']) is not str or value['integrity'] not in ('NOT_CHECKED', 'OK', 'FAILED') or
+                type(value['integrityError']) is not str or value['integrityError'] not in errors or type(value['readable']) is not bool):
+            return unavailable
+        for label, limit in (('staffAccounts', 8), ('credentialOverrides', 5)):
+            item = value[label]
+            if (type(item) is not dict or set(item) != {'object', 'definition', 'missingSchemaColumns', 'missingQueryColumns', 'query', 'error'} or
+                    type(item['object']) is not str or item['object'] not in ('MISSING', 'TABLE', 'OTHER') or
+                    type(item['definition']) is not str or item['definition'] not in ('MISSING', 'MATCH', 'MISMATCH') or
+                    type(item['missingSchemaColumns']) is not int or not 0 <= item['missingSchemaColumns'] <= 64 or
+                    type(item['missingQueryColumns']) is not int or not 0 <= item['missingQueryColumns'] <= limit or
+                    type(item['query']) is not str or item['query'] not in ('NOT_CHECKED', 'PREPARES', 'FAILED') or
+                    type(item['error']) is not str or item['error'] not in errors):
+                return unavailable
+        return value
+    except subprocess.TimeoutExpired:
+        return {'state': 'TIMEOUT', 'error': 'TIMEOUT'}
+    except Exception:
+        return unavailable
+
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if directory is not None:
+            os.close(directory)
+
 class RehearsalDeadline(BaseException):
     # Must escape health's OSError/ValueError retry, unlike TimeoutError.
     pass
@@ -565,6 +830,9 @@ class RehearsalReport:
         self.safe_to_remove = True
         self.deadline = time.monotonic() + 300
         self.readiness = None
+        self.schema = None
+        self.directory_identity = None
+        self.snapshot_identity = None
 
     def fail(self, error):
         if self.failure is None:
@@ -582,7 +850,8 @@ class RehearsalReport:
                           'stage': self.failure['stage'] if self.failure else 'COMPLETE',
                           'error': self.failure['error'] if self.failure else 'NONE',
                           'cleanup': self.cleanup, 'activationAttempted': False,
-                          **({'readinessDiagnostic': self.readiness} if self.readiness is not None else {})}), flush=True)
+                          **({'readinessDiagnostic': self.readiness} if self.readiness is not None else {}),
+                          **({'schemaDiagnostic': self.schema} if self.schema is not None else {})}), flush=True)
 
 
 def resume_rehearsal_deadline(report):
@@ -667,6 +936,7 @@ def rehearsal_directory(owner, report, unit):
     os.chown(directory, owner.pw_uid, owner.pw_gid)
     metadata = Path(directory).lstat()
     identity = (metadata.st_dev, metadata.st_ino)
+    report.directory_identity = identity
     try:
         yield directory
     except BaseException as error:
@@ -723,6 +993,9 @@ def rehearse(candidate, values, db, status_path, owner, unit, report=None):
                 source.close()
         os.chmod(snapshot, 0o600)
         os.chown(snapshot, owner.pw_uid, owner.pw_gid)
+        if report is not None:
+            metadata = snapshot.lstat()
+            report.snapshot_identity = (metadata.st_dev, metadata.st_ino)
         rehearsal_stage(report, 'FINGERPRINT_BEFORE')
         before = database_fingerprint(snapshot)
         try:
@@ -782,6 +1055,12 @@ def rehearse(candidate, values, db, status_path, owner, unit, report=None):
                     stopped = probe_stopped(probe_state(unit + '-probe.service'))
                     require(stopped, 'probe stop not verified')
                     report.safe_to_remove = True
+                    if report.readiness and report.readiness.get('state') == 'BLOCKED' and set(report.readiness.get('categories', ())) & {'DB_CHECK', 'STAFF_STORE'}:
+                        # Probe is verified stopped; this optional five-second
+                        # schema-only check cannot enable activation or writes.
+                        remaining = report.deadline - time.monotonic()
+                        report.schema = (schema_diagnostic(candidate, snapshot, report.directory_identity, report.snapshot_identity, remaining) if remaining > 0 else
+                                         {'state': 'TIMEOUT', 'error': 'TIMEOUT'})
             except BaseException as error:
                 if report is not None:
                     report.fail(error)
