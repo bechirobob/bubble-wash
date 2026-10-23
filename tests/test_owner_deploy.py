@@ -57,6 +57,13 @@ class OwnerRoute(unittest.TestCase):
         pins = owner.OWNER_DIAGNOSTIC_SOURCE_SHA256
         self.assertEqual(set(pins), {'src/lib/data-store.ts', 'src/lib/staff-accounts.ts'})
         self.assertEqual(pins['src/lib/staff-accounts.ts'], owner.OWNER_STAFF_NEW_SHA256)
+        if owner.source_manifest(ROOT) != owner.OWNER_CANDIDATE_SOURCE_MANIFEST:
+            sys.path.insert(0, str(ROOT / 'ops/integration-release'))
+            from select_source import select
+            self.assertIn(select(ROOT), ('integration-candidate-v1', 'integration-fallback-v1'))
+            with self.assertRaisesRegex(ValueError, '^pin$'):
+                namespace['reference_ddl'](ROOT, pins)
+            return  # Exact integration source must not enter the historical diagnostic.
         for relative, expected in pins.items():
             self.assertEqual(owner.digest(ROOT / relative), expected)
         statements = namespace['reference_ddl'](ROOT, pins)
@@ -193,7 +200,14 @@ class OwnerRoute(unittest.TestCase):
 
     def test_full_source_and_dependency_manifest_cannot_be_bypassed(self):
         self.assertEqual(owner.OWNER_LIVE_SOURCE_MANIFEST, owner.CANDIDATE_SOURCE_SHA256)
-        self.assertEqual(owner.OWNER_CANDIDATE_SOURCE_MANIFEST, owner.source_manifest(ROOT))
+        if owner.OWNER_CANDIDATE_SOURCE_MANIFEST == owner.source_manifest(ROOT):
+            owner.verify_owner_candidate(ROOT)
+        else:
+            sys.path.insert(0, str(ROOT / 'ops/integration-release'))
+            from select_source import select
+            self.assertIn(select(ROOT), ('integration-candidate-v1', 'integration-fallback-v1'))
+            with self.assertRaises(ValueError):
+                owner.verify_owner_candidate(ROOT)
         with patch.multiple(owner, **self.pins):
             for tree in (self.current,self.candidate):
                 extra=tree/'src/unreviewed.ts'; extra.write_text('unreviewed')
@@ -328,7 +342,10 @@ except ValueError as error:
                      'ops/check-owner-source.py', 'tests/test_owner_deploy.py'):
             self.assertEqual(source.count('      - ' + name + '\n'), 2)
         self.assertIn("-p 'test_owner_deploy.py'", source)
-        self.assertIn('python3 ops/check-owner-source.py', source)
+        self.assertIn('python3 ops/integration-release/select_source.py --release .', source)
+        selector = (ROOT / 'ops/integration-release/select_source.py').read_text()
+        self.assertIn('historical.verify_owner_candidate(root)', selector)
+        self.assertIn('verify_source(root, contract, profile)', selector)
         for path in (*owner.OWNER_CANDIDATE_SOURCE_SHA256, *owner.UNCHANGED_OWNER_MODULES):
             self.assertEqual(source.count('      - ' + path + '\n'), 2, path)
         self.assertNotIn('secrets.', source)

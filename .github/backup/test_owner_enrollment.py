@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # by the emitted host program. Its __main__ block must not run during import.
 ns = {'__name__':'private_enrollment_test'}
 exec(compile((ROOT/'scripts/release-preflight.py').read_text(), 'preflight', 'exec'),ns)
+exec(compile((ROOT/'scripts/owner-enrollment-source-contract.py').read_text(), 'source-contract', 'exec'),ns)
 exec(compile((ROOT/'scripts/owner-enrollment-host.py').read_text(), 'host', 'exec'),ns)
 
 SOURCE_MATCHES = ns['enrollment_source_matches']
@@ -59,7 +60,7 @@ class EnrollmentTests(unittest.TestCase):
         diagnostic={}
         self.popen.side_effect=FileNotFoundError('secret-launch-detail')
         with self.assertRaises(FileNotFoundError):
-            ns['run_private_enrollment']('fixture@example.test','a'*40,'actor','check',False,{},'synthetic-key',diagnostic)
+            ns['run_private_enrollment']('fixture@example.test','a'*40,'actor','check',False,{},'synthetic-key',diagnostic=diagnostic)
         self.assertEqual(diagnostic,{'stage':'before-node'})
         self.popen.side_effect=None
         lock=self.root/'bubblewash-runtime/deploy.lock'
@@ -68,7 +69,7 @@ class EnrollmentTests(unittest.TestCase):
             return (json.dumps({'ok':True,'stage':'preflight'}),'')
         self.process.communicate.side_effect=replace_lock
         with self.assertRaises(ValueError):
-            ns['run_private_enrollment']('fixture@example.test','a'*40,'actor','check',False,{},'synthetic-key',diagnostic)
+            ns['run_private_enrollment']('fixture@example.test','a'*40,'actor','check',False,{},'synthetic-key',diagnostic=diagnostic)
         self.assertEqual(diagnostic,{'stage':'child-started'})
 
     def test_absolute_runuser_executes_with_restricted_path(self):
@@ -264,7 +265,7 @@ class EnrollmentTests(unittest.TestCase):
         self.assertIn('UNTRUSTED IMPORT EXECUTED',unsafe.stderr)
 
     def test_host_stream_uses_stdlib_without_file_or_python_environment_dependencies(self):
-        for relative in ('scripts/release-preflight.py','scripts/owner-enrollment-host.py'):
+        for relative in ('scripts/release-preflight.py','scripts/owner-enrollment-source-contract.py','scripts/owner-enrollment-host.py'):
             source=(ROOT/relative).read_text()
             self.assertNotIn('__file__',source)
             self.assertNotIn('os.environ',source)
@@ -284,7 +285,14 @@ class EnrollmentTests(unittest.TestCase):
 
     def test_real_assembled_owner_source_and_dependency_pins_match(self):
         pins=json.loads((ROOT/'ops/owner-enrollment-source-pins.json').read_text())
-        self.assertTrue(SOURCE_MATCHES(ROOT,pins))
+        spec=importlib.util.spec_from_file_location('enrollment_source_check',ROOT/'ops/check-owner-enrollment-source.py')
+        checker=importlib.util.module_from_spec(spec); spec.loader.exec_module(checker)
+        selected=checker.verify_runner_source(ROOT)
+        self.assertEqual(SOURCE_MATCHES(ROOT,pins),selected=='historical-owner-v1')
+        if selected!='historical-owner-v1':
+            contract=json.loads((ROOT/'ops/owner-enrollment-integration-pins.json').read_text())
+            profile=ns['load_integration_enrollment_profile'](contract,selected)
+            self.assertTrue(ns['integration_enrollment_source_matches'](ROOT,profile,selected))
         pins['src/lib/mfa-encryption.ts']='0'*64
         self.assertFalse(SOURCE_MATCHES(ROOT,pins))
 

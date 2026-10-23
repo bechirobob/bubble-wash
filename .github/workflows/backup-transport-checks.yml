@@ -19,6 +19,29 @@ on:
       - .github/workflows/owner-code-deploy.yml
       - ops/deploy-personal-owner.py
       - ops/check-owner-source.py
+      - ops/integration-release/**
+      - public/**
+      - db/**
+      - scripts/**
+      - tests/**
+      - ops/**
+      - .github/**
+      - tooling/**
+      - docs/**
+      - integration-evidence/**
+      - eslint.config.mjs
+      - playwright.config.mjs
+      - README.md
+      - DESIGN.md
+      - .env.production.example
+      - .gitignore
+      - ops/owner-enrollment-integration-pins.json
+      - ops/check-owner-enrollment-source.py
+      - docs/OWNER_ENROLLMENT_INTEGRATION_CONTRACT.md
+      - scripts/owner-enrollment-source-contract.py
+      - .github/backup/test_owner_enrollment_contract.py
+      - tests/test_integration_release_adapter.py
+      - .github/workflows/integration-code-deploy.yml
       - tests/test_owner_deploy.py
       - .github/workflows/restore-staff-access.yml
       - .github/workflows/staff-access-checks.yml
@@ -79,6 +102,29 @@ on:
       - .github/workflows/owner-code-deploy.yml
       - ops/deploy-personal-owner.py
       - ops/check-owner-source.py
+      - ops/integration-release/**
+      - public/**
+      - db/**
+      - scripts/**
+      - tests/**
+      - ops/**
+      - .github/**
+      - tooling/**
+      - docs/**
+      - integration-evidence/**
+      - eslint.config.mjs
+      - playwright.config.mjs
+      - README.md
+      - DESIGN.md
+      - .env.production.example
+      - .gitignore
+      - ops/owner-enrollment-integration-pins.json
+      - ops/check-owner-enrollment-source.py
+      - docs/OWNER_ENROLLMENT_INTEGRATION_CONTRACT.md
+      - scripts/owner-enrollment-source-contract.py
+      - .github/backup/test_owner_enrollment_contract.py
+      - tests/test_integration_release_adapter.py
+      - .github/workflows/integration-code-deploy.yml
       - tests/test_owner_deploy.py
       - .github/workflows/restore-staff-access.yml
       - .github/workflows/staff-access-checks.yml
@@ -127,6 +173,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -137,7 +185,9 @@ jobs:
           python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
           python3 -m unittest discover -s tests -p 'test_preserving_deploy.py' -v
           python3 -m unittest discover -s tests -p 'test_owner_deploy.py' -v
-          python3 ops/check-owner-source.py
+          python3 ops/integration-release/select_source.py --release .
+          python3 ops/check-owner-enrollment-source.py --verify-runner
+          python3 -m unittest discover -s tests -p 'test_integration_release_adapter.py' -v
           python3 -m py_compile .github/backup/backup_release.py ops/deploy-preserving.py ops/check-release-ci.py ops/deploy-personal-owner.py ops/check-owner-source.py
           git diff --check
 

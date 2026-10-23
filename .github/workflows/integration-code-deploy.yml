@@ -1,0 +1,77 @@
+name: Reviewed Integration Code Deploy
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: 'Published reviewed candidate main commit with exact CI success'
+        required: true
+        type: string
+      fallback_sha:
+        description: 'Published independent reviewed fallback main commit with exact CI success'
+        required: true
+        type: string
+      plan_id:
+        description: '64-hex host-local reviewed plan/package identifier; no installation performed'
+        required: true
+        type: string
+      plan_sha256:
+        description: 'Exact separately reviewed materialized host plan SHA-256'
+        required: true
+        type: string
+      mode:
+        description: 'Inspect by default. Execute requires approved installed host gates and migration window; recovery uses current data.'
+        required: true
+        default: inspect
+        type: choice
+        options: [inspect, execute, recover]
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      FALLBACK_SHA: ${{ inputs.fallback_sha }}
+      PLAN_ID: ${{ inputs.plan_id }}
+      PLAN_SHA256: ${{ inputs.plan_sha256 }}
+      RELEASE_MODE: ${{ inputs.mode }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Require exact published identities and reviewed plan
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[a-f0-9]{40}$ && "$FALLBACK_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$PLAN_ID" =~ ^[a-f0-9]{64}$ && "$PLAN_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$CANDIDATE_SHA" == "$GITHUB_SHA" && "$CANDIDATE_SHA" != "$FALLBACK_SHA" ]]
+          [[ "$RELEASE_MODE" == inspect || "$RELEASE_MODE" == execute || "$RELEASE_MODE" == recover ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+      - name: Verify the exact candidate and retained historical guard
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$CANDIDATE_SHA" ]]
+          python3 ops/integration-release/select_source.py --release . --profile integration-candidate-v1
+          python3 -m unittest discover -s tests -p 'test_owner_deploy.py' -v
+          python3 -m unittest discover -s tests -p 'test_integration_release_adapter.py' -v
+          TARGET_SHA="$CANDIDATE_SHA" python3 ops/check-release-ci.py
+          TARGET_SHA="$FALLBACK_SHA" python3 ops/check-release-ci.py
+      - name: Create no credentials; connect through existing approved production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Consume pre-staged reviewed package, never install gates or resume maintenance
+        run: |
+          set -euo pipefail
+          python3 ops/integration-release/stream_host.py --plan-id "$PLAN_ID" --plan-sha256 "$PLAN_SHA256" --candidate-sha "$CANDIDATE_SHA" --fallback-sha "$FALLBACK_SHA" --mode "$RELEASE_MODE" |
+            tailscale ssh root@hermes 'python3 -I -B -'

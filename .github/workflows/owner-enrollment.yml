@@ -6,6 +6,12 @@ on:
         description: 'Exact deployed, independently reviewed owner-capable release SHA'
         required: true
         type: string
+      source_contract:
+        description: 'Explicit exact reviewed source contract. No automatic fallback or mixed profiles.'
+        required: true
+        default: historical-owner-v1
+        type: choice
+        options: [historical-owner-v1, integration-candidate-v1, integration-fallback-v1]
       mode:
         description: 'Default check-only. Send requires separate activation-link risk approval.'
         required: true
@@ -35,7 +41,9 @@ jobs:
           persist-credentials: false
       - name: Verify reviewed source and private transport tests
         run: |
-          python3 ops/check-owner-source.py
+          # The trusted runner may be the candidate while the live target is the
+          # separately pinned recovery release. Never infer the host selector.
+          python3 ops/check-owner-enrollment-source.py --verify-runner
           python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
       - name: Verify existing private backup destination
         env:
@@ -60,6 +68,7 @@ jobs:
           EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
           ENROLLMENT_MODE: ${{ inputs.mode }}
           DELIVERY_APPROVED: ${{ inputs.delivery_approved }}
+          ENROLLMENT_SOURCE_CONTRACT: ${{ inputs.source_contract }}
         shell: bash
         run: |
           set -euo pipefail

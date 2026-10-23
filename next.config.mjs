@@ -7,7 +7,8 @@ const appHtmlHeaders = [
 
 const nextConfig = {
   poweredByHeader: false,
-  experimental: { cpus: 1 },
+  // Keep verified release files immutable; runtime route caches stay in memory.
+  experimental: { cpus: 1, isrFlushToDisk: false },
   // Keep local HTTP previews compatible with the development asset server.
   allowedDevOrigins: [
     "127.0.0.1",

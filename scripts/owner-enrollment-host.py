@@ -83,7 +83,13 @@ def owner_production_proven(configured, inspection):
     return all(listener.get(k) == flag_state(configured.get(k)) and main.get(k) == flag_state(configured.get(k)) for k in LOGIN_FLAGS)
 
 
-def run_private_enrollment(email, expected_live_sha, actor, mode, delivery_approved, pins, owner_key="", diagnostic=None):
+def selected_enrollment_source_matches(release, pins, source_contract):
+    if source_contract == 'historical-owner-v1':
+        return enrollment_source_matches(release, pins)
+    return integration_enrollment_source_matches(release, pins, source_contract)
+
+
+def run_private_enrollment(email, expected_live_sha, actor, mode, delivery_approved, pins, owner_key="", source_contract='historical-owner-v1', diagnostic=None):
     if diagnostic is not None:
         diagnostic['stage'] = 'before-node'
     # This boolean is an explicit workflow dispatch attestation, not permission
@@ -97,7 +103,7 @@ def run_private_enrollment(email, expected_live_sha, actor, mode, delivery_appro
     if not release_pin_matches(expected_live_sha):
         return {'ok': False, 'state': 'release-pin-mismatch', 'accountCreated': False}
     release = CURRENT.resolve(strict=True)
-    if not enrollment_source_matches(release, pins):
+    if not selected_enrollment_source_matches(release, pins, source_contract):
         return {'ok': False, 'state': 'owner-source-pin-mismatch', 'accountCreated': False}
     with deployment_lock(HOME / 'bubblewash-runtime', pwd.getpwnam('ubuntu').pw_uid) as lock_unchanged:
         lock_unchanged()
@@ -125,7 +131,7 @@ def run_private_enrollment(email, expected_live_sha, actor, mode, delivery_appro
             env['BUBBLEWASH_OWNER_INVITE_CONFIRM'] = email
         if bounded_text(ENV_FILE) != environment_snapshot:
             return {'ok':False, 'state':'environment-drift', 'accountCreated':False}
-        if not release_pin_matches(expected_live_sha) or not enrollment_source_matches(release, pins):
+        if not release_pin_matches(expected_live_sha) or not selected_enrollment_source_matches(release, pins, source_contract):
             return {'ok':False, 'state':'release-or-source-drift', 'accountCreated':False}
         command = ['/usr/sbin/runuser','-u','ubuntu','--','/usr/bin/env','node','--conditions=react-server','--experimental-strip-types',
                    'scripts/invite-additional-owner.mjs', '--' + mode]
