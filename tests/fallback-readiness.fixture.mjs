@@ -47,11 +47,8 @@ if (mode === 'seed') {
   if (scenario === 'migrated') {
     const original = db.prepare('INSERT INTO notification_outbox (id,dedupe_key,channel,target,payload,status,attempts,next_attempt_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)');
     original.run('legacy-uncertain','legacy-uncertain','email','customer','{"purpose":"privacy","synthetic":true}','failed',1,now,now,now);
-    // Migrate using the expanded candidate, not this fallback implementation.
-    const expanded = await import('../../bubblewash-web-5dc997-candidate/src/lib/data-store.ts');
-    expanded.readNotification('legacy-uncertain');
-    expanded.enqueueNotification({id:'post-migration-notification',dedupeKey:'new-notice',channel:'email',target:'customer',payload:{purpose:'booking',synthetic:true}});
-    expanded.getDatabase().close();
+    const { seedCandidateMigratedOutbox } = await import('./helpers/candidate-migrated-outbox.mjs');
+    seedCandidateMigratedOutbox(db,{id:'post-migration-notification',dedupeKey:'new-notice',channel:'email',target:'customer',payload:{purpose:'booking',synthetic:true},now});
     db.prepare('INSERT INTO submissions VALUES (?,?,?,?)').run('post-migration-order',now,'synthetic','{"orderId":"post-migration-order","status":"confirmed"}');
     db.exec('CREATE TABLE synthetic_automation_history (id TEXT PRIMARY KEY, evidence TEXT NOT NULL)');
     db.prepare('INSERT INTO synthetic_automation_history VALUES (?,?)').run('new-history','must survive rollback');
