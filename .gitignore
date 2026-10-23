@@ -46,7 +46,7 @@ next-env.d.ts
 /env/
 /tmp/
 
-# local mission logs / agent working memory (never commit)
+# local working notes and private tooling state (never commit)
 /knowledge/
 /.hermes/
 

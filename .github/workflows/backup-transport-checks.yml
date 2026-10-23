@@ -31,6 +31,7 @@ on:
       - integration-evidence/**
       - eslint.config.mjs
       - playwright.config.mjs
+      - playwright.worklists.config.mjs
       - README.md
       - DESIGN.md
       - .env.production.example
@@ -114,6 +115,7 @@ on:
       - integration-evidence/**
       - eslint.config.mjs
       - playwright.config.mjs
+      - playwright.worklists.config.mjs
       - README.md
       - DESIGN.md
       - .env.production.example

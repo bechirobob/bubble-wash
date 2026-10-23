@@ -25,11 +25,14 @@
     "db:production-roster-reset": "node scripts/reset-production-roster.mjs",
     "db:export": "node scripts/export-portable-data.mjs",
     "maintenance:run": "node scripts/run-maintenance.mjs",
-    "test:workflow": "node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/workflow-http.integration.mjs && node tests/public-availability.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/personal-owner-http.integration.mjs && npm run test:capacity-parity",
-    "test:browser": "playwright test",
+    "test:workflow": "node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/workflow-http.integration.mjs && node tests/public-availability.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/personal-owner-http.integration.mjs && npm run test:capacity-parity && npm run test:staff-worklists",
+    "test:browser": "playwright test && npm run test:browser-worklists",
     "test:automation": "node --conditions=react-server --test --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/notification-outbox.integration.mjs",
     "test:capacity-parity": "node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/capacity-parity-http.integration.mjs",
-    "test:owner-outbox": "node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/owner-outbox-compat-loader.mjs tests/owner-outbox-compatibility.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/owner-outbox-compat-loader.mjs tests/owner-outbox-compatibility.integration.mjs --global-off"
+    "test:owner-outbox": "node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/owner-outbox-compat-loader.mjs tests/owner-outbox-compatibility.integration.mjs && node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/owner-outbox-compat-loader.mjs tests/owner-outbox-compatibility.integration.mjs --global-off",
+    "test:staff-worklists": "node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/staff-worklists-http.integration.mjs",
+    "test:browser-worklists": "playwright test --config playwright.worklists.config.mjs",
+    "test:worklist-fixture": "node tests/browser/worklist-fixture-smoke.mjs"
   },
   "engines": {
     "node": ">=20.9.0"
