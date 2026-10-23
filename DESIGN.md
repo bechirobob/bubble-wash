@@ -233,7 +233,8 @@
 
 ## Services catalogue and estimator
 
-- Present plans as four unboxed radio choices on wide screens and a compact 2×2 selector on tablets and phones. Each choice shows the name, pickup frequency and monthly service fee. One shared area below shows the selected plan’s pickup count, audience and all processing rates; benefits expand on request. Native radio behavior supplies keyboard selection and a visible checked state.
+- Accepted direction, 23 October 2026: Commercial plans use option C, a compact 1× / 2× / 3× / 5–6× pickup-frequency radio group and one selected-plan card. Native radio behavior supplies keyboard selection, full plan-name labels, a visible checked state and a neutral focus outline. Keep the original logo and the existing public palette; use flat surfaces, thin borders and no colored shadows or glows.
+- The selected plan shows its exact monthly service fee and weekly/monthly pickup counts. Keep all four plans available in an expandable comparison, with included services and weight rates in separate native disclosures. Expanded lists use separators and bounded keyboard-accessible scrolling. Show the GHS 450 pickup minimum and make the estimate action scroll to the existing calculator; this does not book or calculate automatically.
 - Plan selection and the calculator share state. Changing either selector preserves entered weight, area and extras, clears the previous estimate and rejects any stale response.
 - Place the estimate immediately after plans on a sage section. Keep weight prominent, extras collapsed and the monthly result distinct from the input controls. Never imply the service fee alone is a total.
 - Numeric fields preserve their raw string while being edited; convert and validate only when calculating so an empty field never becomes a forced zero.
