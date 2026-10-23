@@ -392,6 +392,28 @@ class ReleaseSafety(unittest.TestCase):
                     with self.assertRaises(ValueError): deploy.verify_source_transition(root, root)
 
 
+
+class ReviewedReaderTransition(unittest.TestCase):
+    def test_exact_pair_and_unchanged_critical_files_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            current = Path(directory) / 'old'; candidate = Path(directory) / 'new'
+            for root in (current, candidate):
+                for relative in deploy.CRITICAL_FILES:
+                    file = root / relative; file.parent.mkdir(parents=True, exist_ok=True); file.write_text('old')
+            changed = 'src/lib/data-store.ts'
+            (candidate / changed).write_text('reviewed')
+            pins = {changed: (deploy.digest(current / changed), deploy.digest(candidate / changed))}
+            with patch.object(deploy, 'REVIEWED_READER_TRANSITIONS', pins):
+                deploy.verify_critical_transition(current, candidate)
+                for relative in deploy.CRITICAL_FILES:
+                    for root in (current, candidate):
+                        file = root / relative; previous = file.read_bytes(); file.write_text('unreviewed')
+                        with self.assertRaises(ValueError): deploy.verify_critical_transition(current, candidate)
+                        file.write_bytes(previous)
+                (candidate / changed).write_text('old')
+                with self.assertRaises(ValueError): deploy.verify_critical_transition(current, candidate)
+
+
 class ExactCi(unittest.TestCase):
     def setUp(self):
         spec = importlib.util.spec_from_file_location('ci', Path(__file__).resolve().parents[1] / 'ops/check-release-ci.py')
@@ -773,6 +795,7 @@ class RehearsalOnly(unittest.TestCase):
             stack.enter_context(patch.object(deploy.os, 'geteuid', return_value=0))
             stack.enter_context(patch.object(deploy.pwd, 'getpwnam', return_value=self.owner))
             stack.enter_context(patch.object(deploy, 'verify_source_transition'))
+            stack.enter_context(patch.object(deploy, 'REVIEWED_READER_TRANSITIONS', {}))
             stack.enter_context(patch.object(deploy, 'check_runtime'))
             stack.enter_context(patch.object(deploy, 'health'))
             stack.enter_context(patch.object(deploy, 'verify_private_network', side_effect=[321, self.final_probe_pid]))
