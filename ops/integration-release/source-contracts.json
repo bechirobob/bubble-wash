@@ -8,7 +8,7 @@
   "profiles": {
     "integration-candidate-v1": {
       "appInputGitTree": "71f181ba23f3786333402357d2a9da8b667f397e",
-      "contentSha256": "87b59565dc9b7e9e832e98063cb354cc576bc84bb2a7d769a90e8db3eeb239ca",
+      "contentSha256": "050a8d5ff9c60922fc13405cb37dcf2db3d38cbe7bcb75634060216c631966d5",
       "files": {
         ".env.production.example": "8139384fe3a2d23b948dedf93243effe4cbb05439dc55289d16593af39a8decb",
         ".github/backup/backup_release.py": "86d085e65b0e6dba906b57c296868da41b01c83982e5b93d6430fd73f05f6992",
@@ -315,7 +315,7 @@
         "tests/browser/fixture-smoke.mjs": "242c82c54d1b8f86a66f8b60e3f138043996e6d476090e9b07f5d6bc62436538",
         "tests/browser/list-density.worklist.mjs": "a78a21bfd2350800bd93a822fd7bf9414bd5bcfcacf0a0c9e21d2014a9c3ddc9",
         "tests/browser/login-hydration.spec.mjs": "ea3a4bff733e66c1721dd1bb97978524fcd6516f18aaef706d55e4f4db773196",
-        "tests/browser/opening-intro.spec.mjs": "831c6de3e5d7000d6c137d57fb8c8d06e45d8fd9c5b79b06949b71afa2a0aa99",
+        "tests/browser/opening-intro.spec.mjs": "d880b5a8d9740898fc58fbc6cf9311bc1dcdf11cafc27a0e04508b7b157dd5a2",
         "tests/browser/personal-owner-mfa.spec.mjs": "4519d88305bb919588633f6509a9e27d8dbadde9e9f33e45443bfdcf78a5b3f5",
         "tests/browser/prefetch-lifecycle.mjs": "0fc4ef5dd5accb148b60ec4fefc77f12e27c91468ccc38caf9e22f567a0e0722",
         "tests/browser/pricing-catalogue.spec.mjs": "c7e67c67c231b68b258554ee53f2e4f4aa6953fc14999ea5acf214ece492566f",
