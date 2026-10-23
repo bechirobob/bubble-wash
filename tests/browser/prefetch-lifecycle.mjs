@@ -1,11 +1,12 @@
-// Observe actual Next RSC requests without changing, cancelling, or suppressing them.
+// Observe Next RSC and the admin location poll before hard navigation.
+// Never change, cancel, or suppress requests or browser errors.
 export function observePrefetches(page, report, now = Date.now) {
   const pending = new Set();
   let changedAt = now();
   let phase = 'initial';
   const relevant = request => {
     const url = new URL(request.url());
-    return url.origin === 'http://localhost:3100' && url.searchParams.has('_rsc');
+    return url.origin === 'http://localhost:3100' && (url.searchParams.has('_rsc') || url.pathname === '/api/dispatch/location');
   };
   page.on('request', request => {
     if (!relevant(request)) return;
