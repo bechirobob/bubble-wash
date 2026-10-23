@@ -2,10 +2,10 @@ import { ArrowRight, BadgeCheck, CalendarDays, ChevronDown, Info } from "lucide-
 import { plans, type PlanName } from "@/lib/pricing";
 import { formatMoney } from "@/lib/public-ui";
 
-export function PlanCatalogue({ selected, onSelect }: { selected: PlanName; onSelect: (plan: PlanName) => void }) {
+export function PlanCatalogue({ selected, onSelect, disabled = false }: { selected: PlanName; onSelect: (plan: PlanName) => void; disabled?: boolean }) {
   const plan = plans.find(item => item.name === selected) ?? plans[1];
   return (
-    <section className="serviceSection pageShell planCatalogue focusedPlanCatalogue" aria-labelledby="plans-heading">
+    <section className="serviceSection pageShell planCatalogue focusedPlanCatalogue" aria-labelledby="plans-heading" aria-busy={disabled}>
       <div className="pricingHeading">
         <div><p className="sectionLabel">Commercial plans</p><h2 id="plans-heading">Choose your pickup plan.</h2></div>
         <p id="plan-choice-help">Monthly service fee + laundry charged by weight.</p>
@@ -16,7 +16,7 @@ export function PlanCatalogue({ selected, onSelect }: { selected: PlanName; onSe
             <legend>Pickups per week</legend>
             <div className="focusedPlanSegments">
               {plans.map(item => <label className="focusedPlanSegment" key={item.name}>
-                <input className="srOnly" type="radio" name="catalogue-plan" value={item.name} checked={item.name === plan.name} onChange={() => onSelect(item.name)} />
+                <input className="srOnly" type="radio" disabled={disabled} name="catalogue-plan" value={item.name} checked={item.name === plan.name} onChange={() => onSelect(item.name)} />
                 <span aria-hidden="true">{item.pickups.split(" ")[0]}×</span>
                 <span className="srOnly">{item.name}, {item.pickups}</span>
               </label>)}
@@ -41,7 +41,7 @@ export function PlanCatalogue({ selected, onSelect }: { selected: PlanName; onSe
               <p>Monthly service fees. Laundry is charged separately by weight.</p>
               <ul className="focusedPlanComparison" aria-label="All commercial plans">
                 {plans.map(item => <li key={item.name}>
-                  <button type="button" className="focusedPlanCompareChoice" aria-pressed={item.name === plan.name} onClick={() => onSelect(item.name)} aria-label={`Choose ${item.name}, ${item.pickups}, ${formatMoney(item.subscription)} monthly service fee`}>
+                  <button type="button" disabled={disabled} className="focusedPlanCompareChoice" aria-pressed={item.name === plan.name} onClick={() => onSelect(item.name)} aria-label={`Choose ${item.name}, ${item.pickups}, ${formatMoney(item.subscription)} monthly service fee`}>
                     <span><strong>{item.name}</strong><small>{item.pickups}</small></span>
                     <span className="focusedPlanComparePrice"><strong>{formatMoney(item.subscription)}</strong><small>{item.name === plan.name ? "Selected" : "Choose plan"}</small></span>
                   </button>

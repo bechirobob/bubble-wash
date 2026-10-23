@@ -2,14 +2,20 @@
 
 import Link from "next/link";
 import { Calculator, CalendarPlus } from "lucide-react";
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { addons, plans, zones, type AddonKey, type PlanName, type ZoneKey } from "@/lib/pricing";
 import { formatMoney, postJSON, type Quote } from "@/lib/public-ui";
 import { PlanCatalogue } from "@/components/PlanCatalogue";
 
 const addonEntries = Object.entries(addons) as Array<[AddonKey, (typeof addons)[AddonKey]]>;
 
+// Keep server-rendered controls inert until their change handlers are attached.
+const subscribeToHydration = () => () => {};
+const clientReady = () => true;
+const serverReady = () => false;
+
 export function PricingCalculator({ initialPlan = "Twice weekly", available = true, showCatalogue = false }: { initialPlan?: PlanName; available?: boolean; showCatalogue?: boolean }) {
+  const hydrated = useSyncExternalStore(subscribeToHydration, clientReady, serverReady);
   const [plan, setPlan] = useState<PlanName>(initialPlan);
   const [zone, setZone] = useState<ZoneKey>("core");
   const [kg, setKg] = useState("60");
@@ -41,6 +47,7 @@ export function PricingCalculator({ initialPlan = "Twice weekly", available = tr
 
   async function calculate(event: FormEvent) {
     event.preventDefault();
+    if (!hydrated) return;
     const request = ++revision.current;
     setPending(true);
     setTone("info");
@@ -65,15 +72,15 @@ export function PricingCalculator({ initialPlan = "Twice weekly", available = tr
 
   const calculator = (
     <div className="pricingLayout">
-      <form className="serviceForm quoteForm" onSubmit={calculate}>
+      <form className="serviceForm quoteForm" aria-busy={!hydrated} onSubmit={calculate}>
         <div className="estimateInputs">
-          <label>Collection plan<select value={plan} onChange={(event) => selectPlan(event.target.value as PlanName)}>{plans.map((item) => <option key={item.name}>{item.name}</option>)}</select></label>
-          <label className="estimateWeight">Expected weight per pickup<span className="weightInput"><input aria-describedby="estimate-weight-help" type="number" required min={1} max={10000} step={0.01} inputMode="decimal" value={kg} onChange={(event) => { setKg(event.target.value); invalidate(); }} /><span aria-hidden="true">kg</span></span><small id="estimate-weight-help">{selectedPlan.name} starts at {selectedPlan.bands[0].min} kg per pickup.</small></label>
+          <label>Collection plan<select disabled={!hydrated} value={plan} onChange={(event) => selectPlan(event.target.value as PlanName)}>{plans.map((item) => <option key={item.name}>{item.name}</option>)}</select></label>
+          <label className="estimateWeight">Expected weight per pickup<span className="weightInput"><input disabled={!hydrated} aria-describedby="estimate-weight-help" type="number" required min={1} max={10000} step={0.01} inputMode="decimal" value={kg} onChange={(event) => { setKg(event.target.value); invalidate(); }} /><span aria-hidden="true">kg</span></span><small id="estimate-weight-help">{selectedPlan.name} starts at {selectedPlan.bands[0].min} kg per pickup.</small></label>
         </div>
-        <label>Service area<select value={zone} onChange={(event) => { setZone(event.target.value as ZoneKey); invalidate(); }}>{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
-        <details className="estimateExtras"><summary>Extra services{selectedAddons.length > 0 ? ` · ${selectedAddons.length} selected` : " · optional"}</summary><fieldset className="choiceFieldset"><legend className="srOnly">Optional services</legend><div className="choiceGrid">{addonEntries.map(([key, item]) => <label className="checkOption" key={key}><input type="checkbox" checked={selectedAddons.includes(key)} onChange={() => toggleAddon(key)} /><span><strong>{item.label}</strong><small>{"perKg" in item ? `${formatMoney(item.perKg)} / kg` : "percent" in item ? `${Math.round(item.percent * 100)}% of processing` : formatMoney(item.fixed)}</small></span></label>)}</div></fieldset></details>
-        <button className="button primary" type="submit" disabled={pending}><Calculator aria-hidden="true" />{pending ? "Calculating…" : "Calculate estimate"}</button>
-        <p className={`status ${tone}`} role="status" aria-live="polite">{status}</p>
+        <label>Service area<select disabled={!hydrated} value={zone} onChange={(event) => { setZone(event.target.value as ZoneKey); invalidate(); }}>{zoneEntries.map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
+        <details className="estimateExtras"><summary>Extra services{selectedAddons.length > 0 ? ` · ${selectedAddons.length} selected` : " · optional"}</summary><fieldset className="choiceFieldset"><legend className="srOnly">Optional services</legend><div className="choiceGrid">{addonEntries.map(([key, item]) => <label className="checkOption" key={key}><input type="checkbox" disabled={!hydrated} checked={selectedAddons.includes(key)} onChange={() => toggleAddon(key)} /><span><strong>{item.label}</strong><small>{"perKg" in item ? `${formatMoney(item.perKg)} / kg` : "percent" in item ? `${Math.round(item.percent * 100)}% of processing` : formatMoney(item.fixed)}</small></span></label>)}</div></fieldset></details>
+        <button className="button primary" type="submit" disabled={!hydrated || pending}><Calculator aria-hidden="true" />{pending ? "Calculating…" : "Calculate estimate"}</button>
+        <p className={`status ${tone}`} role="status" aria-live="polite">{hydrated ? status : "Preparing estimate…"}</p>
       </form>
       <aside className="quoteSummary" aria-live="polite">
         <p className="sectionLabel">{quote ? "Your monthly estimate" : "Your selected plan"}</p>
@@ -85,7 +92,7 @@ export function PricingCalculator({ initialPlan = "Twice weekly", available = tr
 
   if (!showCatalogue) return calculator;
   return <>
-    <PlanCatalogue selected={plan} onSelect={selectPlan} />
+    <PlanCatalogue selected={plan} onSelect={selectPlan} disabled={!hydrated} />
     <section className="publicBand publicBandSage" aria-labelledby="estimate-heading"><div className="serviceSection pageShell estimateSection"><div className="sectionIntro"><p className="sectionLabel">Estimate</p><h2 id="estimate-heading">Estimate your monthly cost.</h2><p>Adjust the weight and pickup area to see your monthly total. Final billing uses the weight recorded at intake.</p></div>{calculator}</div></section>
   </>;
 }

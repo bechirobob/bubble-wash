@@ -32,6 +32,7 @@ test('native frequency keyboard navigation updates the selected plan and support
   const catalogue = page.locator('.focusedPlanCatalogue');
   const first = catalogue.getByRole('radio', { name: 'Weekly, 1 pickup / week', exact: true });
   await expect(first).toBeChecked();
+  await expect(first).toBeEnabled();
   await expect(catalogue.getByRole('article')).toHaveCount(1);
   // Enter the native group with the keyboard, not programmatic focus.
   for (let step = 0; step < 30 && !(await first.evaluate(node => node === document.activeElement)); step++) await page.keyboard.press('Tab');
@@ -84,9 +85,13 @@ test('comparison selections preserve estimate inputs and send the unchanged quot
   await page.goto('/services?plan=Weekly');
   const form = page.locator('.quoteForm');
   const weight = form.locator('input[type="number"]');
+  await expect(form).toHaveAttribute('aria-busy', 'false');
+  await expect(weight).toBeEnabled();
   await weight.fill('60.5');
+  await expect(weight).toHaveValue('60.5');
   await form.locator('.estimateExtras > summary').click();
   await form.getByRole('checkbox').first().check();
+  await expect(weight).toHaveValue('60.5');
   const catalogue = page.locator('.focusedPlanCatalogue');
   await catalogue.locator('summary').filter({ hasText: 'Compare all 4 plans' }).click();
   await catalogue.getByRole('button', { name: /^Choose Twice weekly,/ }).click();
@@ -100,4 +105,56 @@ test('comparison selections preserve estimate inputs and send the unchanged quot
   expect((await request).postDataJSON()).toMatchObject({ plan: 'Twice weekly', kg: 60.5, addons: ['ironing'], zone: 'core', discount: 'none' });
   await expect(form.getByRole('status')).toHaveText('Estimate ready.');
   await verifyLayout(page, testInfo, 'pricing-c-estimate');
+});
+
+
+test('slow hydration keeps estimate controls safe, then preserves the decimal quote', async ({ page }, testInfo) => {
+  let releaseScripts;
+  const released = new Promise(resolve => { releaseScripts = resolve; });
+  const scriptRequests = [];
+  const scripts = /^http:\/\/localhost:3100\/_next\/.*\.js(?:\?.*)?$/;
+  await page.route(scripts, route => {
+    const pending = released.then(() => route.continue());
+    scriptRequests.push(pending);
+    return pending;
+  });
+  try {
+    await page.goto('/services?plan=Weekly', { waitUntil: 'commit' });
+    const form = page.locator('.quoteForm');
+    const weight = form.locator('input[type="number"]');
+    const catalogue = page.locator('.focusedPlanCatalogue');
+    await expect(form).toHaveAttribute('aria-busy', 'true');
+    await expect(weight).toBeVisible();
+    await expect(weight).toBeDisabled();
+    for (const control of await form.locator('input, select, button').all()) await expect(control).toBeDisabled();
+    for (const radio of await catalogue.getByRole('radio').all()) await expect(radio).toBeDisabled();
+    await catalogue.locator('summary').filter({ hasText: 'Compare all 4 plans' }).click();
+    const choice = catalogue.getByRole('button', { name: /^Choose Twice weekly,/ });
+    await expect(choice).toBeVisible();
+    for (const button of await catalogue.getByRole('button').all()) await expect(button).toBeDisabled();
+    await expect(form.getByRole('status')).toHaveText('Preparing estimate…');
+    expect(scriptRequests.length).toBeGreaterThan(0);
+    releaseScripts();
+    await expect(form).toHaveAttribute('aria-busy', 'false');
+    await expect(weight).toBeEnabled();
+    await expect(choice).toBeEnabled();
+    await weight.fill('60.5');
+    await expect(weight).toHaveValue('60.5');
+    await form.locator('.estimateExtras > summary').click();
+    await form.getByRole('checkbox').first().check();
+    await expect(weight).toHaveValue('60.5');
+    await choice.click();
+    await expect(weight).toHaveValue('60.5');
+    await expect(form.getByRole('checkbox').first()).toBeChecked();
+    await expect(form.getByRole('combobox', { name: 'Collection plan', exact: true })).toHaveValue('Twice weekly');
+    const request = page.waitForRequest(req => req.url().endsWith('/api/quote') && req.method() === 'POST');
+    await form.getByRole('button', { name: 'Calculate estimate', exact: true }).click();
+    expect((await request).postDataJSON()).toMatchObject({ plan: 'Twice weekly', kg: 60.5, addons: ['ironing'], zone: 'core', discount: 'none' });
+    await expect(form.getByRole('status')).toHaveText('Estimate ready.');
+    await verifyLayout(page, testInfo, 'pricing-hydrated-estimate');
+  } finally {
+    releaseScripts();
+    await Promise.all(scriptRequests);
+    await page.unroute(scripts);
+  }
 });
