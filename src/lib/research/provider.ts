@@ -34,7 +34,7 @@ export async function dispatchResearchNotifications(){
 // Only this fixed synthetic payload can be copied. A prior/uncertain attempt is never resent.
 export async function sendSyntheticResearchTest(db:ReturnType<typeof getDatabase>,key:string,ownerEmail:string,send:typeof fetch=fetch){
  if(!key||!/^\S+@\S+\.\S+$/.test(ownerEmail)||/[\r\n,;]/.test(ownerEmail)||ownerEmail.length>254)throw new Error('Dedicated key and verified operator test recipient required.');
- const input={adultEligible:true as const,instrument:'consumer' as const,schemaVersion,submissionKey:'20b2f9aa-77dd-4c7a-8efe-b23f176c77f1',identity:{name:'TEST ONLY — SYNTHETIC SURVEY RESPONSE',organisation:'',email:'synthetic-test@example.invalid',phone:'0200000000'},consent:true as const,answers:{A1:'25 to 34',C3:'TEST ONLY. No real respondent information. Verifying durable save and the approved survey email path.'},reference:'operator-test-v1'};
+ const input={adultEligible:true as const,instrument:'consumer' as const,schemaVersion,submissionKey:'20b2f9aa-77dd-4c7a-8efe-b23f176c77f1',identity:{name:'TEST ONLY — SYNTHETIC SURVEY RESPONSE',organisation:'',email:'synthetic-test@example.invalid',phone:'0200000000'},consent:true as const,answers:{'icp-student':'No','icp-business':'No','icp-corporate':'No','icp-household':'No',A1:'25 to 34',C3:'TEST ONLY. No real respondent information. Verifying durable save and the approved survey email path.'},reference:'operator-test-v1'};
  const token=randomUUID();
  const claimed=db.transaction(()=>{
   saveResponse(input,db);

@@ -10,7 +10,7 @@ import {schemaVersion,launchApproved,deliveryApproved} from '../src/lib/research
 
 const schema=readFileSync(new URL('../db/proposed/research-v1.sql',import.meta.url),'utf8');
 const now=Date.parse('2026-10-23T17:00:00Z');
-const input=(suffix='d')=>({adultEligible:true,instrument:'consumer',schemaVersion,submissionKey:`f9ba5dce-ae1c-4014-a167-a29c6f6c489${suffix}`,identity:{name:'Synthetic Adult',organisation:'',email:'adult@example.test',phone:'+233240000000'},consent:true,answers:{A1:'25 to 34'},reference:'offline-test'});
+const input=(suffix='d')=>({adultEligible:true,instrument:'consumer',schemaVersion,submissionKey:`f9ba5dce-ae1c-4014-a167-a29c6f6c489${suffix}`,identity:{name:'Synthetic Adult',organisation:'',email:'adult@example.test',phone:'+233240000000'},consent:true,answers:{'icp-student':'No','icp-business':'No','icp-corporate':'No','icp-household':'No',A1:'25 to 34'},reference:'offline-test'});
 function fixture(t){
  const dir=mkdtempSync(path.join(tmpdir(),'research-connections-'));
  const a=new Database(path.join(dir,'fixture.sqlite'));

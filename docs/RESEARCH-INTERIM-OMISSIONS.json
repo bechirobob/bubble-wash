@@ -1,51 +1,20 @@
 {
-  "source_preserved_in": "Library C3 source archive; not overwritten",
-  "omitted_questions": [
-    {
-      "instrument": "Consumer Survey Questionnaire",
-      "id": "A7",
-      "reason": "Income ranges not approved"
-    },
-    {
-      "instrument": "Consumer Survey Questionnaire",
-      "id": "F1a",
-      "reason": "Persona routing and school list not confirmed"
-    },
-    {
-      "instrument": "Consumer Survey Questionnaire",
-      "id": "E3",
-      "reason": "Bag definition missing"
-    },
-    {
-      "instrument": "Consumer Survey Questionnaire",
-      "id": "E4",
-      "reason": "Bag definition missing"
-    },
-    {
-      "instrument": "Consumer Survey Questionnaire",
-      "id": "E5",
-      "reason": "Bag definition missing"
-    },
-    {
-      "instrument": "Consumer Survey Questionnaire",
-      "id": "E6",
-      "reason": "Bag definition missing"
-    },
-    {
-      "instrument": "Consumer Survey Questionnaire",
-      "id": "H2",
-      "reason": "Incentive text missing"
-    }
-  ],
+  "source_preserved_in": "Updated five-DOCX pack, ZIP SHA256 500f71f85c7e37f89d0f459c7ab2f4766b928bcebc9c320dd4c1b76ca0c4f5ea",
+  "omitted_questions": [],
   "other_omissions": [
-    "Interviewer consent/recording scripts and vendor on-site observation checklist; no media upload",
-    "Vendor Q6 parenthetical interviewer photograph instruction omitted from display only"
+    "Original call-recording consent scripts and vendor on-site observation checklist await a truthful self-completion adaptation. No recording, inspection or upload is claimed.",
+    "Distribution-channel reference mapping not supplied; no channel value invented."
   ],
   "counts": [
-    62,
+    69,
     17,
     12,
     13
   ],
-  "interim_owner_direction": "Respondents explicitly select any relevant optional persona sections; no automatic mapping. Restores 26 consumer questions and four interview probes. Parent approved this reversible interim behavior under the owner’s publish-before-reply instruction; not attributed to Abigail."
+  "owner_routing_direction": "Sequential source-defined eligibility; show every matching module/probe. Short labels Students, Business owners, Office workers, Households. Updated household eligibility and 12-month retention approved by owner. Count each respondent once overall.",
+  "requiredness": "Consent, adult eligibility, upfront contact details and routing eligibility are required. Selected Other choices require clarification. Source C3, D3 and H remain optional; unspecified research-answer requiredness is not invented. Interview questions may be skipped.",
+  "analysis_interpretations": [
+    "A2 Neither is retained outside Accra core analysis and continues common sections; no partial response or extra email.",
+    "A3 None of these is outside agreed area quotas; Other requires review. Exact named areas are not silently grouped."
+  ]
 }

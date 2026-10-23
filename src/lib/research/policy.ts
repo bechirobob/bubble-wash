@@ -1,4 +1,4 @@
-export const schemaVersion = 'bubblewash-research-interim-1';
+export const schemaVersion = 'bubblewash-research-3';
 export const launchApproved: boolean = false;
 export const retentionReviewApproved: boolean = false;
 export const deliveryApproved: boolean = false;
@@ -28,5 +28,5 @@ export function submissionBudget(value:unknown){
  return {bytes,percent:Math.ceil(bytes/maxSubmissionBytes*100),remaining:Math.max(0,maxSubmissionBytes-bytes),withinLimit:bytes<=maxSubmissionBytes};
 }
 export function researchNotice(draft:boolean,reviewApproved=false){
- return draft?'Draft only. No real responses are being collected. Use synthetic details only.':'Your contact details remain linked to your research answers. We will contact you only for the optional purposes you choose. Email copies are held separately by the recipient; website privacy requests do not automatically remove those copies.'+(reviewApproved?' Website-stored research records will be reviewed 90 days after the survey closes to decide whether they are still needed. This is a review, not a promise of automatic deletion.':'');
+ return draft?'Draft only. No real responses are being collected. Use synthetic details only.':'Your contact details remain linked to your research answers. We will contact you only for the optional purposes you choose. Email copies are held separately by the recipient; website privacy requests do not automatically remove those copies.'+(reviewApproved?' Identifiable website research records are retained for up to 12 months from collection, then reviewed for deletion or anonymisation, subject to a lawful retention obligation or justified research need. Permanent cleanup is handled separately, not automatically.':'');
 }

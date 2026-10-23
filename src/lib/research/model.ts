@@ -4,13 +4,33 @@ export const ids=['consumer','consumer-interview','business-interview','vendor-i
 export type InstrumentId=typeof ids[number];
 export type Answer=string|string[];
 export type Answers=Record<string,Answer>;
-export type Question={id:string;section:string;prompt:string;source_text:string;options?:string[];answer_specification?:string|null;suggested_input_type:string};
+export type Question={id:string;section:string;prompt:string;source_text:string;options?:string[];answer_specification?:string|null;suggested_input_type:string;required_status?:string};
 export const forms=source.forms.map((form,index)=>({...form,id:ids[index],questions:form.questions as Question[]}));
 export const serviceDescription=source.service_description;
+export const pricingDescription=source.pricing_description;
 export function findForm(id:string){return forms.find(form=>form.id===id);}
-export const personas=[['student','Students'],['business','Business owners and self-employed'],['corporate','Office and corporate workers'],['working-woman','Working women managing household responsibilities']] as const;
+export const profiles=[['student','Students'],['business','Business owners'],['corporate','Office workers'],['household','Households']] as const;
+export const eligibilityQuestions:Question[]=[
+ {id:'icp-student',section:'Your profile',prompt:'Students: Do you attend university or college and live in a hall, hostel or shared accommodation?',source_text:'Setup: F1 university/college attendance and hall, hostel or shared accommodation.',options:['Yes','No'],suggested_input_type:'single_choice'},
+ {id:'icp-business',section:'Your profile',prompt:'Business owners: Are you a business owner or self-employed?',source_text:'Setup: F2 business owner or self-employed.',options:['Yes','No'],suggested_input_type:'single_choice'},
+ {id:'icp-corporate',section:'Your profile',prompt:'Office workers: Are you employed in an office or corporate role?',source_text:'Setup: F3 employed in an office or corporate role.',options:['Yes','No'],suggested_input_type:'single_choice'},
+ {id:'icp-household',section:'Your profile',prompt:'Households: Are you a woman who works and has household laundry responsibilities?',source_text:'Setup: F4 women who work and have household laundry responsibilities; overlap permitted.',options:['Yes','No'],suggested_input_type:'single_choice'},
+];
+export function eligibilityNeeded(q:Question,answers:Answers){return !(q.id==='icp-business'&&answers.A4==='Business owner or self-employed'||q.id==='icp-corporate'&&answers.A4==='Employed in an office or corporate role');}
+export function profileError(answers:Answers):string|null{return eligibilityQuestions.some(q=>eligibilityNeeded(q,answers)&&!['Yes','No'].includes(String(answers[q.id]??'')))?'Please answer each profile question.':null;}
+export function relevantProfiles(answers:Answers){return profiles.filter(([id])=>answers['icp-'+id]==='Yes'||id==='business'&&answers.A4==='Business owner or self-employed'||id==='corporate'&&answers.A4==='Employed in an office or corporate role').map(([id])=>id);}
+export function researchAnalysis(id:InstrumentId,answers:Answers){
+ if(id!=='consumer')return {matchedProfiles:id==='consumer-interview'?relevantProfiles(answers):[]};
+ const accra=['I live in Accra','I work in Accra','Both'].includes(String(answers.A2))?true:answers.A2==='Neither'?false:null;
+ const area=String(answers.A3??'');
+ return {matchedProfiles:relevantProfiles(answers),eligibleAccraSample:accra,eligibleAccraCoreAnalysis:accra,agreedAreaQuota:accra===false?false:['Tse Addo','East Legon','Airport','Cantonments','Achimota','Haatso'].includes(area)?true:area==='None of these'?false:null,areaReviewRequired:area==='Other (specify)',researchArea:area};
+}
+export const interviewProbes=(source.forms[1].persona_probes??[]).map((prompt,i)=>({id:'probe-'+['household','corporate','business','student'][i],section:'Questions for your profile',prompt,source_text:prompt,suggested_input_type:'paragraph',required_status:'consent_script_allows_skipping'}));
+export function displayPrompt(q:Question){return q.id.startsWith('probe-')?q.prompt.replace(/^[^:]+: /,(profiles.find(([id])=>q.id==='probe-'+id)?.[1]??q.prompt.split(':')[0])+': '):q.prompt;}
 export function visible(q:Question,a:Answers,id:InstrumentId){
- if(id==='consumer'&&/^F[1-4]/.test(q.id)){const key=['student','business','corporate','working-woman'][Number(q.id[1])-1];return a['persona-'+key]==='Yes';}
+ if(q.id.startsWith('icp-'))return eligibilityNeeded(q,a);
+ if(id==='consumer'&&/^F[1-4]/.test(q.id))return relevantProfiles(a).some(profile=>profile===['student','business','corporate','household'][Number(q.id[1])-1]);
+ if(id==='consumer-interview'&&q.id.startsWith('probe-'))return relevantProfiles(a).some(profile=>profile===q.id.slice(6));
  if(id==='consumer'){
   if(q.id==='A8a')return a.A8==='House help';
   if(q.id==='B6c')return ['Yes, regularly','Yes, occasionally'].includes(String(a.B6b));
@@ -18,7 +38,6 @@ export function visible(q:Question,a:Answers,id:InstrumentId){
  }
  return !(id==='vendor-interview'&&q.id==='13'&&a.hotelLaundry!=='Yes');
 }
-export function unresolved(q:Question,id:InstrumentId){return id==='consumer'&&['A7','F1a','H2','E3','E4','E5','E6'].includes(q.id);}
 export function answerError(q:Question,value:unknown):string|null{
  if(value===undefined||value==='')return null;
  if(q.suggested_input_type==='checkboxes'){
@@ -32,7 +51,7 @@ export function answerError(q:Question,value:unknown):string|null{
  if(['number','number_or_nonresponse_choice'].includes(q.suggested_input_type)&&!q.options?.includes(value)&&(!/^\d+(\.\d{1,2})?$/.test(value)||Number(value)>100000000))return 'Enter a non-negative number.';
  return null;
 }
-export type Submission={adultEligible:true;instrument:InstrumentId;schemaVersion:string;submissionKey:string;identity:{name:string;organisation:string;email:string;phone:string};consent:true;answers:Answers;reference:string};
+export type Submission={adultEligible:true;instrument:InstrumentId;schemaVersion:string;submissionKey:string;identity:{name:string;organisation:string;email:string;phone:string};consent:true;answers:Answers;reference:string;analysis?:ReturnType<typeof researchAnalysis>};
 export function validate(input:unknown):Submission{
  assertAdult(input); // Deliberately before reading identity.
  const form=findForm(String(input.instrument));
@@ -46,15 +65,17 @@ export function validate(input:unknown):Submission{
  if(['business-interview','vendor-interview'].includes(form.id)&&!details.organisation)throw new Error('Organisation required.');
  if(!input.answers||typeof input.answers!=='object'||Array.isArray(input.answers))throw new Error('Invalid answers.');
  const answers=input.answers as Answers;
- const extras=new Set(form.id==='consumer'?['A3-other',...personas.map(([id])=>'persona-'+id)]:form.id==='consumer-interview'?[...personas.map(([id])=>'persona-'+id),'probe-working-woman','probe-corporate','probe-business','probe-student']:form.id==='business-interview'?['hospital']:['hotelLaundry']);
+ if(['consumer','consumer-interview'].includes(form.id)){const error=profileError(answers);if(error)throw new Error(error);}
+ const extras=new Set(form.id==='consumer'?['A3-other','A4-other','F1a-other']:form.id==='business-interview'?['hospital']:form.id==='vendor-interview'?['hotelLaundry']:[]);
  const clean:Answers={};
  for(const [key,value]of Object.entries(answers)){
-  const q=form.questions.find(q=>q.id===key);
-  if(q){const error=answerError(q,value);if(error)throw new Error(error);if(!visible(q,answers,form.id))throw new Error('Answer not applicable.');if(unresolved(q,form.id)&&value!==''&&value!==undefined)throw new Error('Question content awaiting approval.');}
-  else{if(!extras.has(key)||typeof value!=='string'||value.length>4000)throw new Error('Unknown or invalid field.');if(key.startsWith('probe-')&&answers['persona-'+key.slice(6)]!=='Yes')throw new Error('Persona probe not selected.');if((key.startsWith('persona-')||['hospital','hotelLaundry'].includes(key))&&!['Yes','No',''].includes(value))throw new Error('Invalid classification.');if(key==='A3-other'&&answers.A3!=='Other (specify)')throw new Error('Area clarification not applicable.');}
+  const q=form.questions.find(q=>q.id===key)??(form.id==='consumer-interview'?interviewProbes.find(q=>q.id===key):undefined)??(['consumer','consumer-interview'].includes(form.id)?eligibilityQuestions.find(q=>q.id===key):undefined);
+  if(q){const error=answerError(q,value);if(error)throw new Error(error);if(!visible(q,answers,form.id))throw new Error('Answer not applicable.');}
+  else{if(!extras.has(key)||typeof value!=='string'||value.length>4000)throw new Error('Unknown or invalid field.');if(['hospital','hotelLaundry'].includes(key)&&!['Yes','No',''].includes(value))throw new Error('Invalid classification.');if(key==='A3-other'&&answers.A3!=='Other (specify)'||key==='A4-other'&&answers.A4!=='Other'||key==='F1a-other'&&(answers.F1a!=='Other university or college (please specify)'||!relevantProfiles(answers).includes('student')))throw new Error('Clarification not applicable.');}
   clean[key]=value;
  }
+ if(form.id==='consumer'){for(const [field,choice,detail] of [['A3','Other (specify)','A3-other'],['A4','Other','A4-other'],['F1a','Other university or college (please specify)','F1a-other']])if(answers[field]===choice&&(typeof answers[detail]!=='string'||!String(answers[detail]).trim()||String(answers[detail]).length>160))throw new Error('Please complete the requested clarification.');}
  if(typeof input.reference!=='string'||!/^[a-zA-Z0-9_-]{0,80}$/.test(input.reference))throw new Error('Invalid reference.');
- return {adultEligible:true,instrument:form.id,schemaVersion,submissionKey:input.submissionKey,identity:details,consent:true,answers:clean,reference:input.reference};
+ return {adultEligible:true,instrument:form.id,schemaVersion,submissionKey:input.submissionKey,identity:details,consent:true,answers:clean,reference:input.reference,analysis:researchAnalysis(form.id,clean)};
 }
 

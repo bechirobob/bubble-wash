@@ -120,6 +120,12 @@ test.describe('interim survey open-fixture acceptance',()=>{
     await page.getByLabel('Phone number',{exact:true}).fill('0200000000');
     if(await page.getByLabel('Organisation',{exact:true}).count())await page.getByLabel('Organisation',{exact:true}).fill('Synthetic Browser Fixture');
   }
+  async function eligibility(page,yes=[]){
+    for(const [id,name] of [['student','Students'],['business','Business owners'],['corporate','Office workers'],['household','Households']]){
+      const group=page.getByRole('group',{name:new RegExp('^'+name+':')});
+      if(await group.isVisible())await group.getByRole('radio',{name:yes.includes(id)?'Yes':'No',exact:true}).check();
+    }
+  }
   test('adult gate and consent refusal never submit identity',async({page},testInfo)=>{
     let requests=0;page.on('request',r=>{if(r.url().includes('/api/research/responses'))requests++;});
     await page.emulateMedia({reducedMotion:'reduce'});await page.goto('/survey/consumer');
@@ -130,34 +136,35 @@ test.describe('interim survey open-fixture acceptance',()=>{
     await enter(page);await page.getByRole('radio',{name:'No, I do not agree (end survey)',exact:true}).click();
     await expect(page.getByRole('heading',{name:'You can stop here.'})).toBeVisible();expect(requests).toBe(0);
   });
-  test('details persist across steps and persona questions require selection',async({page},testInfo)=>{
-    await enter(page);
-    const information=page.getByText('More information',{exact:true});
+  test('compact details, required Other text and sequential source eligibility',async({page},testInfo)=>{
+    await enter(page);const information=page.getByText('More information',{exact:true});
     await expect(page.getByText(/Your response is not anonymous/)).toBeVisible();
-    await expect(page.getByText(/Website-stored research records/)).not.toBeVisible();
-    await information.focus();await information.press('Enter');
-    await expect(page.getByText(/Website-stored research records/)).toBeVisible();
-    await information.press('Enter');
-    await expect(page.getByText(/Website-stored research records/)).not.toBeVisible();
-    await page.screenshot({path:testInfo.outputPath('survey-details.png'),fullPage:true});
-    await page.getByText('Optional questions for work, study or home',{exact:true}).click();
-    await page.getByRole('checkbox',{name:'Students',exact:true}).check();
-    await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();
-    await page.getByRole('button',{name:'Continue',exact:true}).click();
-    await page.getByRole('radio',{name:'25 to 34',exact:true}).check();
-    await page.getByRole('button',{name:'Back',exact:true}).click();
-    await expect(page.getByLabel('Full name',{exact:true})).toHaveValue('TEST SURVEY — SYNTHETIC');
-    await page.getByText('Optional questions for work, study or home',{exact:true}).click();
-    await expect(page.getByRole('checkbox',{name:'Students',exact:true})).toBeChecked();
-    await page.getByRole('button',{name:'Continue',exact:true}).click();
-    await expect(page.getByRole('radio',{name:'25 to 34',exact:true})).toBeChecked();
-    for(let i=0;i<8&&!await page.getByRole('heading',{name:'Section F1 — Students (conditional)',exact:true}).isVisible();i++)await page.getByRole('button',{name:'Continue',exact:true}).click();
-    await expect(page.getByRole('heading',{name:'Section F1 — Students (conditional)',exact:true})).toBeVisible();
-    await expect(page.getByText('Which university or college do you attend?',{exact:false})).toHaveCount(0);
+    await expect(page.getByText(/Identifiable website research records/)).not.toBeVisible();
+    await information.focus();await information.press('Enter');await expect(page.getByText(/up to 12 months from collection/)).toBeVisible();
+    await information.press('Enter');await page.screenshot({path:testInfo.outputPath('survey-details.png'),fullPage:true});
+    await expect(page.getByText('Optional questions for work, study or home',{exact:true})).toHaveCount(0);
+    await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();await page.getByRole('button',{name:'Continue',exact:true}).click();
+    await page.getByRole('radio',{name:'25 to 34',exact:true}).check();await page.getByRole('radio',{name:'Other (specify)',exact:true}).check();
+    await page.getByRole('button',{name:'Continue',exact:true}).click();await expect(page.getByLabel('Specify area',{exact:true})).toBeVisible();await page.getByLabel('Specify area',{exact:true}).fill('Synthetic area');
+    await page.getByRole('button',{name:'Back',exact:true}).click();await expect(page.getByLabel('Full name',{exact:true})).toHaveValue('TEST SURVEY — SYNTHETIC');
+    await page.getByRole('button',{name:'Continue',exact:true}).click();await expect(page.getByRole('radio',{name:'25 to 34',exact:true})).toBeChecked();
+    await page.getByRole('button',{name:'Continue',exact:true}).click();await page.getByRole('radio',{name:'Other',exact:true}).check();
+    await page.getByRole('button',{name:'Continue',exact:true}).click();await expect(page.getByLabel('Please describe your work/study category.')).toBeVisible();
+    await page.getByLabel('Please describe your work/study category.').fill('Synthetic work category');await page.getByRole('button',{name:'Continue',exact:true}).click();
+    for(let i=0;i<5&&!await page.getByRole('group',{name:/^Students:/}).isVisible();i++)await page.getByRole('button',{name:'Continue',exact:true}).click();
+    await page.getByRole('button',{name:'Continue',exact:true}).click();await expect(page.getByRole('group',{name:/^Students:/})).toBeVisible();
+    await eligibility(page,['student']);await page.getByRole('button',{name:'Continue',exact:true}).click();
+    await expect(page.getByRole('group',{name:/^Households:/})).toContainText('woman who works and has household laundry responsibilities');await eligibility(page,['corporate','household']);
+    await page.screenshot({path:testInfo.outputPath('survey-profile-routing.png'),fullPage:true});await page.getByRole('button',{name:'Continue',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Students',exact:true})).toBeVisible();await expect(page.getByText('Which university or college do you attend?',{exact:false})).toBeVisible();
+    await page.getByRole('radio',{name:'University of Ghana',exact:true}).check();
+    for(let i=0;i<8&&!await page.getByRole('heading',{name:'Households',exact:true}).isVisible();i++)await page.getByRole('button',{name:'Continue',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Households',exact:true})).toBeVisible();
   });
   test('long multilingual responses show a recoverable overall-length limit',async({page})=>{
     await enter(page,'consumer-interview');await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();await page.getByRole('button',{name:'Continue',exact:true}).click();
     for(let i=0;i<8;i++){
+      await eligibility(page);
       const inputs=page.locator('textarea');for(let j=0;j<await inputs.count();j++)await inputs.nth(j).fill('漢'.repeat(4000));
       if(await page.getByRole('button',{name:'Continue',exact:true}).isDisabled())break;
       await page.getByRole('button',{name:'Continue',exact:true}).click();
@@ -166,6 +173,31 @@ test.describe('interim survey open-fixture acceptance',()=>{
     await expect(page.getByRole('button',{name:'Continue',exact:true})).toBeDisabled();
     const inputs=page.locator('textarea');for(let j=0;j<await inputs.count();j++)await inputs.nth(j).fill('Short synthetic answer.');
     await expect(page.getByRole('button',{name:'Continue',exact:true})).toBeEnabled();
+  });
+  test('changing eligibility removes hidden answers before a real synthetic save',async({page})=>{
+    await enter(page);await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();await page.getByRole('button',{name:'Continue',exact:true}).click();
+    for(let i=0;i<6&&!await page.getByRole('group',{name:/^Students:/}).isVisible();i++)await page.getByRole('button',{name:'Continue',exact:true}).click();
+    await eligibility(page);await page.getByRole('button',{name:'Continue',exact:true}).click();await eligibility(page,['corporate','household']);await page.getByRole('button',{name:'Continue',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Office workers',exact:true})).toBeVisible();await page.getByRole('radio',{name:'Under 30 min',exact:true}).check();
+    for(let i=0;i<5&&!await page.getByRole('heading',{name:'Households',exact:true}).isVisible();i++)await page.getByRole('button',{name:'Continue',exact:true}).click();
+    await page.getByRole('radio',{name:'All or almost all',exact:true}).check();
+    for(let i=0;i<8&&!await page.getByRole('group',{name:/^Office workers:/}).isVisible();i++)await page.getByRole('button',{name:'Back',exact:true}).click();
+    await eligibility(page);await page.getByRole('button',{name:'Back',exact:true}).click();await eligibility(page,['student']);
+    for(let i=0;i<35&&!await page.getByRole('button',{name:'Submit response',exact:true}).isVisible();i++)await page.getByRole('button',{name:'Continue',exact:true}).click();
+    const saved=page.waitForResponse(r=>r.url().endsWith('/api/research/responses')&&r.request().method()==='POST');await page.getByRole('button',{name:'Submit response',exact:true}).click();const response=await saved;expect(response.status()).toBe(200);
+    const submitted=response.request().postDataJSON();expect(submitted.answers['icp-student']).toBe('Yes');expect(submitted.answers['icp-corporate']).toBe('No');expect(submitted.answers['icp-household']).toBe('No');expect(submitted.answers.F3a).toBeUndefined();expect(submitted.answers.F4a).toBeUndefined();
+    await expect(page.getByRole('heading',{name:'Thank you!',exact:true})).toBeVisible();
+  });
+  test('consumer interview retains all qualifying probes and submits once',async({page})=>{
+    await enter(page,'consumer-interview');await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();await page.getByRole('button',{name:'Continue',exact:true}).click();const seen=new Set();
+    for(let i=0;i<20&&!await page.getByRole('button',{name:'Submit response',exact:true}).isVisible();i++){
+      await eligibility(page,['student','business','corporate','household']);
+      for(const name of ['Students:','Business owners:','Office workers:','Households:'])if(await page.locator('legend').filter({hasText:name}).count()&&await page.locator('textarea').count())seen.add(name);
+      const inputs=page.locator('textarea');for(let j=0;j<await inputs.count();j++)await inputs.nth(j).fill('Clearly marked synthetic interview answer.');await page.getByRole('button',{name:'Continue',exact:true}).click();
+    }
+    expect([...seen].sort()).toEqual(['Business owners:','Households:','Office workers:','Students:']);
+    const saved=page.waitForResponse(r=>r.url().endsWith('/api/research/responses')&&r.request().method()==='POST');await page.getByRole('button',{name:'Submit response',exact:true}).click();const response=await saved;expect(response.status()).toBe(200);
+    const answers=response.request().postDataJSON().answers;for(const key of ['probe-student','probe-business','probe-corporate','probe-household'])expect(answers[key]).toBe('Clearly marked synthetic interview answer.');await expect(page.getByRole('heading',{name:'Thank you!',exact:true})).toBeVisible();
   });
   test('business journey saves once and shows compact confirmation',async({page},testInfo)=>{
     await enter(page,'business-interview');await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();

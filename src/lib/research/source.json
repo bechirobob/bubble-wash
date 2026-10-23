@@ -1,5 +1,5 @@
 {
-  "version": "interim-1",
+  "version": "research-3",
   "forms": [
     {
       "title": "Consumer Survey Questionnaire",
@@ -42,14 +42,14 @@
           "id": "A3",
           "section": "Section A — About you (screener)",
           "prompt": "Which of these areas do you live in or spend most of your working/studying time in?",
-          "answer_specification": "Tse Addo / East Legon / Airport (Airport Residential/City area) / Cantonments / Achimota / Haatso / Other (specify) / None of these",
+          "answer_specification": "Tse Addo / East Legon / Airport / Cantonments / Achimota / Haatso / Other (specify) / None of these",
           "required": null,
           "required_status": "not_specified",
-          "source_text": "A3. Which of these areas do you live in or spend most of your working/studying time in?\nTse Addo / East Legon / Airport (Airport Residential/City area) / Cantonments / Achimota / Haatso / Other (specify) / None of these",
+          "source_text": "A3. Which of these areas do you live in or spend most of your working/studying time in?\nTse Addo / East Legon / Airport / Cantonments / Achimota / Haatso / Other (specify) / None of these",
           "options": [
             "Tse Addo",
             "East Legon",
-            "Airport (Airport Residential/City area)",
+            "Airport",
             "Cantonments",
             "Achimota",
             "Haatso",
@@ -108,6 +108,25 @@
           "suggested_input_type": "single_choice"
         },
         {
+          "id": "A7",
+          "section": "Section A — About you (screener)",
+          "prompt": "What is your household’s approximate total monthly income from all sources, before expenses? (GH¢)",
+          "answer_specification": "Under GH₵2,000 / GH₵2,000–4,999 / GH₵5,000–9,999 / GH₵10,000–15,000 / Above GH₵15,000 / Don’t know / Prefer not to say",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "A7. What is your household’s approximate total monthly income from all sources, before expenses? (GH¢)\nUnder GH₵2,000 / GH₵2,000–4,999 / GH₵5,000–9,999 / GH₵10,000–15,000 / Above GH₵15,000 / Don’t know / Prefer not to say",
+          "options": [
+            "Under GH₵2,000",
+            "GH₵2,000–4,999",
+            "GH₵5,000–9,999",
+            "GH₵10,000–15,000",
+            "Above GH₵15,000",
+            "Don’t know",
+            "Prefer not to say"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
           "id": "A8",
           "section": "Section A — About you (screener)",
           "prompt": "Who mainly looks after household chores in your home?",
@@ -141,6 +160,24 @@
           "number_choice_label": "Enter amount",
           "units": "GH¢",
           "instruction": "Include salary only; exclude groceries and other expenses."
+        },
+        {
+          "id": "F1a",
+          "section": "Section F1 — Students (conditional)",
+          "prompt": "Which university or college do you attend?",
+          "answer_specification": "University of Ghana / Kwame Nkrumah University of Science and Technology (KNUST) / Central University / Lancaster University Ghana / Wisconsin International University College Ghana / Other university or college (please specify)",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "F1a. Which university or college do you attend?\nUniversity of Ghana / Kwame Nkrumah University of Science and Technology (KNUST) / Central University / Lancaster University Ghana / Wisconsin International University College Ghana / Other university or college (please specify)",
+          "options": [
+            "University of Ghana",
+            "Kwame Nkrumah University of Science and Technology (KNUST)",
+            "Central University",
+            "Lancaster University Ghana",
+            "Wisconsin International University College Ghana",
+            "Other university or college (please specify)"
+          ],
+          "suggested_input_type": "single_choice"
         },
         {
           "id": "F1b",
@@ -889,6 +926,46 @@
           "suggested_input_type": "single_choice"
         },
         {
+          "id": "E3",
+          "section": "Section E — The idea and pricing",
+          "prompt": "At what price would it be so cheap that you'd doubt the quality?",
+          "answer_specification": "Number, GH¢",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E3. At what price would it be so cheap that you'd doubt the quality?\nNumber, GH¢",
+          "suggested_input_type": "number"
+        },
+        {
+          "id": "E4",
+          "section": "Section E — The idea and pricing",
+          "prompt": "At what price would it be a bargain?",
+          "answer_specification": "Number, GH¢",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E4. At what price would it be a bargain?\nNumber, GH¢",
+          "suggested_input_type": "number"
+        },
+        {
+          "id": "E5",
+          "section": "Section E — The idea and pricing",
+          "prompt": "At what price would it start to feel expensive, but you'd still consider it?",
+          "answer_specification": "Number, GH¢",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E5. At what price would it start to feel expensive, but you'd still consider it?\nNumber, GH¢",
+          "suggested_input_type": "number"
+        },
+        {
+          "id": "E6",
+          "section": "Section E — The idea and pricing",
+          "prompt": "At what price would it be too expensive to consider?",
+          "answer_specification": "Number, GH¢",
+          "required": null,
+          "required_status": "not_specified",
+          "source_text": "E6. At what price would it be too expensive to consider?\nNumber, GH¢",
+          "suggested_input_type": "number"
+        },
+        {
           "id": "E7",
           "section": "Section E — The idea and pricing",
           "prompt": "How quickly would you want your laundry back?",
@@ -1002,6 +1079,20 @@
           "required": false,
           "required_status": "explicit_optional",
           "source_text": "H1. Would you like to join the Bubblewash waitlist and hear when we launch?\nYes / No",
+          "options": [
+            "Yes",
+            "No"
+          ],
+          "suggested_input_type": "single_choice"
+        },
+        {
+          "id": "H2",
+          "section": "Section H — Stay in touch (all optional)",
+          "prompt": "Would you be happy to talk to us for 30 minutes about your answers? No incentive is offered.",
+          "answer_specification": "Yes / No",
+          "required": false,
+          "required_status": "explicit_optional",
+          "source_text": "H2. Would you be happy to talk to us for 30 minutes about your answers? No incentive is offered.\nYes / No",
           "options": [
             "Yes",
             "No"
@@ -1482,5 +1573,11 @@
       ]
     }
   ],
-  "service_description": "Imagine a service where you book a laundry pickup from your phone. A vetted laundry washes, irons and folds your items, and they are returned to your door within an agreed time. You pay by mobile money or card."
+  "service_description": "Imagine a service where you book a laundry pickup from your phone. A vetted laundry washes, irons and folds your items, and they are returned to your door within an agreed time. You pay by mobile money or card.",
+  "pricing_description": "For E3–E6, think about one standard laundry bag of everyday laundry, collected, washed, ironed and returned. Answer in GH₵.",
+  "organisation": {
+    "name": "Bubble Wash Technologies Ltd.",
+    "address": "Eugene’s Place, Accra, Ghana",
+    "privacy_contact": "info@bubblewash.co"
+  }
 }
