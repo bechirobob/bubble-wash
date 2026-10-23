@@ -299,6 +299,43 @@ class Transport(unittest.TestCase):
             with self.assertRaises(FileExistsError):t.write_private(link,b'replacement')
 
 
+class RunnerTransport(unittest.TestCase):
+    def test_restrictive_path_reproduces_bare_binary_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary=Path(directory)/'synthetic-tailscale-path-test'
+            binary.write_text('#!'+sys.executable+'\nprint("synthetic-ok")\n')
+            binary.chmod(0o700)
+            with patch.dict(os.environ, {'PATH':directory+os.pathsep+os.environ.get('PATH','')}):
+                with self.assertRaises(FileNotFoundError):f.bounded([binary.name])
+                self.assertEqual(f.bounded([str(binary)]),b'synthetic-ok\n')
+
+    def test_runner_uses_pinned_action_absolute_binary_without_path_expansion(self):
+        with patch.object(t.f,'bounded',return_value=encrypted()) as run,patch.object(t,'payload',return_value=b'synthetic-program'):
+            raw,header=t.runner_transport(CONTEXT)
+        self.assertEqual(run.call_args.args[0],['/usr/local/bin/tailscale','ssh','root@hermes','/usr/bin/python3 -I -B -'])
+        self.assertNotIn('env',run.call_args.kwargs)
+        self.assertEqual(raw,encrypted());self.assertEqual(header['context'],CONTEXT)
+
+    def test_fixed_categories_distinguish_runner_host_and_storage(self):
+        with patch.object(t.f,'bounded',side_effect=FileNotFoundError('/private/SECRET')),patch.object(t,'payload',return_value=b'synthetic'):
+            with self.assertRaises(t.PhaseFailure) as caught:t.runner_transport(CONTEXT)
+            self.assertEqual(caught.exception.result,'transport-failed')
+            self.assertNotIn('SECRET',str(caught.exception))
+        for result in ('inspection-failed','encryption-unavailable'):
+            with patch.object(t.f,'bounded',return_value=f.canonical(f.summary(result=result))),patch.object(t,'payload',return_value=b'synthetic'):
+                _,public=t.runner_transport(CONTEXT)
+                self.assertEqual(public['result'],result)
+        with self.assertRaises(t.PhaseFailure) as caught:
+            t.storage_step(lambda:(_ for _ in ()).throw(RuntimeError('/private/SECRET')))
+        self.assertEqual(caught.exception.result,'storage-failed');self.assertNotIn('SECRET',str(caught.exception))
+
+    def test_raw_or_unexpected_host_output_is_never_forwarded(self):
+        for output in (b'/private/SECRET',f.canonical(f.summary(result='storage-failed'))):
+            with patch.object(t.f,'bounded',return_value=output),patch.object(t,'payload',return_value=b'synthetic'):
+                with self.assertRaises(t.PhaseFailure) as caught:t.runner_transport(CONTEXT)
+            self.assertEqual(str(caught.exception),'transport-failed')
+
+
 class PrivateStorage(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

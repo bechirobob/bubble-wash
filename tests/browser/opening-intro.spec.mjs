@@ -132,13 +132,22 @@ test.describe('interim survey open-fixture acceptance',()=>{
   });
   test('details persist across steps and persona questions require selection',async({page},testInfo)=>{
     await enter(page);
+    const information=page.getByText('More information about your data',{exact:true});
+    await expect(page.getByText(/This is not anonymous/)).toBeVisible();
+    await expect(page.getByText(/Website-stored research records/)).not.toBeVisible();
+    await information.focus();await information.press('Enter');
+    await expect(page.getByText(/Website-stored research records/)).toBeVisible();
+    await information.press('Enter');
+    await expect(page.getByText(/Website-stored research records/)).not.toBeVisible();
     await page.screenshot({path:testInfo.outputPath('survey-details.png'),fullPage:true});
+    await page.getByText('Optional questions for work, study or home',{exact:true}).click();
     await page.getByRole('checkbox',{name:'Students',exact:true}).check();
     await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();
     await page.getByRole('button',{name:'Continue',exact:true}).click();
     await page.getByRole('radio',{name:'25 to 34',exact:true}).check();
     await page.getByRole('button',{name:'Back',exact:true}).click();
     await expect(page.getByLabel('Full name',{exact:true})).toHaveValue('TEST SURVEY — SYNTHETIC');
+    await page.getByText('Optional questions for work, study or home',{exact:true}).click();
     await expect(page.getByRole('checkbox',{name:'Students',exact:true})).toBeChecked();
     await page.getByRole('button',{name:'Continue',exact:true}).click();
     await expect(page.getByRole('radio',{name:'25 to 34',exact:true})).toBeChecked();
