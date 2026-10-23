@@ -149,6 +149,10 @@ export async function verifyPaystackCheckout(reference: string) {
     headers: { Authorization: `Bearer ${secret}` },
   });
   const data = (await response.json().catch(() => ({}))) as PaystackVerifyResponse;
-  if (!response.ok || !data.status || !data.data) throw new Error(data.message || "Unable to verify Paystack checkout.");
+  if (!response.ok || !data || typeof data !== "object" || data.status !== true
+    || !data.data || typeof data.data !== "object" || Array.isArray(data.data)
+    || typeof data.data.status !== "string" || !data.data.status.trim()) {
+    throw new Error("Unable to verify Paystack checkout.");
+  }
   return data.data;
 }

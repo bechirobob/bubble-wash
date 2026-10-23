@@ -145,3 +145,15 @@ export function isActiveMovingDriverAssignment(
     && order.driverId.trim().toLowerCase() === expected
     && movingRouteStages.has(order.workflowStage.key);
 }
+
+// Stop cutoffs use the device capture clock, not network receipt time.
+export function validateLocationStopTime(value: unknown, now = Date.now()) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)) return null;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time) || time > now + LIVE_LOCATION_MAX_FUTURE_SKEW_MS || time < now - LIVE_LOCATION_EXPIRES_AFTER_MS) return null;
+  return new Date(time).toISOString();
+}
+
+export function locationStopCutoff(lastCaptureSentMs: number, now = Date.now()) {
+  return new Date(Math.max(now, Number.isFinite(lastCaptureSentMs) ? lastCaptureSentMs : 0)).toISOString();
+}

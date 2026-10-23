@@ -97,3 +97,13 @@ test("only an exact rider assignment in a moving route stage can share location"
   assert.equal(isActiveMovingDriverAssignment({ driverId: "driver-one", workflowStage: { key: "ready" } }, "driver-one"), false);
   assert.equal(isActiveMovingDriverAssignment({ driverId: "", workflowStage: { key: "driver-en-route" } }, "driver-one"), false);
 });
+
+
+test("stop cutoff includes accepted future-skewed readings without moving backwards", async () => {
+  const { locationStopCutoff, validateLocationStopTime } = await import("../src/lib/dispatch-location.ts");
+  const now = Date.parse("2026-10-22T14:00:00.000Z");
+  assert.equal(locationStopCutoff(now + 20_000, now), "2026-10-22T14:00:20.000Z");
+  assert.equal(locationStopCutoff(now - 20_000, now), "2026-10-22T14:00:00.000Z");
+  assert.equal(validateLocationStopTime(locationStopCutoff(now + 20_000, now), now), "2026-10-22T14:00:20.000Z");
+  assert.equal(validateLocationStopTime(locationStopCutoff(now + 31_000, now), now), null);
+});
