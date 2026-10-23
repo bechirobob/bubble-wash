@@ -50,7 +50,14 @@ test('native frequency keyboard navigation updates the selected plan and support
   await page.keyboard.press('ArrowRight');
   await expect(catalogue.locator('.focusedPlanCard h3')).toHaveText('Contract');
   await expect(catalogue.locator('.focusedPlanPrice strong')).toContainText('4,750');
-  await page.keyboard.press('ArrowRight');
+  // Native radio groups differ at their boundary. Verify reverse traversal
+  // without requiring the browser to wrap from its final option to its first.
+  for (const name of ['Three times weekly, 3 pickups / week', 'Twice weekly, 2 pickups / week', 'Weekly, 1 pickup / week']) {
+    await page.keyboard.press('ArrowLeft');
+    const selected = catalogue.getByRole('radio', { name, exact: true });
+    await expect(selected).toBeChecked();
+    await expect(selected).toBeFocused();
+  }
   await expect(first).toBeChecked();
   await verifyLayout(page, testInfo, 'pricing-c-collapsed');
   const compare = catalogue.locator('summary').filter({ hasText: 'Compare all 4 plans' });

@@ -72,7 +72,10 @@ test('real staff worklist, safe writes, conflict recovery and admin reviews',asy
   await page.getByRole('link',{name:'Assignment options',exact:true}).click();
   await page.getByLabel('Order reference').fill('BW-BROWSEROVERDUE01');
   await page.getByRole('button',{name:'Show available options'}).click();
-  await expect(page.getByText('Available · confirm capacity first')).toBeVisible();
+  await expect(page.getByRole('region',{name:'Vendor options',exact:true}).getByText('Available · confirm capacity first',{exact:true})).toBeVisible();
+  await expect(page.getByRole('region',{name:'Rider options',exact:true}).getByText('Available',{exact:true})).toBeVisible();
+  await expect(page.getByText('Assignment is not available at this order stage.',{exact:false})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Assign vendor + driver',exact:true})).toHaveCount(0);
   await screenshot(page,testInfo,'dispatch-suggestions');
   await page.getByRole('link',{name:'Payment review',exact:true}).click();
   await expect(page.getByText('Invoice missing after laundry check-in')).toBeVisible();
@@ -144,5 +147,20 @@ test('Back and Forward preserve a revised draft after an earlier request finishe
  await page.goForward();form=findForm();
  await expect(form.getByLabel('Next step')).toHaveValue('Revised draft survives old response');
  await form.getByRole('button',{name:/Load latest values/}).click();
+ await expect(form.getByLabel('Next step')).toHaveValue('Submitted before browser Back');
+ await expect(form.getByLabel('Next step')).toBeVisible();
+ await expect(form.getByText('Latest values loaded.',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Refresh',exact:true})).toBeEnabled();
+ // Loading latest must not collapse a restored editor, and a deliberate close
+ // must remain closed during refresh without losing the latest saved values.
+ const disclosure=page.getByRole('region',{name:'Worklist',exact:true}).getByRole('listitem').filter({has:page.getByText('BW-WORKLISTCASE',{exact:true})}).locator('details');
+ await expect(disclosure).toHaveAttribute('open','');
+ await disclosure.locator('summary').click();
+ await expect(disclosure).not.toHaveAttribute('open');
+ await page.getByRole('button',{name:'Refresh',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Refresh',exact:true})).toBeEnabled();
+ await expect(disclosure).not.toHaveAttribute('open');
+ await disclosure.locator('summary').click();
+ await expect(form.getByLabel('Next step')).toBeVisible();
  await expect(form.getByLabel('Next step')).toHaveValue('Submitted before browser Back');
 });

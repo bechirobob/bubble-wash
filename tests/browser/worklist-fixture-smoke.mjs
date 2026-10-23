@@ -39,7 +39,26 @@ try {
     const hasCase = data.items.some(item => item.id === 'case-followup:BW-WORKLISTCASE');
     equal(hasCase, ['admin', 'support'].includes(role), `${role} exact case visibility`);
     equal((await fetch(`${base}/api/staff/automation/case?caseId=CASE-WORKLIST-REFERENCE`, { headers })).status, ['admin', 'support'].includes(role) ? 200 : 403, `${role} exact case authorization`);
-    equal((await fetch(`${base}/api/staff/automation/notifications`, { headers })).status, role === 'admin' ? 200 : 403, `${role} message review authorization`);
+    const notificationResponse = await fetch(`${base}/api/staff/automation/notifications`, { headers });
+    equal(notificationResponse.status, role === 'admin' ? 200 : 403, `${role} message review authorization`);
+    const dispatchResponse = await fetch(`${base}/api/staff/automation/dispatch?orderId=BW-BROWSEROVERDUE01`, { headers });
+    equal(dispatchResponse.status, role === 'admin' ? 200 : 403, `${role} assignment review authorization`);
+    const paymentResponse = await fetch(`${base}/api/staff/automation/reconciliation`, { headers });
+    equal(paymentResponse.status, role === 'admin' ? 200 : 403, `${role} payment review authorization`);
+    if (role === 'admin') {
+      const dispatch = await dispatchResponse.json();
+      equal(dispatch.assignmentAvailable, false, 'Delivered order cannot be assigned');
+      equal(dispatch.vendors.length, 1, 'One synthetic vendor');
+      equal(dispatch.vendors[0].eligible, true, 'Synthetic vendor matches the projected service area');
+      equal(dispatch.vendors[0].recommended, false, 'Capacity must be confirmed before recommendation');
+      equal(dispatch.vendors[0].freshness.fresh, false, 'Synthetic capacity remains unconfirmed');
+      equal(dispatch.drivers.length, 1, 'One synthetic rider');
+      equal(dispatch.drivers[0].eligible, true, 'Synthetic rider matches the projected service area');
+      const payment = await paymentResponse.json();
+      equal(payment.items.some(item => item.orderId === 'BW-BROWSEROVERDUE01' && item.reasons.includes('Invoice missing after laundry check-in')), true, 'Payment review fixture has the expected missing invoice');
+      const notifications = await notificationResponse.json();
+      equal(notifications.items.some(item => item.id === 'synthetic-review' && item.state === 'manual_review'), true, 'Message review fixture requires review, not automatic resend');
+    }
     equal((await fetch(`${base}/api/staff/automation/ownership`, { method: 'POST', headers: { ...headers, origin: 'https://example.invalid', 'content-type': 'application/json' }, body: '{}' })).status, 403, 'Cross-origin worklist mutation denied');
   }
   console.log(JSON.stringify({ ok: true, checks, roles: 4, syntheticOnly: true, graphicalExecution: false }));

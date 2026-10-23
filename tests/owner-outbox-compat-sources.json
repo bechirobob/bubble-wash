@@ -207,7 +207,7 @@
     "src/components/RouteWarmup.tsx": "c762392fee68983fdb23b720cddbc93a3df632a93cc47162d679827c3a7b86ae",
     "src/components/StaffAdminControls.tsx": "68f7f0c58f162546465eff6dfc77d559b9ec99f6a66474d9f54354fbb1e2dccc",
     "src/components/StaffWorklistWorkspace.module.css": "2327a611d554872d1f3084627bb73e0f3efcc944ec31a81edcb5262be63e1ea3",
-    "src/components/StaffWorklistWorkspace.tsx": "6222d64e10f7ef2df6ab17b5495718160a7b03d8ac9048c49a2540ebd854a4e7",
+    "src/components/StaffWorklistWorkspace.tsx": "834ad6335d07de38164c69710f95bf18f78cde5a61267d286be5d9152a03651c",
     "src/components/StaffWorkspaces.tsx": "d901e1695b1402d4b1b58dc757f32c9d1a820dcba607ee45002e5148db9685ce",
     "src/components/TrackingLookup.tsx": "88352820e3b0d503c73abcf2ebe7b2b722f9d4e8d8f457ce245d2ffa8aef6d5e",
     "src/components/VendorCapacityForm.tsx": "bbd97039863dbfda98d6d84a09dd1f87104d8089dfbe510b0c4024cdca387734",

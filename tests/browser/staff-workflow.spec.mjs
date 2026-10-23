@@ -36,7 +36,7 @@ async function save(page, label, endpoint = '/api/orders/advance') {
     // finish its refresh before the next navigation or action can abort that work.
     expect(response.ok(), `${label}: HTTP ${response.status()}`).toBeTruthy();
     if (endpoint === '/api/orders/invoice') {
-      await expect(page.locator('.invoicePanel [role="status"]')).toHaveText('Ledger entry recorded.');
+      await expect(page.locator('.invoicePanel > [role="status"]')).toHaveText('Ledger entry recorded.');
       await expect(page.locator('.invoicePanel').getByRole('button', { name: label, exact: true })).toBeEnabled();
     } else {
       await expect(page.locator('.automationPanel [role="status"]')).toHaveText(/^Saved /);
