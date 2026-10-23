@@ -16,7 +16,7 @@ sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 BACKUP_PIN = '86d085e65b0e6dba906b57c296868da41b01c83982e5b93d6430fd73f05f6992'
-SOURCE_PINS = {'ops/host-facts/facts.py': '19698a44052ee3f9d41d43d908d3e54c7580f95d076c3928f91e329d4d8f645f', 'ops/host-facts/crypto.mjs': 'bb1922517fc7fdd359a19f2d263d6cd7036d3b16b5c37d4a60fbc37a5170c462', 'scripts/php-exposure-inventory.py': 'd1d5eeab85aa3146be20d5d6db32084cb71b9a624c03bcf4a15694866f9e34e5'}  # Filled by the local package freeze, not by runtime input.
+SOURCE_PINS = {'ops/host-facts/facts.py': '42ff5948773808b941ad2c9f8a7b6a6db95329b812d9d42ff2cf92b06df0f0eb', 'ops/host-facts/crypto.mjs': '35dfc7aade5492512823b39687dfa14c615f01451bac015ebd487ca588f103f9', 'scripts/php-exposure-inventory.py': 'd1d5eeab85aa3146be20d5d6db32084cb71b9a624c03bcf4a15694866f9e34e5'}  # Filled by the local package freeze, not by runtime input.
 KEY = '/home/ubuntu/.hermes/secrets/bubblewash-backup-keys/github-actions.key'
 STORE = 'bechirobob/becore-backups'
 MAGIC = b'BWHFACT1'
@@ -175,6 +175,12 @@ def storage_step(function, *args):
     except BaseException:
         raise PhaseFailure('storage-failed') from None
 
+def public_summary(value):
+    # Expanded observations remain only in the authenticated private backup header.
+    f.validate_summary(value)
+    return f.summary(value['flags'], result=value['result'])
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('mode',choices=('inspect','retrieve'));parser.add_argument('--receipt',type=Path);parser.add_argument('--output',type=Path);args=parser.parse_args()
     module,api=storage_step(store_api)
@@ -183,12 +189,12 @@ def main():
     f.require(not args.receipt and not args.output);ctx=inputs(os.environ);storage_step(preflight,module,api,os.environ)
     raw,header=runner_transport(ctx)
     if raw[:8] != MAGIC:
-        print('HOST_FACTS_SUMMARY '+f.canonical(header).decode());return 1
+        print('HOST_FACTS_SUMMARY '+f.canonical(public_summary(header)).decode());return 1
     with tempfile.TemporaryDirectory(prefix='encrypted-host-facts-',dir=os.environ['RUNNER_TEMP']) as directory:
         work=Path(directory);path=work/f"bubblewash-host-facts-{ctx['runId']}-{ctx['runAttempt']}.enc";write_private(path,raw)
         receipt=storage_step(publish,module,api,os.environ,ctx,path,work)
     write_private(Path(os.environ['RUNNER_TEMP'])/'host-facts-receipt.json',f.canonical(receipt))
-    print('HOST_FACTS_SUMMARY '+f.canonical(header['summary']).decode())
+    print('HOST_FACTS_SUMMARY '+f.canonical(public_summary(header['summary'])).decode())
     print('HOST_FACTS_CIPHERTEXT_SHA256 '+hashlib.sha256(raw).hexdigest())
 
 if __name__=='__main__':

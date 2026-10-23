@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import selectors
 import signal
 import stat
@@ -28,16 +29,103 @@ def strict_json(raw):
         result = dict(items); require(len(result) == len(items)); return result
     return json.loads(raw, object_pairs_hook=pairs, parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite')))
 
-def summary(flags=(), result='captured'):
+def summary(flags=(), result='captured', diagnostics=None):
     value = {'schema': 'bubblewash-host-facts-summary/v1', 'result': result, 'flags': sorted(set(flags))}
+    if diagnostics is not None: value['diagnostics'] = diagnostics
     validate_summary(value); return value
 
 def validate_summary(value):
-    require(isinstance(value, dict) and set(value) == {'schema', 'result', 'flags'})
+    require(isinstance(value, dict) and set(value) in ({'schema', 'result', 'flags'}, {'schema', 'result', 'flags', 'diagnostics'}))
     require(value['schema'] == 'bubblewash-host-facts-summary/v1' and value['result'] in RESULTS)
     require(isinstance(value['flags'], list) and all(type(x) is str and x in FLAGS for x in value['flags']))
     require(value['flags'] == sorted(set(value['flags'])))
+    if 'diagnostics' in value: validate_diagnostics(value['diagnostics'])
+    require(len(canonical(value)) <= 7000)
     return value
+
+ENV_CHECKS = ('accountValid', 'regularFile', 'ownerMatches', 'primaryGroupMatches', 'modePrivate', 'singleLink', 'canonicalPath', 'ancestorDirectories', 'ancestorOwners', 'ancestorModes', 'attributesAbsent')
+UNIT_IDS = ('maintenance-timer', 'maintenance-service', 'application-service')
+UNIT_STAGES = ('account-unavailable', 'command-failed', 'properties-invalid', 'inspected')
+SOURCE_STAGES = ('not-assessed', 'trusted', 'ownership-unsafe', 'read-or-validation-failed')
+PHP_NAME = re.compile(r'(?:php(?:[0-9]{1,2}\.[0-9]{1,2})?(?:-(?:fpm|cli|common|opcache|readline|mysql|pgsql|sqlite3|curl|mbstring|xml|zip|gd|intl|bcmath|soap|redis|imagick|dev|cgi|xdebug|apcu))?|libapache2-mod-php(?:[0-9]{1,2}\.[0-9]{1,2})?)')
+PHP_VERSION = re.compile(r'[0-9][A-Za-z0-9.+:~_-]{0,79}')
+PHP_PRESENCE = ('servicesInspected', 'phpServicePresent', 'phpServiceActive', 'webServicePresent', 'listenersInspected', 'phpTcpListenerPresent', 'phpNonLoopbackListenerPresent')
+
+def safe_path(value):
+    return (type(value) is str and 0 < len(value) <= 256 and re.fullmatch(r'/[A-Za-z0-9_./+@:-]*', value) is not None
+            and not value.startswith('//') and value == str(Path(value)) and all(part not in ('.','..') for part in value.split('/')))
+
+
+def private_binding(item):
+    props = item.get('properties', item.get('observedBindingProperties', {}))
+    raw = props.get('EnvironmentFiles')
+    files = None
+    if type(raw) is str and len(raw) <= 1024:
+        if raw == '': files = []
+        else:
+            matches = list(re.finditer(r'(/[^ ]+) \(ignore_errors=(yes|no)\)(?: |$)', raw))
+            if 0 < len(matches) <= 2 and ''.join(x.group(0) for x in matches) == raw and all(safe_path(x.group(1)) for x in matches):
+                files = [{'path':x.group(1), 'ignoreErrors':x.group(2)=='yes'} for x in matches]
+    working = props.get('WorkingDirectory')
+    executable = item.get('runningExecutable', {})
+    path, digest = executable.get('path'), executable.get('sha256')
+    observed = {'path':path,'sha256':digest} if safe_path(path) and type(digest) is str and re.fullmatch('[a-f0-9]{64}',digest) else None
+    return {'environmentFiles':files, 'workingDirectory':working if safe_path(working) else None,
+            'mainPidExecutable':observed, 'identityScope':'main-pid-not-listener-identity'}
+
+
+def validate_binding(value):
+    require(type(value) is dict and set(value)=={'environmentFiles','workingDirectory','mainPidExecutable','identityScope'})
+    require(value['identityScope']=='main-pid-not-listener-identity')
+    require(value['workingDirectory'] is None or safe_path(value['workingDirectory']))
+    files=value['environmentFiles'];require(files is None or type(files) is list and len(files)<=2)
+    for item in files or []:
+        require(type(item) is dict and set(item)=={'path','ignoreErrors'} and safe_path(item['path']) and type(item['ignoreErrors']) is bool)
+    executable=value['mainPidExecutable']
+    require(executable is None or type(executable) is dict and set(executable)=={'path','sha256'} and safe_path(executable['path']) and type(executable['sha256']) is str and re.fullmatch('[a-f0-9]{64}',executable['sha256']))
+
+def validate_diagnostics(value):
+    require(type(value) is dict and set(value) == {'environment', 'units', 'php'})
+    checks = value['environment']
+    require(type(checks) is dict and set(checks) == set(ENV_CHECKS))
+    require(all(v is None or type(v) is bool for v in checks.values()))
+    units = value['units']; require(type(units) is list and len(units) == 3)
+    require([u.get('unit') for u in units] == list(UNIT_IDS))
+    for item in units:
+        require(set(item) == {'unit', 'stage', 'unitSources', 'executableSource', 'propertyIssue', 'missingProperties', 'binding'} and item['stage'] in UNIT_STAGES)
+        validate_binding(item['binding'])
+        require(item['executableSource'] in SOURCE_STAGES and item['propertyIssue'] in ('not-assessed','none','missing','duplicate','unknown','malformed','oversized'))
+        require(type(item['missingProperties']) is list and item['missingProperties'] == sorted(set(item['missingProperties'])) and all(x in PROPERTIES for x in item['missingProperties']))
+        require(type(item['unitSources']) is list and item['unitSources'] == sorted(set(item['unitSources'])) and all(x in SOURCE_STAGES for x in item['unitSources']))
+    php = value['php']; require(type(php) is dict and set(php) == {'packages', 'packagesComplete', *PHP_PRESENCE})
+    require(type(php['packagesComplete']) is bool and all(type(php[k]) is bool or php[k] is None for k in PHP_PRESENCE))
+    require(type(php['packages']) is list and len(php['packages']) <= 24)
+    for item in php['packages']:
+        require(type(item) is dict and set(item) == {'name', 'version'} and type(item['name']) is str and type(item['version']) is str and PHP_NAME.fullmatch(item['name']) and PHP_VERSION.fullmatch(item['version']))
+    require(php['packages'] == sorted(php['packages'], key=lambda x:(x['name'],x['version'])))
+
+def safe_diagnostics(report):
+    packages = report.get('php', {}).get('packages', {})
+    rows = packages.get('result', []) if packages.get('inspected') is True else []
+    accepted = [dict(name=x['name'], version=x['version']) for x in rows if type(x) is dict and type(x.get('name')) is str and type(x.get('version')) is str and PHP_NAME.fullmatch(x['name']) and PHP_VERSION.fullmatch(x['version'])]
+    accepted.sort(key=lambda x:(x['name'],x['version']))
+    services = report.get('php', {}).get('services', {})
+    sr = services.get('result', []) if services.get('inspected') is True else []
+    listeners = report.get('php', {}).get('tcpListeners', {})
+    lr = listeners.get('result', {}) if listeners.get('inspected') is True else {}
+    present = lambda k: lr[k] > 0 if type(lr.get(k)) is int else None
+    value = {'environment': report['installerMetadata'].get('environmentChecks', dict.fromkeys(ENV_CHECKS)),
+             'units': [{'unit':alias, 'stage':item.get('diagnosticStage','account-unavailable'), 'unitSources':sorted(set(item.get('sourceStages') or ['not-assessed'])), 'executableSource':item.get('executableStage','not-assessed'), 'propertyIssue':item.get('propertyIssue','not-assessed'), 'missingProperties':item.get('missingProperties',[]), 'binding':private_binding(item)} for alias,item in zip(UNIT_IDS,report['units'])],
+             'php': {'packages':accepted[:24], 'packagesComplete':packages.get('inspected') is True and len(accepted)==len(rows) and len(accepted)<=24,
+                     'servicesInspected':services.get('inspected') is True,
+                     'phpServicePresent':any(re.fullmatch(r'php[0-9.]*-fpm\.service',x.get('name','')) for x in sr),
+                     'phpServiceActive':any(re.fullmatch(r'php[0-9.]*-fpm\.service',x.get('name','')) and x.get('active') is True for x in sr),
+                     'webServicePresent':any(x.get('name') in ('nginx.service','apache2.service','httpd.service') for x in sr),
+                     'listenersInspected':listeners.get('inspected') is True,
+                     'phpTcpListenerPresent':present('phpTcpListenerCount'), 'phpNonLoopbackListenerPresent':present('phpNonLoopbackTcpListenerCount')}}
+    if services.get('inspected') is not True:
+        for key in ('phpServicePresent', 'phpServiceActive', 'webServicePresent'): value['php'][key] = None
+    validate_diagnostics(value); return value
 
 def bounded(args, data=None, timeout=20, limit=LIMIT, env=None):
     """Bound both pipes while reading; kill the entire new group on every error."""
@@ -121,19 +209,25 @@ def trusted_executable(filename):
 
 def installer_metadata(uid, gid):
     flags = set(); report = {'lockAcquired': False, 'environmentValuesRead': False, 'environmentMetadataSafe': False, 'deploymentLockMetadataSafe': False, 'toolsMetadataSafe': False}
+    checks = report['environmentChecks'] = dict.fromkeys(ENV_CHECKS)
+    checks['accountValid'] = type(uid) is int and uid > 0 and type(gid) is int and gid >= 0
     env = Path('/home/ubuntu/.config/bubblewash/env')
     try:
         info = metadata(env); report['environment'] = info
+        checks.update(regularFile=info.get('kind') == 'file', ownerMatches=info.get('uid') == uid if uid is not None and 'uid' in info else None,
+                      primaryGroupMatches=info.get('gid') == gid if gid is not None and 'gid' in info else None,
+                      modePrivate=info.get('mode') == 0o600 if 'mode' in info else None, singleLink=info.get('links') == 1 if 'links' in info else None)
         report['environmentAncestry'] = ancestry(env.parent)
+        ancestors = report['environmentAncestry']
+        checks.update(ancestorDirectories=bool(ancestors) and all(x.get('kind') == 'directory' for x in ancestors),
+                      ancestorOwners=bool(ancestors) and all(x.get('uid') in (0,uid) for x in ancestors) if uid is not None else None,
+                      ancestorModes=bool(ancestors) and all(not x.get('mode',0) & 0o022 for x in ancestors))
+        checks['canonicalPath'] = env.resolve(strict=True) == env
         names = os.listxattr(env, follow_symlinks=False)
         report['environmentAttributes'] = {'xattrsPresent': bool(names), 'posixAclPresent': any(n in ('system.posix_acl_access','system.posix_acl_default') for n in names)}
         if names: flags.add('installer-env-attributes-present')
-        safe = (type(uid) is int and uid > 0 and type(gid) is int and gid >= 0 and
-                info.get('kind') == 'file' and info.get('uid') == uid and info.get('gid') == gid and
-                info.get('mode') == 0o600 and info.get('links') == 1 and
-                env.resolve(strict=True) == env and bool(report['environmentAncestry']) and all(
-                x.get('kind') == 'directory' and x.get('uid') in (0, uid) and not x.get('mode', 0) & 0o022
-                for x in report['environmentAncestry']))
+        checks['attributesAbsent'] = not names
+        safe = all(v is True for k,v in checks.items() if k != 'attributesAbsent')
         report['environmentMetadataSafe'] = safe and not names
         if not safe: flags.add('installer-env-owner-mode-unsafe')
     except Exception: flags.add('installer-env-metadata-unavailable')
@@ -177,29 +271,39 @@ def collect(php, run=command):
         item = {'manager': manager, 'unit': name, 'inspected': False}; report['units'].append(item)
         if manager == 'user' and uid is None: continue
         prefix = [] if manager == 'system' else ['/usr/sbin/runuser', '-u', 'ubuntu', '--', '/usr/bin/env', f'XDG_RUNTIME_DIR=/run/user/{uid}', f'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus']
+        item['diagnosticStage'] = 'command-failed'
         try:
             raw = run(prefix + ['/usr/bin/systemctl', '--system' if manager == 'system' else '--user', 'show', name, '--no-pager', '--property=' + ','.join(PROPERTIES)])
+            item['diagnosticStage'] = 'properties-invalid'
             props = {}
             for line in raw.splitlines():
-                key, sep, value = line.partition('='); require(sep and key in PROPERTIES and key not in props and len(value) < 8192); props[key] = value
-            require(set(props) == set(PROPERTIES)); item.update(inspected=True, properties=props, sources=[])
+                key, sep, value = line.partition('=')
+                issue = 'malformed' if not sep else 'unknown' if key not in PROPERTIES else 'duplicate' if key in props else 'oversized' if len(value) >= 8192 else 'none'
+                item['propertyIssue'] = issue; require(issue == 'none'); props[key] = value
+                if key in ('EnvironmentFiles','WorkingDirectory'): item.setdefault('observedBindingProperties', {})[key] = value
+            item['missingProperties'] = sorted(set(PROPERTIES) - set(props))
+            item['propertyIssue'] = 'missing' if item['missingProperties'] else 'none'
+            require(not item['missingProperties']); item.update(inspected=True, properties=props, unitSources=[])
             if props['LoadState'] != 'loaded': flags.add('unit-unavailable')
             if props['NeedDaemonReload'] == 'yes': flags.add('pending-reload')
             elif props['NeedDaemonReload'] != 'no': flags.add('metadata-incomplete')
             paths = ([props['FragmentPath']] if props['FragmentPath'] else []) + props['DropInPaths'].split()
             require(len(paths) <= 64)
+            item['diagnosticStage'] = 'inspected'; item['sourceStages'] = []
             if not paths: flags.add('metadata-incomplete')
             for path in paths:
                 try:
-                    value = source(path, uid); item['sources'].append(value)
+                    value = source(path, uid); item['unitSources'].append(value)
+                    item['sourceStages'].append('trusted' if value['trustedOwnership'] else 'ownership-unsafe')
                     if not value['trustedOwnership']: flags.add('unsafe-source')
-                except Exception: item['sources'].append({'path': path, 'inspected': False}); flags.add('unsafe-source')
+                except Exception: item['unitSources'].append({'path': path, 'inspected': False}); item['sourceStages'].append('read-or-validation-failed'); flags.add('unsafe-source')
             pid = props['MainPID']
             if pid.isdigit() and int(pid) > 1:
                 try:
                     executable = os.readlink('/proc/' + pid + '/exe'); item['runningExecutable'] = source(executable, 0, 128*1024*1024)
+                    item['executableStage'] = 'trusted' if item['runningExecutable']['trustedOwnership'] else 'ownership-unsafe'
                     if not item['runningExecutable']['trustedOwnership']: flags.add('unsafe-source')
-                except Exception: flags.add('launch-executable-unresolved')
+                except Exception: item['executableStage'] = 'read-or-validation-failed'; flags.add('launch-executable-unresolved')
             elif name.endswith('.service'): flags.add('launch-executable-unresolved')
         except Exception: flags.add('manager-unavailable')
     report['installerMetadata'], installer_flags = installer_metadata(uid, gid); flags.update(installer_flags)
@@ -227,4 +331,4 @@ def collect(php, run=command):
     report['php'] = php.collect()
     if any(report['php'].get(key, {}).get('inspected') is not True for key in ('packages', 'services', 'tcpListeners', 'processes')): flags.add('php-incomplete')
     flags.add('php-indicators-observed' if php_indicators_observed(report['php']) else 'php-no-indicators-observed-incomplete')
-    return report, summary(flags)
+    return report, summary(flags, diagnostics=safe_diagnostics(report))

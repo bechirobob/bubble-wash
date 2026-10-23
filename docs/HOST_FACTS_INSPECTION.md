@@ -116,3 +116,20 @@ All earlier gap flags remain. No path, version, username, count, raw metadata or
 secret-derived value is placed in the public summary. These flags do not certify
 maintenance-plan safety, exclusion, capacity, application readiness or migration.
 The detailed encrypted report and its host-held decryption key are not exported.
+
+
+## Private bounded diagnostic observations
+
+The optional `diagnostics` object is projected from the same collection before encryption, validated in Python and Node, authenticated in the existing encrypted envelope header, and retained only in the authenticated header of the asset stored in the private backup repository. Public workflow output strips the entire diagnostics field and retains only the original coarse schema/result/flags and ciphertext digest. There is no extra plaintext report, key export, new command, or unauthenticated pre-encryption log line.
+
+- `environment` has eleven fixed boolean-or-null predicates: account validity, regular file, expected owner and primary group, exactly private mode, single link, canonical path, directory ancestry, allowed ancestor owners, non-writable ancestor modes, and absent extended attributes. Null means unobserved. No numeric owners, groups, modes, paths, attribute names, or environment values are included. The installer aggregate retains every previous predicate; these observations authorize no permission change.
+- `units` has exactly three fixed aliases in order: maintenance timer, maintenance service, application service. Fixed stage categories distinguish unavailable account, command failure, invalid properties, and inspected properties. Separate unit-source and running-executable categories distinguish not assessed, trusted ownership, unsafe ownership, and read/validation failure. Property parsing distinguishes missing, duplicate, unknown, malformed, and oversized data; only missing property names from the existing fixed property allowlist are retained, never unknown keys or values. These are coarse observations, not raw exception messages or proof of manager readiness.
+- `php` includes at most 24 installed package name/version pairs from the existing inventory, constrained to PHP metapackages, versioned PHP packages with the fixed common-extension suffix allowlist, and the Apache PHP module. Versions have a bounded package-version alphabet. Unrecognized packages remain only in the encrypted report; `packagesComplete` is false if filtering or truncation occurs. Service and listener observations are boolean or null, not counts, addresses, ports, process IDs or executable identity claims. False observed presence does not prove PHP absence or external safety.
+
+Detailed metadata and all existing gap flags remain encrypted or unchanged. No permission, service, credential, installation, database, or maintenance mutation is added.
+
+### Private fixed-unit binding refinement
+
+Each fixed unit's private diagnostic includes an optional canonical absolute WorkingDirectory, at most two parsed EnvironmentFiles path/ignore-errors pairs, and an optional MainPID executable path plus SHA-256 already collected by the existing source inspection. Paths use a conservative ASCII alphabet, a 256-character bound, and reject relative paths, traversal, duplicate separators and control characters. Unsupported forms remain null, not fabricated bindings. Only already-observed binding properties are retained when unrelated service-only properties are missing on a timer; this does not make the existing installer binding aggregate succeed.
+
+The fixed identity scope is `main-pid-not-listener-identity`: MainPID may be a launcher, and this is not evidence of the listening Node executable, its version, the configured database path or database schema. Use the separately reviewed release preflight for those facts. No extra process reads, argv, environment values or commands are collected. Existing 7000-byte summary and 8192-byte authenticated-header limits still fail closed. All binding fields stay in the private authenticated header; both public output paths remove the entire diagnostic object.

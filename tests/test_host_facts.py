@@ -134,6 +134,8 @@ class SyntheticHost(unittest.TestCase):
                 with patch.object(f,'metadata',side_effect=changed):
                     report,_=f.installer_metadata(1001,2002)
                     self.assertFalse(report['environmentMetadataSafe'])
+                    field={'uid':'ownerMatches','gid':'primaryGroupMatches','mode':'modePrivate','links':'singleLink','kind':'regularFile'}[attribute]
+                    self.assertFalse(report['environmentChecks'][field])
             with patch.object(f,'ancestry',return_value=[{'kind':'directory','uid':0,'mode':0o777}]):
                 report,_=f.installer_metadata(1001,2002)
                 self.assertFalse(report['environmentMetadataSafe']);self.assertFalse(report['deploymentLockMetadataSafe'])
@@ -164,7 +166,7 @@ class SyntheticHost(unittest.TestCase):
         self.assertIn('php-indicators-observed',public['flags'])
         self.assertIn('installer-metadata-preconditions-observed',public['flags'])
         for private in (secret,'/private','/home','1001','2002','php8.3','8.3.123','98765','12345'):
-            self.assertNotIn(private,json.dumps(public))
+            self.assertNotIn(private,json.dumps(t.public_summary(public)))
         for key in safe:
             _,public=get(self.properties,{**safe,key:False})
             self.assertIn('installer-metadata-preconditions-unverified',public['flags'])
@@ -217,8 +219,48 @@ class SyntheticHost(unittest.TestCase):
         self.assertTrue(report['readOnly'])
         self.assertFalse(report['limitations']['databaseRead'])
         self.assertIn('operator-exclusion-unresolved',public['flags'])
-        self.assertNotIn('/home',json.dumps(public))
+        self.assertNotIn('/home',json.dumps(t.public_summary(public)))
         self.assertNotIn('1001',json.dumps(public))
+
+    def test_partial_environment_failure_preserves_observed_predicates(self):
+        with patch.object(f,'metadata',side_effect=self.metadata), \
+             patch.object(f,'ancestry',return_value=[{'kind':'directory','uid':0,'mode':0o755}]), \
+             patch.object(f.Path,'resolve',lambda self,**kw:self), \
+             patch.object(f.os,'listxattr',side_effect=PermissionError('/SECRET')), \
+             patch.object(f,'trusted_executable',side_effect=ValueError()):
+            report,flags=f.installer_metadata(1001,2002)
+        self.assertTrue(report['environmentChecks']['ownerMatches'])
+        self.assertIsNone(report['environmentChecks']['attributesAbsent'])
+        self.assertFalse(report['environmentMetadataSafe'])
+        self.assertIn('installer-env-metadata-unavailable',flags)
+        self.assertNotIn('SECRET',json.dumps(report))
+
+    def test_manager_parse_and_source_trust_failures_are_fixed_categories(self):
+        self.commands=[];php=types.SimpleNamespace(collect=lambda:{})
+        with patch.object(f.pwd,'getpwnam',return_value=types.SimpleNamespace(pw_uid=1001,pw_gid=2002)), \
+             patch.object(f,'source',return_value={'trustedOwnership':False}), \
+             patch.object(f,'metadata',side_effect=self.metadata), \
+             patch.object(f,'installer_metadata',return_value=({},set())), \
+             patch.object(f.os,'readlink',return_value='/PRIVATE'),patch.object(f.Path,'is_dir',return_value=False), \
+             patch.object(f.os,'statvfs',side_effect=OSError()):
+            _,public=f.collect(php,run=self.properties)
+            self.assertTrue(all(x['stage']=='inspected' and x['unitSources']==['ownership-unsafe'] for x in public['diagnostics']['units']))
+            with patch.object(f,'source',side_effect=PermissionError('/SECRET')):
+                _,public=f.collect(php,run=self.properties)
+                self.assertTrue(all(x['unitSources']==['read-or-validation-failed'] for x in public['diagnostics']['units']))
+            _,public=f.collect(php,run=lambda args:'PRIVATE=SECRET')
+            self.assertTrue(all(x['stage']=='properties-invalid' for x in public['diagnostics']['units']))
+            self.assertNotIn('SECRET',json.dumps(public))
+            full=self.properties([])
+            for raw,issue,missing in ((full.replace('User=\n',''),'missing',['User']),
+                                      (full+'\nUser=SECRET','duplicate',[]),
+                                      (full+'\nPRIVATE=SECRET','unknown',[]),
+                                      ('SECRET','malformed',[])):
+                _,public=f.collect(php,run=lambda args:raw)
+                for unit in public['diagnostics']['units']:
+                    self.assertEqual(unit['propertyIssue'],issue)
+                    self.assertEqual(unit['missingProperties'],missing)
+                self.assertNotIn('SECRET',json.dumps(public))
 
     def test_unavailable_observations_cannot_claim_absence(self):
         php=types.SimpleNamespace(collect=lambda:{})
@@ -228,7 +270,92 @@ class SyntheticHost(unittest.TestCase):
             report,public=f.collect(php,run=lambda args: (_ for _ in ()).throw(RuntimeError('PRIVATE ERROR')))
         self.assertTrue({'manager-unavailable','php-incomplete','space-unavailable'}.issubset(public['flags']))
         self.assertNotIn('PRIVATE ERROR',json.dumps((report,public)))
+        self.assertEqual([x['stage'] for x in public['diagnostics']['units']], ['command-failed','command-failed','account-unavailable'])
 
+
+class DiagnosticPrivacy(unittest.TestCase):
+    def report(self):
+        return {'installerMetadata':{'environmentChecks':dict.fromkeys(f.ENV_CHECKS,True)},
+                'units':[{'diagnosticStage':'inspected','sourceStages':['trusted'], 'properties':{'WorkingDirectory':'/private/application','EnvironmentFiles':'/private/env (ignore_errors=no)'}, 'runningExecutable':{'path':'/private/bin/node','sha256':'a'*64}} for _ in range(3)],
+                'php':{'packages':{'inspected':True,'result':[{'name':'php8.3-fpm','version':'8.3.6-0ubuntu0.24.04.2'},
+                           {'name':'php8.3-SECRET','version':'8.3.0'}]},
+                       'services':{'inspected':True,'result':[{'name':'php8.3-fpm.service','active':True},{'name':'nginx.service','active':True}]},
+                       'tcpListeners':{'inspected':True,'result':{'phpTcpListenerCount':19876,'phpNonLoopbackTcpListenerCount':1}},
+                       'private':'/private/SECRET'}}
+
+    def test_public_projection_excludes_paths_counts_unknown_packages_and_keys(self):
+        report=self.report();report['private']='/home/SECRET';report['units'][0]['properties']={'Environment':'SECRET'}
+        diag=f.safe_diagnostics(report);public=f.summary(diagnostics=diag)
+        self.assertEqual(diag['php']['packages'],[{'name':'php8.3-fpm','version':'8.3.6-0ubuntu0.24.04.2'}])
+        self.assertFalse(diag['php']['packagesComplete'])
+        self.assertTrue(diag['php']['phpServiceActive']);self.assertTrue(diag['php']['phpNonLoopbackListenerPresent'])
+        for private in ('SECRET','19876','Environment'):
+            self.assertNotIn(private,json.dumps(t.public_summary(public)))
+        self.assertEqual(set(diag['environment']),set(f.ENV_CHECKS))
+
+    def test_unknown_observations_stay_null_and_package_count_is_bounded(self):
+        report=self.report();report['installerMetadata']={};report['php']={}
+        diag=f.safe_diagnostics(report)
+        self.assertTrue(all(x is None for x in diag['environment'].values()))
+        for key in ('phpServicePresent','phpServiceActive','webServicePresent','phpTcpListenerPresent','phpNonLoopbackListenerPresent'):
+            self.assertIsNone(diag['php'][key])
+        report=self.report();report['php']['packages']['result']=[{'name':'php8.3-fpm','version':'8.3.'+str(i)} for i in range(30)]
+        diag=f.safe_diagnostics(report);self.assertEqual(len(diag['php']['packages']),24);self.assertFalse(diag['php']['packagesComplete'])
+
+    def test_summary_rejects_injected_fields_values_and_shapes(self):
+        good=f.safe_diagnostics(self.report())
+        changes=[lambda x:x['environment'].update(path='/secret'),lambda x:x['environment'].update(ownerMatches=1001),
+                 lambda x:x['units'][0].update(stage='/private/error'),lambda x:x['units'][0].update(unit='root'),
+                 lambda x:x['units'][0].update(unitSources=['SECRET']),lambda x:x['php'].update(phpTcpListenerPresent=12),
+                 lambda x:x['php']['packages'][0].update(name='php8.3-secret'),
+                 lambda x:x['php']['packages'][0].update(version='8.3\nSECRET'),
+                 lambda x:x['php']['packages'][0].update(version='8.3/'+('x'*20)),
+                 lambda x:x['php'].update(packages=x['php']['packages']*25)]
+        for change in changes:
+            bad=copy.deepcopy(good);change(bad)
+            with self.assertRaises((ValueError,TypeError)):f.summary(diagnostics=bad)
+
+    def test_actual_main_stdout_never_emits_private_diagnostics(self):
+        diag=f.safe_diagnostics(self.report());private=f.summary(diagnostics=diag)
+        header={'schema':'bubblewash-host-facts/v1','context':CONTEXT,'summary':private}
+        encoded=f.canonical(header);raw=t.MAGIC+len(encoded).to_bytes(4,'big')+encoded+b'x'*29
+        with tempfile.TemporaryDirectory() as directory:
+            for output,response in ((raw,header),(b'{}',f.summary(result='encryption-unavailable',diagnostics=diag))):
+                stdout=io.StringIO()
+                with patch.dict(os.environ,{**ENV,'RUNNER_TEMP':directory}),patch.object(sys,'argv',['transport','inspect']), \
+                     patch.object(t,'storage_step',side_effect=lambda fn,*args:(None,None) if fn is t.store_api else {}), \
+                     patch.object(t,'runner_transport',return_value=(output,response)), \
+                     contextlib.redirect_stdout(stdout):
+                    t.main()
+                lines=stdout.getvalue().splitlines();public=json.loads(lines[0].removeprefix('HOST_FACTS_SUMMARY '))
+                self.assertEqual(set(public),{'schema','result','flags'})
+                for private_value in ('diagnostics','ownerMatches','php8.3','8.3.6','propertyIssue','/private','a'*64):
+                    self.assertNotIn(private_value,stdout.getvalue())
+
+    def test_private_binding_projection_is_bounded_and_not_listener_identity(self):
+        item=self.report()['units'][0];binding=f.private_binding(item)
+        self.assertEqual(binding['workingDirectory'],'/private/application')
+        self.assertEqual(binding['environmentFiles'],[{'path':'/private/env','ignoreErrors':False}])
+        self.assertEqual(binding['mainPidExecutable'],{'path':'/private/bin/node','sha256':'a'*64})
+        self.assertEqual(binding['identityScope'],'main-pid-not-listener-identity')
+        for path in ('relative','/a/../b','/a/./b','//a','/a//b','/a/','/a\n','/'+('x'*256)):
+            self.assertFalse(f.safe_path(path))
+            bad=copy.deepcopy(binding);bad['workingDirectory']=path
+            with self.assertRaises(ValueError):f.validate_binding(bad)
+        for raw in ('/private/env SECRET','/private/env (ignore_errors=maybe)',' '.join(['/private/env (ignore_errors=no)']*3)):
+            self.assertIsNone(f.private_binding({'properties':{'EnvironmentFiles':raw}})['environmentFiles'])
+        for digest in ('a'*63,'A'*64,'a'*64+'\n'):
+            bad=copy.deepcopy(binding);bad['mainPidExecutable']['sha256']=digest
+            with self.assertRaises(ValueError):f.validate_binding(bad)
+        partial={'observedBindingProperties':{'EnvironmentFiles':'/private/env (ignore_errors=no)','WorkingDirectory':'/private/application'}}
+        self.assertEqual(f.private_binding(partial)['environmentFiles'],binding['environmentFiles'])
+        self.assertIsNone(f.private_binding({})['mainPidExecutable'])
+
+    def test_diagnostics_are_in_authenticated_envelope(self):
+        diag=f.safe_diagnostics(self.report())
+        header={'schema':'bubblewash-host-facts/v1','context':CONTEXT,'summary':f.summary(diagnostics=diag)}
+        encoded=f.canonical(header);raw=t.MAGIC+len(encoded).to_bytes(4,'big')+encoded+b'x'*29
+        self.assertEqual(t.envelope(raw,CONTEXT)['summary']['diagnostics'],diag)
 
 class Transport(unittest.TestCase):
     def test_context_rejects_other_repository_ref_event_and_ids(self):
