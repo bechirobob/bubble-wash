@@ -89,12 +89,32 @@ jobs:
       - name: Run staff worklist interactions at mobile and desktop sizes
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: npm run test:browser-worklists
+      - name: Build isolated open-survey fixture (never a deployment artifact)
+        run: |
+          python3 - <<'PYTEST'
+          import re
+          from pathlib import Path
+          p = Path('src/lib/research/policy.ts')
+          text = p.read_text()
+          for flag in ['launchApproved', 'deliveryApproved', 'retentionReviewApproved']:
+              text, count = re.subn(r'(export const ' + flag + r': boolean = )(?:false|true);', r'\g<1>true;', text)
+              if count != 1:
+                  raise RuntimeError('Expected exactly one research policy flag: ' + flag)
+          p.write_text(text)
+          PYTEST
+          npm run build
+      - name: Run isolated open-survey browser and edge acceptance
+        env:
+          BUBBLEWASH_TEST_RESEARCH_OPEN: 'true'
+        run: npx playwright test tests/browser/opening-intro.spec.mjs --grep 'interim survey open-fixture acceptance|open survey fixture rejects' --output=test-results/survey-browser
       - name: Preserve synthetic browser screenshots for review
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: synthetic-browser-screenshots
-          path: test-results/browser/**/*.png
+          path: |
+            test-results/browser/**/*.png
+            test-results/survey-browser/**/*.png
           if-no-files-found: ignore
           retention-days: 7
       - name: Preserve synthetic worklist screenshots for review

@@ -1,0 +1,51 @@
+{
+  "source_preserved_in": "Library C3 source archive; not overwritten",
+  "omitted_questions": [
+    {
+      "instrument": "Consumer Survey Questionnaire",
+      "id": "A7",
+      "reason": "Income ranges not approved"
+    },
+    {
+      "instrument": "Consumer Survey Questionnaire",
+      "id": "F1a",
+      "reason": "Persona routing and school list not confirmed"
+    },
+    {
+      "instrument": "Consumer Survey Questionnaire",
+      "id": "E3",
+      "reason": "Bag definition missing"
+    },
+    {
+      "instrument": "Consumer Survey Questionnaire",
+      "id": "E4",
+      "reason": "Bag definition missing"
+    },
+    {
+      "instrument": "Consumer Survey Questionnaire",
+      "id": "E5",
+      "reason": "Bag definition missing"
+    },
+    {
+      "instrument": "Consumer Survey Questionnaire",
+      "id": "E6",
+      "reason": "Bag definition missing"
+    },
+    {
+      "instrument": "Consumer Survey Questionnaire",
+      "id": "H2",
+      "reason": "Incentive text missing"
+    }
+  ],
+  "other_omissions": [
+    "Interviewer consent/recording scripts and vendor on-site observation checklist; no media upload",
+    "Vendor Q6 parenthetical interviewer photograph instruction omitted from display only"
+  ],
+  "counts": [
+    62,
+    17,
+    12,
+    13
+  ],
+  "interim_owner_direction": "Respondents explicitly select any relevant optional persona sections; no automatic mapping. Restores 26 consumer questions and four interview probes. Parent approved this reversible interim behavior under the owner’s publish-before-reply instruction; not attributed to Abigail."
+}

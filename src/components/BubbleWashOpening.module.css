@@ -1,0 +1,96 @@
+.opening {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: #fff;
+  color: #123045;
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+.opening:not([open]) { display: none; }
+.opening[open] { display: grid; place-items: center; animation: handoff 2050ms ease both; }
+.opening::backdrop { background: transparent; }
+.scene { position: relative; width: min(94vw, 600px); aspect-ratio: 1; }
+.bubble {
+  position: absolute;
+  inset: 13.333%;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 57%, #fff 66%, #e5f8fd 81%, #c9edf8 96%, #b9e7f5 100%);
+}
+.bubble::before, .bubble::after {
+  content: "";
+  position: absolute;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  inset: 9%;
+  transform: rotate(-28deg);
+}
+.bubble::before { border-top-color: var(--surface); }
+.bubble::after { border-right-color: var(--line); border-width: 1px; clip-path: inset(55% 0 0 52%); }
+.left { animation: mergeLeft 1150ms cubic-bezier(.4,0,.2,1) both; }
+.right { animation: mergeRight 1150ms cubic-bezier(.4,0,.2,1) both; }
+.merged { animation: mergeCentre 1150ms cubic-bezier(.4,0,.2,1) both; }
+.brand {
+  position: absolute;
+  width: 47.5%;
+  aspect-ratio: 317 / 238;
+  left: 26.25%;
+  top: 32.17%;
+  overflow: hidden;
+  animation: brandArrives 1500ms cubic-bezier(.2,.7,.25,1) both;
+}
+.brand img { position: absolute; width: 161.514%; height: auto; max-width: none; left: -33.123%; top: -55.882%; }
+.ring { position: absolute; inset: 13.333%; border: 1px solid var(--line-active); border-radius: 50%; animation: settleRing 1850ms ease-out both; }
+.skip {
+  position: absolute;
+  right: max(24px, env(safe-area-inset-right));
+  bottom: max(24px, env(safe-area-inset-bottom));
+  min-width: 88px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: #fff;
+  color: #243d4a;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.skip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
+@keyframes mergeLeft {
+  0%, 12% { transform: translate(-48%, -5%) scale(.5); opacity: 1; }
+  70% { transform: translate(-10%, 0) scale(.55); opacity: 1; }
+  100% { transform: translate(0, 0) scale(.88); opacity: 0; }
+}
+@keyframes mergeRight {
+  0%, 12% { transform: translate(48%, 5%) scale(.5); opacity: 1; }
+  70% { transform: translate(10%, 0) scale(.55); opacity: 1; }
+  100% { transform: translate(0, 0) scale(.88); opacity: 0; }
+}
+@keyframes mergeCentre {
+  0%, 66% { transform: scale(.35); opacity: 0; }
+  78% { opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes brandArrives {
+  0%, 67% { transform: scale(0); opacity: 0; }
+  72% { opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes settleRing {
+  0%, 80% { transform: scale(1); opacity: 0; }
+  82% { opacity: .25; }
+  100% { transform: scale(1.16); opacity: 0; }
+}
+@keyframes handoff {
+  0%, 88% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .opening[open] { display: none; animation: none; } }
