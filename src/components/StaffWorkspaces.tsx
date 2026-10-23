@@ -1833,6 +1833,7 @@ export function AdminWorkspace({ userName, role, allStaffAccess = false, initial
     { href: "/admin?view=cases", label: "Cases", view: "cases" },
     { href: "/admin?view=operations", label: "Operations health", view: "operations" },
     { href: "/admin?view=activity", label: "Activity", view: "activity" },
+    ...(allStaffAccess ? [{ href: "/admin/surveys", label: "Survey results", view: "survey-results" }] : []),
   ];
 
   return (
