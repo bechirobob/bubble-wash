@@ -8,7 +8,7 @@
   "profiles": {
     "integration-candidate-v1": {
       "appInputGitTree": "71f181ba23f3786333402357d2a9da8b667f397e",
-      "contentSha256": "33cbb9d78fa688eddd87befdb7d7cae82da20f3e92012f248d79805101f502ca",
+      "contentSha256": "f2c45d4f523f11366e85bea024c8d4310973ae89a926ea5cba7f79ee422b36fe",
       "files": {
         "src/app/admin/mfa/enroll/page.tsx": "0a59b23eb3707d52cef6a9214e4404efcaefaeae48664436f9a0291f17a01313",
         "src/app/admin/page.tsx": "d774c2372f2e22a3b6c429c692743660f4434ef08f2f208085759195d8dea06b",
@@ -357,7 +357,7 @@
         ".github/backup/test_check_store.py": "d832886a3a007909ce5341aff9b89ca761669cf2bf831719c3c7ff1cd54d60cb",
         ".github/backup/test_login_inspection.py": "a4c4afa5812f98fba828e2c0d1076e347befd293fc55e5ebd81eebbea7f7c40d",
         ".github/backup/test_owner_enrollment.py": "6fca5dc64a9a67d1a3381a66da13f0b227106ca73d08860409a946130acff441",
-        ".github/backup/test_owner_enrollment_contract.py": "3b0167cf8c80dcffa60d39898c8d1ebff694a0d9c03d64a978572bf682c8be69",
+        ".github/backup/test_owner_enrollment_contract.py": "de9db4e63163c869b425733a1f013307bbe1ef652e4a4fa660d1167cc526c6da",
         ".github/backup/test_owner_preflight.py": "2c1dfd201fbd9678297765885cabb277199b94f3828805699468037f8dbe4612",
         ".github/backup/test_release_preflight.py": "bdb181baa0262a78e7f7b2b01c404e343541098289ad749d998dd744d2b6bc3b",
         ".github/backup/test_retained_candidate.py": "b47f6c10bdade8710f50944a9e79056fe79a75a5b4c868f2445e9de5ac2a51bf",
