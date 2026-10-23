@@ -182,6 +182,14 @@ export function getDatabase() {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
+  initializeDatabaseSchema(db);
+  database = db;
+  purgeExpiredDriverLocations(db);
+  migrateLegacySubmissions(db);
+  return db;
+}
+
+function initializeDatabaseSchema(db: Database.Database) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS submissions (
       id TEXT PRIMARY KEY,
@@ -338,10 +346,6 @@ export function getDatabase() {
       preserved_counts TEXT NOT NULL CHECK (json_valid(preserved_counts))
     );
   `);
-  database = db;
-  purgeExpiredDriverLocations(db);
-  migrateLegacySubmissions(db);
-  return db;
 }
 
 function migrateLegacySubmissions(db: Database.Database) {
@@ -510,11 +514,33 @@ export function releaseWorkflowActionClaim(claimKey: string) {
   getDatabase().prepare("DELETE FROM workflow_action_claims WHERE claim_key = ?").run(claimKey);
 }
 
-export function databaseReadiness() {
-  const db = getDatabase();
+export function openReadOnlyDatabase() {
+  const db = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    db.pragma("query_only = ON");
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+
+export function databaseReadiness(db = getDatabase(), additionalSchema: ((database: Database.Database) => void)[] = []) {
   const quickCheck = db.pragma("quick_check", { simple: true });
-  const writable = db.prepare("SELECT 1 AS ok").get() as { ok?: number } | undefined;
-  return quickCheck === "ok" && writable?.ok === 1;
+  const readable = db.prepare("SELECT 1 AS ok").get() as { ok?: number } | undefined;
+  if (quickCheck !== "ok" || readable?.ok !== 1) return false;
+  // Inspect existing schema only. Missing initialization must block readiness,
+  // not be deferred until the first staff request. Reference DDL runs in memory.
+  const reference = new Database(":memory:");
+  try {
+    initializeDatabaseSchema(reference);
+    for (const initialize of additionalSchema) initialize(reference);
+    const expected = reference.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL").all() as { type: string; name: string; sql: string }[];
+    const actual = db.prepare("SELECT sql FROM sqlite_master WHERE type = ? AND name = ?");
+    return expected.every((entry) => (actual.get(entry.type, entry.name) as { sql: string } | undefined)?.sql === entry.sql);
+  } finally {
+    reference.close();
+  }
 }
 
 export function consumeRateLimit(key: string, limit: number, windowMs: number) {
@@ -788,8 +814,8 @@ function adminMfaSettingFromRow(row: StoredAdminMfaRow): AdminMfaSetting {
   };
 }
 
-export function readAdminMfaSetting(adminEmail: string) {
-  const row = getDatabase().prepare("SELECT * FROM admin_mfa_settings WHERE admin_email = ? COLLATE NOCASE LIMIT 1")
+export function readAdminMfaSetting(adminEmail: string, db = getDatabase()) {
+  const row = db.prepare("SELECT * FROM admin_mfa_settings WHERE admin_email = ? COLLATE NOCASE LIMIT 1")
     .get(adminEmail.trim()) as StoredAdminMfaRow | undefined;
   return row ? adminMfaSettingFromRow(row) : null;
 }
@@ -940,8 +966,8 @@ export function deleteExpiredDriverLiveLocations(capturedBefore: string) {
   return getDatabase().prepare("DELETE FROM driver_live_locations WHERE captured_at < ?").run(capturedBefore).changes;
 }
 
-export function readStaffCredentialOverride(role: "admin" = "admin"): StaffCredentialOverride | null {
-  const row = getDatabase().prepare(`
+export function readStaffCredentialOverride(role: "admin" = "admin", db = getDatabase()): StaffCredentialOverride | null {
+  const row = db.prepare(`
     SELECT role, login, password_hash, credential_version, updated_at
     FROM staff_credential_overrides
     WHERE role = ?

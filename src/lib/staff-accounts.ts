@@ -6,11 +6,14 @@ import type { StaffUser, StaffRole } from "./auth.ts";
 export type StaffAccount = StaffUser & { status: "invited" | "active" | "suspended"; updatedAt: string };
 function db() {
   const database = getDatabase();
-  database.exec(`CREATE TABLE IF NOT EXISTS staff_accounts (email TEXT PRIMARY KEY COLLATE NOCASE, name TEXT NOT NULL, role TEXT NOT NULL, entity_id TEXT NOT NULL, password_hash TEXT NOT NULL, credential_version TEXT NOT NULL, status TEXT NOT NULL, token_hash TEXT NOT NULL, token_expires_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+  initializeStaffAccountsSchema(database);
   return database;
 }
-export function listStaffAccounts() {
-  return db().prepare("SELECT email, name, role, entity_id AS entityId, password_hash AS passwordHash, credential_version AS credentialVersion, status, updated_at AS updatedAt FROM staff_accounts ORDER BY name").all() as StaffAccount[];
+export function initializeStaffAccountsSchema(database: ReturnType<typeof getDatabase>) {
+  database.exec(`CREATE TABLE IF NOT EXISTS staff_accounts (email TEXT PRIMARY KEY COLLATE NOCASE, name TEXT NOT NULL, role TEXT NOT NULL, entity_id TEXT NOT NULL, password_hash TEXT NOT NULL, credential_version TEXT NOT NULL, status TEXT NOT NULL, token_hash TEXT NOT NULL, token_expires_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+}
+export function listStaffAccounts(database = db()) {
+  return database.prepare("SELECT email, name, role, entity_id AS entityId, password_hash AS passwordHash, credential_version AS credentialVersion, status, updated_at AS updatedAt FROM staff_accounts ORDER BY name").all() as StaffAccount[];
 }
 function audit(email: string, action: string, actor: string) {
   appendSubmissionRecord({ id: `BW-${randomUUID()}`, createdAt: new Date().toISOString(), source: "staff-account-administration", data: { submissionType: "staff-account-action", staffEmail: email, actionType: action, submittedByEmail: actor } });

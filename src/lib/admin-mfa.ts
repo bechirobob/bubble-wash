@@ -67,10 +67,10 @@ export function adminMfaEnrollmentExists(adminEmail: string) {
   return readAdminMfaSetting(adminEmail)?.status === "enrolled";
 }
 
-export function adminTotpSecret(adminEmail: string) {
+export function adminTotpSecret(adminEmail: string, database?: Parameters<typeof readAdminMfaSetting>[1]) {
   const environmentSecret = configuredEnvironmentSecret();
   if (environmentSecret) return environmentSecret;
-  const setting = readAdminMfaSetting(adminEmail);
+  const setting = readAdminMfaSetting(adminEmail, database);
   if (!setting || setting.status !== "enrolled") return "";
   try {
     const secret = decrypt(setting.encryptedSecret);
@@ -80,8 +80,8 @@ export function adminTotpSecret(adminEmail: string) {
   }
 }
 
-export function adminMfaConfigured(adminEmail: string) {
-  return Boolean(adminTotpSecret(adminEmail));
+export function adminMfaConfigured(adminEmail: string, database?: Parameters<typeof readAdminMfaSetting>[1]) {
+  return Boolean(adminTotpSecret(adminEmail, database));
 }
 
 export async function startAdminMfaEnrollment(adminEmail: string) {

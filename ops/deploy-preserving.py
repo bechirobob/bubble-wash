@@ -233,7 +233,7 @@ def activate(current, candidate, service, validate):
 # Exact source/dependency transition, not an inference from a partial SQL grep.
 # Review evidence identifies all changed writers and their retained-code readers.
 LIVE_SOURCE_SHA256 = {'src': '23387dd00e0c0a97da2f0f125d853e6b4a289009b758760377a49409fca0ac56', 'package.json': 'd33a04aae78f35b296c6f32ce3523136f2144d42694934113eff42fec01a1c52', 'package-lock.json': '5a3190f9d986628f05a8534ddb462b706bca0bb4b3caadc6e49b6328c84b056f', 'next.config.mjs': '55c7cca7ffcd8464dd2432dffef6ef2b7e4ebc3ee7d6dc508ba72855626cc08e', 'tsconfig.json': '2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c'}
-CANDIDATE_SOURCE_SHA256 = {'src': '8c13df12e056df03155bbaff504653b1d771c65eefcd7eaf6910cea4d0b8368d', 'package.json': '48f1c8740915afbf91091bdedf6ec65de340b2f6fa70b96338c9276e3cbb1c6e', 'package-lock.json': '65ac93becf9f1e4b44af8633e120a547c33a438af5cb6d83f2f8fe1dc77a9e38', 'next.config.mjs': '55c7cca7ffcd8464dd2432dffef6ef2b7e4ebc3ee7d6dc508ba72855626cc08e', 'tsconfig.json': '2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c'}
+CANDIDATE_SOURCE_SHA256 = {'src': '43770b9861b9063016b80c9a26778f21d48975da89b7183ee38cabe6a6c07347', 'package.json': '48f1c8740915afbf91091bdedf6ec65de340b2f6fa70b96338c9276e3cbb1c6e', 'package-lock.json': '65ac93becf9f1e4b44af8633e120a547c33a438af5cb6d83f2f8fe1dc77a9e38', 'next.config.mjs': '55c7cca7ffcd8464dd2432dffef6ef2b7e4ebc3ee7d6dc508ba72855626cc08e', 'tsconfig.json': '2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c'}
 
 
 def source_manifest(release):
@@ -259,6 +259,20 @@ def verify_source_transition(current, candidate):
     require(source_manifest(current) == LIVE_SOURCE_SHA256 and
             source_manifest(candidate) == CANDIDATE_SOURCE_SHA256,
             'source or dependency transition lacks exact compatibility review')
+
+
+# Only these reviewed read-only reader changes may differ from the old release.
+REVIEWED_READER_TRANSITIONS = {'src/lib/data-store.ts': ('f6e12892fb37b5b6b9925f3feffe0bedf87fb11766da6adbb2de4a0a7bffef05', '06918c193312ae23a3bb3b54617047b731458cbf5d4b7624c9c75269ce70323d'), 'src/lib/staff-accounts.ts': ('f5aabfdc8408d3fd8b94b91df06d2769622d0d2f1b0bf80ea6b6065e2560ec01', '17ac2d96b4d76d8ec46b9401cb5e0b18fd9a028b0fde8af8a2218194486c6374')}
+CRITICAL_FILES = ('src/lib/data-store.ts', 'src/lib/operational-store.ts',
+                  'src/lib/availability-store.ts', 'src/lib/staff-accounts.ts', 'src/app/api/health/route.ts')
+
+
+def verify_critical_transition(current, candidate):
+    for relative in CRITICAL_FILES:
+        pair = (digest(current / relative), digest(candidate / relative))
+        expected = REVIEWED_READER_TRANSITIONS.get(relative)
+        require(pair == expected if expected is not None else pair[0] == pair[1],
+                'database or health implementation requires separate review')
 
 
 @contextmanager
@@ -677,10 +691,7 @@ def main(lock_unchanged, report=None):
     require(not (current / 'data/submissions.jsonl').exists() and not (candidate / 'data/submissions.jsonl').exists(),
             'legacy import would mutate data')
     verify_source_transition(current, candidate)
-    # Additional schema/health byte-identity checks remain in force.
-    for relative in ('src/lib/data-store.ts', 'src/lib/operational-store.ts',
-                     'src/lib/availability-store.ts', 'src/lib/staff-accounts.ts', 'src/app/api/health/route.ts'):
-        require(digest(current / relative) == digest(candidate / relative), 'database or health implementation requires separate review')
+    verify_critical_transition(current, candidate)
     receipt_raw = RECEIPT.read_bytes()
     receipt = json.loads(receipt_raw)
     require(receipt.get('sha256') == args.backup_sha256, 'encrypted archive pin mismatch')
@@ -698,6 +709,7 @@ def main(lock_unchanged, report=None):
     def unchanged():
         lock_unchanged()
         verify_source_transition(current, candidate)
+        verify_critical_transition(current, candidate)
         stat = ENV.stat()
         require(ENV.read_bytes() == raw and (stat.st_mode, stat.st_uid, stat.st_gid, stat.st_ino) ==
                 (metadata.st_mode, metadata.st_uid, metadata.st_gid, metadata.st_ino), 'environment changed during release')
