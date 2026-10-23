@@ -122,7 +122,7 @@ test.describe('interim survey open-fixture acceptance',()=>{
   }
   async function eligibility(page,yes=[]){
     for(const [id,name] of [['student','Students'],['business','Business owners'],['corporate','Office workers'],['household','Households']]){
-      const group=page.getByRole('group',{name:new RegExp('^'+name+':')});
+      const group=page.getByRole('group',{name:new RegExp('^'+name+':')}).filter({has:page.locator('input[name="icp-'+id+'"]')});
       if(await group.isVisible())await group.getByRole('radio',{name:yes.includes(id)?'Yes':'No',exact:true}).check();
     }
   }
