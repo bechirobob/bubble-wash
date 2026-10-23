@@ -18,5 +18,5 @@ if len(email)>160 or not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+',email) or not 
 pins = json.loads(Path('ops/owner-enrollment-source-pins.json').read_text())
 sys.stdout.write("__name__ = 'private_owner_enrollment'\n" + Path('scripts/release-preflight.py').read_text())
 sys.stdout.write('\n' + Path('scripts/owner-enrollment-host.py').read_text())
-sys.stdout.write('\ntry:\n    _result = run_private_enrollment(' + ', '.join(repr(value) for value in (email,sha,actor,mode,approved,pins,owner_key)) + ')\nexcept Exception:\n    _result = {"ok":False,"state":"outcome-uncertain-stop-inspect-privately","retryPermitted":False}\n')
+sys.stdout.write('\n_diagnostic = {"stage":"before-node"}\ntry:\n    _result = run_private_enrollment(' + ', '.join(repr(value) for value in (email,sha,actor,mode,approved,pins,owner_key)) + ', diagnostic=_diagnostic)\nexcept Exception:\n    _result = {"ok":False,"state":"outcome-uncertain-stop-inspect-privately","retryPermitted":False}\n    if ' + repr(mode) + ' == "check":\n        _result = {"ok":False,"state":"check-host-pre-node-failed" if _diagnostic.get("stage") == "before-node" else "check-host-post-node-failed","accountCreated":False,"retryPermitted":False}\n')
 sys.stdout.write('print(json.dumps(_result, sort_keys=True))\nraise SystemExit(0 if _result.get("ok") is True else 1)\n')
