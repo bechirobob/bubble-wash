@@ -132,8 +132,8 @@ test.describe('interim survey open-fixture acceptance',()=>{
   });
   test('details persist across steps and persona questions require selection',async({page},testInfo)=>{
     await enter(page);
-    const information=page.getByText('More information about your data',{exact:true});
-    await expect(page.getByText(/This is not anonymous/)).toBeVisible();
+    const information=page.getByText('More information',{exact:true});
+    await expect(page.getByText(/Your response is not anonymous/)).toBeVisible();
     await expect(page.getByText(/Website-stored research records/)).not.toBeVisible();
     await information.focus();await information.press('Enter');
     await expect(page.getByText(/Website-stored research records/)).toBeVisible();
