@@ -138,25 +138,54 @@ def discover_receipt(module,api,env,ctx):
     for asset in assets:f.require(re.fullmatch('sha256:[a-f0-9]{64}',asset.get('digest','')))
     return {'schema':'bubblewash-host-facts-private-receipt/v1','context':ctx,'storageId':int(env['BACKUP_STORE_ID']),'storageSha':env['BACKUP_STORE_SHA'],'tag':tag,'releaseId':release['id'],'assets':[{'name':a['name'],'id':a['id'],'size':a['size'],'sha256':a['digest'][7:]} for a in assets]}
 
+class PhaseFailure(Exception):
+    """Only fixed public result categories, never raw errors or host output."""
+    def __init__(self, result):
+        f.require(result in ('transport-failed', 'storage-failed'))
+        self.result = result
+        super().__init__(result)
+
+
+def runner_transport(ctx):
+    try:
+        # Exact location used by the pinned official Tailscale action on Linux.
+        raw=f.bounded(['/usr/local/bin/tailscale','ssh','root@hermes','/usr/bin/python3 -I -B -'],payload(ctx),timeout=180,limit=f.LIMIT+8232)
+        if raw[:8] != MAGIC:
+            f.require(len(raw) <= 8192)
+            failure=f.validate_summary(f.strict_json(raw))
+            f.require(failure['result'] in ('inspection-failed', 'encryption-unavailable'))
+            return raw, failure
+        return raw, envelope(raw,ctx)
+    except BaseException:
+        raise PhaseFailure('transport-failed') from None
+
+
+def storage_step(function, *args):
+    try:
+        return function(*args)
+    except BaseException:
+        raise PhaseFailure('storage-failed') from None
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('mode',choices=('inspect','retrieve'));parser.add_argument('--receipt',type=Path);parser.add_argument('--output',type=Path);args=parser.parse_args()
-    module,api=store_api()
+    module,api=storage_step(store_api)
     if args.mode=='retrieve':
         f.require(args.output);receipt=f.strict_json(args.receipt.read_bytes()) if args.receipt else discover_receipt(module,api,os.environ,inputs(os.environ));retrieve(module,api,receipt,args.output);print('HOST_FACTS_RETRIEVAL_VERIFIED');return
-    f.require(not args.receipt and not args.output);ctx=inputs(os.environ);preflight(module,api,os.environ)
-    raw=f.bounded(['tailscale','ssh','root@hermes','/usr/bin/python3 -I -B -'],payload(ctx),timeout=180,limit=f.LIMIT+8232)
+    f.require(not args.receipt and not args.output);ctx=inputs(os.environ);storage_step(preflight,module,api,os.environ)
+    raw,header=runner_transport(ctx)
     if raw[:8] != MAGIC:
-        f.require(len(raw) <= 8192);failure=f.validate_summary(f.strict_json(raw));f.require(failure['result'] != 'captured');print('HOST_FACTS_SUMMARY '+f.canonical(failure).decode());return 1
-    header=envelope(raw,ctx)
+        print('HOST_FACTS_SUMMARY '+f.canonical(header).decode());return 1
     with tempfile.TemporaryDirectory(prefix='encrypted-host-facts-',dir=os.environ['RUNNER_TEMP']) as directory:
         work=Path(directory);path=work/f"bubblewash-host-facts-{ctx['runId']}-{ctx['runAttempt']}.enc";write_private(path,raw)
-        receipt=publish(module,api,os.environ,ctx,path,work)
+        receipt=storage_step(publish,module,api,os.environ,ctx,path,work)
     write_private(Path(os.environ['RUNNER_TEMP'])/'host-facts-receipt.json',f.canonical(receipt))
     print('HOST_FACTS_SUMMARY '+f.canonical(header['summary']).decode())
     print('HOST_FACTS_CIPHERTEXT_SHA256 '+hashlib.sha256(raw).hexdigest())
 
 if __name__=='__main__':
     try:result=main()
+    except PhaseFailure as error:
+        print('HOST_FACTS_SUMMARY '+f.canonical(f.summary(result=error.result)).decode());result=1
     except BaseException:
         print('HOST_FACTS_SUMMARY '+f.canonical(f.summary(result='inspection-failed')).decode());result=1
     raise SystemExit(result or 0)
