@@ -1,0 +1,174 @@
+name: Survey-only verified release
+run-name: Survey-only ${{ inputs.mode }} ${{ inputs.runtime_sha }}
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Verify runs hosted exact-lock tests only; deploy also performs the separately approved closed release'
+        required: true
+        default: verify
+        type: choice
+        options: [verify, deploy, activate]
+      verification_run:
+        description: 'Activate only: successful first-attempt verify/deploy run for these exact controls and runtime'
+        type: string
+      runtime_sha:
+        description: 'Reviewed full runtime-artifact commit with the exact frozen survey-only tree'
+        required: true
+        type: string
+      backup_sha256:
+        description: 'Deploy only: verified encrypted archive SHA256 from fresh pinned backup run'
+        type: string
+      receipt_run:
+        description: 'Deploy only: verified private backup run, at most 30 hours old'
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: inputs.mode != 'activate' && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      RUNTIME_SHA: ${{ inputs.runtime_sha }}
+      NEXT_TELEMETRY_DISABLED: '1'
+      NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED: 'false'
+      NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED: 'false'
+      NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          path: controls
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.runtime_sha }}
+          persist-credentials: false
+          path: runtime-artifact
+      - name: Bind separate reviewed controls and complete runtime artifact
+        run: |
+          set -euo pipefail
+          [[ "$(git -C controls rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$RUNTIME_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$(git -C runtime-artifact rev-parse HEAD)" == "$RUNTIME_SHA" ]]
+          python3 - <<'PY'
+          import hashlib,json,os,subprocess
+          from pathlib import Path
+          p=json.loads(Path('controls/ops/survey-only-source-pins.json').read_bytes())
+          tree=subprocess.check_output(['git','-C','runtime-artifact','rev-parse','HEAD^{tree}']).decode().strip()
+          assert tree==p['runtimeTree']
+          files=subprocess.check_output(['git','-C','runtime-artifact','ls-tree','-r','--name-only','HEAD']).decode().splitlines()
+          assert set(files)==set(p['runtimeFiles']) and len(files)==len(p['runtimeFiles'])
+          for name,digest in p['runtimeFiles'].items():
+            path=Path('runtime-artifact')/name
+            assert not path.is_symlink() and path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest()==digest
+          PY
+          python3 -B -m unittest discover -s controls/tests -p 'test_survey_only_deploy.py' -v
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install exact runtime lock and run preserved unit/data/auth checks
+        working-directory: runtime-artifact
+        run: |
+          npm ci --no-audit --no-fund
+          npm run test:unit
+          npm run test:data
+          npm run typecheck
+          npm audit --audit-level=moderate
+          npm audit --omit=dev --audit-level=moderate
+          node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs --test tests/research-*.test.mjs
+      - name: Install official test browsers
+        working-directory: runtime-artifact
+        run: npx playwright install --with-deps chromium webkit
+      - name: Build and run all unchanged browser assertions
+        working-directory: runtime-artifact
+        run: |
+          node --test tests/browser-egress.test.mjs
+          npm run build
+          npm run test:workflow
+          node tests/browser/fixture-smoke.mjs
+          npx playwright test
+      - name: Run open survey fixture assertions separately, never a deployment build
+        working-directory: runtime-artifact
+        env:
+          BUBBLEWASH_TEST_RESEARCH_OPEN: 'true'
+        run: npx playwright test tests/browser/opening-intro.spec.mjs --grep 'interim survey open-fixture acceptance|open survey fixture rejects' --output=test-results/survey-browser
+      - name: Preserve synthetic browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: survey-only-browser-evidence
+          path: runtime-artifact/test-results/**/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+  deploy:
+    needs: verify
+    if: always() && !cancelled() && (inputs.mode == 'deploy' || inputs.mode == 'activate') && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main' && (needs.verify.result == 'success' || (inputs.mode == 'activate' && needs.verify.result == 'skipped'))
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      RUNTIME_SHA: ${{ inputs.runtime_sha }}
+      VERIFICATION_RUN: ${{ inputs.verification_run }}
+      BACKUP_SHA: ${{ inputs.backup_sha256 }}
+      RECEIPT_RUN: ${{ inputs.receipt_run }}
+      BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+      BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.runtime_sha }}
+          persist-credentials: false
+          path: runtime-artifact
+      - name: Require exact identities and no automatic deployment rerun
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$RUNTIME_SHA" =~ ^[a-f0-9]{40}$ && "$(git -C runtime-artifact rev-parse HEAD)" == "$RUNTIME_SHA" ]]
+          [[ "$BACKUP_SHA" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$RECEIPT_RUN" =~ ^[1-9][0-9]*$ && "$BACKUP_STORE_ID" =~ ^[1-9][0-9]*$ && "$BACKUP_STORE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$(git -C runtime-artifact rev-parse HEAD^{tree})" == "$(python3 -c 'import json; print(json.load(open("ops/survey-only-source-pins.json"))["runtimeTree"])')" ]]
+      - name: Reuse terminal exact hosted verification before separately approved activation
+        if: inputs.mode == 'activate'
+        run: python3 -B ops/deploy-survey-only.py --check-hosted-run
+      - name: Verify existing private backup destination without installing access
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+        run: python3 .github/backup/check_store.py
+      - name: Connect through existing approved production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Stage only the pinned runtime artifact, never current-main controls
+        if: inputs.mode == 'deploy'
+        run: |
+          set -euo pipefail
+          release_id="$(date -u +%Y%m%dT%H%M%SZ)-${RUNTIME_SHA:0:12}"
+          release_dir="/home/ubuntu/bubblewash-releases/$release_id"
+          git -C runtime-artifact archive --format=tar "$RUNTIME_SHA" > "$RUNNER_TEMP/survey-release.tar"
+          # No root archive extraction/chown into app-writable ancestors.
+          tailscale ssh root@hermes "/usr/sbin/runuser -u ubuntu -- /usr/bin/python3 -I -c \"import os,pathlib,stat; p=pathlib.Path('$release_dir'); a=p.parent; s=a.lstat(); assert a.resolve(strict=True)==a and stat.S_ISDIR(s.st_mode) and s.st_uid==os.getuid() and not s.st_mode & 0o022; p.mkdir(mode=0o750); assert p.resolve(strict=True)==p\""
+          tailscale ssh root@hermes "/usr/sbin/runuser -u ubuntu -- /bin/sh -c \"umask 077; /usr/bin/tar --no-same-owner -xf - -C '$release_dir' && test ! -e '$release_dir/.release-sha' && printf '%s\\n' '$RUNTIME_SHA' > '$release_dir/.release-sha'\"" < "$RUNNER_TEMP/survey-release.tar"
+          printf 'RELEASE_DIR=%s\n' "$release_dir" >> "$GITHUB_ENV"
+      - name: Build, prove both copied runtimes, add only survey schema, switch code with closed flags
+        if: inputs.mode == 'deploy'
+        run: |
+          set -euo pipefail
+          python3 -B ops/deploy-survey-only.py --emit > "$RUNNER_TEMP/survey-deploy.py"
+          tailscale ssh root@hermes "python3 -I -B - --candidate '$RELEASE_DIR' --sha '$RUNTIME_SHA' --expected-live '5dc997db0393e1cf88dde29859b7e1c4550ee4ee' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < "$RUNNER_TEMP/survey-deploy.py"
+      - name: Enable only survey flags after accepted marked test, with atomic configuration rollback
+        if: inputs.mode == 'activate'
+        run: |
+          set -euo pipefail
+          python3 -B ops/deploy-survey-only.py --emit > "$RUNNER_TEMP/survey-activate.py"
+          tailscale ssh root@hermes "python3 -I -B - --mode activate --sha '$RUNTIME_SHA' --expected-live '5dc997db0393e1cf88dde29859b7e1c4550ee4ee' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < "$RUNNER_TEMP/survey-activate.py"

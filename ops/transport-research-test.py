@@ -46,6 +46,36 @@ def public_program():
     return '/usr/bin/python3 -I -B -c ' + shlex.quote(code)
 
 
+def runtime_pins(env, f):
+    runtime = env.get('RUNTIME_SHA', '')
+    f.require(re.fullmatch('[a-f0-9]{40}', runtime))
+    pins = json.loads(source('ops/survey-only-source-pins.json'))
+    f.require(pins.get('schema') == 'bubblewash-survey-only/v1')
+    tree = pins.get('runtimeTree', '')
+    f.require(re.fullmatch('[a-f0-9]{40}', tree))
+    clean = {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}
+    def git(*args, limit=4 * 1024 * 1024):
+        return f.bounded(['/usr/bin/git', '-C', str(ROOT), *args], env=clean, limit=limit)
+    f.require(git('rev-parse', runtime + '^{tree}', limit=128).decode().strip() == tree)
+    files = pins.get('runtimeFiles')
+    f.require(type(files) is dict and 1 <= len(files) <= 500)
+    entries = git('ls-tree', '-r', '-z', runtime, limit=128 * 1024).split(b'\0')
+    actual = {}
+    for entry in entries:
+        if not entry: continue
+        metadata, name = entry.split(b'\t', 1)
+        mode, kind, blob = metadata.split()
+        f.require(mode in (b'100644', b'100755') and kind == b'blob')
+        name = name.decode('utf-8')
+        f.require(name not in actual)
+        actual[name] = blob.decode('ascii')
+    f.require(set(actual) == set(files))
+    for name, expected in files.items():
+        f.require(type(expected) is str and re.fullmatch('[a-f0-9]{64}', expected))
+        f.require(hashlib.sha256(git('cat-file', 'blob', actual[name])).hexdigest() == expected)
+    return runtime, files
+
+
 def request(env, owner, f, host):
     f.require(env.get('GITHUB_REPOSITORY') == 'bechirobob/bubble-wash' and env.get('GITHUB_REF') == 'refs/heads/main' and env.get('GITHUB_EVENT_NAME') == 'workflow_dispatch')
     f.require(env.get('RUNNER_DEBUG') != '1' and env.get('ACTIONS_STEP_DEBUG') != 'true')
@@ -56,11 +86,11 @@ def request(env, owner, f, host):
     f.require(f.bounded(['/usr/bin/git', '-C', str(ROOT), 'status', '--porcelain', '--untracked-files=all'], env=clean, limit=8192) == b'')
     mode = env.get('TEST_MODE', '')
     f.require(mode != 'send' or env.get('GITHUB_RUN_ATTEMPT') == '1')
-    names = [*(str(p.relative_to(ROOT)) for p in (ROOT / 'src').rglob('*') if p.is_file()), *RUNTIME_FILES]
-    value = {'ownerEmail': owner, 'reviewedSha': reviewed, 'nodePath': env.get('VERIFIED_NODE_PATH', ''),
-             'nodeSha256': env.get('VERIFIED_NODE_SHA256', ''), 'databasePath': env.get('VERIFIED_DATABASE_PATH', ''),
+    runtime, files = runtime_pins(env, f)
+    value = {'ownerEmail': owner, 'reviewedSha': reviewed, 'runtimeSha': runtime, 'nodePath': env.get('VERIFIED_NODE_PATH', ''),
+             'nodeSha256': env.get('VERIFIED_NODE_SHA256', ''),
              'mode': mode, 'deliveryApproved': env.get('DELIVERY_APPROVED') == 'true',
-             'sourcePins': {name: hashlib.sha256(source(name)).hexdigest() for name in sorted(set(names))}}
+             'sourcePins': files}
     return host.validate_request(value)
 
 

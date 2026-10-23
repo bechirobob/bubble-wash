@@ -167,7 +167,7 @@
         "src/lib/research/email.ts": "8042b1e00a89c98f2b235bbf35d1023a3c9b3399ad8099e62be17f97b1f7748b",
         "src/lib/research/model.ts": "04a5b61c324050f98fddba4095019bfe37c47ccd18c6c3e2f476b8252a90ab06",
         "src/lib/research/policy.ts": "554964e3e408dd283f005340e9a715c1b8473f9f5ec8d746c202893a22d19469",
-        "src/lib/research/provider.ts": "45811a18291abb121ce79e8dc56152ab863506d8884aaaa845dca034d5c5332f",
+        "src/lib/research/provider.ts": "995aebd96ebcad76bbfb2128ce599d4168329905259344eac92c2f67e2529c15",
         "src/lib/research/request.ts": "418d58407da1535263f42ae5e175391b0b294487a1c72e20f4314a6b6a4f265b",
         "src/lib/research/source.json": "14c2edf671c6c2f8fcb3d7ae03aac2a39a6c0902704c3b977406cedb7357986c",
         "src/lib/research/store.ts": "89d492af7193c36446c490369361fe09a9af9fb7c33463a73cd3a2f98b2013b3",

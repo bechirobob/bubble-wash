@@ -64,7 +64,7 @@ test('production, exact installed database and dedicated installed key are requi
   assert.deepEqual(await run({ ...f, mode: '--retry' }), { attempted: false, status: 'blocked' });
 });
 
-test('real helper saves first, targets fixed To and private owner CC, and never resends', async (t) => {
+test('real helper saves first, targets only the private owner, and never resends', async (t) => {
   const f = fixture(t);
   let calls = 0;
   const send = async (url, request) => {
@@ -72,12 +72,13 @@ test('real helper saves first, targets fixed To and private owner CC, and never 
     assert.equal(url, 'https://api.resend.com/emails');
     const db = new Database(f.databasePath, { readonly: true, fileMustExist: true });
     assert.equal(db.prepare('SELECT COUNT(*) n FROM research_responses').get().n, 1);
-    assert.deepEqual(db.prepare('SELECT state,attempts FROM research_notification_outbox').get(), { state: 'sending', attempts: 1 });
+    assert.deepEqual(db.prepare('SELECT state,attempts,recipient FROM research_notification_outbox').get(), { state: 'sending', attempts: 1, recipient: 'operator-test-only' });
     assert.doesNotMatch(db.prepare('SELECT payload FROM research_responses').get().payload, /synthetic-owner/);
     db.close();
     const body = JSON.parse(request.body);
-    assert.deepEqual(body.to, ['info@bubblewash.co']);
-    assert.deepEqual(body.cc, [ownerEmail]);
+    assert.deepEqual(body.to, [ownerEmail]);
+    assert.equal(Object.hasOwn(body, 'cc'), false);
+    assert.equal(Object.hasOwn(body, 'bcc'), false);
     assert.match(body.subject, /^\[TEST ONLY\]/);
     assert.match(body.text, /TEST ONLY — SYNTHETIC/);
     return Response.json({ id: 'synthetic-provider-id' });

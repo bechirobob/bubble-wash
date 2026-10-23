@@ -30,24 +30,28 @@ SHA = 'a' * 40
 
 
 def request():
-    return {'ownerEmail': OWNER, 'reviewedSha': SHA, 'nodePath': '/usr/bin/node', 'nodeSha256': 'b' * 64,
-            'databasePath': '/home/ubuntu/private/existing.sqlite', 'mode': 'check', 'deliveryApproved': False,
+    return {'ownerEmail': OWNER, 'reviewedSha': SHA, 'runtimeSha': 'e' * 40, 'nodePath': '/usr/bin/node', 'nodeSha256': 'b' * 64,
+            'mode': 'check', 'deliveryApproved': False,
             'sourcePins': {name: 'c' * 64 for name in [*t.RUNTIME_FILES, 'src/lib/research/provider.ts', 'src/lib/data-store.ts']}}
 
 
 def environment():
     return {'GITHUB_REPOSITORY': 'bechirobob/bubble-wash', 'GITHUB_REF': 'refs/heads/main', 'GITHUB_EVENT_NAME': 'workflow_dispatch',
-            'GITHUB_SHA': SHA, 'REVIEWED_SHA': SHA, 'GITHUB_RUN_ATTEMPT': '1', 'TEST_MODE': 'check', 'DELIVERY_APPROVED': 'false',
+            'GITHUB_SHA': SHA, 'REVIEWED_SHA': SHA, 'RUNTIME_SHA': 'e' * 40, 'GITHUB_RUN_ATTEMPT': '1', 'TEST_MODE': 'check', 'DELIVERY_APPROVED': 'false',
             'VERIFIED_NODE_PATH': '/usr/bin/node', 'VERIFIED_NODE_SHA256': 'b' * 64,
-            'VERIFIED_DATABASE_PATH': '/home/ubuntu/private/existing.sqlite', 'HOME': '/home/runner',
+            'HOME': '/home/runner',
             'BUBBLEWASH_OWNER_EMAIL': OWNER, 'GH_TOKEN': 'SYNTHETIC_NOT_FOR_SSH'}
 
 
 class Protocol(unittest.TestCase):
+    def setUp(self):
+        mock = patch.object(t, 'runtime_pins', return_value=('e' * 40, request()['sourcePins']))
+        mock.start(); self.addCleanup(mock.stop)
+
     def test_rejects_missing_extra_unsafe_or_unapproved_fields(self):
         h.validate_request(request())
         for edit in [{'extra': True}, {'ownerEmail': OWNER + ',other@example.invalid'}, {'nodePath': '/usr/../bin/node'},
-                     {'databasePath': 'relative.sqlite'}, {'mode': 'send'}, {'reviewedSha': 'main'}, {'nodeSha256': ''}, {'sourcePins': {}}]:
+                     {'databasePath': 'relative.sqlite'}, {'mode': 'send'}, {'reviewedSha': 'main'}, {'runtimeSha': 'main'}, {'nodeSha256': ''}, {'sourcePins': {}}]:
             with self.subTest(edit=edit), self.assertRaises((ValueError, TypeError)):
                 h.validate_request({**request(), **edit})
         with self.assertRaises(ValueError): h.validate_request({'ownerEmail': OWNER})
@@ -115,6 +119,38 @@ class Protocol(unittest.TestCase):
             self.assertEqual(len(calls), 1); self.assertEqual(json.loads(output.getvalue()), expected)
 
 
+class RuntimeArtifact(unittest.TestCase):
+    def test_exact_full_git_tree_and_hashes_not_current_main_source(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.check_output(['/usr/bin/git', '-C', str(root), *args], stderr=subprocess.DEVNULL)
+            git('init', '-q')
+            (root / 'runtime.txt').write_text('reviewed runtime only')
+            git('add', 'runtime.txt')
+            git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture')
+            sha = git('rev-parse', 'HEAD').decode().strip()
+            pins = {'schema': 'bubblewash-survey-only/v1', 'runtimeTree': git('rev-parse', 'HEAD^{tree}').decode().strip(),
+                    'runtimeFiles': {'runtime.txt': hashlib.sha256((root / 'runtime.txt').read_bytes()).hexdigest()}}
+            def bounded(argv, **kwargs):
+                self.assertEqual(kwargs['env'], {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'})
+                raw = subprocess.check_output(argv, env=kwargs['env'], stderr=subprocess.DEVNULL)
+                self.assertLessEqual(len(raw), kwargs['limit']); return raw
+            facts = SimpleNamespace(require=f.require, bounded=bounded)
+            with patch.object(t, 'ROOT', root), patch.object(t, 'source', side_effect=lambda _: json.dumps(pins).encode()):
+                self.assertEqual(t.runtime_pins({'RUNTIME_SHA': sha}, facts), (sha, pins['runtimeFiles']))
+                for edit in ['hash', 'missing', 'extra', 'tree', 'sha']:
+                    original = json.loads(json.dumps(pins)); value = sha
+                    if edit == 'hash': pins['runtimeFiles']['runtime.txt'] = '0' * 64
+                    if edit == 'missing': pins['runtimeFiles'] = {}
+                    if edit == 'extra': pins['runtimeFiles']['unreviewed.txt'] = 'a' * 64
+                    if edit == 'tree': pins['runtimeTree'] = 'a' * 40
+                    if edit == 'sha': value = 'main'
+                    with self.subTest(edit=edit), self.assertRaises(ValueError): t.runtime_pins({'RUNTIME_SHA': value}, facts)
+                    pins.clear(); pins.update(original)
+
+
 class Host(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
@@ -122,11 +158,12 @@ class Host(unittest.TestCase):
         (self.runtime / 'deploy.lock').touch(mode=0o600)
         self.release = self.root / 'release'; self.release.mkdir()
         self.current = self.root / 'current'; self.current.symlink_to(self.release, target_is_directory=True)
-        self.env = self.root / 'env'; self.db = self.root / 'existing.sqlite'; self.db.touch(mode=0o600)
-        self.marker = self.runtime / 'current-release'; self.marker.write_text(f'sha={SHA}\npath={self.release}\n')
+        self.config = self.root / 'config'; self.config.mkdir(mode=0o700)
+        self.env = self.config / 'env'; self.db = self.root / 'existing.sqlite'; self.db.touch(mode=0o600)
+        self.marker = self.runtime / 'current-release'; self.marker.write_text(f'sha={"e" * 40}\npath={self.release}\n')
         self.env.write_text(f'BUBBLEWASH_DATABASE_DRIVER=sqlite\nBUBBLEWASH_DATABASE_PATH={self.db}\nBUBBLEWASH_RESEARCH_RESEND_KEY={KEY}\nNODE_OPTIONS=untrusted\n')
         self.env.chmod(0o600)
-        self.value = {**request(), 'databasePath': str(self.db)}
+        self.value = request()
         self.calls = []
         def bounded(argv, data=None, **kwargs):
             if '--version' in argv: return b'v22.23.3\n'
@@ -158,13 +195,21 @@ class Host(unittest.TestCase):
             old = self.env.read_bytes(); old_marker = self.marker.read_bytes()
             edit(); self.assertEqual(self.operation(), {'attempted': False, 'status': 'blocked'}); self.assertFalse(self.calls)
             self.env.write_bytes(old); self.env.chmod(0o600); self.marker.write_bytes(old_marker); self.db.touch(mode=0o600)
-        self.value['databasePath'] = str(self.root / 'different.sqlite')
+        self.env.write_text(self.env.read_text().replace(str(self.db), 'relative.sqlite'))
         self.assertEqual(self.operation(), {'attempted': False, 'status': 'blocked'})
 
-    def test_env_metadata_failure_is_hard_stop_without_content_read(self):
-        self.facts.installer_metadata = lambda *_: ({'environmentMetadataSafe': False}, set())
-        with patch.object(h, 'retained_environment') as opened, self.assertRaises(ValueError): self.operation()
-        opened.assert_not_called(); self.assertFalse(self.calls)
+    def test_parent_guard_failure_is_hard_stop_without_content_read(self):
+        self.config.chmod(0o777)
+        with patch.object(h.os, 'read') as read:
+            self.assertEqual(self.operation(), {'attempted': False, 'status': 'blocked'})
+        read.assert_not_called(); self.assertFalse(self.calls)
+
+    def test_collector_aggregate_is_not_used_and_parent_drift_refuses(self):
+        self.facts.installer_metadata = lambda *_: (_ for _ in ()).throw(AssertionError('not authority'))
+        self.assertEqual(self.operation(), {'attempted': False, 'status': 'ready'})
+        with h.retained_environment(self.facts, i, os.getuid(), os.getgid()) as (_, unchanged):
+            self.config.chmod(0o755)
+            with self.assertRaises(ValueError): unchanged()
 
     def test_symlink_hardlink_and_unsafe_sidecar_refused(self):
         real = self.root / 'real-env'; self.env.rename(real); self.env.symlink_to(real)
@@ -218,6 +263,10 @@ class Workflow(unittest.TestCase):
                       'tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8',
                       'BUBBLEWASH_OWNER_EMAIL: ${{ secrets.BUBBLEWASH_OWNER_EMAIL }}']:
             self.assertIn(value, text)
+        self.assertIn('protected owner recipient only; no CC or BCC', text)
+        self.assertNotIn('info@bubblewash.co', text)
+        self.assertNotIn('database_path', text)
+        self.assertNotIn('VERIFIED_DATABASE_PATH', text)
         self.assertNotIn('secrets.BUBBLEWASH_RESEARCH_RESEND_KEY', text)
         self.assertNotIn('upload-artifact', text)
         self.assertNotIn(OWNER, text)
@@ -231,6 +280,7 @@ class RuntimeBinding(unittest.TestCase):
             for pid in (41, 42):
                 folder = proc / str(pid); folder.mkdir(); (folder / 'cwd').symlink_to(release, target_is_directory=True)
                 (folder / 'cgroup').write_text('0::/application')
+                (folder / 'environ').write_bytes(b'BUBBLEWASH_DATABASE_PATH=/private/test.sqlite\0IGNORED=synthetic-secret\0')
             (proc / '42' / 'exe').symlink_to(node)
             original_path = Path
             def paths(value):
@@ -242,13 +292,16 @@ class RuntimeBinding(unittest.TestCase):
             facts = SimpleNamespace(require=f.require, trusted_executable=lambda x:x, bounded=bounded)
             proof = SimpleNamespace(parse_env=p.parse_env, process_identity=lambda pid:(pid, 123), bounded_bytes=lambda path, limit: path.read_bytes(), runtime_flags=lambda pid:{'NODE_ENV':'production'})
             with patch.object(h, 'Path', side_effect=paths):
-                h.verify_runtime(facts, proof, release, str(node), os.getuid())
+                h.verify_runtime(facts, proof, release, str(node), os.getuid(), Path('/private/test.sqlite'))
                 (proc / '42' / 'cgroup').write_text('0::/another-service')
-                with self.assertRaises(ValueError): h.verify_runtime(facts, proof, release, str(node), os.getuid())
+                with self.assertRaises(ValueError): h.verify_runtime(facts, proof, release, str(node), os.getuid(), Path('/private/test.sqlite'))
                 (proc / '42' / 'cgroup').write_text('0::/application')
-                with self.assertRaises(ValueError): h.verify_runtime(facts, proof, release, str(root / 'different-node'), os.getuid())
+                with self.assertRaises(ValueError): h.verify_runtime(facts, proof, release, str(root / 'different-node'), os.getuid(), Path('/private/test.sqlite'))
+                for raw in (b'', b'BUBBLEWASH_DATABASE_PATH=/wrong\0', b'BUBBLEWASH_DATABASE_PATH=/private/test.sqlite\0BUBBLEWASH_DATABASE_PATH=/private/test.sqlite\0'):
+                    (proc / '42' / 'environ').write_bytes(raw)
+                    with self.assertRaises(ValueError): h.verify_runtime(facts, proof, release, str(node), os.getuid(), Path('/private/test.sqlite'))
                 facts.bounded = lambda argv, **kwargs: unit if argv[0] == '/usr/bin/systemctl' else b'pid=42 pid=43'
-                with self.assertRaises(ValueError): h.verify_runtime(facts, proof, release, str(node), os.getuid())
+                with self.assertRaises(ValueError): h.verify_runtime(facts, proof, release, str(node), os.getuid(), Path('/private/test.sqlite'))
 
 
 
