@@ -1,0 +1,35 @@
+{
+  "schema": "bubblewash-integration-host-plan/v1",
+  "oldSha": "5dc997db0393e1cf88dde29859b7e1c4550ee4ee",
+  "old": null,
+  "candidate": null,
+  "fallback": null,
+  "current": "/home/ubuntu/bubblewash-pilot",
+  "marker": "/home/ubuntu/bubblewash-runtime/current-release",
+  "state": "/var/lib/bubblewash-release",
+  "database": null,
+  "snapshot": null,
+  "releaseShas": {"candidate": null, "fallback": null},
+  "ownerEvidencePath": null,
+  "node": {"path": null, "sha256": null},
+  "guards": {
+    "envSha256": null,
+    "receiptSha256": null,
+    "database": null,
+    "receiptRun": null,
+    "storeSha": null,
+    "storeId": null,
+    "archiveSha256": null
+  },
+  "hostAcceptance": {
+    "inventoryPaths": [],
+    "launcherAliases": [],
+    "exclusionReceipt": null,
+    "exclusionReceiptSha256": null
+  },
+  "units": {
+    "system/bubblewash-maintenance.timer": null,
+    "system/bubblewash-maintenance.service": null,
+    "user/bubblewash-local.service": null
+  }
+}

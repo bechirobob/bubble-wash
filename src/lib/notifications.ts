@@ -1,14 +1,18 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   enqueueNotification,
   readSubmissionRecordsForOrder,
-  readDueNotifications,
+  beginNotificationAttempt,
+  claimNotification,
+  readNotification,
+  notificationOutboxMetrics,
   updateNotificationDelivery,
   type NotificationOutboxRecord,
 } from "@/lib/data-store";
 import { buildOrderSummaries, type SubmissionRecord } from "@/lib/submissions";
+import { commercialNotificationsEnabled, NOTIFICATION_REQUEST_TIMEOUT_MS, notificationRetryDelay, type NotificationDeliveryState } from "./notification-policy.ts";
 
 export type NotificationChannel = "email" | "whatsapp";
 
@@ -28,7 +32,14 @@ export type NotificationMessage = {
 export type NotificationResult = {
   channel: NotificationChannel;
   target: NotificationTarget;
+  /** Compatibility alias for provider acceptance, never proof of delivery. */
   sent: boolean;
+  status?: NotificationDeliveryState;
+  accepted?: boolean;
+  delivered?: boolean;
+  manualFollowUp?: boolean;
+  exhausted?: boolean;
+  outboxId?: string;
   providerId?: string;
   skipped?: string;
   error?: string;
@@ -69,85 +80,123 @@ function alertAllows(channel: NotificationChannel, preference: string) {
   return normalized.includes(channel) || normalized.includes("email + whatsapp") || normalized.includes("both");
 }
 
-async function sendEmail(message: NotificationMessage): Promise<NotificationResult> {
-  const apiKey = envText("RESEND_API_KEY");
-  const from = envText("BUBBLEWASH_EMAIL_FROM") || "Bubble Wash <updates@bubblewash.co>";
-  const to = message.toEmail;
-  if (!to) return { channel: "email", target: message.target, sent: false, skipped: "No email address available." };
-  if (!apiKey) return { channel: "email", target: message.target, sent: false, skipped: "RESEND_API_KEY is not configured." };
+type PreparedRequest = {
+  url: string;
+  body: string;
+  credential: string;
+  accountHash: string;
+  snapshot: string;
+  idempotencyKey: string;
+};
 
-  try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from,
-        to: [to],
-        subject: message.subject,
-        text: message.text,
-        html: message.html ?? `<p>${htmlEscape(message.text).replaceAll("\n", "<br />")}</p>`,
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    const data = (await response.json().catch(() => ({}))) as { id?: string; message?: string; error?: string };
-    if (!response.ok) {
-      return { channel: "email", target: message.target, sent: false, error: data.message || data.error || "Resend email request failed." };
-    }
-    return { channel: "email", target: message.target, sent: true, providerId: data.id };
-  } catch (error) {
-    return { channel: "email", target: message.target, sent: false, error: error instanceof Error ? error.message : "Email send failed." };
-  }
+type ProviderOutcome = {
+  status: "accepted" | "failed" | "uncertain" | "manual_review";
+  providerId?: string;
+  error?: string;
+};
+
+function hash(value: string) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
-async function sendWhatsApp(message: NotificationMessage): Promise<NotificationResult> {
-  const accessToken = envText("WHATSAPP_ACCESS_TOKEN");
-  const phoneNumberId = envText("WHATSAPP_PHONE_NUMBER_ID");
-  const apiVersion = envText("WHATSAPP_API_VERSION");
-  const templateName = message.purpose === "early_access"
-    ? envText("WHATSAPP_EARLY_ACCESS_TEMPLATE")
-    : message.purpose === "booking"
-      ? envText("WHATSAPP_BOOKING_TEMPLATE")
-      : message.purpose === "privacy"
-        ? envText("WHATSAPP_PRIVACY_TEMPLATE")
-        : envText("WHATSAPP_OPERATIONS_TEMPLATE");
-  const to = normalizeGhanaPhone(message.toWhatsApp ?? "");
-  if (!to) return { channel: "whatsapp", target: message.target, sent: false, skipped: "No WhatsApp number available." };
-  if (!accessToken || !phoneNumberId || !apiVersion) return { channel: "whatsapp", target: message.target, sent: false, error: "WhatsApp Cloud API credentials are not configured." };
-  if (!templateName) return { channel: "whatsapp", target: message.target, sent: false, error: "The approved WhatsApp template is not configured." };
-
-  try {
-    const response = await fetch(`https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to,
-        type: "template",
-        template: {
-          name: templateName,
-          language: { code: "en" },
-          components: message.whatsappTemplateParameters?.length ? [{
-            type: "body",
-            parameters: message.whatsappTemplateParameters.map((parameter) => ({ type: "text", text: parameter.slice(0, 1024) })),
-          }] : undefined,
-        },
-      }),
-      signal: AbortSignal.timeout(10_000),
+// Persist the exact body and destination once. A config/template/from-address
+// change must not alter a retry carrying an already-used idempotency key.
+function prepareRequest(record: NotificationOutboxRecord): PreparedRequest | { blocked: string } {
+  const message = messageFromOutbox(record);
+  let url: string;
+  let body: string;
+  let credential: string;
+  let account: string;
+  if (record.channel === "email") {
+    if (!message.toEmail) return { blocked: "No email address available." };
+    credential = envText("RESEND_API_KEY");
+    if (!credential) return { blocked: "RESEND_API_KEY is not configured." };
+    account = credential;
+    url = "https://api.resend.com/emails";
+    body = JSON.stringify({
+      from: envText("BUBBLEWASH_EMAIL_FROM") || "Bubble Wash <updates@bubblewash.co>",
+      to: [message.toEmail], subject: message.subject, text: message.text,
+      html: message.html || `<p>${htmlEscape(message.text).replaceAll("\n", "<br />")}</p>`,
     });
-    const data = (await response.json().catch(() => ({}))) as { messages?: Array<{ id?: string }>; error?: { message?: string } };
-    if (!response.ok) {
-      return { channel: "whatsapp", target: message.target, sent: false, error: data.error?.message || "WhatsApp message request failed." };
+  } else {
+    const to = normalizeGhanaPhone(message.toWhatsApp ?? "");
+    if (!to) return { blocked: "No WhatsApp number available." };
+    credential = envText("WHATSAPP_ACCESS_TOKEN");
+    const phoneNumberId = envText("WHATSAPP_PHONE_NUMBER_ID");
+    const apiVersion = envText("WHATSAPP_API_VERSION");
+    if (!credential || !phoneNumberId || !apiVersion) return { blocked: "WhatsApp Cloud API credentials are not configured." };
+    account = `${credential}:${phoneNumberId}`;
+    url = `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`;
+    const templateName = envText(message.purpose === "early_access" ? "WHATSAPP_EARLY_ACCESS_TEMPLATE"
+      : message.purpose === "booking" ? "WHATSAPP_BOOKING_TEMPLATE"
+        : message.purpose === "privacy" ? "WHATSAPP_PRIVACY_TEMPLATE" : "WHATSAPP_OPERATIONS_TEMPLATE");
+    if (!record.providerRequest && !templateName) return { blocked: "The approved WhatsApp template is not configured." };
+    body = JSON.stringify({
+      messaging_product: "whatsapp", recipient_type: "individual", to, type: "template",
+      template: {
+        name: templateName, language: { code: "en" },
+        components: message.whatsappTemplateParameters?.length ? [{
+          type: "body", parameters: message.whatsappTemplateParameters.map((parameter) => ({ type: "text", text: parameter.slice(0, 1024) })),
+        }] : undefined,
+      },
+    });
+  }
+  const accountHash = hash(account);
+  if (record.providerAccountHash && record.providerAccountHash !== accountHash) {
+    return { blocked: "Provider account credentials changed after an attempt. Verify the original provider outcome before any resend." };
+  }
+  if (record.providerRequest) {
+    try {
+      const saved = JSON.parse(record.providerRequest) as { url?: string; body?: string };
+      if (typeof saved.url !== "string" || typeof saved.body !== "string") throw new Error("Invalid snapshot");
+      // Provider destinations are generated by us, not accepted from form data.
+      if (record.channel === "email" ? saved.url !== "https://api.resend.com/emails"
+        : !/^https:\/\/graph\.facebook\.com\/[^/]+\/[^/]+\/messages$/.test(saved.url)) throw new Error("Invalid provider");
+      url = saved.url;
+      body = saved.body;
+    } catch {
+      return { blocked: "Saved provider request is invalid. Manual review is required." };
     }
-    return { channel: "whatsapp", target: message.target, sent: true, providerId: data.messages?.[0]?.id };
-  } catch (error) {
-    return { channel: "whatsapp", target: message.target, sent: false, error: error instanceof Error ? error.message : "WhatsApp send failed." };
+  }
+  const snapshot = record.providerRequest || JSON.stringify({ url, body });
+  const idempotencyKey = record.channel === "email"
+    ? record.providerIdempotencyKey || `bubblewash/${hash(`${record.id}:${snapshot}`)}` : "";
+  return { url, body, credential, accountHash, snapshot, idempotencyKey };
+}
+
+async function sendPreparedRequest(channel: NotificationChannel, request: PreparedRequest): Promise<ProviderOutcome> {
+  try {
+    const response = await fetch(request.url, {
+      method: "POST", redirect: "error",
+      headers: {
+        Authorization: `Bearer ${request.credential}`, "Content-Type": "application/json",
+        ...(request.idempotencyKey ? { "Idempotency-Key": request.idempotencyKey } : {}),
+      },
+      body: request.body,
+      signal: AbortSignal.timeout(NOTIFICATION_REQUEST_TIMEOUT_MS),
+    });
+    const data = await response.json().catch(() => null) as {
+      id?: string; name?: string; message?: string;
+      messages?: Array<{ id?: string }>; error?: { message?: string } | string;
+    } | null;
+    if (response.ok) {
+      const providerId = channel === "email" ? data?.id : data?.messages?.[0]?.id;
+      if (typeof providerId === "string" && providerId.trim()) return { status: "accepted", providerId };
+      return { status: "uncertain", error: "Provider returned success without a message ID. Acceptance is uncertain; delivery is not confirmed." };
+    }
+    const error = text(data?.message)
+      || text(typeof data?.error === "string" ? data.error : data?.error?.message)
+      || `Provider rejected the request (HTTP ${response.status}).`;
+    // A timeout/server failure can happen after acceptance. WhatsApp has no
+    // provider dedupe in this integration, so these must never be blind retries.
+    if (response.status === 408 || response.status >= 500) return { status: "uncertain", error };
+    if (response.status === 429 || (channel === "email" && response.status === 409 && data?.name === "concurrent_idempotent_requests")) {
+      return { status: "failed", error };
+    }
+    return { status: "manual_review", error };
+  } catch {
+    // Do not persist thrown provider/client text, which may contain credentials.
+    return { status: "uncertain", error: "Provider connection timed out or failed. The request may have been accepted; delivery is not confirmed." };
   }
 }
 
@@ -181,39 +230,67 @@ function messageFromOutbox(record: NotificationOutboxRecord): NotificationMessag
   };
 }
 
+function resultFromOutbox(record: NotificationOutboxRecord): NotificationResult {
+  const accepted = record.deliveryState === "accepted" || record.deliveryState === "delivered";
+  return {
+    channel: record.channel, target: record.target, outboxId: record.id,
+    status: record.deliveryState, sent: accepted, accepted,
+    delivered: record.deliveryState === "delivered", providerId: record.providerId || undefined,
+    queued: ["queued", "retrying", "processing"].includes(record.deliveryState),
+    skipped: record.deliveryState === "skipped" ? record.lastError : undefined,
+    error: ["retrying", "exhausted", "manual_review"].includes(record.deliveryState) ? record.lastError : undefined,
+    manualFollowUp: ["skipped", "exhausted", "manual_review"].includes(record.deliveryState),
+    exhausted: record.deliveryState === "exhausted",
+  };
+}
+
 async function deliverOutboxRecord(record: NotificationOutboxRecord): Promise<NotificationResult> {
-  const message = messageFromOutbox(record);
-  const result = record.channel === "email" ? await sendEmail(message) : await sendWhatsApp(message);
-  if (result.sent) {
-    updateNotificationDelivery({ id: record.id, status: "sent", providerId: result.providerId });
-    return result;
+  const prepared = prepareRequest(record);
+  if ("blocked" in prepared) {
+    updateNotificationDelivery({ id: record.id, leaseToken: record.leaseToken,
+      status: record.attempts ? "manual_review" : "skipped", error: prepared.blocked });
+    return resultFromOutbox(readNotification(record.id) ?? record);
   }
-  if (result.skipped) {
-    updateNotificationDelivery({ id: record.id, status: "skipped", error: result.skipped });
-    return result;
+  const attempt = beginNotificationAttempt({ id: record.id, leaseToken: record.leaseToken,
+    providerRequest: prepared.snapshot, idempotencyKey: prepared.idempotencyKey, accountHash: prepared.accountHash });
+  if (!attempt) {
+    updateNotificationDelivery({ id: record.id, leaseToken: record.leaseToken, status: "manual_review",
+      error: "The request lease, retry limit, or deduplication evidence changed before sending. No new provider request was made." });
+    return resultFromOutbox(readNotification(record.id) ?? record);
   }
-  const retryAfterMs = Math.min(24 * 60 * 60_000, 60_000 * (2 ** Math.min(record.attempts, 10)));
-  updateNotificationDelivery({ id: record.id, status: "failed", error: result.error ?? "Provider delivery failed.", retryAfterMs });
-  return result;
+  const result = await sendPreparedRequest(record.channel, prepared);
+  updateNotificationDelivery({ id: record.id, leaseToken: record.leaseToken, ...result, retryAfterMs: notificationRetryDelay(attempt.attempts) });
+  return resultFromOutbox(readNotification(record.id) ?? attempt);
 }
 
 async function enqueueAndDeliver(dedupeKey: string, channel: NotificationChannel, message: NotificationMessage) {
   const queued = enqueueNotification({
     id: `NQ-${randomUUID().replaceAll("-", "").slice(0, 20).toUpperCase()}`,
-    dedupeKey,
-    channel,
-    target: message.target,
-    payload: messagePayload(message),
+    dedupeKey, channel, target: message.target, payload: messagePayload(message),
   });
-  if (queued.status === "sent") return { channel, target: message.target, sent: true, providerId: queued.providerId } satisfies NotificationResult;
-  return deliverOutboxRecord(queued);
+  const claimed = claimNotification({ id: queued.id });
+  return claimed ? deliverOutboxRecord(claimed) : resultFromOutbox(readNotification(queued.id) ?? queued);
 }
 
 export async function processNotificationOutbox(limit = 20) {
-  const records = readDueNotifications(Math.max(1, Math.min(limit, 100)));
+  const maximum = Number.isFinite(limit) ? Math.max(1, Math.min(Math.floor(limit), 100)) : 20;
   const results: NotificationResult[] = [];
-  for (const record of records) results.push(await deliverOutboxRecord(record));
+  for (let index = 0; index < maximum; index += 1) {
+    const record = claimNotification();
+    if (!record) break;
+    results.push(await deliverOutboxRecord(record));
+  }
   return results;
+}
+
+export function notificationOutboxSummary() {
+  const metrics = notificationOutboxMetrics();
+  return {
+    queued: metrics.queued, retrying: metrics.retrying, processing: metrics.processing,
+    accepted: metrics.accepted, delivered: metrics.delivered,
+    skipped: metrics.skipped, exhausted: metrics.exhausted, manualReview: metrics.manualReview,
+    manualFollowUp: metrics.skipped + metrics.exhausted + metrics.manualReview,
+  };
 }
 
 function customerBookingMessage(record: SubmissionRecord): NotificationMessage {
@@ -289,7 +366,7 @@ export async function dispatchPrivacyRequestConfirmation(input: {
 }
 
 export function queueSubmissionNotifications(record: SubmissionRecord): NotificationResult[] {
-  if (process.env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED !== "true") return [{ channel: "email", target: "operations", sent: false, skipped: "Manual customer follow-up is required during the pilot." }];
+  if (!commercialNotificationsEnabled()) return [{ channel: "email", target: "operations", sent: false, status: "skipped", manualFollowUp: true, skipped: "Manual customer follow-up is required during the pilot." }];
   const type = text(record.data.submissionType);
   const orderRecords = text(record.data.orderId) ? readSubmissionRecordsForOrder(text(record.data.orderId)) : [];
   const seed = orderRecords.find((item) => text(item.data.submissionType) === "pickup-booking");
@@ -304,7 +381,7 @@ export function queueSubmissionNotifications(record: SubmissionRecord): Notifica
   for (const message of messages) for (const channel of ["email", "whatsapp"] as const) {
     if (message.target === "customer" && !alertAllows(channel, preference)) continue;
     const queued = enqueueNotification({ id: `NQ-${randomUUID()}`, dedupeKey: `${record.id}:${message.target}:${channel}`, channel, target: message.target, payload: messagePayload(message) });
-    results.push({ channel, target: message.target, sent: queued.status === "sent", queued: queued.status === "pending" || queued.status === "failed" });
+    results.push(resultFromOutbox(queued));
   }
   return results;
 }
@@ -313,13 +390,21 @@ export async function dispatchSubmissionNotifications(record: SubmissionRecord) 
 }
 
 export function notificationSummary(results: NotificationResult[]) {
-  if (results.some((result) => result.queued)) return "Updates are queued for delivery.";
-  const sent = results.filter((result) => result.sent).length;
-  const skipped = results.filter((result) => result.skipped).length;
-  const failed = results.filter((result) => result.error).length;
-  if (sent) return `${sent} notification${sent === 1 ? "" : "s"} sent${failed ? `, ${failed} failed` : ""}.`;
   if (results.some((result) => result.skipped?.includes("Manual customer follow-up"))) return "Saved. Manual customer follow-up is required.";
-  if (skipped && !failed) return "Automated updates are enabled but provider credentials are incomplete.";
-  if (failed) return `${failed} notification${failed === 1 ? "" : "s"} failed. Check provider configuration.`;
-  return "No notifications were required.";
+  const delivered = results.filter((result) => result.delivered).length;
+  const accepted = results.filter((result) => (result.accepted || result.sent) && !result.delivered).length;
+  const queued = results.filter((result) => result.queued).length;
+  const skipped = results.filter((result) => result.skipped).length;
+  const exhausted = results.filter((result) => result.exhausted).length;
+  const review = results.filter((result) => result.manualFollowUp && !result.skipped && !result.exhausted).length;
+  const failed = results.filter((result) => result.error && !result.queued && !result.manualFollowUp).length;
+  const parts: string[] = [];
+  if (delivered) parts.push(`${delivered} confirmed delivered`);
+  if (accepted) parts.push(`${accepted} accepted by the provider (delivery not confirmed)`);
+  if (queued) parts.push(`${queued} queued for delivery${results.some((result) => result.status === "retrying") ? " or safe retry" : ""}`);
+  if (skipped) parts.push(`${skipped} skipped; manual follow-up required`);
+  if (exhausted) parts.push(`${exhausted} exhausted retries; manual follow-up required`);
+  if (review) parts.push(`${review} require manual review before any resend`);
+  if (failed) parts.push(`${failed} failed; check provider configuration`);
+  return parts.length ? `Notifications: ${parts.join("; ")}.` : "No notifications were required.";
 }
