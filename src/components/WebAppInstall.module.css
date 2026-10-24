@@ -12,7 +12,7 @@
 .instructions li + li { margin-top: 5px; }
 .install { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 44px; padding: 10px 16px; border: 1px solid var(--brand); border-radius: var(--radius-sm); color: #fff; background: var(--brand); box-shadow: none; }
 .install:hover:not(:disabled) { background: var(--brand-dark); }
-.install:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+.install:focus-visible { outline-offset: 3px; }
 .instructions .status:not(:empty) { margin-top: 12px; }
 .instructions .note { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); }
 .back { display: inline-flex; align-items: center; min-height: 44px; margin-top: 18px; }

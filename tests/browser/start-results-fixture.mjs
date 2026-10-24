@@ -11,6 +11,8 @@ const platform = Object.fromEntries(['PATH','HOME','TMPDIR','TEMP','TMP','SYSTEM
 for (const key of Object.keys(process.env)) delete process.env[key];
 const directory = mkdtempSync(join(tmpdir(), 'bubblewash-results-synthetic-'));
 Object.assign(process.env, platform, { NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1', BUBBLEWASH_DATABASE_PATH: join(directory, 'synthetic.sqlite'), BUBBLEWASH_SESSION_SECRET: 'synthetic-results-session-secret-never-production', BUBBLEWASH_MFA_ENCRYPTION_KEY: Buffer.alloc(32, 19).toString('base64'), BUBBLEWASH_STAFF_AUTH_DISABLED: 'false', BUBBLEWASH_DISABLE_DEMO_LOGIN: 'true', BUBBLEWASH_ADMIN_MFA_REQUIRED: 'false', NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED: 'false', BUBBLEWASH_PUBLIC_URL: 'http://localhost:3217', BUBBLEWASH_TRUST_PROXY_HEADERS: 'true' });
+// Open questionnaires only in this temporary, egress-blocked synthetic fixture.
+Object.assign(process.env, { BUBBLEWASH_RESEARCH_OPEN: 'true', BUBBLEWASH_RESEARCH_EMAIL_ENABLED: 'true', BUBBLEWASH_RESEARCH_RESEND_KEY: 'synthetic-egress-blocked-key' });
 const { createPasswordHash } = await import('../../src/lib/passwords.ts');
 process.env.BUBBLEWASH_ADMIN_EMAIL = 'master@example.invalid';
 process.env.BUBBLEWASH_ADMIN_PASSWORD_HASH = createPasswordHash('synthetic-master-results-password');

@@ -25,10 +25,12 @@ test('survey tables preserve the owner-baseline schema and existing records',asy
 });
 
 // Survey-only deployment must not inherit tinted or absent tokens from the older home page.
-test('survey and intro define their accepted neutral borders and accessible focus locally',()=>{
+test('survey and intro define neutral tokens and inherit the shared accessible focus policy',()=>{
  for(const [name,scope] of [['research/research.module.css','.shell'],['BubbleWashOpening.module.css','.opening']]){
   const css=readFileSync(new URL('../src/components/'+name,import.meta.url),'utf8');
   assert.ok(css.startsWith(scope+' { --line:#dedede; --line-strong:#858585; --line-active:#333333; --focus-ring:#222222; }'));
-  assert.match(css,/:focus-visible/);assert.match(css,/var\(--focus-ring\)/);
+  assert.match(css,/:focus-visible/);
+  const shared=readFileSync(new URL('../src/app/globals.css',import.meta.url),'utf8');
+  assert.match(shared,/:focus-visible[^{}]*\{[^}]*outline: 3px solid var\(--focus-ring\)/);
  }
 });

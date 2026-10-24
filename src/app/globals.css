@@ -81,9 +81,20 @@ input, select, textarea {
   min-height: 44px;
 }
 textarea { min-height: 120px; resize: vertical; }
-input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible, summary:focus-visible {
+:focus-visible, html[data-input-modality="keyboard"] :focus, input:focus, select:focus, textarea:focus, [contenteditable]:not([contenteditable="false"]):focus {
   outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
+}
+/* Shared input policy, not a viewport rule: touch/mouse and their programmatic
+   focus transfers do not draw navigation rings. Editing controls keep their cue.
+   Unknown/assistive and keyboard input retain native focus-visible behavior.
+   Important is limited to this presentation contract, so route CSS cannot
+   accidentally restore pointer rings. Never blur or remove tabindex to hide one. */
+@media (forced-colors: none) {
+html[data-input-modality="pointer"] :focus:not(:is(
+  input:not([type="button"], [type="submit"], [type="reset"], [type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]),
+  select, textarea, [contenteditable]:not([contenteditable="false"])
+)) { outline: none !important; }
 }
 h1, h2, h3, h4, p { margin-top: 0; }
 h1, h2, h3, h4 { color: var(--ink-strong); letter-spacing: -.03em; font-weight: 700; }
@@ -1661,7 +1672,7 @@ input, select, textarea { font-size: 1rem; }
 .planChoices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .planChoice { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 16px 0; border-block: 2px solid transparent; border-top-color: var(--line-strong); cursor: pointer; }
 .planChoice:has(input:checked) { border-bottom-color: var(--brand); }
-.planChoice:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 4px; }
+html:not([data-input-modality="pointer"]) .planChoice:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
 .planChoiceName { display: flex; align-items: baseline; gap: 8px; color: var(--ink-strong); line-height: 1.35; }
 .planChoiceName input { flex: 0 0 auto; width: 16px; height: 16px; min-height: 16px; padding: 0; margin: 0; accent-color: var(--brand); }
 .planChoiceSchedule { font-size: .85rem; color: var(--muted); }
