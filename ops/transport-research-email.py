@@ -17,9 +17,11 @@ def main():
         raise ValueError('invalid dedicated credential')
     if os.environ.get('RUNNER_DEBUG') == '1' or os.environ.get('ACTIONS_STEP_DEBUG') == 'true':
         raise ValueError('debug must be disabled')
+    repair = os.environ.pop('REPAIR_CONFIG_PARENT', 'false')
+    if repair not in ('true', 'false'): raise ValueError('repair option refused')
     source = Path('ops/install-research-email.py').read_bytes()
     # Public reviewed program only in argv. The key is absent from child env/argv.
-    program = "import base64;exec(compile(base64.b64decode(" + repr(base64.b64encode(source)) + "),'<survey-installer>','exec'))"
+    program = "import base64,types;i=types.ModuleType('installer');exec(compile(base64.b64decode(" + repr(base64.b64encode(source)) + "),'<survey-installer>','exec'),i.__dict__);i.main(repair_config_parent=" + repr(repair == 'true') + ")"
     command = '/usr/bin/python3 -I -B -c ' + shlex.quote(program)
     result = subprocess.run(['tailscale', 'ssh', 'root@hermes', command], input=key.encode(),
                             capture_output=True, timeout=90)

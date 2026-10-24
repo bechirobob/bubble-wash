@@ -17,6 +17,7 @@ import sys
 import secrets
 
 ENV = Path('/home/ubuntu/.config/bubblewash/env')
+CONFIG_PARENT = Path('/home/ubuntu/.config')
 RUNTIME = Path('/home/ubuntu/bubblewash-runtime')
 KEY = b'BUBBLEWASH_RESEARCH_RESEND_KEY'
 FLAG = b'BUBBLEWASH_RESEARCH_EMAIL_ENABLED'
@@ -151,8 +152,36 @@ def install(path, key, app_uid, unchanged):
         os.close(directory)
 
 
-def main():
+
+def repair_config_directory(app_uid, unchanged):
+    """One explicitly approved mode transition on the existing app-owned inode."""
+    require(os.geteuid() == app_uid and os.getuid() == app_uid)
+    path = ENV.parent.parent
+    require(path == CONFIG_PARENT)
+    require(path.resolve(strict=True) == path)
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(fd)
+        require(stat.S_ISDIR(before.st_mode) and before.st_uid == app_uid)
+        require(stat.S_IMODE(before.st_mode) == 0o775 and not os.listxattr(fd))
+        require(identity(path.lstat()) == identity(before))
+        unchanged()
+        require(path.resolve(strict=True) == path and identity(path.lstat()) == identity(before))
+        require(identity(os.fstat(fd)) == identity(before))
+        os.fchmod(fd, 0o755)
+        after = os.fstat(fd)
+        require((after.st_dev, after.st_ino, after.st_uid, after.st_gid, after.st_nlink) ==
+                (before.st_dev, before.st_ino, before.st_uid, before.st_gid, before.st_nlink))
+        require(stat.S_IMODE(after.st_mode) == 0o755 and not os.listxattr(fd))
+        require(path.resolve(strict=True) == path and identity(path.lstat()) == identity(after))
+        unchanged()
+    finally:
+        os.close(fd)
+
+
+def main(repair_config_parent=False):
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    require(type(repair_config_parent) is bool)
     require(os.geteuid() == 0 and len(sys.argv) == 1)
     # Host identity is bound by the fixed authenticated root@hermes transport.
     account = pwd.getpwnam('ubuntu')
@@ -165,6 +194,8 @@ def main():
         os.setuid(app_uid)
         require(os.geteuid() == app_uid and os.getuid() == app_uid)
         unchanged()
+        if repair_config_parent:
+            repair_config_directory(app_uid, unchanged)
         # No credential input, environment or app source access before the drop.
         key = sys.stdin.buffer.read(205)
         require(len(key) <= 203)
