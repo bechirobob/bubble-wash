@@ -411,7 +411,7 @@ class WorkflowOrderingTests(unittest.TestCase):
     def test_strict_control_selector_precedes_nested_checkout(self):
         workflow=(ROOT/'.github/workflows/owner-document-enrollment.yml').read_text()
         checkout='uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262'
-        control='python3 -B ops/integration-release/select_source.py --release . --profile integration-candidate-v1'
+        control='python3 -B ops/integration-release/select_source.py --release . --runner-only'
         runtime='python3 -B ops/deploy-survey-update.py --check-runtime'
         first=workflow.index(checkout);second=workflow.index(checkout,first+len(checkout))
         self.assertEqual(workflow.count(control),1)
@@ -432,12 +432,12 @@ class WorkflowOrderingTests(unittest.TestCase):
             for name in contracts.SOURCE_DIRS:
                 if (ROOT/name).exists():shutil.copytree(ROOT/name,clean/name)
             for name in profile['rootFiles']:shutil.copyfile(ROOT/name,clean/name)
-            command=['python3','-B',str(clean/'ops/integration-release/select_source.py'),'--release',str(clean),'--profile','integration-candidate-v1']
+            command=['python3','-B',str(clean/'ops/integration-release/select_source.py'),'--release',str(clean),'--runner-only']
             accepted=subprocess.run(command,capture_output=True,text=True,timeout=30)
-            self.assertEqual(accepted.returncode,0,accepted.stderr);self.assertEqual(accepted.stdout.strip(),'integration-candidate-v1')
+            self.assertEqual(accepted.returncode,0,accepted.stderr);self.assertEqual(accepted.stdout.strip(),'reviewed-runner-only-v1')
             (clean/'runtime-artifact').mkdir()
             rejected=subprocess.run(command,capture_output=True,text=True,timeout=30)
-            self.assertNotEqual(rejected.returncode,0);self.assertIn('source matches no unique reviewed integration contract',rejected.stderr)
+            self.assertNotEqual(rejected.returncode,0);self.assertIn('unexpected runner root directory',rejected.stderr)
             (clean/'runtime-artifact').rmdir()
             restored=subprocess.run(command,capture_output=True,text=True,timeout=30)
             self.assertEqual(restored.returncode,0,restored.stderr)

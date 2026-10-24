@@ -1,32 +1,29 @@
-# Host materialization contract
+# Protected rehearsal and plan handoff
 
-PLAN-TEMPLATE.json is intentionally incomplete and cannot execute. It contains no fake release SHA, invented database path, invented unit source or approval boolean. Filling it is a separate host-read/approval operation, not performed here.
+The release coordinates the three known Bubble Wash units under the existing deployment lock and persistent holds. It does not technically exclude privileged root, ubuntu, other operators or unknown invokers. Those operators must not write the database or launch Bubble Wash during the approved window. The explicit residual-risk approval is required; a global-exclusion assertion is not accepted.
 
-Each unit entry must contain:
-- properties: exact WorkingDirectory, EnvironmentFiles, User, Group and FragmentPath strings as loaded by its correct system or ubuntu user manager.
-- execStart: for each service only, an array of {path, argv, ignoreFailure} from typed D-Bus ExecStart. Runtime timestamps/PID/exit codes are validated then discarded.
-- files: complete mapping of FragmentPath and every effective drop-in path to SHA-256.
-- dropins: exact effective drop-in path to SHA-256 map. All gate paths and their parents must be root-controlled; no pending daemon reload is allowed.
-- fragmentUid: for the user service only, the observed root or ubuntu uid of the unchanged fragment.
-- cgroup: for the two services, the exact reviewed manager cgroup path, retained for stop checks even if systemd clears it afterward.
+The known units are system/bubblewash-maintenance.timer, system/bubblewash-maintenance.service and user/bubblewash-local.service. Their current sources, properties and control groups are observed under the lock. A blank cgroup is acceptable only when observed inactive/dead with no process IDs. Before migration all known units must be stopped, observed groups empty, captured processes absent and port 3000 unused. Conditions gate future starts; they do not stop existing writers.
 
-inventoryPaths must include all required cron/at/container paths, the system/global-user/vendor/transient/generator unit trees, all account user unit configuration paths, and active user managers' runtime source trees. Missing roots are recorded explicitly as absent; symlinked files bind the exact target and content, including masked /dev/null units. Unknown source paths or directory links require review, not automatic traversal acceptance.
+## Preparation
 
-The root-controlled exclusion receipt has exactly these keys:
-- schema: bubblewash-host-invoker-review/v1
-- hostMachineIdSha256 and bootId: the actual target host and current boot
-- issuedAt and expiresAt: integer UTC epoch seconds, at most 1800 seconds apart
-- sourceContractSha256: the exact source-contracts.json digest
-- inventorySha256: canonical sorted JSON SHA-256 of Host.inventory()
-- excludedInvokers: exactly [root-direct, ubuntu-direct, other-users, cron-at, alternate-systemd, containers, remote-triggers]
-- reviewReference: SHA-256 of the separately approved bounded invoker-review evidence
+The protected control package is /var/lib/bubblewash-release/packages/<packageId>. Its identity is the SHA-256 of canonical JSON containing adapterFiles and sourceContractSha256. It is separate from the exact immutable runtime sources. The accepted candidate is 5f256800d65dbe3b69f54e95afa0e8ab30b5e881; the fallback is 80ec00902fcc5fe16a17ab814c7d191ad44afb64. The live source before this upgrade is 853b7c1020fb7dab66f302a2603369d5fa8b3dff.
 
-The exclusions are an explicit review of launch authority for this transition, not security enforcement against a privileged actor. Never fabricate a receipt from test fixtures or merely copy the required category list without reviewing actual evidence. This package does not generate approval receipts.
+Preparation stages fresh build and production-only runtime workspaces, freezes them into root-owned releases, and rehearses both against separate copies of one retained private SQLite preimage. It does not create maintenance holds, restart services, switch production code or write the live database. A failed or interrupted attempt is retained for inspection, not reused automatically.
 
-Protect staged plans and packages under /var/lib/bubblewash-release/plans and /var/lib/bubblewash-release/packages/<plan_id>, respectively. The workflow bootstrap rejects writable ancestry, extra files, symlinks, special objects and all bytecode/cache artifacts before import. No source-contracts.json or imported code may be writable by the app user. The plan ID is a reviewed 64-hex package identifier, independent from the exact plan SHA-256 input.
+Only a successfully completed protected rehearsal evidence file may be materialized. Its source contract, whole source trees, runtime/dependency manifests and unchanged preimage are checked again. The preimage is not the later maintenance snapshot and must never be restored over live data.
 
-Owner evidence must describe the already-reviewed candidate AND fallback behavior, including owner capability/MFA preservation and enrollment compatibility. materialize_plan.py copies its digest, pins the exact owner source files, verifies real clean Git bindings, hashes all built runtime and installed dependency objects and captures the existing database inode. It does not confer approval or write anything to a host.
+## Materialization request
 
-The old database and its snapshots remain outside all code roots. The existing original guard binds lock/config/database marker/backup status and encrypted archive receipt. Never replace a stale receipt or failed pin with an invented value; stop for renewed evidence and review.
+The exact request keys are packageId, preparationRunId, preparationEvidenceSha256, ownerEvidenceSha256, operatorApprovalSha256, riskApprovalSha256, gitBindings, backup and reviewRecords. All digests are lowercase SHA-256. The runner derives gitBindings from the actual clean candidate/fallback checkouts, never from user input. backup contains sha256, receiptRun, storeSha and storeId for a fresh, verified encrypted backup.
 
-Recovery after reboot/receipt expiry keeps the same immutable installed package path and plan ID, because controllerPins binds those absolute paths. Renew only the exclusion receipt/path/digest and encrypted-backup receipt/run/archive evidence, then independently review the new FULL host-plan digest. durable_plan() excludes only those expiring evidence fields; candidate/fallback, source/runtime/dependencies, owner evidence, Node, DB inode/path, environment digest, gate units and adapter bytes remain journal-bound. Configuration drift needs explicit separate reconciliation, not a receipt renewal.
+reviewRecords contains owner and operator records. The owner record uses schema bubblewash-owner-pair-review/v1 and binds candidateSha, fallbackSha, ownerFiles, ownerCapabilityPreserved, MFAPreserved, enrollmentCompatible and reviewReference. All three preservation flags must be true. The operator record uses schema bubblewash-operator-approval/v1 and binds candidateSha, fallbackSha, riskApprovalSha256, residualAssumptionSha256, approved and reviewReference. Approval must be true and refer to actual reviewed authorization. Record digests bind real evidence; they do not create authority. Never fabricate review records from tests.
+
+Under the retained lock, the host rechecks current source, process, Node executable, environment, database inode, backup and known-unit evidence. It creates a bounded host/boot operator receipt with a maximum 30-minute validity, the exact source contract, known inventory and residual-risk approval. It exclusively writes root0600 review records within a new root0700 /var/lib/bubblewash-release/plans/<packageId> directory, then validates and writes /var/lib/bubblewash-release/plans/<packageId>.json. The imported code package remains byte-identical. Output contains only status and the final plan digest.
+
+Materialization never opens live SQLite or stops services. Existing plan, review directory, maintenance snapshot or transition journal causes refusal. A partial write is preserved for investigation. Do not overwrite it, automatically renew an expired receipt, or replace journal identity after a crash.
+
+## Execution and recovery
+
+The approved live upgrade still requires successful private-copy rehearsal, valid fresh evidence and all final checks. Existing accounts, owner/MFA access, responses, bookings and booking pause remain intact. No PHP, native-app release, WhatsApp commercial enablement or unrelated security change is authorized here.
+
+Persistent holds and the current-data compatible fallback protect interrupted execution. An expired host receipt or changed evidence fails closed. Recovery after expiry requires explicit evidence review while preserving the original package and durable transition identity. Never restart an incompatible historical app or restore a stale snapshot after the new app could have served requests.

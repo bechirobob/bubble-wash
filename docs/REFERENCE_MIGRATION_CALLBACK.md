@@ -1,141 +1,233 @@
-# Reference-aware migration callback
+# Full integration migration callback
 
-This is a narrow adapter change, not a new release controller or host installer.
-It does not select application sources, grant a maintenance window, create an
-exclusion receipt, or make a host plan executable. The final source, owner,
-runtime and dependency contracts must be reviewed separately for both releases.
-Historical deployment guards and the durable controller remain unchanged.
+This is a bounded update to the existing adapter, not a new controller or host
+installer. The historical provenance baseline remains
+`5dc997db0393e1cf88dde29859b7e1c4550ee4ee`. The v2 host plan explicitly binds the
+current execution baseline `853b7c1020fb7dab66f302a2603369d5fa8b3dff`, tree
+`24fbe62668c996d0821153cf341b24765ef653b1`. Neither baseline is substituted for
+the other. All vendored durable, transition, and preserving primitives remain
+byte-identical. Exact source selectors remain fail-closed.
 
-## Ordered explicit migration
+This local proposal grants no production maintenance or security permission.
+Installed gates, staging custody, explicit coordinated-operator risk acceptance, known-app unit evidence, fresh
+backup, owner evidence, built runtimes, dependencies and final source commits
+must be independently established and approved. V2 candidate/fallback directories
+use the exact full40 commit names under the existing protected releases root,
+matching the inactive stager; arbitrary64 package names are not runtime names.
+The separate `prepare` mode now supports inactive builds and two rehearsals from
+one private current-data copy. It is not a production upgrade, gate installer or
+migration approval. Synthetic-fixture timings are not a migration-window estimate;
+only the separately approved actual preparation run can supply host timings.
 
-`Host.migrate(database)` invokes two fixed entrypoints from the pinned candidate:
+## Separate control and runtime custody
 
-1. `scripts/migrate-booking-references.mjs --database DATABASE`, requiring exactly
-   `{ "ok": true, "migration": "permanent-booking-vendor-labels-v1", "historicalBackfill": false }`.
-2. Only after that confirmed result, `scripts/migrate-notification-outbox.mjs
-   --database DATABASE`, requiring exactly
-   `{ "ok": true, "migration": "notification-outbox-exact-additive-v1" }`.
+Application runtime artifacts remain frozen independently from this control
+checkout. The two runtime profiles bind exact published commit, complete Git
+tree and source-content commitment. A control commit is never substituted for
+an application commit, nor accepted as an enrollment or deployment profile.
+The manual workflow checks out controls at `GITHUB_SHA` and the runtime at the
+separately supplied, code-pinned `candidate_sha`; both identities are checked
+before transport. The candidate still requires the unchanged exact-main CI
+checker. A control run does not manufacture missing runtime CI evidence.
 
-Both acknowledgments reject duplicate JSON keys, additional fields, and numeric
-substitutes for boolean values. Canonical comparison preserves exact value types.
+The reviewed capsule's two unchanged files live under
+`ops/integration-release/capsule/{scripts,tests}`. The app-UID invocation uses
+its protected absolute control path and `--source` points at the independently
+verified runtime, which supplies only its DDL and dependencies. Both capsule
+files are covered by `adapterFiles` and durable `controllerPins`; no capsule or
+test is added to an immutable runtime artifact, and package scripts are unchanged.
+The existing Python migration suite runs all 40 capsule tests from this control
+path, in addition to the real-CLI crash and preservation tests.
 
-Both scripts open the existing database directly. Neither calls the initializing
-application store. Each commits its own existing immediate transaction; the pair
-is deliberately **not** claimed to be one atomic transaction. Label maps are
-created empty, never backfilling historical bookings or vendors. The established
-outbox migration retains its conservative treatment of uncertain legacy sends.
+`controlRunner` is a single separately named exact content commitment for CI
+checkout recognition. It is not a third runtime profile. Only the explicit
+runner-only selector and existing runner-only enrollment check may consume it;
+runtime selectors and historical host/enrollment contracts reject it. The owner
+document workflow uses runner-only recognition solely for its control checkout
+before the separate live-runtime checkout; its exact live runtime pins, recipients
+and issuance behavior are unchanged. A future full deployment does not refresh
+those historical owner runtime pins: they continue to fail closed until separately
+reviewed. Existing
+source traversal remains strict and the control subtree is still independently
+pinned rather than weakening source checks or copying an inventory.
 
-The existing controller first verifies guards, loaded gates and exclusions,
-persists both holds, stops writers and proves quiescence. It creates, verifies
-and fsyncs a fresh local SQLite snapshot before recording `MIGRATING` and calling
-this adapter. The previously required encrypted off-host backup remains a
-separate prerequisite. No backup is restored over the current database.
+Fallback acceptance requires exact bound runtime CI and the independently
+reviewed control-proof receipt. The earlier failed backup run remains failed
+historical provenance. Unset receipt pins fail closed before network or host
+access; public artifact metadata alone is not a review of its assertions.
 
-## Failure and recovery
+## Pre-maintenance preparation
 
-| Observed database state | Automatic behavior |
-| --- | --- |
-| Label preflight fails or maps are partial/unreviewed | No outbox call; writers remain held. |
-| Labels committed, outbox absent or partial | Journal remains `MIGRATING`; both holds remain. `recover` refuses readiness and does not rerun either migration. |
-| Both migrations committed but process died before recording `MIGRATED` | `recover` inspects actual schema, not merely the journal phase; it may select only the pinned reference-aware fallback. |
-| Candidate startup/readiness fails after complete migration | Existing controller re-holds/stops, verifies current database, then attempts the pinned fallback. |
-| Fallback, guards, pins, quiescence or readiness remain uncertain | No success is reported; holds remain or are restored. |
+`prepare` takes no deployment plan, completion token, configuration or credential
+input. Its exact public request contains runId, first runAttempt, the two pinned
+published runtime SHAs, verified backup/receipt/store identities and Node path/hash.
+The workflow verifies the clean control Git checkout, both independently checked-out
+runtime commit/tree/content bindings and the required hosted CI proofs before
+transport. Missing new-run or reviewed proof-receipt pins keep it held.
 
-## Explicit held completion
+Four fresh app-owned workspaces receive exact Git archives: independent build and
+production-install roots for each runtime. The bootstrap creates/validates only
+approved fixed staging roots, then stages one fresh public control package through
+the unchanged stager. It verifies every package file before importing the adapter;
+the capsule remains separate from both runtime artifacts. Existing fixed roots
+must already have exact safe modes and root:root ownership. The bootstrap requires
+root effective uid/gid and process-local umask022, without correcting existing
+permissions or changing persistent settings.
 
-The separate manual `complete-labels-only` mode is available through the existing
-host adapter, source-verified stdin transport, and manual deployment workflow.
-It is never selected by `inspect`, `execute`, `recover`, or any default. Both the
-transport and host CLI require `--completion-confirmation
-complete-labels-only:FULL_PLAN_SHA256`; the workflow has the equivalent optional
-input. The digest must equal the exact current reviewed plan file digest. Missing,
-wrong, or stale confirmation fails before any hold or service mutation. This token
-is an input guard, **not** evidence of user approval: actual host actions still
-require the separately approved maintenance/completion action.
+This inactive workspace/package staging occurs BEFORE the helper's retained
+production deployment lock and live853 binding. It does not stop services, create
+holds, open the live database, select code or alter configuration. All builds,
+private DB copying, copy-only migration/probes and final binding checks then run
+UNDER the retained lock. No durable deployment state/controller is constructed.
 
-This mode must be present in the **same exact package before initial execute**.
-Adding it after interruption changes the package/controller pins and durable plan
-identity, so it cannot repair an interruption from an older package. Do not move
-the package to a new path, clear the journal, repin an interrupted deployment, or
-change immutable plan fields to bypass this binding. Only receipt/evidence renewal
-already permitted by the durable plan projection is possible; review the resulting
-full plan digest and explicitly confirm that new digest.
+The helper verifies live code, process/config flags, complete environment bytes,
+backup evidence and database identity. Writers may continue, so live row equality
+is deliberately not required. One bounded read-only SQLite backup is retained in
+`rehearsal-evidence/<run>-1/preimage.sqlite` with private root custody. Candidate and
+fallback probes each derive from a separate disposable copy of this SAME preimage.
+Both must pass exact migration/preservation proofs and read-only runtime probes;
+the preimage itself must remain unchanged. It is never reused as the later actual
+maintenance snapshot or journal, exported, or restored over the live DB.
 
-After confirmation, the existing shared deployment lock protects restoration of
-both durable holds and stops of the same three fixed units, even when a later
-receipt or plan validation fails. No start action is issued. The normal exact
-source/runtime/dependency/Node/owner/config/backup/gate/exclusion guards are then
-required again, with concrete process/cgroup/listener quiescence. The journal must
-be exactly the same plan's `MIGRATING` or `MIGRATED`, with no target. The pointer
-and marker must still identify the original old release. Ready/selected/other
-journals and later running-release states are not accepted.
+Builds use fresh app-owned roots and a private temporary npm cache. Production
+packaging omits only the exact untracked lock-declared generated tooling subtree,
+retains tracked source, and canonicalizes only the two reviewed newly installed
+dependency file modes before final manifests. Frozen runtime/source/dependency
+proofs remain strict. No `.next/cache` or writable-code exception is admitted.
+Public output is bounded status/stage/timings, packageId, private evidence-file SHA and no-maintenance-approval flags;
+full manifests, preservation evidence and the preimage stay private. Record the
+actual snapshot/build/migration-proof/probe durations before proposing a window.
+Any uncertain or failed attempt is retained and requires inspection, never an
+implicit retry, overwrite, cleanup, service switch or production migration.
 
-For `MIGRATING`, readonly checks require exact core, owner/staff, label-map and
-legacy-outbox schema, empty booking/vendor maps and no consumed map sequence.
-All pre-existing schema, table rows (including rowid), non-label sequences and
-SQLite application/user metadata must match the private controller-owned snapshot
-created before initial migration. The snapshot is only read: it is never exported,
-changed, or restored. Its regular single-link identity, size/timestamps and bytes
-must remain stable during inspection; access time is deliberately not part of
-identity. This narrow initial-transition mode does not accept legitimate later
-bookings, changed owner/MFA records, or other intervening data changes.
+## Protected host plan handoff
 
-Only that exact labels-only state may run the same strict label-first/outbox
-callback. The label step is idempotent. Full readonly fallback schema acceptance,
-unchanged guards, old pointer/marker, both holds and quiescence are required before
-recording `MIGRATED`. Success is explicitly
-`migration-completed-held-use-recover`: no runtime selection, application startup,
-maintenance resume, database restore, or journal deletion occurs.
+The implemented `materialize` mode consumes the exact prepared package, successful
+private evidence hash, externally reviewed public owner/operator record objects
+and hashes, actual residual-risk approval reference, and current backup pins.
+The runner supplies real clean runtime commit/tree bindings. Under the retained
+lock it reconstructs source trees, verifies the private runtime/dependency proof
+and current host bindings, stores only validated private review records, and
+exclusively writes one0600 plan. It emits the plan SHA, never private contents.
+It does not stop services, create holds, open live SQLite or execute a controller.
+Actual risk approval and separate approval of this exact final plan remain required.
+See ops/integration-release/HOST-EVIDENCE.md for exact fields, the explicit
+coordinated writer assumption, nullable inactive cgroups and initial-only renewal
+limitation. No global invoker-exclusion boolean is fabricated.
 
-If either accepted journal phase already has the exact complete additive schema,
-this mode verifies it and returns `already-complete-held-use-recover`, without
-calling either migration or writing the database/journal. This covers a crash
-after outbox commit and a lost successful response. A `MIGRATED` journal with an
-incomplete schema is refused, never reinterpreted as legacy. If interrupted while
-still labels-only, a separately approved retry of this same confirmed action is
-idempotent; partial/drifted schema remains held. Successful completion never
-automatically invokes recovery. The separate existing `recover` verifies current
-data and may select only the pinned reference-aware fallback, without restoring
-the snapshot. It retains current post-migration bookings and owner/MFA state.
+## Initial execution
 
-## Local regression coverage
+The explicit CoordinatedController (unchanged inherited orchestration) verifies the existing guards, writes durable application
+and maintenance holds, stops application/maintenance/timer writers, proves
+quiescence, and creates and fsyncs a consistent private SQLite snapshot. The
+separately verified encrypted off-host backup remains required.
 
-Supply local, already reviewed candidate and fallback source directories with
-working test dependencies, plus the compatible Node executable. These are test
-inputs, not materialized host plan identities:
+The adapter then performs these exact steps against the explicit existing DB:
 
-    export PYTHONDONTWRITEBYTECODE=1
-    export BW_TEST_CANDIDATE=/absolute/local/candidate
-    export BW_TEST_FALLBACK=/absolute/local/fallback
-    export BW_TEST_NODE=/absolute/local/node
-    python3 -B -m unittest discover -s tests -p 'test_*.py' -v
+1. `CONTROL/capsule/scripts/migrate-integration-features.mjs --preflight --database DATABASE
+   --source CANDIDATE` opens readonly/query-only and positively verifies exact
+   legacy outbox, absent label maps, required core/staff/owner/research schemas,
+   and exact admitted optional schemas. Unknown or partial schemas refuse before
+   either legacy migration. The reviewed initial model has no AUTOINCREMENT
+   table and refuses even a residual empty `sqlite_sequence`; pre-migration
+   rehearsal must report this exact limitation before the first legacy CLI.
+   Any unexpected real-host sequence requires new schema evidence/review, not
+   an expanded allowance. A private snapshot comparison proves the unchanged
+   initial preimage.
+2. `scripts/migrate-booking-references.mjs --database DATABASE` creates empty
+   booking/vendor maps. No historical booking or vendor backfill occurs.
+3. `scripts/migrate-notification-outbox.mjs --database DATABASE` applies the exact
+   eight-column/index extension and deterministic conservative legacy conversion.
+4. `CONTROL/capsule/scripts/migrate-integration-features.mjs --database DATABASE --source CANDIDATE`
+   applies one immediate transaction for five reachable feature tables and only
+   the exact historical ownership-table `order_id TEXT NOT NULL DEFAULT ''`
+   addition. The exact historical two-column `driver_location_stops` also gains
+   `generation TEXT NOT NULL DEFAULT ''` and `order_id TEXT NOT NULL DEFAULT ''`
+   in that same transaction. Existing stop values and rowids remain unchanged;
+   inactive empty defaults do not resume GPS sharing. No partial/foreign location
+   shape is accepted. It never creates the optional customer-receipt table.
+5. Positive complete-schema checks and exact preimage projection checks must
+   pass before the frozen controller may expose the candidate.
 
-The new tests use real migration CLIs, disposable SQLite databases, and the
-unchanged controller's execute/journal/recover path. Service, loaded-gate,
-quiescence, readiness and approval boundaries are simulated, never represented
-as proof of a real host. Abrupt child-process termination after each commit tests
-the actual durable failure boundary. Completion tests exercise the production route, real CLI parser/plan digest,
-exact workflow confirmation shell, actual backup-expiry guard, shared lock,
-snapshot/data comparison, and abrupt interruption retries. They prove no
-automatic selection/start, no unconfirmed mutation, and separate fallback
-recovery without snapshot restoration. Owner capabilities, MFA,
-historical records, payment references, old idempotency rows and permanent
-mapping/high-water data are retained. No provider or external service is called.
+These three migration commits are deliberately not described as one atomic
+transaction. Acknowledgments reject duplicate keys, extra fields, wrong types,
+uncertain output, invalid feature counts, non-boolean `locationColumnsAdded` or
+`ownershipColumnAdded`, and unrequested optional-table creation.
+No migration invokes application initialization, cleanup, historical import,
+account reset, notification sending, or configuration changes.
 
-## Test-input portability
+All existing account/invite/MFA values, research records/outbox, expired-location
+and rate-limit rows, and other pre-existing rows/rowids/schema/metadata are
+preserved. The full environment remains digest-bound; research OPEN and EMAIL
+remain true, booking remains paused, staff authentication remains enabled and
+demo login remains disabled. Commercial automation must remain disabled under
+the app's exact boolean rule:
+`NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED != 'true'`. This neither enables
+WhatsApp automation nor invents an approved template; unrelated research/email
+flows are unchanged. The earlier retained host evidence did not report this
+boolean, so its live value is not yet verified. Keys are neither read into subprocess environments
+nor written. Readonly SQLite can still coordinate WAL shared memory; no
+`immutable` shortcut or stale-read claim is made.
 
-The callback/completion unit and fault tests can run with the same current
-checkout supplied explicitly as both `BW_TEST_CANDIDATE` and `BW_TEST_FALLBACK`:
-the tested migration/readiness interfaces are shared, while controller release
-roots and manifests remain independent disposable fixtures. This is appropriate
-for ordinary source CI and needs no unpublished sibling directory. A compatible
-Node executable and installed test dependencies are still required. Missing
-inputs fail, never silently skip. The partial control overlay itself is not an
-application checkout, so its standalone acceptance uses explicit external source
-inputs as shown above.
+## Held recovery states
 
-Final release acceptance must additionally supply the **two distinct exact
-reviewed candidate and fallback source trees**. A same-checkout CI pass is not a
-claim of cross-version compatibility or final source-profile acceptance. This
-control overlay deliberately leaves application source profiles and publishing
-commit identities unchanged for the separate final reconciliation.
+The pinned feature model positively classifies:
+
+- `initial`: exact pre-migration schema, absent maps and legacy outbox.
+- `labels-only`: exact maps and exact legacy outbox.
+- `features-pending`: exact maps/additive outbox, but feature schema not complete,
+  including an exact old location-stop form even when all five tables exist.
+- `complete`: all five feature tables and supported current ownership schema.
+- Anything unknown, partial, malformed or unreviewed: refusal, with holds retained.
+
+`recover` never reruns migrations. An incomplete state remains held. A complete
+state may select only the independently reviewed migration-aware fallback,
+never old853, and never restores the snapshot or any stale database.
+
+Before any target could have served requests, both completion and recovery
+require exact original schema/rows/rowids/metadata with only the declared changes:
+new maps/sequences are empty; outbox status/error/conversion and every added-column
+default are exact; new feature tables are empty; existing ownership rows gain only
+an empty `order_id`; exact old location-stop rows gain only empty `generation`
+and `order_id`. Existing feature rows are preserved, not required to be empty.
+The snapshot is private, identity/stability checked, read only, and never exported.
+
+After a durable selected/ready phase could have exposed a target, legitimate
+account, research, booking or feature writes may advance. Recovery validates the
+exact journal/plan and current complete schema, not stale whole-database equality.
+It keeps current data and leaves maintenance held even after fallback readiness.
+
+## Separately approved completion
+
+The explicit mode is now `complete-migration` in both host CLI and existing
+stdin/workflow routes. The prior `complete-labels-only` token is not accepted.
+`inspect` remains the default. Completion requires the exact input token
+`complete-migration:FULL_PLAN_SHA256`; missing, malformed or stale tokens fail
+before any host action. This token is an input guard, not proof of user approval.
+Separate explicit approval of the actual bounded completion action is required.
+
+The exact same package must have been bound before initial execute. Never change
+its immutable pins/path, clear the journal, or substitute a new controller to
+repair an older interrupted transition. Only already-permitted receipt renewal
+may preserve journal identity, with review of the new full plan digest.
+
+Under the existing deployment lock, completion restores both holds and stops the
+same three fixed units, even if later validation refuses. Exact source/runtime,
+dependency, Node, owner, config, backup, installed-gate and coordinated-operator acceptance
+checks apply. The journal must be canonical, match the same plan, have phase
+`MIGRATING` or `MIGRATED`, and have no target. The pointer/marker must still identify
+old853 and all writers must be quiescent.
+
+For a positively classified and preimage-verified `MIGRATING` state, completion
+runs only the remaining steps: initial runs labels/outbox/features, labels-only
+runs outbox/features, features-pending runs features only. It does not replay
+completed steps. Complete schema plus preimage preservation is required afterward.
+Success records `MIGRATED` and returns `migration-completed-held-use-recover`.
+There is no runtime start, pointer change, maintenance resume, journal deletion,
+or automatic recovery. A separate recovery operation remains necessary.
+
+An already complete held state returns `already-complete-held-use-recover`
+without a migration or database/journal write. `MIGRATED` with incomplete schema,
+unknown journal states, consumed new maps/features or any undeclared old-row
+change refuse. Any further attempt after interruption requires fresh separate
+approval; uncertainty is never converted into an implicit retry.

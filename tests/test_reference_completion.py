@@ -22,30 +22,30 @@ class ConfirmationTests(unittest.TestCase):
     def test_missing_wrong_or_stale_confirmation_precedes_all_host_access(self):
         digest = 'a' * 64
         with patch.object(a, 'load_controller', side_effect=AssertionError('host access before confirmation')):
-            for value in ('', None, True, 'complete-labels-only:' + 'b' * 64, 'complete-labels-only:' + digest + '\n'):
+            for value in ('', None, True, 'complete-migration:' + 'b' * 64, 'complete-migration:' + digest + '\n'):
                 with self.subTest(value=value), self.assertRaises(ValueError):
-                    a.run_plan({}, 'complete-labels-only', value, digest)
+                    a.run_plan({}, 'complete-migration', value, digest)
             for mode in ('inspect', 'execute', 'recover', 'unknown'):
                 with self.subTest(mode=mode), self.assertRaises(ValueError):
-                    a.run_plan({}, mode, 'complete-labels-only:' + digest, digest)
+                    a.run_plan({}, mode, 'complete-migration:' + digest, digest)
 
     def test_main_checks_actual_plan_file_digest_and_confirmation_before_run(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'plan.json'; path.write_text('{"fixture":"reviewed"}\n')
             digest = fixtures.contracts.digest(path)
             base = ['host_adapter', '--plan', str(path), '--plan-sha256', digest,
-                    '--mode', 'complete-labels-only']
+                    '--mode', 'complete-migration']
             # Root-protected ancestry is separately covered by bootstrap tests;
             # this disposable path tests the real parser, file hash and JSON load.
             with patch.object(a, 'protected'), patch.object(a, 'run_plan', return_value='already-complete-held-use-recover') as run:
-                for args in (base, base + ['--completion-confirmation', 'complete-labels-only:' + 'b' * 64],
-                             [value if value != digest else 'b' * 64 for value in base] + ['--completion-confirmation', 'complete-labels-only:' + 'b' * 64]):
+                for args in (base, base + ['--completion-confirmation', 'complete-migration:' + 'b' * 64],
+                             [value if value != digest else 'b' * 64 for value in base] + ['--completion-confirmation', 'complete-migration:' + 'b' * 64]):
                     with patch.object(sys, 'argv', args), self.assertRaises(ValueError): a.main()
                     run.assert_not_called()
                 output = io.StringIO()
-                with patch.object(sys, 'argv', base + ['--completion-confirmation', 'complete-labels-only:' + digest]), patch.object(a.signal, 'signal'), redirect_stdout(output):
+                with patch.object(sys, 'argv', base + ['--completion-confirmation', 'complete-migration:' + digest]), patch.object(a.signal, 'signal'), redirect_stdout(output):
                     a.main()
-                run.assert_called_once_with({'fixture': 'reviewed'}, 'complete-labels-only', 'complete-labels-only:' + digest, digest)
+                run.assert_called_once_with({'fixture': 'reviewed'}, 'complete-migration', 'complete-migration:' + digest, digest)
                 self.assertEqual(json.loads(output.getvalue()), {'ok': True, 'result': 'already-complete-held-use-recover', 'maintenanceResumed': False, 'databaseRestored': False})
 
     def test_workflow_confirmation_guard_is_before_tailnet_and_default_is_inspect(self):
@@ -54,10 +54,11 @@ class ConfirmationTests(unittest.TestCase):
         shell = workflow.split('run: |', 1)[1].split('      - uses:', 1)[0]
         shell = '\n'.join(line[10:] for line in shell.splitlines() if line.strip())
         common = {**os.environ, 'CANDIDATE_SHA': 'c' * 40, 'GITHUB_SHA': 'c' * 40,
-                  'FALLBACK_SHA': 'f' * 40, 'PLAN_ID': '1' * 64, 'PLAN_SHA256': 'a' * 64}
-        for mode, token, success in [('complete-labels-only', '', False), ('complete-labels-only', 'complete-labels-only:' + 'b' * 64, False),
-                                     ('complete-labels-only', 'complete-labels-only:' + 'a' * 64, True), ('inspect', '', True),
-                                     ('execute', 'complete-labels-only:' + 'a' * 64, False), ('recover', '', True)]:
+                  'FALLBACK_SHA': 'f' * 40, 'PLAN_ID': '1' * 64, 'PLAN_SHA256': 'a' * 64,
+                  'PREPARATION_PINS': '', 'MATERIALIZATION_REVIEW': ''}
+        for mode, token, success in [('complete-migration', '', False), ('complete-migration', 'complete-migration:' + 'b' * 64, False),
+                                     ('complete-migration', 'complete-migration:' + 'a' * 64, True), ('inspect', '', True),
+                                     ('execute', 'complete-migration:' + 'a' * 64, False), ('recover', '', True)]:
             result = subprocess.run(['bash', '-c', shell], env={**common, 'RELEASE_MODE': mode, 'COMPLETION_CONFIRMATION': token}, capture_output=True, timeout=10)
             self.assertEqual(result.returncode == 0, success)
             self.assertEqual(result.stdout, b'')
@@ -66,23 +67,101 @@ class ConfirmationTests(unittest.TestCase):
     def test_stream_requires_exact_confirmation_and_emits_no_payload_on_refusal(self):
         command = [sys.executable, '-I', '-B', str(fixtures.ADAPTER / 'stream_host.py'),
                    '--plan-id', '1' * 64, '--plan-sha256', 'a' * 64,
-                   '--candidate-sha', 'c' * 40, '--fallback-sha', 'f' * 40,
-                   '--mode', 'complete-labels-only']
+                   '--candidate-sha', 'c' * 40, '--fallback-sha', '80ec00902fcc5fe16a17ab814c7d191ad44afb64',
+                   '--mode', 'complete-migration']
         # -I deliberately does not add the script directory; use the supported
         # ordinary local entrypoint with bytecode writes disabled instead.
         command.remove('-I')
-        for value in ('', 'complete-labels-only:' + 'b' * 64):
+        for value in ('', 'complete-migration:' + 'b' * 64):
             result = subprocess.run(command + ['--completion-confirmation', value], capture_output=True, text=True, timeout=10)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(result.stdout, '')
-        result = subprocess.run(command + ['--completion-confirmation', 'complete-labels-only:' + 'a' * 64], capture_output=True, text=True, timeout=10)
+        # Supply a synthetic reviewed receipt only inside the disposable test
+        # process. The published C1 constant remains None and refuses execution.
+        script = ("import sys,runpy;sys.path.insert(0," + repr(str(fixtures.ADAPTER)) + ");import contracts;"
+                  "contracts.FALLBACK_CONTROL_PROOF={'controlSha':'c'*40,'runId':123,'artifactId':456,'artifactSha256':'d'*64};"
+                  "sys.argv=['stream_host',*sys.argv[1:]];runpy.run_path(" + repr(str(fixtures.ADAPTER/'stream_host.py')) + ",run_name='__main__')")
+        result = subprocess.run([sys.executable,'-B','-c',script] + command[3:] + ['--completion-confirmation', 'complete-migration:' + 'a' * 64], capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         compile(result.stdout, '<reviewed-bootstrap>', 'exec')
-        self.assertIn("'--mode', 'complete-labels-only'", result.stdout)
-        self.assertIn("'--completion-confirmation', 'complete-labels-only:" + 'a' * 64 + "'", result.stdout)
+        self.assertIn("'--mode', 'complete-migration'", result.stdout)
+        self.assertIn("'--completion-confirmation', 'complete-migration:" + 'a' * 64 + "'", result.stdout)
+
+
+class PreparationTransportTests(unittest.TestCase):
+    def request(self):
+        return {'runId':'123','runAttempt':1,
+                'candidateSha':'5f256800d65dbe3b69f54e95afa0e8ab30b5e881',
+                'fallbackSha':'80ec00902fcc5fe16a17ab814c7d191ad44afb64',
+                'backupSha256':'a'*64,'receiptRun':'124','storeSha':'b'*40,'storeId':1,
+                'node':{'path':'/usr/bin/node','sha256':'c'*64}}
+
+    def test_missing_proof_refuses_before_program_generation(self):
+        import stream_host
+        with patch.object(fixtures.contracts, 'FALLBACK_CONTROL_PROOF', None), patch.object(stream_host, 'public_package', side_effect=AssertionError('serialized before proof')):
+            with self.assertRaises(ValueError):stream_host.preparation_bootstrap('prepare',self.request())
+
+    def test_prepare_input_is_exact_and_retries_are_refused(self):
+        import stream_host
+        contract=fixtures.contracts.read_json(fixtures.ADAPTER/'source-contracts.json')
+        self.assertEqual(stream_host.validate_preparation_request(self.request(),contract),self.request())
+        for key,value in [('runAttempt',2),('runAttempt',True),('runId','../123'),
+                          ('storeId',True),('backupSha256','bad'),('candidateSha','f'*40)]:
+            with self.subTest(key=key),self.assertRaises(ValueError):
+                stream_host.validate_preparation_request({**self.request(),key:value},contract)
+        with self.assertRaises(ValueError):stream_host.validate_preparation_request({**self.request(),'environment':'private'},contract)
+
+    def test_preparation_emitter_is_code_only_and_compiles_without_host_action(self):
+        import stream_host
+        with patch.object(fixtures.contracts, 'FALLBACK_CONTROL_PROOF', {'controlSha':'c'*40,'runId':123,'artifactId':456,'artifactSha256':'d'*64}):
+            body=stream_host.preparation_bootstrap('prepare',self.request())
+        compile(body,'<synthetic-prepare>','exec')
+        self.assertIn("base.mkdir(mode=0o755)",body)
+        self.assertIn("path.open('xb')",body)
+        self.assertIn("integration_preparation",body)
+        self.assertIn("prepare_pair(request",body)
+        self.assertNotIn("host_adapter.main()",body)
+        self.assertIn("__source_verified__=True",body)
+
+    def test_bootstrap_failure_is_fixed_metadata_without_private_traceback(self):
+        import stream_host
+        with patch.object(fixtures.contracts, 'FALLBACK_CONTROL_PROOF', {'controlSha':'c'*40,'runId':123,'artifactId':456,'artifactSha256':'d'*64}):
+            body=stream_host.preparation_bootstrap('prepare',self.request())
+        # Refuse before any host filesystem action, even on a privileged runner.
+        body=body.replace('require(os.geteuid()==0 and os.getegid()==0)',"require(False)",1)
+        result=subprocess.run([sys.executable,'-I','-B','-'],input=body,capture_output=True,text=True,timeout=10)
+        self.assertNotEqual(result.returncode,0);self.assertEqual(result.stdout,'')
+        self.assertEqual(json.loads(result.stderr),{'ok':False,'status':'control-bootstrap-refused-or-incomplete','inspectBeforeRetry':True,'automaticRetry':False})
+
+    def test_unknown_mode_and_mixed_request_cli_emit_nothing(self):
+        command=[sys.executable,'-B',str(fixtures.ADAPTER/'stream_host.py')]
+        for args in [ ['--mode','unknown'], ['--mode','prepare'],
+                      ['--mode','inspect-host-evidence','--preparation-request','/nonexistent'] ]:
+            result=subprocess.run(command+args,capture_output=True,text=True,timeout=10)
+            self.assertNotEqual(result.returncode,0);self.assertEqual(result.stdout,'')
 
 
 class CompletionTests(fixtures.RealMigrationTests):
+    def setUp(self):
+        super().setUp()
+        # Bind the real coordinated policy before the first journal phase.
+        policy = fixtures.contracts.load_controller().CoordinatedController
+        self.enterContext(patch.object(c, 'Controller', policy))
+        self.enterContext(patch.object(c, 'CoordinatedController', policy, create=True))
+        self.fixture.plan.pop('externalInvokersExcluded')
+        self.fixture.plan['coordinatedWriterHold'] = {
+            'schema': 'bubblewash-coordinated-writer-hold/v1',
+            'knownUnits': list(fixtures.contracts.COORDINATED_UNITS),
+            'knownInvokersSha256': 'b' * 64, 'riskApprovalSha256': 'a' * 64,
+            'residualAccessAcknowledged': True,
+            'residualAssumptionSha256': fixtures.contracts.RESIDUAL_ASSUMPTION_SHA256,
+        }
+        policy_path = Path(fixtures.contracts.__file__).resolve()
+        self.fixture.plan['controllerPins'][str(policy_path)] = fixtures.contracts.digest(policy_path)
+        self.control = self.fixture.make_controller()
+        self.assertIsInstance(self.control, policy)
+        self.host.journal_plan, self.host.journal_hash = self.fixture.plan, self.control.plan_hash
+
     def labels_only(self):
         actual = self.host.node
         def interrupt(root, args, database):
@@ -106,7 +185,7 @@ class CompletionTests(fixtures.RealMigrationTests):
         runtime = self.fixture.root / 'route-runtime'; runtime.mkdir()
         (runtime / 'deploy.lock').write_bytes(b'')
         env = self.fixture.root / 'env'
-        env.write_text('BUBBLEWASH_STAFF_AUTH_DISABLED=false\nBUBBLEWASH_BOOKINGS_DISABLED=true\nBUBBLEWASH_DISABLE_DEMO_LOGIN=true\n')
+        env.write_text('BUBBLEWASH_STAFF_AUTH_DISABLED=false\nBUBBLEWASH_BOOKINGS_DISABLED=true\nBUBBLEWASH_DISABLE_DEMO_LOGIN=true\nNEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED=false\n')
         self.host.uid = os.getuid()
         self.host.roots = (self.fixture.old, self.fixture.candidate, self.fixture.fallback)
         self.host.service = self.fixture.service
@@ -143,7 +222,7 @@ class CompletionTests(fixtures.RealMigrationTests):
         snapshot = fixtures.contracts.digest(self.fixture.plan['snapshot'])
         with self.routed_host():
             plan = {**self.fixture.plan, 'guards': {}}
-            self.assertEqual(a.run_plan(plan, 'complete-labels-only', 'complete-labels-only:' + 'a' * 64, 'a' * 64),
+            self.assertEqual(a.run_plan(plan, 'complete-migration', 'complete-migration:' + 'a' * 64, 'a' * 64),
                              'migration-completed-held-use-recover')
         self.assertGreaterEqual(self.guard_checks, 3)
         self.assert_held()
@@ -176,7 +255,7 @@ class CompletionTests(fixtures.RealMigrationTests):
             raise ValueError('Synthetic current plan validation refused')
         before = c.core.database_fingerprint(self.fixture.db); journal = self.fixture.state.journal.read_bytes()
         with self.routed_host(), patch.object(a, 'validate_plan', side_effect=refused), self.assertRaises(ValueError):
-            a.run_plan({**self.fixture.plan, 'guards': {}}, 'complete-labels-only', 'complete-labels-only:' + 'a' * 64, 'a' * 64)
+            a.run_plan({**self.fixture.plan, 'guards': {}}, 'complete-migration', 'complete-migration:' + 'a' * 64, 'a' * 64)
         self.assert_held(); self.assertEqual(self.calls, [])
         self.assertEqual(c.core.database_fingerprint(self.fixture.db), before)
         self.assertEqual(self.fixture.state.journal.read_bytes(), journal)
@@ -186,7 +265,7 @@ class CompletionTests(fixtures.RealMigrationTests):
         evidence = fixtures.frozen.ExistingHostGuardTests('test_expired_status_blocks')
         evidence.setUp(); self.addCleanup(evidence.tearDown)
         values = evidence.env.read_text().replace(str(evidence.db), str(self.fixture.db))
-        values += 'BUBBLEWASH_STAFF_AUTH_DISABLED=false\nBUBBLEWASH_BOOKINGS_DISABLED=true\nBUBBLEWASH_DISABLE_DEMO_LOGIN=true\n'
+        values += 'BUBBLEWASH_STAFF_AUTH_DISABLED=false\nBUBBLEWASH_BOOKINGS_DISABLED=true\nBUBBLEWASH_DISABLE_DEMO_LOGIN=true\nNEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED=false\n'
         evidence.env.write_text(values)
         evidence.expected.update(envSha256=c.core.digest(evidence.env), database=str(self.fixture.db))
         receipt = json.loads(evidence.receipt.read_text()); receipt['verifiedAt'] = '2000-01-01T00:00:00Z'
@@ -196,7 +275,7 @@ class CompletionTests(fixtures.RealMigrationTests):
         real_guard = c.HostGuards
         with self.routed_host(), patch.object(c, 'HostGuards', real_guard), patch.object(a, 'RUNTIME', evidence.runtime), \
              patch.object(a, 'ENV', evidence.env), patch.object(a, 'RECEIPT', evidence.receipt), self.assertRaises(ValueError):
-            a.run_plan({**self.fixture.plan, 'guards': evidence.expected}, 'complete-labels-only', 'complete-labels-only:' + 'a' * 64, 'a' * 64)
+            a.run_plan({**self.fixture.plan, 'guards': evidence.expected}, 'complete-migration', 'complete-migration:' + 'a' * 64, 'a' * 64)
         self.assert_held(); self.assertEqual(self.calls, [])
         self.assertEqual([(event[0], event[2]) for event in self.fixture.events], list(c.core.UNITS))
         self.assertEqual(c.core.database_fingerprint(self.fixture.db), before)
@@ -207,8 +286,8 @@ class CompletionTests(fixtures.RealMigrationTests):
         state = self.fixture.state
         files = [self.fixture.db, state.journal, state.app_hold, state.maintenance_hold]
         before = [(p.stat().st_ino, p.read_bytes()) for p in files]
-        for confirmation, digest in [('', 'a' * 64), ('complete-labels-only:' + 'b' * 64, 'a' * 64), ('complete-labels-only:' + 'a' * 64, 'b' * 64)]:
-            with self.assertRaises(ValueError): a.run_plan({}, 'complete-labels-only', confirmation, digest)
+        for confirmation, digest in [('', 'a' * 64), ('complete-migration:' + 'b' * 64, 'a' * 64), ('complete-migration:' + 'a' * 64, 'b' * 64)]:
+            with self.assertRaises(ValueError): a.run_plan({}, 'complete-migration', confirmation, digest)
         self.assertEqual([(p.stat().st_ino, p.read_bytes()) for p in files], before)
         self.assertEqual(self.fixture.events, [])
         self.assertEqual(self.calls, [])
@@ -308,13 +387,32 @@ class CompletionTests(fixtures.RealMigrationTests):
         self.assertEqual(self.complete(), 'migration-completed-held-use-recover')
         self.assert_held(); self.assertEqual(self.protected_rows(), self.before)
 
+    def test_original_row_changed_during_completion_stays_held(self):
+        self.labels_only()
+        actual=self.host.node
+        def mutate(root,args,database):
+            value=actual(root,args,database)
+            if args[0]==fixtures.FEATURE and '--verify' in args:
+                with sqlite3.connect(database) as db:db.execute("UPDATE staff_accounts SET name='unexpected'")
+            return value
+        self.host.node=mutate
+        with self.assertRaises(ValueError):self.complete()
+        self.assert_held()
+        self.assertEqual(self.fixture.state.read()['phase'],'MIGRATING')
+
+    def test_already_complete_original_row_mutation_is_not_accepted(self):
+        self.labels_only();self.complete()
+        with sqlite3.connect(self.fixture.db) as db:db.execute("UPDATE staff_accounts SET name='unexpected'")
+        with self.assertRaises(ValueError):self.complete()
+        self.assert_held()
+
     def test_post_commit_retry_reports_already_complete_without_database_or_journal_write(self):
         self.labels_only()
         def crash():
             actual = self.host.node
             def crashing(root, args, database):
                 result = actual(root, args, database)
-                if args[0] == fixtures.OUTBOX: os._exit(94)
+                if args[0] == fixtures.FEATURE and '--preflight' not in args and '--verify' not in args: os._exit(94)
                 return result
             self.host.node = crashing
             self.complete()

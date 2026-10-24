@@ -1,6 +1,6 @@
 {
   "schema": "bubblewash-integration-host-plan/v1",
-  "oldSha": "5dc997db0393e1cf88dde29859b7e1c4550ee4ee",
+  "oldSha": "853b7c1020fb7dab66f302a2603369d5fa8b3dff",
   "old": null,
   "candidate": null,
   "fallback": null,
@@ -9,9 +9,15 @@
   "state": "/var/lib/bubblewash-release",
   "database": null,
   "snapshot": null,
-  "releaseShas": {"candidate": null, "fallback": null},
+  "releaseShas": {
+    "candidate": null,
+    "fallback": null
+  },
   "ownerEvidencePath": null,
-  "node": {"path": null, "sha256": null},
+  "node": {
+    "path": null,
+    "sha256": null
+  },
   "guards": {
     "envSha256": null,
     "receiptSha256": null,
@@ -22,14 +28,27 @@
     "archiveSha256": null
   },
   "hostAcceptance": {
-    "inventoryPaths": [],
-    "launcherAliases": [],
-    "exclusionReceipt": null,
-    "exclusionReceiptSha256": null
+    "operatorReceipt": null,
+    "operatorReceiptSha256": null,
+    "knownInvokersSha256": null,
+    "riskApprovalSha256": null,
+    "launcherAliases": []
   },
   "units": {
     "system/bubblewash-maintenance.timer": null,
     "system/bubblewash-maintenance.service": null,
     "user/bubblewash-local.service": null
+  },
+  "coordinatedWriterHold": {
+    "schema": "bubblewash-coordinated-writer-hold/v1",
+    "knownUnits": [
+      "system/bubblewash-maintenance.timer",
+      "system/bubblewash-maintenance.service",
+      "user/bubblewash-local.service"
+    ],
+    "knownInvokersSha256": null,
+    "riskApprovalSha256": null,
+    "residualAccessAcknowledged": false,
+    "residualAssumptionSha256": null
   }
 }

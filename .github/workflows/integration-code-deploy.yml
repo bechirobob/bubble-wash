@@ -7,7 +7,7 @@ on:
         required: false
         type: string
       fallback_sha:
-        description: 'Published independent reviewed fallback main commit with exact CI success'
+        description: 'Exact accepted published fallback commit with its bound hosted test evidence'
         required: false
         type: string
       plan_id:
@@ -23,9 +23,19 @@ on:
         required: true
         default: inspect
         type: choice
-        options: [inspect-host-evidence, inspect, execute, recover, complete-labels-only]
+        options: [prepare, materialize, inspect-host-evidence, inspect, execute, recover, complete-migration]
       completion_confirmation:
-        description: 'Completion only, after explicit approval: complete-labels-only: followed by the exact full plan SHA-256. Otherwise leave empty.'
+        description: 'Completion only, after explicit approval: complete-migration: followed by the exact full plan SHA-256. Otherwise leave empty.'
+        required: false
+        default: ''
+        type: string
+      preparation_pins:
+        description: 'Prepare only: public JSON backupSha256, receiptRun, storeSha, storeId, node:{path,sha256}. Never credentials or configuration.'
+        required: false
+        default: ''
+        type: string
+      materialization_review:
+        description: 'Materialize only: reviewed public record objects/digests, preparation receipt SHA and backup pins. No private chat, credentials, config or database data.'
         required: false
         default: ''
         type: string
@@ -40,6 +50,9 @@ jobs:
     environment: backup-storage
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: controls
     env:
       CANDIDATE_SHA: ${{ inputs.candidate_sha }}
       FALLBACK_SHA: ${{ inputs.fallback_sha }}
@@ -47,44 +60,119 @@ jobs:
       PLAN_SHA256: ${{ inputs.plan_sha256 }}
       RELEASE_MODE: ${{ inputs.mode }}
       COMPLETION_CONFIRMATION: ${{ inputs.completion_confirmation }}
+      PREPARATION_PINS: ${{ inputs.preparation_pins }}
+      MATERIALIZATION_REVIEW: ${{ inputs.materialization_review }}
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - name: Require exact published identities and reviewed plan
+        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           if [[ "$RELEASE_MODE" == inspect-host-evidence ]]; then
-            [[ -z "$CANDIDATE_SHA$FALLBACK_SHA$PLAN_ID$PLAN_SHA256$COMPLETION_CONFIRMATION" ]]
+            [[ -z "$CANDIDATE_SHA$FALLBACK_SHA$PLAN_ID$PLAN_SHA256$COMPLETION_CONFIRMATION$PREPARATION_PINS$MATERIALIZATION_REVIEW" ]]
             exit 0
           fi
           [[ "$CANDIDATE_SHA" =~ ^[a-f0-9]{40}$ && "$FALLBACK_SHA" =~ ^[a-f0-9]{40}$ ]]
-          [[ "$PLAN_ID" =~ ^[a-f0-9]{64}$ && "$PLAN_SHA256" =~ ^[a-f0-9]{64}$ ]]
-          [[ "$CANDIDATE_SHA" == "$GITHUB_SHA" && "$CANDIDATE_SHA" != "$FALLBACK_SHA" ]]
-          [[ "$RELEASE_MODE" == inspect || "$RELEASE_MODE" == execute || "$RELEASE_MODE" == recover || "$RELEASE_MODE" == complete-labels-only ]]
-          if [[ "$RELEASE_MODE" == complete-labels-only ]]; then
-            [[ "$COMPLETION_CONFIRMATION" == "complete-labels-only:$PLAN_SHA256" ]]
+          if [[ "$RELEASE_MODE" == prepare ]]; then
+            [[ -z "$PLAN_ID$PLAN_SHA256$COMPLETION_CONFIRMATION$MATERIALIZATION_REVIEW" && -n "$PREPARATION_PINS" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          elif [[ "$RELEASE_MODE" == materialize ]]; then
+            [[ -z "$PLAN_ID$PLAN_SHA256$COMPLETION_CONFIRMATION$PREPARATION_PINS" && -n "$MATERIALIZATION_REVIEW" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          else
+            [[ "$PLAN_ID" =~ ^[a-f0-9]{64}$ && "$PLAN_SHA256" =~ ^[a-f0-9]{64}$ && -z "$PREPARATION_PINS$MATERIALIZATION_REVIEW" ]]
+          fi
+          [[ "$CANDIDATE_SHA" != "$FALLBACK_SHA" ]]
+          [[ "$RELEASE_MODE" == prepare || "$RELEASE_MODE" == materialize || "$RELEASE_MODE" == inspect || "$RELEASE_MODE" == execute || "$RELEASE_MODE" == recover || "$RELEASE_MODE" == complete-migration ]]
+          if [[ "$RELEASE_MODE" == complete-migration ]]; then
+            [[ "$COMPLETION_CONFIRMATION" == "complete-migration:$PLAN_SHA256" ]]
           else
             [[ -z "$COMPLETION_CONFIRMATION" ]]
           fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ inputs.candidate_sha || github.sha }}
+          ref: ${{ github.sha }}
+          path: controls
           persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: inputs.mode != 'inspect-host-evidence'
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          path: runtime-candidate
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: inputs.mode == 'prepare' || inputs.mode == 'materialize'
+        with:
+          ref: ${{ inputs.fallback_sha }}
+          path: runtime-fallback
+          persist-credentials: false
+      - name: Bind the complete clean control checkout including self-excluded modules
+        run: |
+          set -euo pipefail
+          python3 -B -c 'import os,sys; from pathlib import Path; sys.path.insert(0,"ops/integration-release"); from contracts import git_binding; git_binding(Path.cwd(),os.environ["GITHUB_SHA"])'
       - name: Verify the exact candidate and retained historical guard
         if: inputs.mode != 'inspect-host-evidence'
         run: |
           set -euo pipefail
-          [[ "$(git rev-parse HEAD)" == "$CANDIDATE_SHA" ]]
-          python3 ops/integration-release/select_source.py --release . --profile integration-candidate-v1
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          python3 ops/integration-release/select_source.py --release . --runner-only
+          python3 ops/integration-release/select_source.py --release ../runtime-candidate --profile integration-candidate-v1 --commit "$CANDIDATE_SHA"
           python3 -m unittest discover -s tests -p 'test_owner_deploy.py' -v
           python3 -m unittest discover -s tests -p 'test_integration_release_adapter.py' -v
           TARGET_SHA="$CANDIDATE_SHA" python3 ops/check-release-ci.py
-          TARGET_SHA="$FALLBACK_SHA" python3 ops/check-release-ci.py
+          python3 ops/integration-release/contracts.py --verify-fallback-ci "$FALLBACK_SHA"
+      - name: Verify exact preparation request and both runtime checkouts before transport
+        if: inputs.mode == 'prepare'
+        run: |
+          set -euo pipefail
+          python3 -B ops/integration-release/select_source.py --release ../runtime-fallback --profile integration-fallback-v1 --commit "$FALLBACK_SHA"
+          python3 -B -m unittest discover -s tests -p 'test_integration_prepare.py' -v
+          python3 -B - <<'PYREQUEST'
+          import json, os, pathlib, sys
+          sys.path.insert(0, 'ops/integration-release')
+          from contracts import read_json, HERE, canonical, require
+          from stream_host import validate_preparation_request
+          def unique(rows):
+              result = dict(rows)
+              require(len(result) == len(rows), 'duplicate preparation input')
+              return result
+          public = json.loads(os.environ['PREPARATION_PINS'], object_pairs_hook=unique)
+          require(type(public) is dict and set(public) == {'backupSha256','receiptRun','storeSha','storeId','node'}, 'only public preparation pins are accepted')
+          request = {**public, 'runId':os.environ['GITHUB_RUN_ID'], 'runAttempt':int(os.environ['GITHUB_RUN_ATTEMPT']), 'candidateSha':os.environ['CANDIDATE_SHA'], 'fallbackSha':os.environ['FALLBACK_SHA']}
+          validate_preparation_request(request, read_json(HERE/'source-contracts.json'))
+          with (pathlib.Path(os.environ['RUNNER_TEMP'])/'integration-preparation-request.json').open('xb') as stream:
+              stream.write(canonical(request))
+          PYREQUEST
+          python3 -B ops/integration-release/stream_host.py --mode prepare --preparation-request "$RUNNER_TEMP/integration-preparation-request.json" > "$RUNNER_TEMP/integration-preparation.py"
+          python3 -B -c 'import os,sys; from pathlib import Path; sys.path.insert(0,"ops/integration-release"); from contracts import git_binding; git_binding(Path.cwd(),os.environ["GITHUB_SHA"])' 
+      - name: Bind reviewed materialization inputs to actual published checkout trees
+        if: inputs.mode == 'materialize'
+        run: |
+          set -euo pipefail
+          python3 -B - <<'PYMATERIALIZE'
+          import json, os, pathlib, sys
+          sys.path.insert(0, 'ops/integration-release')
+          from contracts import HERE, canonical, read_json, require, verify_published_source
+          from materialize_plan import validate_materialization_request
+          def unique(rows):
+              value = dict(rows)
+              require(len(value) == len(rows), 'duplicate materialization input')
+              return value
+          request = json.loads(os.environ['MATERIALIZATION_REVIEW'], object_pairs_hook=unique)
+          require(type(request) is dict and 'gitBindings' not in request, 'Git provenance must come from actual clean checkouts')
+          contract = read_json(HERE/'source-contracts.json')
+          request['gitBindings'] = {label:verify_published_source(pathlib.Path('../runtime-'+label), contract,
+              'integration-'+label+'-v1', os.environ[label.upper()+'_SHA']) for label in ('candidate','fallback')}
+          validate_materialization_request(request, contract)
+          with (pathlib.Path(os.environ['RUNNER_TEMP'])/'integration-materialization-request.json').open('xb') as stream:
+              stream.write(canonical(request))
+          PYMATERIALIZE
+          python3 -B ops/integration-release/stream_host.py --mode materialize --materialization-request "$RUNNER_TEMP/integration-materialization-request.json" > "$RUNNER_TEMP/integration-materialization.py"
+          python3 -B -c 'import os,sys; from pathlib import Path; sys.path.insert(0,"ops/integration-release"); from contracts import git_binding; git_binding(Path.cwd(),os.environ["GITHUB_SHA"])'
       - name: Test bounded pre-installation evidence route
         if: inputs.mode == 'inspect-host-evidence'
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
-          python3 -B ops/integration-release/select_source.py --release . --profile integration-candidate-v1
+          python3 -B ops/integration-release/select_source.py --release . --runner-only
           python3 -B -m unittest discover -s tests -p 'test_integration_host_evidence.py' -v
           python3 -B ops/integration-release/stream_host.py --mode inspect-host-evidence > /dev/null
       - name: Create no credentials; connect through existing approved production tailnet
@@ -94,7 +182,31 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
+      - name: Stage exact sources into four fresh inactive app-UID workspaces
+        if: inputs.mode == 'prepare'
+        run: |
+          set -euo pipefail
+          for label in candidate fallback; do
+            if [[ "$label" == candidate ]]; then sha="$CANDIDATE_SHA"; else sha="$FALLBACK_SHA"; fi
+            git -C "../runtime-$label" archive --format=tar "$sha" > "$RUNNER_TEMP/integration-$label.tar"
+            for kind in build runtime; do
+              release_dir="/home/ubuntu/bubblewash-releases/prepare-$kind-$GITHUB_RUN_ID-1-$sha"
+              tailscale ssh root@hermes "/usr/sbin/runuser -u ubuntu -- /usr/bin/python3 -I -c \"import os,pathlib,stat; p=pathlib.Path('$release_dir'); a=p.parent; s=a.lstat(); assert a.resolve(strict=True)==a and stat.S_ISDIR(s.st_mode) and s.st_uid==os.getuid() and not s.st_mode & 0o022; p.mkdir(mode=0o750); assert p.resolve(strict=True)==p\""
+              tailscale ssh root@hermes "/usr/sbin/runuser -u ubuntu -- /bin/sh -c \"umask 077; /usr/bin/tar --no-same-owner -xf - -C '$release_dir' && test ! -e '$release_dir/.release-sha' && printf '%s\\n' '$sha' > '$release_dir/.release-sha'\"" < "$RUNNER_TEMP/integration-$label.tar"
+            done
+          done
+      - name: Prepare inactive pair and rehearse two copies of one private preimage
+        if: inputs.mode == 'prepare'
+        run: |
+          set -euo pipefail
+          tailscale ssh root@hermes 'python3 -I -B -' < "$RUNNER_TEMP/integration-preparation.py"
+      - name: Materialize one private reviewed plan without stopping services or opening the database
+        if: inputs.mode == 'materialize'
+        run: |
+          set -euo pipefail
+          tailscale ssh root@hermes 'python3 -I -B -' < "$RUNNER_TEMP/integration-materialization.py"
       - name: Consume pre-staged reviewed package, never install gates or resume maintenance
+        if: inputs.mode != 'prepare' && inputs.mode != 'materialize'
         run: |
           set -euo pipefail
           if [[ "$RELEASE_MODE" == inspect-host-evidence ]]; then

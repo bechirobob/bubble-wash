@@ -5,7 +5,7 @@ import importlib.util
 from pathlib import Path
 import sys
 sys.dont_write_bytecode = True
-from contracts import HERE, PROFILE_NAMES, read_json, verify_source, require
+from contracts import HERE, PROFILE_NAMES, read_json, verify_source, require, verify_control_runner, verify_published_source
 
 
 def select(root, requested=None):
@@ -42,5 +42,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--release', type=Path, required=True)
     parser.add_argument('--profile', choices=('historical-owner-v1', *PROFILE_NAMES))
+    parser.add_argument('--runner-only', action='store_true')
+    parser.add_argument('--commit')
     args = parser.parse_args()
-    print(select(args.release, args.profile))
+    if args.runner_only:
+        require(not args.profile and not args.commit, 'runner recognition is not a host profile')
+        print(verify_control_runner(args.release, read_json(HERE/'source-contracts.json')))
+    else:
+        chosen = select(args.release, args.profile)
+        if args.commit:
+            require(chosen in PROFILE_NAMES, 'published binding needs an integration profile')
+            verify_published_source(args.release, read_json(HERE/'source-contracts.json'), chosen, args.commit)
+        print(chosen)

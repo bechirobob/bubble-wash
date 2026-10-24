@@ -2,10 +2,12 @@
 """Installed-gate consumer. No install, reload, configuration write, or maintenance start.
 
 Defaults to inspection. Execute/recover require an exact externally reviewed plan
-and exclusion receipt. Merely setting a boolean cannot authorize host acceptance.
+and coordinated operator review. Privileged unknown invokers are not excluded.
 """
 import argparse
 import copy
+from contextlib import contextmanager
+import importlib.util
 import hashlib
 import http.client
 import json
@@ -23,7 +25,7 @@ import time
 sys.dont_write_bytecode = True
 from contracts import (HERE, BASELINE, PROFILE_NAMES, canonical, digest, object_digest,
                        read_json, regular, relative, require, dependency_manifest,
-                       load_controller, verify_source)
+                       load_controller, verify_source, runtime_manifest, COORDINATED_UNITS, RESIDUAL_ASSUMPTION_SHA256)
 
 STATE = Path('/var/lib/bubblewash-release')
 HOME = Path('/home/ubuntu')
@@ -248,14 +250,16 @@ def process_identity(pid, proc=Path('/proc')):
     return fields[19]
 
 
-def release_processes(releases, proc=Path('/proc')):
-    """All UIDs, no argv/environment output. A vanished PID is the only tolerated race."""
+def release_processes(releases, proc=Path('/proc'), uid=None):
+    """Bounded process evidence with no argv/environment output or global claim."""
     roots = tuple(str(Path(root)).encode() for root in releases)
     found = {}
     for item in proc.iterdir():
         if not item.name.isdigit() or int(item.name) == os.getpid():
             continue
         try:
+            if uid is not None and item.stat().st_uid != uid:
+                continue
             fields = (item/'stat').read_text().rsplit(')', 1)[1].split()
             if fields[0] == 'Z':
                 continue
@@ -349,76 +353,60 @@ class Host:
         self.ctl(manager, action, unit)
 
     def inventory(self):
-        required = ['/etc/crontab', '/etc/cron.d', '/etc/cron.hourly', '/etc/cron.daily', '/etc/cron.weekly',
-                    '/etc/cron.monthly', '/var/spool/cron', '/var/spool/at', '/etc/docker', '/etc/containers',
-                    '/etc/systemd/system', '/run/systemd/system', '/usr/lib/systemd/system',
-                    '/etc/systemd/user', '/run/systemd/user', '/usr/lib/systemd/user',
-                    '/run/systemd/transient', '/run/systemd/system.control',
-                    '/run/systemd/generator', '/run/systemd/generator.early', '/run/systemd/generator.late']
-        managers = {'system': ['systemctl']}
-        accounts = pwd.getpwall()
-        for account in accounts:
-            # All accounts with a home plus every extant user bus, not only ubuntu.
-            home = Path(account.pw_dir)
-            if home.is_absolute() and str(home) not in ('/', '/nonexistent'):
-                required.extend(str(home/name) for name in ('.config/systemd/user', '.local/share/systemd/user'))
-            runtime = Path('/run/user')/str(account.pw_uid)
-            if (runtime/'bus').exists():
-                require(re.fullmatch(r'[A-Za-z0-9_.-]+', account.pw_name), 'unsupported user-manager identity')
-                managers['user:'+str(account.pw_uid)] = ['runuser', '-u', account.pw_name, '--', 'env',
-                    'XDG_RUNTIME_DIR='+str(runtime), 'DBUS_SESSION_BUS_ADDRESS=unix:path='+str(runtime/'bus'),
-                    'systemctl', '--user']
-                required.extend(str(runtime/'systemd'/name) for name in
-                    ('user', 'transient', 'user.control', 'generator', 'generator.early', 'generator.late'))
-        require('user:'+str(self.uid) in managers, 'ubuntu user manager unavailable')
-        configured = self.plan['hostAcceptance']['inventoryPaths']
-        require(set(required).issubset(configured) and len(configured) == len(set(configured)), 'invoker inventory scopes incomplete')
-        values = configuration_inventory(configured, allow_links=True)
+        """Only the three known units, their exact sources and static commands.
+
+        No claim is made about other users, cron, containers or privileged actors.
+        Volatile running states and command timestamps are deliberately excluded.
+        """
         units = {}
-        for manager, prefix in managers.items():
-            installed = self.run(prefix+['list-unit-files', '--type=service,timer,socket,path', '--no-legend', '--no-pager', '--plain'])
-            listing = self.run(prefix+['list-units', '--all', '--type=service,timer,socket,path', '--no-legend', '--no-pager', '--plain'])
-            ids = []
-            for line in listing.splitlines():
-                name = line.split()[0]
-                require(re.fullmatch(r'[A-Za-z0-9_.:@\\-]+\.(service|timer|socket|path)', name), 'ambiguous loaded unit identity')
-                ids.append(name)
-            require(len(ids) == len(set(ids)), 'duplicate loaded unit identity')
-            loaded = ''
-            if ids:
-                loaded = self.run(prefix+['show', *sorted(ids), '--property=Id,FragmentPath,SourcePath,DropInPaths,Transient,NeedDaemonReload'])
-                seen = set()
-                for block in loaded.strip().split('\n\n'):
-                    properties = self.c.core.parse_properties(block)
-                    require(set(properties) == {'Id', 'FragmentPath', 'SourcePath', 'DropInPaths', 'Transient', 'NeedDaemonReload'}
-                            and properties['Id'] in ids and properties['Id'] not in seen
-                            and properties['NeedDaemonReload'] == 'no', 'loaded unit inventory incomplete or stale')
-                    seen.add(properties['Id'])
-                    # Sources outside standard paths must also be explicitly reviewed.
-                    for name in [properties['FragmentPath'], properties['SourcePath'], *properties['DropInPaths'].split()]:
-                        if name:
-                            require(name in values, 'loaded source outside reviewed inventory')
-                require(seen == set(ids), 'loaded unit listing incomplete')
-            units[manager] = {'installed': installed, 'loaded': loaded}
-        return {'files': values, 'unitFiles': units}
+        for manager, unit in self.c.core.UNITS:
+            properties = self.c.core.parse_properties(self.ctl(manager, 'show', unit,
+                '--property=LoadState,FragmentPath,DropInPaths,NeedDaemonReload,WorkingDirectory,EnvironmentFiles,User,Group'))
+            require(properties.get('LoadState') == 'loaded' and properties.get('NeedDaemonReload') == 'no',
+                    'known unit unavailable or stale')
+            names = [properties['FragmentPath'], *shlex.split(properties['DropInPaths'])]
+            require(names[0] and len(names) == len(set(names)) and len(names) <= 33, 'known unit sources incomplete')
+            files = {}
+            for name in names:
+                path = Path(name)
+                require(any(path.is_relative_to(base) for base in
+                    (Path('/etc/systemd/system'), Path('/etc/systemd/user'), Path('/usr/lib/systemd/system'),
+                     Path('/usr/lib/systemd/user'), HOME/'.config/systemd/user')), 'known source outside allowed roots')
+                owner = 0 if manager == 'system' or name != names[0] else path.stat().st_uid
+                require(owner in (0, self.uid), 'known source owner invalid')
+                protected(path, owner=owner, parents=name != names[0])
+                files[name] = digest(path)
+            units[manager+'/'+unit] = {'properties': properties, 'files': files,
+                'execStart': [] if unit == self.c.core.TIMER else self.exec_start(manager, unit)}
+        return {'schema': 'bubblewash-known-invokers/v1', 'units': units}
 
     def exclusion(self):
+        """Validate coordinated approval; never translate it into global exclusion."""
         acceptance = self.plan['hostAcceptance']
-        receipt_path = Path(acceptance['exclusionReceipt'])
+        require('externalInvokersExcluded' not in acceptance and 'excludedInvokers' not in acceptance,
+                'global exclusion is not this policy')
+        receipt_path = Path(acceptance['operatorReceipt'])
         protected(receipt_path, parents=True)
-        require(digest(receipt_path) == acceptance['exclusionReceiptSha256'], 'invoker review receipt changed')
+        require(stat.S_IMODE(receipt_path.stat().st_mode) == 0o600, 'operator review must be private')
+        require(digest(receipt_path) == acceptance['operatorReceiptSha256'], 'operator review changed')
         receipt = read_json(receipt_path)
-        require(set(receipt) == {'schema', 'hostMachineIdSha256', 'bootId', 'issuedAt', 'expiresAt', 'sourceContractSha256', 'inventorySha256', 'excludedInvokers', 'reviewReference'}, 'invoker receipt shape invalid')
-        require(receipt['schema'] == 'bubblewash-host-invoker-review/v1'
+        require(set(receipt) == {'schema', 'hostMachineIdSha256', 'bootId', 'issuedAt', 'expiresAt',
+                'sourceContractSha256', 'knownInvokersSha256', 'riskApprovalSha256', 'reviewReference',
+                'residualAssumptionSha256'}, 'operator receipt shape invalid')
+        require(receipt['schema'] == 'bubblewash-coordinated-operator-review/v1'
                 and receipt['hostMachineIdSha256'] == digest('/etc/machine-id')
                 and receipt['bootId'] == Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-                and receipt['sourceContractSha256'] == self.plan['sourceContractSha256'], 'invoker receipt not bound to this host/boot/source')
+                and receipt['sourceContractSha256'] == self.plan['sourceContractSha256'],
+                'operator review not bound to this host, boot and source')
         require(type(receipt['issuedAt']) is int and type(receipt['expiresAt']) is int
                 and receipt['issuedAt'] <= time.time() < receipt['expiresAt']
-                and 0 < receipt['expiresAt']-receipt['issuedAt'] <= 1800, 'invoker review expired or invalid')
-        require(receipt['excludedInvokers'] == list(SCOPES)
-                and re.fullmatch(r'[a-f0-9]{64}', receipt['reviewReference']), 'explicit bounded exclusion review missing')
-        require(object_digest(self.inventory()) == receipt['inventorySha256'], 'launch inventory changed since review')
+                and 0 < receipt['expiresAt']-receipt['issuedAt'] <= 1800, 'operator review expired')
+        require(receipt['residualAssumptionSha256'] == RESIDUAL_ASSUMPTION_SHA256
+                and receipt['riskApprovalSha256'] == acceptance['riskApprovalSha256']
+                and re.fullmatch('[a-f0-9]{64}', receipt['riskApprovalSha256'])
+                and re.fullmatch('[a-f0-9]{64}', receipt['reviewReference']), 'explicit coordinated approval missing')
+        require(object_digest(self.inventory()) == receipt['knownInvokersSha256'] == acceptance['knownInvokersSha256'],
+                'known invokers changed since review')
         return True
 
     def exec_start(self, manager, unit):
@@ -453,7 +441,7 @@ class Host:
             require(props.get('LoadState') == 'loaded', 'unit not loaded')
             expected = entry['properties']
             require(set(expected) == {'WorkingDirectory', 'EnvironmentFiles', 'User', 'Group', 'FragmentPath'}, 'unit contract incomplete')
-            require(all(props.get(k) == v for k, v in expected.items()), 'effective unit identity changed')
+            require(all(props.get(k, '') == v for k, v in expected.items()), 'effective unit identity changed')
             if unit != self.c.core.TIMER:
                 require(self.exec_start(manager, unit) == entry['execStart'], 'loaded service executable or argv changed')
             require(set(entry['files']) == {expected['FragmentPath'], *entry['dropins']}, 'unit sources incomplete')
@@ -468,12 +456,20 @@ class Host:
         return True
 
     def capture(self):
-        self.captured = release_processes(self.scan_roots, self.proc)
+        self.captured = release_processes(self.scan_roots, self.proc, self.uid)
+        self.empty_groups = set()
         for manager, unit in self.c.core.UNITS:
             if unit == self.c.core.TIMER:
                 continue
             props = self.c.core.parse_properties(self.show(manager, unit))
             configured = self.plan['units'][manager+'/'+unit]['cgroup']
+            if configured == '':
+                require(props.get('ControlGroup') == '' and props.get('ActiveState') == 'inactive'
+                        and props.get('SubState') == 'dead' and props.get('MainPID') == '0'
+                        and props.get('ControlPID') == '0' and props.get('Job') == '',
+                        'empty cgroup was not observed inactive')
+                self.empty_groups.add((manager, unit))
+                continue
             require(configured.startswith('/') and '..' not in Path(configured).parts, 'invalid cgroup contract')
             if props.get('ControlGroup'):
                 require(props['ControlGroup'] == configured, 'cgroup identity differs')
@@ -488,12 +484,35 @@ class Host:
                             self.captured[pid] = process_identity(pid, self.proc)
             else:
                 require(props.get('MainPID') == '0' and props.get('ControlPID') == '0', 'absent cgroup with process')
-                self.groups[group] = (0, 0)  # If newly created/replaced, inspection rejects it.
+                self.groups[group] = (0, 0)
 
     def quiet(self):
-        require(not release_processes(self.scan_roots, self.proc), 'unmanaged release process remains')
-        return self.c.core.inspect_quiescence(self.show, self.groups, self.roots, self.uid,
-                 lambda: self.run(['ss', '-H', '-ltnp', 'sport = :3000']), self.captured, proc=self.proc)
+        # Equivalent checks to the frozen primitive, with explicit observed-empty
+        # cgroups instead of fabricating a path for an already inactive service.
+        for manager, unit in self.c.core.UNITS:
+            props = self.c.core.parse_properties(self.show(manager, unit))
+            require(props.get('LoadState') == 'loaded' and props.get('ActiveState') == 'inactive'
+                    and props.get('SubState') == 'dead' and props.get('Job') == '', 'known unit not fully stopped')
+            if unit != self.c.core.TIMER:
+                require(props.get('MainPID') == '0' and props.get('ControlPID') == '0', 'known writer remains')
+                if (manager, unit) in getattr(self, 'empty_groups', set()):
+                    require(props.get('ControlGroup') == '', 'previously empty cgroup became active')
+        require(len(self.groups) + len(getattr(self, 'empty_groups', set())) == 2, 'cgroup inventory incomplete')
+        for group, identity in self.groups.items():
+            require(not group.is_symlink(), 'untrusted cgroup')
+            if not group.exists():
+                continue
+            require((group.stat().st_dev, group.stat().st_ino) == tuple(identity), 'captured cgroup replaced')
+            for path in (group, *group.rglob('*')):
+                require(not path.is_symlink(), 'cgroup symlink')
+                if path.is_dir():
+                    require(not (path/'cgroup.procs').read_text().strip(), 'cgroup task remains')
+        require(self.run(['ss', '-H', '-ltnp', 'sport = :3000']) == '', 'application listener remains')
+        for pid, start in self.captured.items():
+            require(str(pid).isdigit() and str(start).isdigit() and not (self.proc/str(pid)).exists(),
+                    'captured process survives or PID reused')
+        require(not release_processes(self.scan_roots, self.proc, self.uid), 'unmanaged release process remains')
+        return True
 
     def node(self, target, args, database):
         node = self.plan['node']['path']
@@ -505,25 +524,44 @@ class Host:
         return self.run(['runuser', '-u', 'ubuntu', '--', node, '--conditions=react-server',
                          '--experimental-strip-types', *args], cwd=target, env=environment, timeout=90).strip()
 
-    def migrate(self, database):
-        def acknowledgement(raw):
-            def unique(pairs):
-                value = dict(pairs)
-                require(len(value) == len(pairs), 'duplicate migration result key')
-                return value
-            # Canonical JSON distinguishes booleans from Python-equal 0/1.
-            return canonical(json.loads(raw, object_pairs_hook=unique))
+    @staticmethod
+    def acknowledgement(raw, expected):
+        def unique(pairs):
+            value = dict(pairs)
+            require(len(value) == len(pairs), 'duplicate migration result key')
+            return value
+        require(canonical(json.loads(raw, object_pairs_hook=unique)) == canonical(expected), 'migration result uncertain')
+        return True
 
-        # Both fixed entrypoints open only the existing database, never the
-        # initializing application store. Label maps must commit first: the new
-        # outbox preflight deliberately refuses a database missing those maps.
-        # A failure between commits remains MIGRATING/held. Recovery does not
-        # rerun this callback or restore a snapshot; completion needs separate
-        # approval while all writer holds and the deployment lock remain held.
+    def feature(self, database, mode=None):
+        require(mode in (None, '--preflight', '--verify'), 'unsupported feature mode')
+        capsule = HERE/'capsule/scripts/migrate-integration-features.mjs'
+        regular(capsule)
+        args = [str(capsule)] + ([mode] if mode else []) + ['--database', str(database), '--source', self.plan['candidate']]
+        return self.node(Path(self.plan['candidate']), args, database)
+
+    def migrate(self, database, resume=False):
+        # Initial execution requires the original exact schema. Explicit held
+        # completion accepts only one of the separately checked partial stages.
+        if resume:
+            require(self.completion_schema(database) in ('pre-migration', 'labels-only', 'outbox-complete'), 'completion stage is not partial')
+        else:
+            self.acknowledgement(self.feature(database, '--preflight'),
+                                 {'ok': True, 'status': 'exact-pre-migration-ready', 'databaseChanged': False})
         result = self.node(Path(self.plan['candidate']), ['scripts/migrate-booking-references.mjs', '--database', str(database)], database)
-        require(acknowledgement(result) == canonical({'ok': True, 'migration': 'permanent-booking-vendor-labels-v1', 'historicalBackfill': False}), 'label migration result uncertain')
+        self.acknowledgement(result, {'ok': True, 'migration': 'permanent-booking-vendor-labels-v1', 'historicalBackfill': False})
         result = self.node(Path(self.plan['candidate']), ['scripts/migrate-notification-outbox.mjs', '--database', str(database)], database)
-        require(acknowledgement(result) == canonical({'ok': True, 'migration': 'notification-outbox-exact-additive-v1'}), 'migration result uncertain')
+        self.acknowledgement(result, {'ok': True, 'migration': 'notification-outbox-exact-additive-v1'})
+        result = read_result(self.feature(database))
+        require(set(result) == {'ok','status','migration','createdTables','ownershipColumnAdded','locationColumnsAdded','optionalCustomerTableCreated'}
+                and result['ok'] is True and result['status'] == 'exact-post-feature-ready'
+                and result['migration'] == 'exact-integration-features-v1'
+                and type(result['createdTables']) is int and 0 <= result['createdTables'] <= 5
+                and type(result['ownershipColumnAdded']) is bool and type(result['locationColumnsAdded']) is bool
+                and result['optionalCustomerTableCreated'] is False, 'feature migration result uncertain')
+        self.acknowledgement(self.feature(database, '--verify'),
+                             {'ok': True, 'status': 'exact-post-feature-ready', 'databaseChanged': False})
+        verify_completion_data(Path(self.plan['snapshot']), database, 'complete')
         return True
 
     def verify_database(self, database):
@@ -534,24 +572,25 @@ class Host:
                   "try{db.pragma('query_only=ON');if(!databaseReadiness(db,[initializeStaffAccountsSchema])||"
                   "!db.prepare('PRAGMA table_info(notification_outbox)').all().some(x=>x.name==='delivery_state'))"
                   "throw Error('schema');console.log('exact-additive-ready');}finally{db.close();}")
-        return self.node(Path(self.plan['fallback']), ['--input-type=module', '-e', script], database) == 'exact-additive-ready'
+        require(self.node(Path(self.plan['fallback']), ['--input-type=module', '-e', script], database) == 'exact-additive-ready', 'fallback schema rejected')
+        return self.acknowledgement(self.feature(database, '--verify'),
+            {'ok': True, 'status': 'exact-post-feature-ready', 'databaseChanged': False})
 
     def completion_schema(self, database):
-        # Readiness checks exact core/staff, label schema/high-water and one of
-        # the two exact outbox schemas. A missing column alone is not evidence.
-        script = ("import Database from 'better-sqlite3';"
-                  "import {databaseReadiness} from './src/lib/data-store.ts';"
-                  "import {initializeStaffAccountsSchema} from './src/lib/staff-accounts.ts';"
-                  "const db=new Database(process.env.BUBBLEWASH_DATABASE_PATH,{readonly:true,fileMustExist:true});"
-                  "try{db.pragma('query_only=ON');if(!databaseReadiness(db,[initializeStaffAccountsSchema]))"
-                  "throw Error('schema');const complete=db.prepare('PRAGMA table_info(notification_outbox)').all()"
-                  ".some(x=>x.name==='delivery_state');if(!complete){"
-                  "for(const table of ['booking_references','vendor_codes']){"
-                  "if(db.prepare('SELECT count(*) n FROM '+table).get().n!==0||"
-                  "db.prepare('SELECT 1 FROM sqlite_sequence WHERE name=?').get(table))throw Error('consumed labels');}}"
-                  "console.log(complete?'already-complete':'labels-only');}finally{db.close();}")
+        # Pure, readonly admission of initial, labels-only, outbox-complete or
+        # fully complete schema. No arbitrary missing-column inference.
+        capsule = (HERE/'capsule/scripts/migrate-integration-features.mjs').as_uri()
+        script = ("import {featureSchemaModel,inspectFeatureSchema} from " + json.dumps(capsule) + ";"
+            "const model=await featureSchemaModel("+json.dumps(self.plan['candidate'])+");"
+            "const db=new model.Database(process.env.BUBBLEWASH_DATABASE_PATH,{readonly:true,fileMustExist:true});"
+            "db.pragma('query_only=ON');try{model.unchanged();let stage=null;"
+            "for(const [name,m,complete] of [['already-complete',model,true],['outbox-complete',model,false],"
+            "['labels-only',{...model,expected:new Map([...model.preExpected,...['booking_references','vendor_codes','sqlite_sequence'].map(n=>[n,model.expected.get(n)])]),required:model.required},false],"
+            "['pre-migration',{...model,expected:model.preExpected,required:model.preRequired},false]]){"
+            "try{inspectFeatureSchema(db,m,complete);stage=name;break;}catch{}}"
+            "if(!stage)throw Error('partial schema rejected');model.unchanged();console.log(stage);}finally{db.close();}")
         result = self.node(Path(self.plan['candidate']), ['--input-type=module', '-e', script], database)
-        require(result in ('labels-only', 'already-complete'), 'completion schema uncertain')
+        require(result in ('pre-migration', 'labels-only', 'outbox-complete', 'already-complete'), 'completion schema uncertain')
         return result
 
     def runtime_node(self):
@@ -590,8 +629,144 @@ class Host:
         return False
 
 
+def read_result(raw):
+    def pairs(rows):
+        result = dict(rows)
+        require(len(rows) == len(result), 'duplicate result key')
+        return result
+    result = json.loads(raw, object_pairs_hook=pairs)
+    require(type(result) is dict, 'result is not an object')
+    return result
+
+
+def admit_production_configuration(values):
+    require(values.get('BUBBLEWASH_STAFF_AUTH_DISABLED') == 'false'
+            and values.get('BUBBLEWASH_BOOKINGS_DISABLED') == 'true'
+            and values.get('BUBBLEWASH_DISABLE_DEMO_LOGIN') == 'true'
+            and values.get('NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED') == 'false'
+            and values.get('NODE_ENV') in (None, 'production'), 'unsafe production configuration')
+    return True
+
+
+def require_no_runtime_cache(root):
+    root = Path(root)
+    for path in root.rglob('*'):
+        require('__pycache__' not in path.parts and path.suffix not in ('.pyc', '.pyo'), 'runtime bytecode cache refused')
+    return True
+
+
+@contextmanager
+def locked_materialization_facts(request, run=None):
+    """Observe existing state under the deployment lock. No live DB open/write.
+
+    Yield exact private plan fields plus a recheck closure. Review records are
+    written by the caller only while this context retains the same lock.
+    """
+    import contracts
+    require(os.geteuid() == 0, 'root materialization required')
+    c = load_controller()
+    g = c.guards_module()
+    uid = pwd.getpwnam('ubuntu').pw_uid
+    backup = request['backup']
+    require(set(backup) == {'sha256', 'receiptRun', 'storeSha', 'storeId'}
+            and re.fullmatch('[a-f0-9]{64}', backup['sha256'])
+            and re.fullmatch('[1-9][0-9]{0,19}', backup['receiptRun'])
+            and re.fullmatch('[a-f0-9]{40}', backup['storeSha'])
+            and type(backup['storeId']) is int and backup['storeId'] > 0, 'backup request invalid')
+    prepare = sys.modules.get('integration_preparation')
+    require(prepare is not None and getattr(prepare, '__source_sha256__', None) == contracts.PREPARATION_HELPER_SHA256,
+            'verified preparation reader missing')
+    with g.deployment_lock(RUNTIME, uid) as lock_unchanged:
+        raw = evidence_read(ENV, uid)
+        marker_raw = evidence_read(RUNTIME/'current-release', uid)
+        receipt_raw = evidence_read(RECEIPT, uid)
+        values, marker, receipt = g.parse(raw), g.parse(marker_raw), read_result(receipt_raw)
+        admit_production_configuration(values)
+        old = CURRENT.resolve(strict=True)
+        require(CURRENT.is_symlink() and old.parent == OLD_RELEASES and marker.get('sha') == contracts.LIVE_SHA
+                and marker.get('path') == str(old), 'current release differs')
+        release_marker = evidence_read(old/'.release-sha', uid, 128)
+        require(release_marker.decode().strip() == contracts.LIVE_SHA, 'current release marker differs')
+        old_files = prepare.source_files(old, uid)
+        require(prepare.git_tree(old_files) == contracts.LIVE_TREE, 'current source tree differs')
+        database = Path(values.get('BUBBLEWASH_DATABASE_PATH', ''))
+        require(database.is_absolute() and database.resolve(strict=True) == database
+                and not database.is_relative_to(OLD_RELEASES) and not database.is_relative_to(STATE), 'unsafe database path')
+        db_identity = protected(database, owner=uid)
+        archive = Path(values['BUBBLEWASH_BACKUP_OFFSITE_DIR'])/receipt['filename']
+        status = Path(values['BUBBLEWASH_BACKUP_STATUS_PATH'])
+        require(receipt.get('sha256') == backup['sha256'], 'wrong backup archive')
+        archive_identity = protected(archive, owner=uid)
+        guards = {'envSha256': hashlib.sha256(raw).hexdigest(), 'receiptSha256': hashlib.sha256(receipt_raw).hexdigest(),
+            'database': str(database), 'receiptRun': backup['receiptRun'], 'storeSha': backup['storeSha'],
+            'storeId': backup['storeId'], 'archiveSha256': backup['sha256']}
+        host = Host.__new__(Host)
+        host.uid, host.c, host.run, host.proc = uid, c, run or Host.command, Path('/proc')
+        invokers = host.inventory()
+        units = {}
+        for manager, unit in c.core.UNITS:
+            row = invokers['units'][manager+'/'+unit]
+            props = c.core.parse_properties(host.show(manager, unit))
+            require(props.get('LoadState') == 'loaded', 'known unit is not loaded')
+            cgroup = props.get('ControlGroup', '')
+            if unit != c.core.TIMER and not cgroup:
+                require(props.get('ActiveState') == 'inactive' and props.get('SubState') == 'dead'
+                        and props.get('MainPID') == '0' and props.get('ControlPID') == '0'
+                        and props.get('Job') == '', 'unobserved service cgroup')
+            units[manager+'/'+unit] = {'properties': {key: row['properties'].get(key, '') for key in
+                    ('WorkingDirectory','EnvironmentFiles','User','Group','FragmentPath')},
+                'files': row['files'], 'dropins': {name: pin for name,pin in row['files'].items()
+                    if name != row['properties']['FragmentPath']},
+                'fragmentUid': Path(row['properties']['FragmentPath']).stat().st_uid,
+                'execStart': row['execStart'], 'cgroup': cgroup}
+        state = c.DurableState(STATE)
+        c.LoadedGates(state, c.SystemdReader(uid, host.run),
+            {(manager, unit): units[manager+'/'+unit]['dropins'] for manager,unit in c.core.UNITS})()
+        props = c.core.parse_properties(host.show('user', c.core.APP))
+        pid = props.get('MainPID','')
+        require(pid.isdigit() and int(pid)>1, 'live application PID missing')
+        pid_start = process_identity(pid)
+        executable = (Path('/proc')/pid/'exe').resolve(strict=True)
+        node_identity = protected(executable, parents=True)
+        node = {'path': str(executable), 'sha256': digest(executable)}
+        host.plan = {'node': node}
+        machine, boot = digest('/etc/machine-id'), Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        require(re.fullmatch('[a-f0-9-]{36}', boot), 'boot identity invalid')
+        issued = int(time.time())
+        def recheck():
+            lock_unchanged()
+            require(evidence_read(ENV, uid) == raw and evidence_read(RECEIPT, uid) == receipt_raw
+                    and evidence_read(RUNTIME/'current-release', uid) == marker_raw, 'private release bindings changed')
+            require(CURRENT.is_symlink() and CURRENT.resolve(strict=True) == old
+                    and evidence_read(old/'.release-sha', uid, 128) == release_marker
+                    and prepare.source_files(old, uid) == old_files, 'current release changed')
+            require(protected(database, owner=uid) == db_identity, 'database inode changed')
+            require(protected(archive, owner=uid) == archive_identity and archive.stat().st_size == receipt['size']
+                    and digest(archive) == backup['sha256'], 'backup archive changed')
+            g.verify_receipt(receipt, read_result(evidence_read(status, uid)), time.time(),
+                backup['receiptRun'], backup['storeSha'], backup['storeId'])
+            require(host.inventory() == invokers, 'known unit definitions changed')
+            c.LoadedGates(state, c.SystemdReader(uid, host.run),
+                {(manager, unit): units[manager+'/'+unit]['dropins'] for manager,unit in c.core.UNITS})()
+            require(protected(executable, parents=True) == node_identity and digest(executable) == node['sha256']
+                    and process_identity(pid) == pid_start, 'live Node identity changed')
+            host.runtime_node()
+            g.check_runtime(old, values)
+            require(digest('/etc/machine-id') == machine
+                    and Path('/proc/sys/kernel/random/boot_id').read_text().strip() == boot
+                    and time.time() < issued + 1800, 'materialization observation expired')
+            return True
+        recheck()
+        yield {'old': str(old), 'oldSha': contracts.LIVE_SHA, 'current': str(CURRENT),
+            'marker': str(RUNTIME/'current-release'), 'state': str(STATE), 'database': str(database),
+            'databaseIdentity': list(db_identity[:2]), 'node': node, 'guards': guards, 'units': units,
+            'knownInvokersSha256': object_digest(invokers), 'hostMachineIdSha256': machine, 'bootId': boot,
+            'issuedAt': issued, 'expiresAt': issued+1800}, recheck
+        recheck()
+
+
 def validate_plan(plan, host=True):
-    require(plan.get('schema') == 'bubblewash-integration-host-plan/v1' and plan.get('oldSha') == BASELINE, 'wrong integration baseline')
+    require(plan.get('schema') == 'bubblewash-integration-host-plan/v1' and plan.get('oldSha') == __import__('contracts').LIVE_SHA, 'wrong integration baseline')
     require(plan.get('sourceContractSha256') == digest(HERE/'source-contracts.json'), 'source contract differs')
     contract = read_json(HERE/'source-contracts.json')
     require(set(plan['releaseShas']) == {'candidate', 'fallback'}, 'release pair incomplete')
@@ -604,8 +779,10 @@ def validate_plan(plan, host=True):
     for key, profile in zip(('candidate', 'fallback'), PROFILE_NAMES):
         root = Path(plan[key])
         if host:
-            require(root.parent == RELEASES and re.fullmatch(r'[0-9]{8}T[0-9]{6}Z-'+plan['releaseShas'][key][:12], root.name), 'invalid installed release directory')
+            require(root.parent == RELEASES and root.name == plan['releaseShas'][key], 'invalid installed release directory')
         verify_source(root, contract, profile)
+        require_no_runtime_cache(root)
+        require(plan['manifests'][key] == runtime_manifest(root, plan['releaseShas'][key]), 'runtime image changed')
         require(plan['dependencies'][key] == dependency_manifest(root/'node_modules'), 'installed dependency bytes changed')
         require(plan['gitBindings'][key]['commit'] == plan['releaseShas'][key]
                 and re.fullmatch('[a-f0-9]{40}', plan['gitBindings'][key]['tree']), 'unmaterialized Git provenance')
@@ -659,73 +836,136 @@ def durable_plan(plan, control):
     result = {name: copy.deepcopy(plan[name]) for name in immutable}
     result['guardIdentity'] = {name: plan['guards'][name] for name in ('envSha256', 'database')}
     result['invokerIdentity'] = {name: copy.deepcopy(plan['hostAcceptance'][name])
-                                 for name in ('inventoryPaths', 'launcherAliases')}
-    result['externalInvokersExcluded'] = True
+                                 for name in ('launcherAliases', 'knownInvokersSha256', 'riskApprovalSha256')}
+    result['coordinatedWriterHold'] = {'schema': 'bubblewash-coordinated-writer-hold/v1',
+        'knownUnits': list(COORDINATED_UNITS),
+        'knownInvokersSha256': plan['hostAcceptance']['knownInvokersSha256'],
+        'riskApprovalSha256': plan['hostAcceptance']['riskApprovalSha256'],
+        'residualAccessAcknowledged': True, 'residualAssumptionSha256': RESIDUAL_ASSUMPTION_SHA256}
     result['controllerPins'] = {str(Path(control.__file__).resolve()): digest(control.__file__),
                                str(Path(control.core.__file__).resolve()): digest(control.core.__file__),
-                               **{str(HERE/name): pin for name,pin in plan['adapterFiles'].items()}}
+                               **{str(HERE/name): pin for name,pin in plan['adapterFiles'].items()},
+                               str(HERE/'contracts.py'): digest(HERE/'contracts.py')}
     return result
 
 
 def completion_confirmation(mode, confirmation, plan_sha256):
-    if mode == 'complete-labels-only':
+    if mode == 'complete-migration':
         require(isinstance(plan_sha256, str) and re.fullmatch('[a-f0-9]{64}', plan_sha256)
-                and confirmation == 'complete-labels-only:' + plan_sha256,
+                and confirmation == 'complete-migration:' + plan_sha256,
                 'explicit completion confirmation must match the reviewed full plan digest')
     else:
         require(not confirmation, 'completion confirmation is not valid for this mode')
 
 
-def verify_completion_data(snapshot, database):
-    """Compare all pre-existing data with the original snapshot, without exporting it."""
-    excluded = {'booking_references', 'vendor_codes', 'sqlite_sequence'}
-    def fingerprint(path, original):
+def verify_completion_data(snapshot, database, stage='labels-only'):
+    """Exact old-column/rowid preservation, allowing only documented additions.
+
+    The feature capsule separately verifies exact final schema. This comparison
+    proves that additive DDL and the specified legacy-outbox quarantine have not
+    changed any other original values, rows, rowids or sequence high-water marks.
+    """
+    require(stage in ('labels-only', 'complete'), 'unknown completion evidence stage')
+    additions = {'booking_references','vendor_codes'}
+    features = {'driver_location_stops','operational_work_ownership','operational_command_receipts',
+                'vendor_capacity_confirmations','mobile_operations_receipts'}
+    if stage == 'complete':
+        additions |= features
+    def quoted(name):
+        return '"' + name.replace('"', '""') + '"'
+    def capture(path, original):
         path = Path(path)
         require(path.is_absolute() and path.resolve(strict=True) == path
                 and not any(char in str(path) for char in ('?', '#')), 'unsafe completion evidence path')
         info = regular(path)
         if original:
-            require(info.st_uid == os.geteuid() and not info.st_mode & 0o077,
-                    'snapshot evidence must remain private and controller-owned')
-        fields = ('st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid', 'st_nlink', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+            require(info.st_uid == os.geteuid() and not info.st_mode & 0o077, 'snapshot evidence must remain private')
+        fields = ('st_dev','st_ino','st_mode','st_uid','st_gid','st_nlink','st_size','st_mtime_ns','st_ctime_ns')
         identity = tuple(getattr(info, field) for field in fields)
         before = digest(path)
-        with sqlite3.connect(path.as_uri() + '?mode=ro', uri=True) as db:
+        result = {}
+        with sqlite3.connect(path.as_uri()+'?mode=ro', uri=True) as db:
             db.execute('PRAGMA query_only=ON')
-            require(db.execute('PRAGMA quick_check').fetchall() == [('ok',)], 'completion evidence integrity failed')
-            schema = db.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').fetchall()
-            if original:
-                require(not any(row[1] in excluded - {'sqlite_sequence'} or row[2] in excluded - {'sqlite_sequence'} for row in schema),
-                        'original snapshot already contains label maps')
-            sequence = [row for row in schema if row[1] == 'sqlite_sequence']
-            require(not sequence or sequence == [('table', 'sqlite_sequence', 'sqlite_sequence', 'CREATE TABLE sqlite_sequence(name,seq)')],
-                    'sequence schema differs')
-            protected_schema = [row for row in schema if row[1] not in excluded and row[2] not in excluded]
-            metadata = (db.execute('PRAGMA user_version').fetchone(), db.execute('PRAGMA application_id').fetchone())
-            value = hashlib.sha256(repr((protected_schema, metadata)).encode())
+            require(db.execute('PRAGMA quick_check').fetchall() == [('ok',)], 'completion integrity failed')
+            result['metadata'] = [db.execute('PRAGMA '+name).fetchone() for name in ('user_version','application_id','encoding')]
+            result['schema'] = db.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').fetchall()
             tables = {row[1]: row for row in db.execute('PRAGMA main.table_list') if row[0] == 'main'}
-            for kind, name, _, _ in protected_schema:
+            result['tables'] = {}
+            for kind,name,_,_ in result['schema']:
                 if kind != 'table': continue
                 table = tables.get(name)
-                require(table and table[2] == 'table' and table[4] in (0, 1), 'unsupported completion evidence table')
-                quoted = '"' + name.replace('"', '""') + '"'
-                columns = db.execute('PRAGMA main.table_xinfo(' + quoted + ')').fetchall()
-                require(columns and len(columns) == table[3], 'incomplete completion evidence columns')
-                selection = '*'
+                require(table and table[2] == 'table' and table[4] in (0,1), 'unsupported table')
+                columns = db.execute('PRAGMA main.table_xinfo('+quoted(name)+')').fetchall()
+                require(columns and len(columns) == table[3], 'incomplete table columns')
+                names = [column[1] for column in columns]
+                alias = None
                 if table[4] == 0:
-                    names = {column[1].casefold() for column in columns}
-                    alias = next((name for name in ('rowid', '_rowid_', 'oid') if name not in names), None)
-                    require(alias is not None, 'completion rowid is shadowed')
-                    selection = '"' + alias + '",*'
-                rows = sorted(repr(row) for row in db.execute('SELECT ' + selection + ' FROM ' + quoted))
-                value.update(name.encode() + b'\0' + '\n'.join(rows).encode())
-            sequence_rows = db.execute('SELECT name,seq FROM sqlite_sequence ORDER BY name,seq').fetchall() if sequence else []
-            require(not any(row[0] in ('booking_references', 'vendor_codes') for row in sequence_rows), 'label sequence was consumed')
-            value.update(repr(sequence_rows).encode())
+                    alias = next((value for value in ('rowid','_rowid_','oid') if value not in {name.casefold() for name in names}), None)
+                    require(alias, 'original rowid is shadowed')
+                select = (quoted(alias)+',' if alias else '') + ','.join(quoted(name) for name in names)
+                rows = db.execute('SELECT '+select+' FROM '+quoted(name)).fetchall()
+                result['tables'][name] = {'columns': columns, 'rows': rows, 'rowid': bool(alias)}
         require(tuple(getattr(regular(path), field) for field in fields) == identity and digest(path) == before,
                 'completion evidence changed while reading')
-        return value.digest()
-    require(fingerprint(snapshot, True) == fingerprint(database, False), 'pre-existing data changed since the migration snapshot')
+        return result
+    original, current = capture(snapshot, True), capture(database, False)
+    require(original['metadata'] == current['metadata'], 'database metadata changed')
+    require(not ({'booking_references','vendor_codes'} & original['tables'].keys()), 'snapshot already had label maps')
+    old_tables, new_tables = original['tables'], current['tables']
+    require(set(old_tables) <= set(new_tables) and set(new_tables)-set(old_tables) <= additions|{'sqlite_sequence'},
+            'unreviewed table addition or removal')
+    changed_schema = {'notification_outbox','driver_location_stops','operational_work_ownership'} if stage == 'complete' else set()
+    old_schema = [row for row in original['schema'] if row[2] not in changed_schema and row[1] != 'sqlite_sequence']
+    new_schema = [row for row in current['schema'] if row[2] in old_tables and row[2] not in changed_schema and row[1] != 'sqlite_sequence']
+    require(old_schema == new_schema, 'original schema changed')
+    for name, old in old_tables.items():
+        new = new_tables[name]
+        require(new['rowid'] == old['rowid'] and new['columns'][:len(old['columns'])] == old['columns'], 'original columns changed')
+        if name not in changed_schema:
+            require(new['columns'] == old['columns'], 'unreviewed columns added')
+        if name == 'sqlite_sequence':
+            require(sorted(old['rows']) == sorted(new['rows']), 'sequence high-water changed')
+            continue
+        width = len(old['columns']) + int(old['rowid'])
+        expected = copy.deepcopy(old['rows'])
+        # New delivery metadata quarantines old ambiguous attempts; only these
+        # two legacy values may change. Existing newer outbox rows stay exact.
+        names = [col[1] for col in old['columns']]
+        if name == 'notification_outbox' and stage == 'complete' and 'delivery_state' not in names and 'delivery_state' in [col[1] for col in new['columns']]:
+            require('status' in names and 'last_error' in names, 'legacy outbox columns missing')
+            status_index = names.index('status') + int(old['rowid'])
+            error_index = names.index('last_error') + int(old['rowid'])
+            expected = [list(row) for row in expected]
+            for row in expected:
+                if row[status_index] in ('pending','failed'):
+                    row[status_index] = 'failed'
+                    row[error_index] = 'Legacy outbox row has no lease or provider deduplication evidence. Verify with the provider before any resend.'
+            expected = [tuple(row) for row in expected]
+        require(sorted(map(repr, expected)) == sorted(repr(tuple(row[:width])) for row in new['rows']),
+                'original values, rows or rowids changed')
+        added = [col[1] for col in new['columns'][len(old['columns']):]]
+        if added:
+            require(stage == 'complete', 'unreviewed additive column values')
+            defaults = {'lease_token': None, 'lease_expires_at': None, 'lease_attempt_started': 0,
+                        'first_attempt_at': None, 'provider_request': None,
+                        'provider_idempotency_key': None, 'provider_account_hash': None,
+                        'generation': '', 'order_id': ''}
+            old_by_identity = {repr(row[0]): row for row in old['rows']} if old['rowid'] else {}
+            for row in new['rows']:
+                require(old['rowid'] and repr(row[0]) in old_by_identity, 'added values need original rowid evidence')
+                previous = old_by_identity[repr(row[0])]
+                for offset, column in enumerate(added, width):
+                    if name == 'notification_outbox' and column == 'delivery_state':
+                        status = previous[names.index('status')+1]
+                        expected_value = 'accepted' if status == 'sent' else 'skipped' if status == 'skipped' else 'manual_review'
+                    else:
+                        require(column in defaults, 'unknown added column default')
+                        expected_value = defaults[column]
+                    require(type(row[offset]) is type(expected_value) and row[offset] == expected_value,
+                            'added column contains unreviewed data')
+
+    for name in set(new_tables)-set(old_tables):
+        require(not new_tables[name]['rows'], 'new table contains unexpected data')
     return True
 
 
@@ -752,14 +992,16 @@ def complete_labels_only(control, host):
         database = Path(plan['database'])
         schema = host.completion_schema(database)
         if schema == 'already-complete':
+            verify_completion_data(Path(plan['snapshot']), database, 'complete')
             require(control.verify_database(database) is True, 'complete schema not accepted by fallback')
             unchanged()
             return 'already-complete-held-use-recover'
         require(record['phase'] == 'MIGRATING', 'MIGRATED journal requires a complete schema')
-        verify_completion_data(Path(plan['snapshot']), database)
+        verify_completion_data(Path(plan['snapshot']), database, 'complete')
         unchanged()
-        require(control.migrate(database) is True, 'completion migration uncertain')
+        require(host.migrate(database, resume=True) is True, 'completion migration uncertain')
         require(control.verify_database(database) is True, 'completion schema not accepted')
+        verify_completion_data(Path(plan['snapshot']), database, 'complete')
         unchanged()
         control.phase('MIGRATED')
         return 'migration-completed-held-use-recover'
@@ -769,14 +1011,14 @@ def complete_labels_only(control, host):
 
 
 def run_plan(plan, mode, confirmation='', plan_sha256=None):
-    require(mode in ('inspect', 'execute', 'recover', 'complete-labels-only'), 'unknown release mode')
+    require(mode in ('inspect', 'execute', 'recover', 'complete-migration'), 'unknown release mode')
     # Reject a missing/wrong confirmation before constructing state or stopping
     # anything. The confirmation is an input guard, not an approval receipt.
     completion_confirmation(mode, confirmation, plan_sha256)
     c = load_controller()
     state = c.DurableState(STATE)
     host = Host(plan, c)
-    if mode in ('recover', 'complete-labels-only'):
+    if mode in ('recover', 'complete-migration'):
         # Recovery first restores the installed holds under the shared lock,
         # even if a receipt expired or a runtime pin no longer matches. This
         # preliminary phase can only stop the three fixed existing units.
@@ -791,10 +1033,7 @@ def run_plan(plan, mode, confirmation='', plan_sha256=None):
             require(not failures, 'recovery stop failed; durable holds retained')
     validate_plan(plan)
     values = c.guards_module().parse(ENV.read_bytes())
-    require(values.get('BUBBLEWASH_STAFF_AUTH_DISABLED') == 'false'
-            and values.get('BUBBLEWASH_BOOKINGS_DISABLED') == 'true'
-            and values.get('BUBBLEWASH_DISABLE_DEMO_LOGIN') == 'true'
-            and values.get('NODE_ENV') in (None, 'production'), 'unsafe production configuration')
+    admit_production_configuration(values)
     for root in host.roots:
         require(not (root/'data/submissions.jsonl').exists(), 'legacy import file present')
     guard = c.HostGuards(RUNTIME, ENV, RECEIPT, plan['guards'], host.uid)
@@ -807,15 +1046,14 @@ def run_plan(plan, mode, confirmation='', plan_sha256=None):
         bound_guard.marker_path = verify_guard.marker_path
         host.loaded(state)
         host.capture()
-        # Boolean is consumed only by the frozen controller, after this adapter's
-        # concrete host/receipt verification. Caller cannot supply this shortcut.
+        # Named policy preserves every controller pin without a false exclusion claim.
         controller_plan = durable_plan(plan, c)
-        control = c.Controller(controller_plan, state, bound_guard, host.service, host.quiet,
+        control = c.CoordinatedController(controller_plan, state, bound_guard, host.service, host.quiet,
                                host.migrate, host.verify_database, host.readiness, lambda: host.loaded(state))
         if mode == 'inspect':
             control.pins()
             return 'inspected-no-host-state-changed'
-        if mode == 'complete-labels-only':
+        if mode == 'complete-migration':
             return complete_labels_only(control, host)
         return control.recover() if mode == 'recover' else control.execute()
 
@@ -824,7 +1062,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--plan-sha256', required=True)
-    parser.add_argument('--mode', choices=('inspect', 'execute', 'recover', 'complete-labels-only'), default='inspect')
+    parser.add_argument('--mode', choices=('inspect', 'execute', 'recover', 'complete-migration'), default='inspect')
     parser.add_argument('--completion-confirmation', default='')
     args = parser.parse_args()
     protected(args.plan, parents=True)

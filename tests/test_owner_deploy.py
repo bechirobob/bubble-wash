@@ -59,8 +59,8 @@ class OwnerRoute(unittest.TestCase):
         self.assertEqual(pins['src/lib/staff-accounts.ts'], owner.OWNER_STAFF_NEW_SHA256)
         if owner.source_manifest(ROOT) != owner.OWNER_CANDIDATE_SOURCE_MANIFEST:
             sys.path.insert(0, str(ROOT / 'ops/integration-release'))
-            from select_source import select
-            self.assertIn(select(ROOT), ('integration-candidate-v1', 'integration-fallback-v1'))
+            from contracts import verify_control_runner, read_json
+            self.assertEqual(verify_control_runner(ROOT, read_json(ROOT/'ops/integration-release/source-contracts.json')), 'reviewed-runner-only-v1')
             with self.assertRaisesRegex(ValueError, '^pin$'):
                 namespace['reference_ddl'](ROOT, pins)
             return  # Exact integration source must not enter the historical diagnostic.
@@ -204,8 +204,8 @@ class OwnerRoute(unittest.TestCase):
             owner.verify_owner_candidate(ROOT)
         else:
             sys.path.insert(0, str(ROOT / 'ops/integration-release'))
-            from select_source import select
-            self.assertIn(select(ROOT), ('integration-candidate-v1', 'integration-fallback-v1'))
+            from contracts import verify_control_runner, read_json
+            self.assertEqual(verify_control_runner(ROOT, read_json(ROOT/'ops/integration-release/source-contracts.json')), 'reviewed-runner-only-v1')
             with self.assertRaises(ValueError):
                 owner.verify_owner_candidate(ROOT)
         with patch.multiple(owner, **self.pins):
@@ -363,3 +363,43 @@ except ValueError as error:
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CoordinatedPolicyTests(unittest.TestCase):
+    def test_named_policy_accepts_only_explicit_boundary_and_preserves_host_refusals(self):
+        sys.path.insert(0, str(ROOT/'ops/integration-release'))
+        import contracts
+        folder=ROOT/'ops/integration-release/vendor/bubblewash-durable-controller'
+        sys.path.insert(0,str(folder))
+        spec=importlib.util.spec_from_file_location('coordinated_policy_fixture',folder/'test_controller.py')
+        fixture_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixture_module)
+        f=fixture_module.DurableTests('test_success_leaves_maintenance_inhibited_and_owner_aware_pointer')
+        f.setUp();self.addCleanup(f.tearDown)
+        module=contracts.load_controller();policy=module.CoordinatedController
+        f.plan.pop('externalInvokersExcluded')
+        f.plan['coordinatedWriterHold']={'schema':'bubblewash-coordinated-writer-hold/v1',
+            'knownUnits':list(contracts.COORDINATED_UNITS),'knownInvokersSha256':'b'*64,
+            'riskApprovalSha256':'a'*64,'residualAccessAcknowledged':True,
+            'residualAssumptionSha256':contracts.RESIDUAL_ASSUMPTION_SHA256}
+        f.plan['controllerPins'][str(contracts.HERE/'contracts.py')]=contracts.digest(contracts.HERE/'contracts.py')
+        def make():
+            guard=lambda:True;guard.database_path=f.db;guard.marker_path=f.marker
+            return policy(f.plan,f.state,guard,f.service,lambda:True,f.migrate,f.verify,lambda _:True,lambda:True)
+        make().pins()
+        for key,value in [('externalInvokersExcluded',True),('externalInvokersExcluded',False)]:
+            f.plan[key]=value
+            with self.assertRaises(ValueError):make().pins()
+            del f.plan[key]
+        for key,value in [('residualAccessAcknowledged',False),('knownUnits',[]),('riskApprovalSha256',''),('residualAssumptionSha256','0'*64)]:
+            saved=f.plan['coordinatedWriterHold'][key];f.plan['coordinatedWriterHold'][key]=value
+            with self.assertRaises(ValueError):make().pins()
+            f.plan['coordinatedWriterHold'][key]=saved
+        guard_control=make();guard_control.guard=lambda:False
+        with self.assertRaises(ValueError):guard_control.pins()
+        gates_control=make();gates_control.verify_gates=lambda:False
+        with self.assertRaises(ValueError):gates_control.pins()
+        old=f.plan['databaseIdentity'];f.plan['databaseIdentity']=[0,0]
+        with self.assertRaises(ValueError):make().pins()
+        f.plan['databaseIdentity']=old
+        # Unmodified historical policy still refuses this coordinated plan.
+        with self.assertRaises(ValueError):f.make_controller().pins()
