@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentStaffUser } from "@/lib/auth";
 import {
   deleteDriverLiveLocation,
+  stopDriverLiveLocation,
   deleteExpiredDriverLiveLocations,
   readDriverLiveLocation,
   readDriverLiveLocations,
@@ -14,6 +15,7 @@ import {
   projectDriverLocation,
   type StoredDriverLocation,
   validateLiveLocationInput,
+  validateLocationStopTime,
 } from "@/lib/dispatch-location";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { privateNoStoreHeaders, sameOriginJsonGuard } from "@/lib/security";
@@ -157,8 +159,14 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const cleared = deleteDriverLiveLocation(driverId);
-    return json({ ok: true, cleared, location: null });
+    let body: unknown;
+    try { body = await request.json(); } catch { return json({ ok: false, error: "Location stop must contain valid JSON." }, 400); }
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => key !== "stoppedAt")) return json({ ok: false, error: "Unsupported location stop field." }, 400);
+    // Existing browser clients send {}; newer clients freeze the cutoff before awaiting in-flight updates.
+    const supplied = (body as { stoppedAt?: unknown }).stoppedAt;
+    const cutoff = validateLocationStopTime(supplied === undefined ? new Date().toISOString() : supplied);
+    if (!cutoff) return json({ ok: false, error: "Use a recent valid location stop time." }, 422);
+    return json({ ok: true, ...stopDriverLiveLocation(driverId, cutoff), location: null });
   } catch (error) {
     console.error("Bubble Wash live location clear failed", {
       message: error instanceof Error ? error.message : "Unknown error",

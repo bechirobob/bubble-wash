@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import { getDatabase } from "./data-store.ts";
+import { bookingReferenceForOrder } from "./booking-references.ts";
+import { allocateVendorCode, vendorCodeForId } from "./vendor-codes.ts";
+import { getDatabase, appendSubmissionRecord } from "./data-store.ts";
 
 export type AvailabilityStatus = "available" | "limited" | "paused" | "inactive" | "active" | "training" | "suspended";
+
+export function vendorStatusAssignable(status: string) {
+  return ["available", "limited", "active"].includes(status.trim().toLowerCase());
+}
 
 export type VendorAvailabilityInput = {
   vendorId?: string;
@@ -29,6 +35,7 @@ export type DriverAvailabilityInput = {
 
 export type VendorAvailability = Required<Omit<VendorAvailabilityInput, "vendorId" | "serviceZones" | "serviceTypes" | "nextAvailableAt" | "notes">> & {
   vendorId: string;
+  vendorCode: string | null;
   serviceZones: string[];
   serviceTypes: string[];
   nextAvailableAt?: string;
@@ -53,6 +60,7 @@ export type VendorDeclineInput = {
 };
 
 export type VendorDecline = Required<Omit<VendorDeclineInput, "vendorId">> & {
+  bookingReference: string | null;
   id: string;
   vendorId: string;
   createdAt: string;
@@ -226,6 +234,7 @@ export function getAvailabilityDatabase() {
 function vendorFromRow(row: VendorRow): VendorAvailability {
   return {
     vendorId: row.vendor_id,
+    vendorCode: vendorCodeForId(getAvailabilityDatabase(), row.vendor_id),
     vendorName: row.vendor_name,
     serviceZones: listFromJson(row.service_zones),
     serviceTypes: listFromJson(row.service_types),
@@ -256,6 +265,7 @@ function declineFromRow(row: DeclineRow): VendorDecline {
   return {
     id: row.id,
     orderId: row.order_id,
+    bookingReference: bookingReferenceForOrder(getAvailabilityDatabase(), row.order_id),
     vendorId: row.vendor_id,
     vendorName: row.vendor_name,
     reason: row.reason,
@@ -278,22 +288,32 @@ export function upsertVendorAvailability(input: VendorAvailabilityInput): Vendor
     notes: input.notes?.trim() || null,
     updatedAt: nowIso(),
   };
-  getAvailabilityDatabase()
-    .prepare(`
-      INSERT INTO vendor_availability (vendor_id, vendor_name, service_zones, service_types, capacity_remaining, availability_status, next_available_at, updated_by, notes, updated_at)
-      VALUES (@vendorId, @vendorName, @serviceZones, @serviceTypes, @capacityRemaining, @availabilityStatus, @nextAvailableAt, @updatedBy, @notes, @updatedAt)
-      ON CONFLICT(vendor_id) DO UPDATE SET
-        vendor_name = excluded.vendor_name,
-        service_zones = excluded.service_zones,
-        service_types = excluded.service_types,
-        capacity_remaining = excluded.capacity_remaining,
-        availability_status = excluded.availability_status,
-        next_available_at = excluded.next_available_at,
-        updated_by = excluded.updated_by,
-        notes = excluded.notes,
-        updated_at = excluded.updated_at
-    `)
-    .run(record);
+  const db = getAvailabilityDatabase();
+  db.transaction(() => {
+    const prior = db.prepare("SELECT * FROM vendor_availability WHERE vendor_id=?").get(record.vendorId) as VendorRow | undefined;
+    // Old vendors remain unlabelled pending a separately reviewed inventory.
+    if (!prior) allocateVendorCode(db, record.vendorId, record.vendorName);
+    db
+      .prepare(`
+        INSERT INTO vendor_availability (vendor_id, vendor_name, service_zones, service_types, capacity_remaining, availability_status, next_available_at, updated_by, notes, updated_at)
+        VALUES (@vendorId, @vendorName, @serviceZones, @serviceTypes, @capacityRemaining, @availabilityStatus, @nextAvailableAt, @updatedBy, @notes, @updatedAt)
+        ON CONFLICT(vendor_id) DO UPDATE SET
+          vendor_name = excluded.vendor_name,
+          service_zones = excluded.service_zones,
+          service_types = excluded.service_types,
+          capacity_remaining = excluded.capacity_remaining,
+          availability_status = excluded.availability_status,
+          next_available_at = excluded.next_available_at,
+          updated_by = excluded.updated_by,
+          notes = excluded.notes,
+          updated_at = excluded.updated_at
+      `)
+      .run(record);
+    const materialChange = !prior || prior.capacity_remaining !== record.capacityRemaining || prior.availability_status !== record.availabilityStatus || prior.service_zones !== record.serviceZones || prior.service_types !== record.serviceTypes || prior.next_available_at !== record.nextAvailableAt;
+    if (materialChange && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='vendor_capacity_confirmations'").get()) {
+      db.prepare("DELETE FROM vendor_capacity_confirmations WHERE vendor_id=? COLLATE NOCASE").run(record.vendorId);
+    }
+  }).immediate();
   return listVendorAvailability().find((vendor) => vendor.vendorId === record.vendorId)!;
 }
 
@@ -379,7 +399,7 @@ export function reserveAssignmentCapacity(orderId: string, vendorId?: string, dr
 
     if (vendorId) {
       const row = db.prepare("SELECT * FROM vendor_availability WHERE vendor_id = ?").get(vendorId) as VendorRow | undefined;
-      if (!row || row.capacity_remaining <= 0 || /(paused|closed|unavailable|inactive|suspended|tomorrow)/.test(row.availability_status.toLowerCase())) {
+      if (!row || row.capacity_remaining <= 0 || !vendorStatusAssignable(row.availability_status)) {
         throw new Error("Vendor capacity is no longer available.");
       }
       const updated = db.prepare("UPDATE vendor_availability SET capacity_remaining = capacity_remaining - 1, updated_at = ? WHERE vendor_id = ? AND capacity_remaining > 0")
@@ -522,8 +542,7 @@ export function appendSubmissionRecordAndReleaseOrderCapacity(
 ): CapacityReleaseResult {
   const db = getAvailabilityDatabase();
   const finalize = db.transaction(() => {
-    db.prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
-      .run({ id: record.id, createdAt: record.createdAt, source: record.source ?? null, data: JSON.stringify(record.data) });
+    appendSubmissionRecord(record);
     return releaseOrderCapacity(db, orderId.trim(), vendorId, driverId);
   });
   return finalize.immediate();
@@ -554,7 +573,7 @@ export function recordVendorDecline(input: VendorDeclineInput): VendorDecline {
       WHERE order_id = ? COLLATE NOCASE AND vendor_id = ?
     `).all(record.orderId, vendorId) as ReservationRow[];
     releaseReservationRows(db, reservations, "vendor-decline", "vendor");
-    return record;
+    return { ...record, bookingReference: bookingReferenceForOrder(db, record.orderId) };
   });
   return save.immediate();
 }

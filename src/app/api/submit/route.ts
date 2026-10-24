@@ -1,7 +1,9 @@
+import { submissionIdentity } from "@/lib/submission-identity";
 import { bookingAvailable, validatePickupSlot, validateAddons } from "@/lib/booking-policy";
 import { saveBookingOnce } from "@/lib/operational-store";
 import { freezePricing } from "@/lib/billing";
 import { customerSessionCookieName, customerSessionCookieOptions, encodeCustomerSession } from "@/lib/customer-session";
+import type { SubmissionRecord } from "@/lib/submissions";
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { canAccess, getCurrentStaffUser, type StaffRole } from "@/lib/auth";
@@ -300,6 +302,9 @@ export async function POST(request: NextRequest) {
     const authError = await authorizeSubmission(submissionType);
     if (authError) return authError;
     const staffUser = publicSubmissionTypes.has(submissionType) ? null : await getCurrentStaffUser();
+    if (staffUser?.role === "vendor" && submissionType === "vendor-application") {
+      return NextResponse.json({ ok: false, error: "Refresh the capacity page and use the verified capacity control." }, { status: 409 });
+    }
     if (staffUser && queueOnlySubmissionTypes.has(submissionType)) {
       return NextResponse.json({ ok: false, error: "Use the verified action on the staff order queue for this update." }, { status: 400 });
     }
@@ -426,8 +431,8 @@ export async function POST(request: NextRequest) {
       body.pricingSnapshot = freezePricing(text(body.plan), text(body.zone));
       body.pickupConfirmation = "requested";
     }
-    const record = {
-      id: `BW-${randomUUID().replaceAll("-", "").slice(0, 16).toUpperCase()}`,
+    let record: SubmissionRecord = {
+      id: submissionIdentity(randomUUID()),
       createdAt: new Date().toISOString(),
       source: "bubblewash-operations-web",
       data: body,
@@ -438,10 +443,10 @@ export async function POST(request: NextRequest) {
       if (!/^[a-zA-Z0-9_-]{16,100}$/.test(key)) return NextResponse.json({ ok: false, error: "Refresh the booking form before submitting." }, { status: 400 });
       const result = saveBookingOnce(record, key, queueSubmissionNotifications);
       const response = NextResponse.json({ ok: true, message: "Pickup requested. Operations will confirm your window.", ...result });
-      response.cookies.set(customerSessionCookieName, encodeCustomerSession(result.id, text(body.email), true), customerSessionCookieOptions());
+      response.cookies.set(customerSessionCookieName, encodeCustomerSession(result.id, text(body.email), false), customerSessionCookieOptions());
       return response;
     }
-    appendSubmissionRecord(record);
+    record = appendSubmissionRecord(record);
     const deliveryCode = ["pickup-booking", "checkout-request"].includes(submissionType) ? createDeliveryCode(record.id) : "";
     syncAvailabilityTables(body, submissionType, text(body.name) || text(body.company) || "Bubble Wash team");
     const notifications = await dispatchSubmissionNotifications(record);
@@ -450,6 +455,7 @@ export async function POST(request: NextRequest) {
         ok: true,
         message: "Thanks — your request was received. Keep this reference for tracking.",
         id: record.id,
+        bookingReference: record.data.bookingReference ?? null,
         ...(deliveryCode ? { deliveryCode } : {}),
       });
     }

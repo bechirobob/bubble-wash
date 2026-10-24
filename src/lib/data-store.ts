@@ -1,6 +1,12 @@
 import "server-only";
 
 import Database from "better-sqlite3";
+import { allocateBookingReference, bookingReferenceForOrder, isRootBooking, submissionDataWithoutLabels } from "./booking-references.ts";
+import { vendorCodeForId } from "./vendor-codes.ts";
+import { bookingReferenceSchemaState, createBookingReferenceSchema } from "./booking-reference-schema.ts";
+import { randomUUID } from "node:crypto";
+import { addNotificationOutboxColumns, migrateNotificationOutbox, NOTIFICATION_OUTBOX_LEASE_INDEX_SQL, notificationOutboxSchemaSnapshot } from "./notification-outbox-schema.ts";
+import { commercialNotificationsEnabled, NOTIFICATION_LEASE_MS, NOTIFICATION_MAX_ATTEMPTS, RESEND_SAFE_RETRY_WINDOW_MS, type NotificationDeliveryState } from "./notification-policy.ts";
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import path from "node:path";
 import { LIVE_LOCATION_EXPIRES_AFTER_MS, type StoredDriverLocation } from "./dispatch-location.ts";
@@ -110,7 +116,15 @@ export type NotificationOutboxRecord = {
   channel: "email" | "whatsapp";
   target: "customer" | "operations";
   payload: Record<string, unknown>;
+  // Legacy status remains compatible. "sent" means provider acceptance only.
   status: "pending" | "sent" | "failed" | "skipped";
+  deliveryState: NotificationDeliveryState;
+  leaseToken: string;
+  leaseExpiresAt: string;
+  firstAttemptAt: string;
+  providerRequest: string;
+  providerIdempotencyKey: string;
+  providerAccountHash: string;
   attempts: number;
   nextAttemptAt: string;
   providerId: string;
@@ -152,6 +166,14 @@ type StoredOutboxRow = {
   target: NotificationOutboxRecord["target"];
   payload: string;
   status: NotificationOutboxRecord["status"];
+  delivery_state: NotificationDeliveryState;
+  lease_token: string | null;
+  lease_expires_at: string | null;
+  lease_attempt_started: number;
+  first_attempt_at: string | null;
+  provider_request: string | null;
+  provider_idempotency_key: string | null;
+  provider_account_hash: string | null;
   attempts: number;
   next_attempt_at: string;
   provider_id: string | null;
@@ -182,7 +204,13 @@ export function getDatabase() {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
-  initializeDatabaseSchema(db);
+  // Only brand-new stores bootstrap the additive maps. Existing stores require
+  // the explicit offline migration; a request must never silently migrate them.
+  db.transaction(() => {
+    const fresh = !db.prepare("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get();
+    initializeDatabaseSchema(db);
+    if (fresh) createBookingReferenceSchema(db);
+  }).immediate();
   database = db;
   purgeExpiredDriverLocations(db);
   migrateLegacySubmissions(db);
@@ -368,10 +396,20 @@ function migrateLegacySubmissions(db: Database.Database) {
   migratedLegacyJsonl = true;
 }
 
-export function appendSubmissionRecord(record: SubmissionRecord) {
-  getDatabase()
-    .prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
-    .run({ id: record.id, createdAt: record.createdAt, source: record.source ?? null, data: JSON.stringify(record.data) });
+export function appendSubmissionRecord(record: SubmissionRecord): SubmissionRecord {
+  const db = getDatabase();
+  const insert = () => {
+    const data = submissionDataWithoutLabels(record.data);
+    if (isRootBooking(data)) {
+      if (bookingReferenceForOrder(db, record.id)) throw new Error("A committed booking identity cannot be reused.");
+      data.bookingReference = allocateBookingReference(db, record.id);
+    }
+    const stored = { ...record, data };
+    db.prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
+      .run({ id: stored.id, createdAt: stored.createdAt, source: stored.source ?? null, data: JSON.stringify(stored.data) });
+    return stored;
+  };
+  return db.inTransaction ? insert() : db.transaction(insert).immediate();
 }
 
 export function appendSubmissionRecordWithDeliveryProof(record: SubmissionRecord, input: { orderId: string; codeHash: string; usedBy: string; recipientName: string }) {
@@ -383,10 +421,18 @@ export function appendSubmissionRecordWithDeliveryProof(record: SubmissionRecord
       WHERE order_id = @orderId COLLATE NOCASE AND code_hash = @codeHash AND used_at IS NULL
     `).run({ ...input, usedAt: record.createdAt });
     if (proof.changes !== 1) throw new Error("Delivery confirmation code is invalid or already used.");
-    db.prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
-      .run({ id: record.id, createdAt: record.createdAt, source: record.source ?? null, data: JSON.stringify(record.data) });
+    appendSubmissionRecord(record);
   });
   apply();
+}
+
+function projectedSubmissionData(row: StoredSubmissionRow): Record<string, unknown> {
+  const data = submissionDataWithoutLabels(JSON.parse(row.data) as Record<string, unknown>);
+  const db = getDatabase();
+  if (isRootBooking(data)) data.bookingReference = bookingReferenceForOrder(db, row.id);
+  else if (typeof data.orderId === "string" && data.orderId.trim()) data.bookingReference = bookingReferenceForOrder(db, data.orderId.trim());
+  if (typeof data.vendorId === "string") data.vendorCode = vendorCodeForId(db, data.vendorId);
+  return data;
 }
 
 export function readSubmissionRecords(limit = 200): SubmissionRecord[] {
@@ -398,7 +444,7 @@ export function readSubmissionRecords(limit = 200): SubmissionRecord[] {
     id: row.id,
     createdAt: row.created_at,
     source: row.source ?? undefined,
-    data: JSON.parse(row.data) as Record<string, unknown>,
+    data: projectedSubmissionData(row),
   }));
 }
 
@@ -419,7 +465,7 @@ export function readSubmissionRecordsForOrder(orderId: string): SubmissionRecord
     id: row.id,
     createdAt: row.created_at,
     source: row.source ?? undefined,
-    data: JSON.parse(row.data) as Record<string, unknown>,
+    data: projectedSubmissionData(row),
   }));
 }
 
@@ -432,7 +478,7 @@ export function findSubmissionRecordById(id: string): SubmissionRecord | null {
     id: row.id,
     createdAt: row.created_at,
     source: row.source ?? undefined,
-    data: JSON.parse(row.data) as Record<string, unknown>,
+    data: projectedSubmissionData(row),
   };
 }
 
@@ -452,7 +498,7 @@ export function findCheckoutByPaymentReference(reference: string): SubmissionRec
     id: row.id,
     createdAt: row.created_at,
     source: row.source ?? undefined,
-    data: JSON.parse(row.data) as Record<string, unknown>,
+    data: projectedSubmissionData(row),
   };
 }
 
@@ -482,13 +528,7 @@ export function appendPaymentVerificationOnce(input: {
         (@reference, @status, @transaction_id, @amount_minor, @currency, @record_id, @verified_at)
     `).run(verification);
     if (inserted.changes === 0) return false;
-    db.prepare("INSERT INTO submissions (id, created_at, source, data) VALUES (@id, @createdAt, @source, @data)")
-      .run({
-        id: input.record.id,
-        createdAt: input.record.createdAt,
-        source: input.record.source ?? null,
-        data: JSON.stringify(input.record.data),
-      });
+    appendSubmissionRecord(input.record);
     return true;
   });
   return save.immediate();
@@ -525,7 +565,9 @@ export function openReadOnlyDatabase() {
   }
 }
 
-export function databaseReadiness(db = getDatabase(), additionalSchema: ((database: Database.Database) => void)[] = []) {
+export function databaseReadiness(db = getDatabase(), additionalSchema: ((database: Database.Database) => void)[] = [], options: { allowMissingBookingReferences?: boolean } = {}) {
+  const references = bookingReferenceSchemaState(db);
+  if (references !== "ready" && !(references === "absent" && options.allowMissingBookingReferences === true)) return false;
   const quickCheck = db.pragma("quick_check", { simple: true });
   const readable = db.prepare("SELECT 1 AS ok").get() as { ok?: number } | undefined;
   if (quickCheck !== "ok" || readable?.ok !== 1) return false;
@@ -537,7 +579,17 @@ export function databaseReadiness(db = getDatabase(), additionalSchema: ((databa
     for (const initialize of additionalSchema) initialize(reference);
     const expected = reference.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL").all() as { type: string; name: string; sql: string }[];
     const actual = db.prepare("SELECT sql FROM sqlite_master WHERE type = ? AND name = ?");
-    return expected.every((entry) => (actual.get(entry.type, entry.name) as { sql: string } | undefined)?.sql === entry.sql);
+    // Preserve every existing exact check except the outbox table itself, which
+    // has precisely two reviewed schemas. Its original due index is still required.
+    if (!expected.every((entry) => entry.type === "table" && entry.name === "notification_outbox"
+      || (actual.get(entry.type, entry.name) as { sql: string } | undefined)?.sql === entry.sql)) return false;
+    const outboxSchema = notificationOutboxSchemaSnapshot(db);
+    if (outboxSchema === notificationOutboxSchemaSnapshot(reference)) return true;
+    // Apply the same ordered additive DDL only to the disposable reference.
+    // This rejects partial migrations, schema drift and missing/extra indexes.
+    addNotificationOutboxColumns(reference);
+    reference.exec(NOTIFICATION_OUTBOX_LEASE_INDEX_SQL);
+    return outboxSchema === notificationOutboxSchemaSnapshot(reference);
   } finally {
     reference.close();
   }
@@ -634,6 +686,10 @@ export function createPrivacyRequest(input: Omit<PrivacyRequest, "status" | "cre
   return privacyRequestFromRow(row);
 }
 
+function notificationDatabase() {
+  return migrateNotificationOutbox(getDatabase());
+}
+
 function outboxFromRow(row: StoredOutboxRow): NotificationOutboxRecord {
   return {
     id: row.id,
@@ -642,6 +698,13 @@ function outboxFromRow(row: StoredOutboxRow): NotificationOutboxRecord {
     target: row.target,
     payload: JSON.parse(row.payload) as Record<string, unknown>,
     status: row.status,
+    deliveryState: row.delivery_state,
+    leaseToken: row.lease_token ?? "",
+    leaseExpiresAt: row.lease_expires_at ?? "",
+    firstAttemptAt: row.first_attempt_at ?? "",
+    providerRequest: row.provider_request ?? "",
+    providerIdempotencyKey: row.provider_idempotency_key ?? "",
+    providerAccountHash: row.provider_account_hash ?? "",
     attempts: row.attempts,
     nextAttemptAt: row.next_attempt_at,
     providerId: row.provider_id ?? "",
@@ -654,7 +717,7 @@ function outboxFromRow(row: StoredOutboxRow): NotificationOutboxRecord {
 
 export function enqueueNotification(input: Pick<NotificationOutboxRecord, "id" | "dedupeKey" | "channel" | "target" | "payload">) {
   const now = new Date().toISOString();
-  const row = getDatabase().prepare(`
+  const row = notificationDatabase().prepare(`
     INSERT INTO notification_outbox
       (id, dedupe_key, channel, target, payload, status, attempts, next_attempt_at, created_at, updated_at)
     VALUES
@@ -665,46 +728,147 @@ export function enqueueNotification(input: Pick<NotificationOutboxRecord, "id" |
   return outboxFromRow(row);
 }
 
+export function readNotification(id: string) {
+  const row = notificationDatabase().prepare("SELECT * FROM notification_outbox WHERE id = ?").get(id) as StoredOutboxRow | undefined;
+  return row ? outboxFromRow(row) : null;
+}
+
+function notificationLimit(limit: number) {
+  return Number.isFinite(limit) ? Math.max(1, Math.min(Math.floor(limit), 100)) : 20;
+}
+
+// Privacy and early-access confirmations deliberately remain available while
+// commercial order automation is off, matching the existing product contract.
+const notificationEnabledSql = "(@commercial = 1 OR COALESCE(json_extract(payload, '$.purpose'), '') IN ('privacy', 'early_access'))";
 export function readDueNotifications(limit = 20) {
-  const rows = getDatabase().prepare(`
+  const rows = notificationDatabase().prepare(`
     SELECT * FROM notification_outbox
-    WHERE status IN ('pending', 'failed') AND next_attempt_at <= @now AND attempts < 8
-    ORDER BY created_at ASC
-    LIMIT @limit
-  `).all({ now: new Date().toISOString(), limit }) as StoredOutboxRow[];
+    WHERE delivery_state IN ('queued', 'retrying') AND next_attempt_at <= @now
+      AND attempts < @maxAttempts AND ${notificationEnabledSql}
+    ORDER BY created_at ASC, id ASC LIMIT @limit
+  `).all({ now: new Date().toISOString(), limit: notificationLimit(limit), maxAttempts: NOTIFICATION_MAX_ATTEMPTS, commercial: Number(commercialNotificationsEnabled()) }) as StoredOutboxRow[];
   return rows.map(outboxFromRow);
+}
+
+function recoverNotificationLeases(db: Database.Database, now: number) {
+  const iso = new Date(now).toISOString();
+  const retryCutoff = new Date(now - RESEND_SAFE_RETRY_WINDOW_MS).toISOString();
+  // A crashed worker might already have submitted its request. Only a persisted
+  // Resend key and unchanged request within its retention window allow replay.
+  db.prepare(`UPDATE notification_outbox SET
+    delivery_state = CASE
+      WHEN provider_request IS NULL AND attempts = 0 THEN 'queued'
+      WHEN channel = 'email' AND provider_request IS NOT NULL AND provider_idempotency_key IS NOT NULL
+        AND first_attempt_at > @retryCutoff AND attempts < @maxAttempts THEN 'retrying'
+      ELSE 'manual_review' END,
+    status = CASE WHEN provider_request IS NULL AND attempts = 0 THEN 'pending' ELSE 'failed' END,
+    last_error = 'Worker lease expired. The provider may have accepted the request; unsafe replay is blocked.',
+    lease_token = NULL, lease_expires_at = NULL, lease_attempt_started = 0, next_attempt_at = @now, updated_at = @now
+    WHERE delivery_state = 'processing' AND lease_expires_at <= @now
+  `).run({ now: iso, retryCutoff, maxAttempts: NOTIFICATION_MAX_ATTEMPTS });
+  db.prepare(`UPDATE notification_outbox SET delivery_state = 'manual_review', status = 'failed',
+    last_error = 'Resend deduplication window expired. Verify the provider outcome before any resend.', updated_at = @now
+    WHERE delivery_state IN ('queued', 'retrying') AND channel = 'email'
+      AND first_attempt_at IS NOT NULL AND first_attempt_at <= @retryCutoff
+  `).run({ now: iso, retryCutoff });
+  db.prepare(`UPDATE notification_outbox SET delivery_state = 'exhausted', status = 'failed', updated_at = @now
+    WHERE delivery_state IN ('queued', 'retrying') AND attempts >= @maxAttempts
+  `).run({ now: iso, maxAttempts: NOTIFICATION_MAX_ATTEMPTS });
+}
+
+export function claimNotification(input: { id?: string; now?: number } = {}) {
+  const db = notificationDatabase();
+  const now = input.now ?? Date.now();
+  return db.transaction(() => {
+    recoverNotificationLeases(db, now);
+    const row = db.prepare(`UPDATE notification_outbox
+      SET delivery_state = 'processing', status = 'pending', lease_token = @token, lease_attempt_started = 0,
+        lease_expires_at = @expires, updated_at = @now
+      WHERE id = (SELECT id FROM notification_outbox
+        WHERE delivery_state IN ('queued', 'retrying') AND next_attempt_at <= @now
+          AND attempts < @maxAttempts AND (@id IS NULL OR id = @id) AND ${notificationEnabledSql}
+        ORDER BY created_at ASC, id ASC LIMIT 1)
+      RETURNING *
+    `).get({ id: input.id ?? null, now: new Date(now).toISOString(), expires: new Date(now + NOTIFICATION_LEASE_MS).toISOString(), token: randomUUID(), maxAttempts: NOTIFICATION_MAX_ATTEMPTS, commercial: Number(commercialNotificationsEnabled()) }) as StoredOutboxRow | undefined;
+    return row ? outboxFromRow(row) : null;
+  }).immediate();
+}
+
+// Commit the immutable provider request BEFORE network I/O. Attempts count
+// requests that may have reached a provider, not mere claims or missing config.
+export function beginNotificationAttempt(input: {
+  id: string; leaseToken: string; providerRequest: string; idempotencyKey: string; accountHash: string; now?: number;
+}) {
+  const now = input.now ?? Date.now();
+  const row = notificationDatabase().prepare(`UPDATE notification_outbox
+    SET attempts = attempts + 1, lease_attempt_started = 1, first_attempt_at = COALESCE(first_attempt_at, @now),
+      provider_request = COALESCE(provider_request, @request),
+      provider_idempotency_key = COALESCE(provider_idempotency_key, NULLIF(@key, '')),
+      provider_account_hash = COALESCE(provider_account_hash, @account), updated_at = @now
+    WHERE id = @id AND delivery_state = 'processing' AND lease_token = @token AND lease_expires_at > @now
+      AND lease_attempt_started = 0 AND attempts < @maxAttempts
+      AND (channel <> 'email' OR @key <> '')
+      AND @request <> '' AND @account <> ''
+      AND (provider_request IS NULL OR provider_request = @request)
+      AND (provider_account_hash IS NULL OR provider_account_hash = @account)
+      AND (provider_idempotency_key IS NULL OR provider_idempotency_key = @key)
+      AND (channel <> 'email' OR first_attempt_at IS NULL OR first_attempt_at > @retryCutoff)
+    RETURNING *
+  `).get({ id: input.id, token: input.leaseToken, request: input.providerRequest, key: input.idempotencyKey, account: input.accountHash, now: new Date(now).toISOString(), retryCutoff: new Date(now - RESEND_SAFE_RETRY_WINDOW_MS).toISOString(), maxAttempts: NOTIFICATION_MAX_ATTEMPTS }) as StoredOutboxRow | undefined;
+  return row ? outboxFromRow(row) : null;
 }
 
 export function updateNotificationDelivery(input: {
   id: string;
-  status: "sent" | "failed" | "skipped";
+  leaseToken: string;
+  status: "sent" | "accepted" | "failed" | "uncertain" | "skipped" | "manual_review";
   providerId?: string;
   error?: string;
   retryAfterMs?: number;
+  now?: number;
 }) {
-  const now = new Date();
-  const nextAttemptAt = new Date(now.getTime() + (input.retryAfterMs ?? 0)).toISOString();
-  getDatabase().prepare(`
-    UPDATE notification_outbox
-    SET status = @status,
-        attempts = attempts + 1,
-        next_attempt_at = @nextAttemptAt,
-        provider_id = NULLIF(@providerId, ''),
-        last_error = NULLIF(@error, ''),
-        updated_at = @now,
-        sent_at = CASE WHEN @status = 'sent' THEN @now ELSE sent_at END
-    WHERE id = @id
-  `).run({ ...input, providerId: input.providerId ?? "", error: input.error?.slice(0, 500) ?? "", nextAttemptAt, now: now.toISOString() });
+  const db = notificationDatabase();
+  const now = input.now ?? Date.now();
+  const iso = new Date(now).toISOString();
+  const nextAttempt = now + Math.max(0, input.retryAfterMs ?? 0);
+  return db.transaction(() => {
+    const row = db.prepare("SELECT * FROM notification_outbox WHERE id = ? AND delivery_state = 'processing' AND lease_token = ? AND lease_expires_at > ?")
+      .get(input.id, input.leaseToken, iso) as StoredOutboxRow | undefined;
+    if (!row) return false; // A stale worker must never overwrite a new owner.
+    if ((input.status === "sent" || input.status === "accepted") && (!row.lease_attempt_started || !input.providerId?.trim())) return false;
+    let state: NotificationDeliveryState;
+    if (input.status === "sent" || input.status === "accepted") state = "accepted";
+    else if (input.status === "skipped" || input.status === "manual_review") state = input.status;
+    else if (input.status === "uncertain" && (row.channel !== "email" || !row.provider_idempotency_key || !row.provider_request)) state = "manual_review";
+    else if (row.channel === "email" && row.first_attempt_at && nextAttempt >= Date.parse(row.first_attempt_at) + RESEND_SAFE_RETRY_WINDOW_MS) state = "manual_review";
+    else if (row.attempts >= NOTIFICATION_MAX_ATTEMPTS) state = input.status === "uncertain" ? "manual_review" : "exhausted";
+    else state = "retrying";
+    const legacy = state === "accepted" ? "sent" : state === "skipped" ? "skipped" : "failed";
+    db.prepare(`UPDATE notification_outbox SET status = @status, delivery_state = @state,
+      next_attempt_at = @nextAttempt, provider_id = COALESCE(NULLIF(@providerId, ''), provider_id),
+      last_error = NULLIF(@error, ''), updated_at = @now,
+      sent_at = CASE WHEN @state = 'accepted' THEN @now ELSE sent_at END,
+      lease_token = NULL, lease_expires_at = NULL, lease_attempt_started = 0 WHERE id = @id AND lease_token = @token
+    `).run({ id: input.id, token: input.leaseToken, status: legacy, state, nextAttempt: new Date(nextAttempt).toISOString(), providerId: input.providerId ?? "", error: input.error?.slice(0, 500) ?? "", now: iso });
+    return true;
+  }).immediate();
 }
 
 export function notificationOutboxMetrics() {
-  return getDatabase().prepare(`
-    SELECT
-      SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
-      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
-      SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent
+  return notificationDatabase().prepare(`SELECT
+    COUNT(CASE WHEN status = 'pending' THEN 1 END) AS pending,
+    COUNT(CASE WHEN status = 'failed' THEN 1 END) AS failed,
+    COUNT(CASE WHEN status = 'sent' THEN 1 END) AS sent,
+    COUNT(CASE WHEN delivery_state = 'queued' THEN 1 END) AS queued,
+    COUNT(CASE WHEN delivery_state = 'processing' THEN 1 END) AS processing,
+    COUNT(CASE WHEN delivery_state = 'retrying' THEN 1 END) AS retrying,
+    COUNT(CASE WHEN delivery_state = 'accepted' THEN 1 END) AS accepted,
+    COUNT(CASE WHEN delivery_state = 'delivered' THEN 1 END) AS delivered,
+    COUNT(CASE WHEN delivery_state = 'skipped' THEN 1 END) AS skipped,
+    COUNT(CASE WHEN delivery_state = 'exhausted' THEN 1 END) AS exhausted,
+    COUNT(CASE WHEN delivery_state = 'manual_review' THEN 1 END) AS manualReview
     FROM notification_outbox
-  `).get() as { pending: number | null; failed: number | null; sent: number | null };
+  `).get() as { pending: number; failed: number; sent: number; queued: number; processing: number; retrying: number; accepted: number; delivered: number; skipped: number; exhausted: number; manualReview: number };
 }
 
 export function operationsDataMetrics() {
@@ -921,12 +1085,26 @@ function driverLocationFromRow(row: StoredDriverLocationRow): StoredDriverLocati
   };
 }
 
+// Keep optional location stop schema out of ordinary startup/readiness initialization.
+// Existing production reset/backup guards continue to reject activated extended schemas.
+function driverLocationDatabase() {
+  const db = getDatabase();
+  db.exec("CREATE TABLE IF NOT EXISTS driver_location_stops (driver_id TEXT PRIMARY KEY, captured_before TEXT NOT NULL)");
+  return db;
+}
+export function readDriverLocationStop(driverId: string) {
+  const db = getDatabase();
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='driver_location_stops'").get()) return null;
+  const row = db.prepare("SELECT captured_before FROM driver_location_stops WHERE driver_id=?").get(driverId.trim().toLowerCase()) as { captured_before: string } | undefined;
+  return row?.captured_before ?? null;
+}
+
 export function upsertDriverLiveLocation(location: StoredDriverLocation) {
-  const result = getDatabase().prepare(`
+  const result = driverLocationDatabase().prepare(`
     INSERT INTO driver_live_locations
       (driver_id, order_id, latitude, longitude, accuracy_meters, captured_at, received_at)
-    VALUES
-      (@driverId, @orderId, @latitude, @longitude, @accuracyMeters, @capturedAt, @receivedAt)
+    SELECT @driverId, @orderId, @latitude, @longitude, @accuracyMeters, @capturedAt, @receivedAt
+    WHERE NOT EXISTS (SELECT 1 FROM driver_location_stops WHERE driver_id = @driverId COLLATE NOCASE AND captured_before >= @capturedAt)
     ON CONFLICT(driver_id) DO UPDATE SET
       order_id = excluded.order_id,
       latitude = excluded.latitude,
@@ -956,6 +1134,20 @@ export function readDriverLiveLocations(): StoredDriverLocation[] {
     ORDER BY captured_at DESC
   `).all() as StoredDriverLocationRow[];
   return rows.map(driverLocationFromRow);
+}
+
+// A shared privacy boundary for browser and native clients. Delayed stops never erase newer shares.
+export function stopDriverLiveLocation(driverId: string, capturedBefore = new Date().toISOString()) {
+  const id = driverId.trim().toLowerCase();
+  if (!id || !Number.isFinite(Date.parse(capturedBefore))) throw new Error("A valid rider and stop cutoff are required.");
+  const cutoff = new Date(capturedBefore).toISOString();
+  const db = driverLocationDatabase();
+  return db.transaction(() => {
+    db.prepare("INSERT INTO driver_location_stops VALUES (?,?) ON CONFLICT(driver_id) DO UPDATE SET captured_before=max(captured_before,excluded.captured_before)").run(id, cutoff);
+    const newerLocationRetained = Boolean(db.prepare("SELECT 1 FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE AND captured_at > ?").get(id, cutoff));
+    const cleared = db.prepare("DELETE FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE AND captured_at <= ?").run(id, cutoff).changes > 0;
+    return { cleared, newerLocationRetained };
+  }).immediate();
 }
 
 export function deleteDriverLiveLocation(driverId: string) {
@@ -1031,6 +1223,7 @@ export function resetDataStoreForTests() {
   database.prepare("DELETE FROM workflow_action_claims").run();
   database.prepare("DELETE FROM payment_verifications").run();
   database.prepare("DELETE FROM driver_live_locations").run();
+  if (database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='driver_location_stops'").get()) database.prepare("DELETE FROM driver_location_stops").run();
   database.prepare("DELETE FROM early_access_signups").run();
   database.prepare("DELETE FROM privacy_requests").run();
   database.prepare("DELETE FROM notification_outbox").run();

@@ -2,6 +2,7 @@ import "server-only";
 import { createHash, createHmac } from "node:crypto";
 import { getDatabase, appendSubmissionRecord, readSubmissionRecordsForOrder, deliveryCodeRecord } from "./data-store.ts";
 import { deliveryCodeHash } from "./chain-of-custody.ts";
+import { bookingReferenceForOrder, internalOrderForBookingReference, isRootBooking, submissionDataWithoutLabels } from "./booking-references.ts";
 import type { SubmissionRecord } from "./submissions.ts";
 
 export function operationalDatabase() {
@@ -18,7 +19,9 @@ export function operationalDatabase() {
 }
 export function saveBookingOnce(record: SubmissionRecord, key: string, enqueue: (record: SubmissionRecord) => void) {
   const db = operationalDatabase();
-  const hash = createHash("sha256").update(JSON.stringify(Object.entries(record.data).sort(([a], [b]) => a.localeCompare(b)))).digest("hex");
+  const payload = submissionDataWithoutLabels(record.data);
+  if (!isRootBooking(payload)) throw new Error("Booking save requires a root booking.");
+  const hash = createHash("sha256").update(JSON.stringify(Object.entries(payload).sort(([a], [b]) => a.localeCompare(b)))).digest("hex");
   return db.transaction(() => {
     const prior = db.prepare("SELECT payload_hash, order_id FROM booking_requests WHERE request_key = ?").get(key) as { payload_hash: string; order_id: string } | undefined;
     if (prior && prior.payload_hash !== hash) throw new Error("This request changed. Start a new booking before submitting different details.");
@@ -27,16 +30,20 @@ export function saveBookingOnce(record: SubmissionRecord, key: string, enqueue: 
     if (!secret) throw new Error("Session configuration unavailable.");
     const code = String(parseInt(createHmac("sha256", secret).update(`booking-code:${orderId}:${key}`).digest("hex").slice(0, 12), 16) % 1000000).padStart(6, "0");
     if (!prior) {
-      appendSubmissionRecord(record);
+      const stored = appendSubmissionRecord({ ...record, data: payload });
       db.prepare("INSERT INTO booking_requests VALUES (?, ?, ?, ?)").run(key, hash, orderId, record.createdAt);
       db.prepare("INSERT INTO delivery_proofs (order_id, code_hash, created_at) VALUES (?, ?, ?)").run(orderId, deliveryCodeHash(orderId, code), record.createdAt);
-      enqueue(record);
+      enqueue(stored);
     }
     const proof = deliveryCodeRecord(orderId);
-    return { id: orderId, deliveryCode: proof?.codeHash === deliveryCodeHash(orderId, code) && !proof.usedAt ? code : "", replayed: Boolean(prior) };
+    return { id: orderId, bookingReference: bookingReferenceForOrder(db, orderId), deliveryCode: proof?.codeHash === deliveryCodeHash(orderId, code) && !proof.usedAt ? code : "", replayed: Boolean(prior) };
   }).immediate();
 }
 export function readOrderPage(offset = 0, limit = 100, query = "") {
-  const rows = operationalDatabase().prepare(`SELECT id FROM submissions WHERE json_extract(data, '$.submissionType') IN ('pickup-booking','checkout-request') AND COALESCE(json_extract(data, '$.orderId'), '') = '' AND (? = '' OR id LIKE ? OR json_extract(data, '$.company') LIKE ? OR json_extract(data, '$.name') LIKE ?) ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`).all(query, `%${query}%`, `%${query}%`, `%${query}%`, limit + 1, offset) as { id: string }[];
+  const db = operationalDatabase();
+  // This lookup is for authenticated staff search, never public tracking.
+  const referenceOrderId = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='booking_references'").get()
+    ? internalOrderForBookingReference(db, query) : null;
+  const rows = db.prepare(`SELECT id FROM submissions WHERE json_extract(data, '$.submissionType') IN ('pickup-booking','checkout-request') AND COALESCE(json_extract(data, '$.orderId'), '') = '' AND (? = '' OR id LIKE ? OR json_extract(data, '$.company') LIKE ? OR json_extract(data, '$.name') LIKE ? OR id = ?) ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`).all(query, `%${query}%`, `%${query}%`, `%${query}%`, referenceOrderId, limit + 1, offset) as { id: string }[];
   return { records: rows.slice(0, limit).flatMap(({ id }) => readSubmissionRecordsForOrder(id)), nextOffset: rows.length > limit ? offset + limit : null };
 }

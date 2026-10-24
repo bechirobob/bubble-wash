@@ -4,7 +4,7 @@ import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 
-test('survey tables preserve the owner-baseline schema and existing records',async()=>{
+test('survey tables preserve the full-release schema and existing records',async()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'survey-baseline-'));
  process.env.BUBBLEWASH_DATABASE_PATH=path.join(dir,'synthetic.sqlite');
  const {getDatabase}=await import('../src/lib/data-store.ts');
@@ -17,7 +17,7 @@ test('survey tables preserve the owner-baseline schema and existing records',asy
   assert.deepEqual(db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND tbl_name NOT IN ('research_responses','research_notification_outbox') ORDER BY type,name").all(),schema);
   assert.deepEqual(db.prepare('SELECT * FROM submissions').all(),rows);
   assert.equal(db.prepare("SELECT count(*) n FROM sqlite_master WHERE type='table' AND name IN ('research_responses','research_notification_outbox')").get().n,2);
-  assert.equal(db.prepare("SELECT count(*) n FROM sqlite_master WHERE name='booking_references'").get().n,0);
+  assert.equal(db.prepare("SELECT count(*) n FROM sqlite_master WHERE name='booking_references'").get().n,1);
   assert.equal(db.prepare('PRAGMA table_info(notification_outbox)').all().some(row=>row.name==='lease_token'),false);
   assert.deepEqual(db.pragma('foreign_key_check'),[]);
   assert.equal(getDatabase(),db);

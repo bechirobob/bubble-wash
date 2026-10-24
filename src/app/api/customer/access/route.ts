@@ -20,8 +20,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const orderId = text(body.orderId, 40).toUpperCase();
     const contact = text(body.contact);
-    if (!/^BW-[A-Z0-9]{8,32}$/.test(orderId) || !contact) {
-      return NextResponse.json({ ok: false, error: "Enter your Bubble Wash reference and booking email or phone." }, { status: 400 });
+    if (/^BW-\d+$/i.test(orderId) || !/^BW-[A-Z0-9]{8,32}$/.test(orderId) || !contact) {
+      return NextResponse.json({ ok: false, error: "Use your private tracking code and booking contact, or recover access with your booking email." }, { status: 400 });
     }
     const seed = findSubmissionRecordById(orderId);
     const submissionType = text(seed?.data.submissionType);
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     if (!order) return NextResponse.json({ ok: false, error: "We could not verify those booking details." }, { status: 401 });
     const existingSession = decodeCustomerSession(request.cookies.get(customerSessionCookieName)?.value);
     const verifiedContact = Boolean(existingSession?.verifiedContact && existingSession.contactFingerprint === customerContactFingerprint(contact));
-    const response = NextResponse.json({ ok: true, order: customerOrderView(order, records) });
+    const response = NextResponse.json({ ok: true, order: customerOrderView(order, records) }, { headers: { "Cache-Control": "private, no-store" } });
     response.cookies.set({
       name: customerSessionCookieName,
       value: encodeCustomerSession(orderId, contact, verifiedContact),

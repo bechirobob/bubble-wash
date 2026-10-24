@@ -35,6 +35,23 @@ try {
   await action('admin', 'admin-assign-vendor');
   await action('vendor', 'vendor-accept-job');
   await action('driver', 'driver-start-route');
+  // Browser GPS privacy boundary, including stale resend after stopping.
+  async function stopBrowser(stoppedAt, expected=200, extraHeaders={}) {
+    const response=await fetch(`${origin}/api/dispatch/location`,{method:'DELETE',headers:{origin:'https://127.0.0.1:3099','content-type':'application/json',cookie:cookies.driver,...extraHeaders},body:JSON.stringify({stoppedAt})});
+    const data=await response.json(); assert.equal(response.status,expected,JSON.stringify(data)); checks++; return data;
+  }
+  const firstPoint={orderId,latitude:5.56,longitude:-0.18,accuracyMeters:10,capturedAt:new Date(Date.now()-1000).toISOString()};
+  await post('/api/dispatch/location',firstPoint,'driver');
+  const stopTime=new Date().toISOString(); await stopBrowser(stopTime);
+  await post('/api/dispatch/location',firstPoint,'driver',409);
+  const browserPoint={...firstPoint,capturedAt:new Date(Date.now()+10).toISOString()}; await post('/api/dispatch/location',browserPoint,'driver');
+  await stopBrowser(browserPoint.capturedAt); await post('/api/dispatch/location',browserPoint,'driver',409);
+  const resumedPoint={...firstPoint,capturedAt:new Date(Date.now()+20).toISOString()}; await post('/api/dispatch/location',resumedPoint,'driver');
+  assert.equal((await stopBrowser(browserPoint.capturedAt)).newerLocationRetained,true); checks++;
+  await stopBrowser(resumedPoint.capturedAt,403,{origin:'https://attacker.example.invalid'});
+  await stopBrowser(resumedPoint.capturedAt,401,{cookie:'',authorization:'Bearer synthetic-invalid-token'});
+  await stopBrowser(resumedPoint.capturedAt);
+
   await action('driver', 'driver-mark-picked-up', { pickupBagCount: '1', operatorNote: 'Received one sealed bag.' });
   await action('driver', 'driver-drop-at-vendor', { vendorRecipient: 'Laundry receiver', handoffBagCount: '1', operatorNote: 'Received at vendor desk.' });
   await action('vendor', 'vendor-log-intake', { bagTag: `${orderId}-BAG`, intakeBagCount: '1', intakeCondition: 'Count and condition matched', receivedWeightKg: '20', operatorNote: 'Calibrated scale receipt checked.' });
