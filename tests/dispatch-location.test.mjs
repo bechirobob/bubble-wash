@@ -15,6 +15,7 @@ import {
 const now = Date.parse("2026-07-18T12:00:00.000Z");
 const valid = {
   orderId: "BW-LIVE-123",
+  generation: "89a2112d-3c1d-48d1-a9d2-baaeddd532b9",
   latitude: 5.6037,
   longitude: -0.187,
   accuracyMeters: 18.5,
@@ -99,11 +100,11 @@ test("only an exact rider assignment in a moving route stage can share location"
 });
 
 
-test("stop cutoff includes accepted future-skewed readings without moving backwards", async () => {
-  const { locationStopCutoff, validateLocationStopTime } = await import("../src/lib/dispatch-location.ts");
-  const now = Date.parse("2026-10-22T14:00:00.000Z");
-  assert.equal(locationStopCutoff(now + 20_000, now), "2026-10-22T14:00:20.000Z");
-  assert.equal(locationStopCutoff(now - 20_000, now), "2026-10-22T14:00:00.000Z");
-  assert.equal(validateLocationStopTime(locationStopCutoff(now + 20_000, now), now), "2026-10-22T14:00:20.000Z");
-  assert.equal(validateLocationStopTime(locationStopCutoff(now + 31_000, now), now), null);
+test("location updates require an explicit server-issued generation", async () => {
+  const { validLocationGeneration } = await import("../src/lib/dispatch-location.ts");
+  for (const generation of [undefined, "", "legacy", "89a2112d-3c1d-18d1-a9d2-baaeddd532b9", valid.generation + " "]) {
+    assert.equal(validLocationGeneration(generation), null);
+    assert.equal(validateLiveLocationInput({ ...valid, generation }, now).ok, false);
+  }
+  assert.equal(validLocationGeneration(valid.generation), valid.generation);
 });

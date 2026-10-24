@@ -917,9 +917,7 @@ export function purgeOperationalData(now = Date.now(), householdLaunchDate = pro
       WHERE status = 'enrolled' AND recovery_bundle_encrypted IS NOT NULL AND updated_at < ?
     `).run(isoDaysAgo(1)).changes;
     result.workflowClaims = db.prepare("DELETE FROM workflow_action_claims WHERE claimed_at < ?").run(isoDaysAgo(90)).changes;
-    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='operational_command_receipts'").get()) {
-      result.operationalCommandReceipts = db.prepare("DELETE FROM operational_command_receipts WHERE created_at < ?").run(isoDaysAgo(90)).changes;
-    }
+    // New worklist receipts are retained until a separate retention policy is approved.
     result.notificationLogs = db.prepare("DELETE FROM notification_outbox WHERE updated_at < ?").run(isoDaysAgo(90)).changes;
     result.optedOutSignups = db.prepare("DELETE FROM early_access_signups WHERE marketing_status = 'opted_out' AND updated_at < ?").run(isoDaysAgo(30)).changes;
     const launch = /^\d{4}-\d{2}-\d{2}$/.test(householdLaunchDate) ? new Date(`${householdLaunchDate}T00:00:00.000Z`).getTime() : Number.NaN;
@@ -946,10 +944,7 @@ export function purgeOperationalData(now = Date.now(), householdLaunchDate = pro
       db.prepare("DELETE FROM driver_live_locations WHERE order_id = ? COLLATE NOCASE").run(orderId);
       db.prepare("DELETE FROM workflow_action_claims WHERE order_id = ? COLLATE NOCASE").run(orderId);
       db.prepare("DELETE FROM delivery_proofs WHERE order_id = ? COLLATE NOCASE").run(orderId);
-      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='operational_work_ownership'").get()) {
-        const columns = db.prepare("PRAGMA table_info(operational_work_ownership)").all() as { name: string }[];
-        if (columns.some((column) => column.name === "order_id")) db.prepare("DELETE FROM operational_work_ownership WHERE order_id = ? COLLATE NOCASE").run(orderId);
-      }
+      // New worklist ownership records are outside the inherited retention policy.
       deletedOrderRecords += db.prepare(`
         DELETE FROM submissions WHERE id = @orderId COLLATE NOCASE OR json_extract(data, '$.orderId') = @orderId COLLATE NOCASE
       `).run({ orderId }).changes;
@@ -1096,7 +1091,7 @@ function driverLocationFromRow(row: StoredDriverLocationRow): StoredDriverLocati
 // Existing production reset/backup guards continue to reject activated extended schemas.
 function driverLocationDatabase() {
   const db = getDatabase();
-  db.exec("CREATE TABLE IF NOT EXISTS driver_location_stops (driver_id TEXT PRIMARY KEY, captured_before TEXT NOT NULL)");
+  db.exec("CREATE TABLE IF NOT EXISTS driver_location_stops (driver_id TEXT PRIMARY KEY, captured_before TEXT NOT NULL, generation TEXT NOT NULL DEFAULT '', order_id TEXT NOT NULL DEFAULT '')");
   return db;
 }
 export function readDriverLocationStop(driverId: string) {
@@ -1106,12 +1101,30 @@ export function readDriverLocationStop(driverId: string) {
   return row?.captured_before ?? null;
 }
 
-export function upsertDriverLiveLocation(location: StoredDriverLocation) {
+// A generation is a fence, not authentication. The route verifies rider/order ownership.
+export function startDriverLiveLocation(driverId: string, orderId: string) {
+  const id = driverId.trim().toLowerCase();
+  if (!id || !orderId.trim()) throw new Error("A rider and assigned order are required.");
+  const generation = randomUUID();
+  const db = driverLocationDatabase();
+  return db.transaction(() => {
+    db.prepare(`INSERT INTO driver_location_stops (driver_id,captured_before,generation,order_id)
+      VALUES (?,?,?,?) ON CONFLICT(driver_id) DO UPDATE SET
+      captured_before=excluded.captured_before,generation=excluded.generation,order_id=excluded.order_id`)
+      .run(id, new Date().toISOString(), generation, orderId);
+    db.prepare("DELETE FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE").run(id);
+    return generation;
+  }).immediate();
+}
+
+export function upsertDriverLiveLocation(location: StoredDriverLocation, generation: string) {
+  if (!generation) return false;
   const result = driverLocationDatabase().prepare(`
     INSERT INTO driver_live_locations
       (driver_id, order_id, latitude, longitude, accuracy_meters, captured_at, received_at)
     SELECT @driverId, @orderId, @latitude, @longitude, @accuracyMeters, @capturedAt, @receivedAt
-    WHERE NOT EXISTS (SELECT 1 FROM driver_location_stops WHERE driver_id = @driverId COLLATE NOCASE AND captured_before >= @capturedAt)
+    WHERE EXISTS (SELECT 1 FROM driver_location_stops WHERE driver_id = @driverId COLLATE NOCASE
+      AND generation = @generation AND generation != '' AND order_id = @orderId COLLATE NOCASE)
     ON CONFLICT(driver_id) DO UPDATE SET
       order_id = excluded.order_id,
       latitude = excluded.latitude,
@@ -1120,7 +1133,7 @@ export function upsertDriverLiveLocation(location: StoredDriverLocation) {
       captured_at = excluded.captured_at,
       received_at = excluded.received_at
     WHERE driver_live_locations.captured_at < excluded.captured_at
-  `).run(location);
+  `).run({ ...location, generation });
   return result.changes === 1;
 }
 
@@ -1143,17 +1156,20 @@ export function readDriverLiveLocations(): StoredDriverLocation[] {
   return rows.map(driverLocationFromRow);
 }
 
-// A shared privacy boundary for browser and native clients. Delayed stops never erase newer shares.
-export function stopDriverLiveLocation(driverId: string, capturedBefore = new Date().toISOString()) {
+// Device timestamps never authorize a stop. Legacy stops are privacy-first and unconditional.
+export function stopDriverLiveLocation(driverId: string, session?: { generation: string; orderId: string }) {
   const id = driverId.trim().toLowerCase();
-  if (!id || !Number.isFinite(Date.parse(capturedBefore))) throw new Error("A valid rider and stop cutoff are required.");
-  const cutoff = new Date(capturedBefore).toISOString();
+  if (!id) throw new Error("A valid rider is required.");
   const db = driverLocationDatabase();
   return db.transaction(() => {
-    db.prepare("INSERT INTO driver_location_stops VALUES (?,?) ON CONFLICT(driver_id) DO UPDATE SET captured_before=max(captured_before,excluded.captured_before)").run(id, cutoff);
-    const newerLocationRetained = Boolean(db.prepare("SELECT 1 FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE AND captured_at > ?").get(id, cutoff));
-    const cleared = db.prepare("DELETE FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE AND captured_at <= ?").run(id, cutoff).changes > 0;
-    return { cleared, newerLocationRetained };
+    if (session && !db.prepare(`SELECT 1 FROM driver_location_stops
+      WHERE driver_id=? AND generation=? AND generation!='' AND order_id=? COLLATE NOCASE`)
+      .get(id, session.generation, session.orderId)) return { cleared: false, staleGeneration: true };
+    db.prepare(`INSERT INTO driver_location_stops (driver_id,captured_before,generation,order_id)
+      VALUES (?,?,'','') ON CONFLICT(driver_id) DO UPDATE SET
+      captured_before=excluded.captured_before,generation='',order_id=''`).run(id, new Date().toISOString());
+    const cleared = db.prepare("DELETE FROM driver_live_locations WHERE driver_id = ? COLLATE NOCASE").run(id).changes > 0;
+    return { cleared, staleGeneration: false };
   }).immediate();
 }
 

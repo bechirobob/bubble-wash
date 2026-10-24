@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -289,12 +290,36 @@ class EnrollmentTests(unittest.TestCase):
         checker=importlib.util.module_from_spec(spec); spec.loader.exec_module(checker)
         selected=checker.verify_runner_source(ROOT)
         self.assertEqual(SOURCE_MATCHES(ROOT,pins),selected=='historical-owner-v1')
-        if selected!='historical-owner-v1':
+        if selected=='reviewed-runner-only-v1':
+            # Runner acceptance must not make the same app eligible for any
+            # historical host enrollment selector or a new invented selector.
+            for profile_name in ['historical-owner-v1', *ns['INTEGRATION_ENROLLMENT_PROFILE_SHA256'], selected]:
+                with self.assertRaises((ValueError, KeyError)):
+                    checker.check_source(ROOT, profile_name)
+        elif selected!='historical-owner-v1':
             contract=json.loads((ROOT/'ops/owner-enrollment-integration-pins.json').read_text())
             profile=ns['load_integration_enrollment_profile'](contract,selected)
             self.assertTrue(ns['integration_enrollment_source_matches'](ROOT,profile,selected))
         pins['src/lib/mfa-encryption.ts']='0'*64
         self.assertFalse(SOURCE_MATCHES(ROOT,pins))
+
+    def test_runner_only_candidate_rejects_changed_and_extra_source(self):
+        spec=importlib.util.spec_from_file_location('runner_only_check',ROOT/'ops/check-owner-enrollment-source.py')
+        checker=importlib.util.module_from_spec(spec); spec.loader.exec_module(checker)
+        if checker.verify_runner_source(ROOT) != 'reviewed-runner-only-v1':
+            return  # Historical snapshots retain their independently tested path.
+        copy=self.root/'runner-copy'
+        shutil.copytree(ROOT,copy,ignore=shutil.ignore_patterns('.git','node_modules','.next','__pycache__'))
+        self.assertEqual(checker.verify_runner_source(copy),'reviewed-runner-only-v1')
+        target=copy/'src/lib/data-store.ts'; original=target.read_bytes()
+        target.write_bytes(original+b'\n// changed\n')
+        with self.assertRaises(ValueError): checker.verify_runner_source(copy)
+        target.write_bytes(original)
+        extra=copy/'src/unreviewed.ts'; extra.write_text('export {}')
+        with self.assertRaises(ValueError): checker.verify_runner_source(copy)
+        extra.unlink()
+        target.unlink()
+        with self.assertRaises((ValueError,FileNotFoundError)): checker.verify_runner_source(copy)
 
     def test_timeout_terminates_group_and_never_retries(self):
         self.process.communicate.side_effect=[subprocess.TimeoutExpired('private-operation',45), ('','')]

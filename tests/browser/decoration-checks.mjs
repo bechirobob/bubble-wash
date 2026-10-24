@@ -1,6 +1,6 @@
 import { expect } from '@playwright/test';
 
-// Only solid brand-button edges and the live-status dot are colored borders.
+// Preserve exact live public accents; staff decorative boundaries remain neutral.
 // Map strokes, status text/icons, fills and native validation are not decoration.
 export async function expectNeutralDecoration(page) {
   const violations = await page.locator('body *').evaluateAll(nodes => {
@@ -18,11 +18,15 @@ export async function expectNeutralDecoration(page) {
         if (!parseFloat(style[`border${side}Width`]) || ['none', 'hidden'].includes(style[`border${side}Style`])) continue;
         const color = style[`border${side}Color`];
         const solidFunctionalEdge = !pseudo && node.matches('.navCta, .liveShareIndicator.is-on') && color === style.backgroundColor;
-        if (!neutral(color) && !solidFunctionalEdge) failures.push(`${label}: ${side} border ${color}`);
+        const publicAccent = !pseudo && !node.closest('.portalPage') && (
+          (side === 'Top' && node.matches('.planGrid, .quoteSummary, .trackingResult, .bookingConfirmation, .planRecommendation') && ['rgb(6, 75, 100)', 'rgb(8, 101, 132)'].includes(color)) ||
+          (side === 'Bottom' && node.matches('.planChoice:has(input:checked)') && color === 'rgb(8, 101, 132)')
+        );
+        if (!neutral(color) && !solidFunctionalEdge && !publicAccent) failures.push(`${label}: ${side} border ${color}`);
       }
       if (parseFloat(style.outlineWidth) && !['none', 'hidden'].includes(style.outlineStyle) && !neutral(style.outlineColor) && !matchMedia('(forced-colors: active)').matches) failures.push(`${label}: outline ${style.outlineColor}`);
     }
     return failures;
   });
-  expect(violations, 'Shared neutral decorative edges, neutral focus and no shadows').toEqual([]);
+  expect(violations, 'Exact live public accents, neutral staff edges/focus, and no shadows').toEqual([]);
 }

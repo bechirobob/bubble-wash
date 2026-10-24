@@ -6,11 +6,20 @@ const read = name => readFileSync(new URL(`../${name}`, import.meta.url), 'utf8'
 test('worklist graphical CI has an explicit step and cannot be skipped by an earlier journey failure', () => {
   const workflow = read('.github/workflows/browser-regression.yml');
   assert.match(workflow, /name: Build production runtime for synthetic test data\n\s+id: build\n\s+run: npm run build/);
+  const fullMode = "(github.event_name != 'workflow_dispatch' || inputs.mode != 'gps')";
   for (const command of ['test:worklist-fixture', 'test:browser-worklists']) {
-    assert.ok(workflow.includes(`if: \${{ !cancelled() && steps.build.outcome == 'success' }}\n        run: npm run ${command}`));
+    assert.ok(workflow.includes(`if: \${{ !cancelled() && steps.build.outcome == 'success' && ${fullMode} }}\n        run: npm run ${command}`));
   }
-  assert.match(workflow, /name: Run four-role journeys at mobile and desktop sizes\n\s+run: npx playwright test/);
-  assert.equal((workflow.match(/run: npm run build/g) || []).length, 1, 'Existing browser job builds once');
+  assert.ok(workflow.includes("name: Run four-role journeys at mobile and desktop sizes\n        if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode != 'gps' }}\n        run: npx playwright test"));
+  // The exact condition above omits success(), so an earlier journey failure does not suppress worklists.
+  const worklistsRun = (event, mode, cancelled = false, build = 'success') => !cancelled && build === 'success' && (event !== 'workflow_dispatch' || mode !== 'gps');
+  for (const event of ['pull_request', 'push']) for (const mode of [undefined, 'full', 'gps']) assert.equal(worklistsRun(event, mode), true);
+  for (const mode of [undefined, 'full']) assert.equal(worklistsRun('workflow_dispatch', mode), true);
+  assert.equal(worklistsRun('workflow_dispatch', 'gps'), false);
+  assert.equal(worklistsRun('pull_request', 'full', true), false);
+  assert.equal(worklistsRun('pull_request', 'full', false, 'failure'), false);
+  assert.equal((workflow.match(/npm run build/g) || []).length, 2, 'Main fixture and isolated open-survey fixture each build once');
+  assert.match(workflow, /name: Build isolated open-survey fixture \(never a deployment artifact\)\n\s+if: \$\{\{ github.event_name != 'workflow_dispatch' \|\| inputs.mode != 'gps' \}\}[\s\S]*?npm run build/);
 });
 
 test('worklist screenshots are explicit synthetic workspace captures only', () => {
