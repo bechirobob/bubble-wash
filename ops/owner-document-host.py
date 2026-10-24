@@ -133,6 +133,36 @@ def invoke_capsule(node, release, request, before_commit, child_env, timeout=45)
             if pipe is not None and not pipe.closed:pipe.close()
 
 
+def runtime_configuration(release, values, node, uid, database):
+    """Retain full equality after UID drop, without the root-only runuser wrapper."""
+    require(uid>0 and os.getuid()==uid==os.geteuid())
+    env={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','HOME':str(core.HOME),'LC_ALL':'C',
+         'XDG_RUNTIME_DIR':f'/run/user/{uid}','DBUS_SESSION_BUS_ADDRESS':f'unix:path=/run/user/{uid}/bus'}
+    ctl=facts.trusted_executable('/usr/bin/systemctl');ss=facts.trusted_executable('/usr/bin/ss')
+    def main_pid():
+        state=preflight.parse_env(facts.bounded([ctl,'--user','show',core.UNIT,'--property=MainPID'],env=env,limit=8192).decode())
+        require(set(state)=={'MainPID'} and re.fullmatch('[1-9][0-9]*',state['MainPID']))
+        pid=int(state['MainPID']);require(pid>1);return pid
+    def listener_pid():
+        raw=facts.bounded([ss,'-H','-ltnp','sport = :3000'],env=env,limit=8192)
+        pids=set(re.findall(rb'pid=(\d+)',raw));require(len(pids)==1)
+        pid=int(next(iter(pids)));require(pid>1);return pid
+    main=main_pid();listener=listener_pid();identities={pid:preflight.process_identity(pid) for pid in {main,listener}}
+    operator.verify_runtime(facts,preflight,release,node,uid,database)
+    for pid in identities:
+        proc=preflight.PROC/str(pid);require(proc.stat().st_uid==uid and (proc/'cwd').resolve(strict=True)==release)
+        raw=preflight.bounded_bytes(proc/'environ',1024*1024)
+        effective=dict(item.decode().split('=',1) for item in raw.split(b'\0') if b'=' in item)
+        require(all(effective.get(key)==value for key,value in values.items()))
+        require(effective.get('NODE_ENV')=='production' and effective.get('BUBBLEWASH_DISABLE_DEMO_LOGIN')=='true' and
+                all(effective.get(key)=='true' for key in guards.FLAGS))
+    require(preflight.bounded_bytes(preflight.PROC/str(main)/'cgroup',65536)==
+            preflight.bounded_bytes(preflight.PROC/str(listener)/'cgroup',65536))
+    require(all(preflight.process_identity(pid)==identity for pid,identity in identities.items()) and
+            (preflight.PROC/str(listener)/'exe').resolve(strict=True)==Path(node) and
+            main_pid()==main and listener_pid()==listener)
+
+
 def operation(request, owner, lock_unchanged):
     global STAGE,ATTEMPTED
     STAGE='source';release=core.CURRENT.resolve(strict=True)
@@ -148,8 +178,7 @@ def operation(request, owner, lock_unchanged):
     db_identity=guards.database_identity(database,owner);sql=(release/'db/proposed/research-v1.sql').read_bytes()
     STAGE='runtime';node=facts.trusted_executable(NODE);require(node==NODE and facts.source(node,0,128*1024*1024)['sha256']==NODE_SHA256)
     require(re.fullmatch(rb'v22\.\d+\.\d+\n',facts.bounded([node,'--version'],limit=128)))
-    operator.verify_source(facts,release,{},owner.pw_uid);operator.verify_runtime(facts,preflight,release,node,owner.pw_uid,database)
-    guards.runtime_flags(release,values,True)
+    operator.verify_source(facts,release,{},owner.pw_uid);runtime_configuration(release,values,node,owner.pw_uid,database)
     def bound():
         lock_unchanged();require(core.CURRENT.resolve(strict=True)==release and guards.inspect_read(marker_path,owner,'current')==marker_raw)
         actual,identity=scanner.source_snapshot(release,owner);require(scanner.content_commitment(actual)==pins['runtimeContent'] and identity==source_identity)
@@ -173,7 +202,7 @@ def operation(request, owner, lock_unchanged):
     capsule_request={**request['recipient'],'actor':'github-actions:'+request['context']['actor'],'release':str(release),'dbPath':str(database),
                      'env':env,'context':context(request),'publicKey':request['publicKey'],'schemaSha256':schema_hash}
     def before_commit():
-        bound();backup();operator.verify_runtime(facts,preflight,release,node,owner.pw_uid,database)
+        bound();backup();runtime_configuration(release,values,node,owner.pw_uid,database)
     STAGE='issuance';ATTEMPTED=True
     encrypted=invoke_capsule(node,release,capsule_request,before_commit,{'PATH':'/usr/bin:/bin','HOME':str(core.HOME),**env})
     envelope(encrypted,request);bound()
