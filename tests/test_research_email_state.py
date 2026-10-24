@@ -1,4 +1,5 @@
 import contextlib
+import errno
 import builtins
 import importlib.util
 import io
@@ -84,6 +85,79 @@ class ReadOnlyState(unittest.TestCase):
         workflow=(ROOT/'.github/workflows/research-email-state.yml').read_text();transport=(ROOT/'ops/transport-research-email-state.py').read_text()
         self.assertNotIn('RESEND_KEY',workflow);self.assertNotIn('RESEND_KEY',transport);self.assertNotIn('install(',transport)
         self.assertIn('group: bubblewash-production',workflow);self.assertIn('limit=4096',transport);self.assertIn("'HOME':home",transport)
+
+
+class LockDiagnostics(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.runtime=Path(self.tmp.name);self.runtime.chmod(0o700)
+        self.lock=self.runtime/'deploy.lock';self.lock.write_bytes(b'');self.lock.chmod(0o600)
+        self.binding=patch.object(i,'RUNTIME',self.runtime);self.binding.start();self.addCleanup(self.binding.stop)
+        self.state=c.result()
+    def observe(self):
+        with c.observed_lock(i,os.getuid(),self.state) as unchanged:unchanged()
+    def test_success_matches_original_and_changes_no_metadata(self):
+        before=(i.identity(self.runtime.stat()),i.identity(self.lock.stat()))
+        with i.deployment_lock(self.runtime,os.getuid()) as unchanged:unchanged()
+        self.observe();self.assertTrue(all(self.state[k] is True for k in c.LOCK_FIELDS))
+        self.assertEqual(before,(i.identity(self.runtime.stat()),i.identity(self.lock.stat())))
+    def test_open_failure_is_precise_and_remaining_unknown(self):
+        real=os.open
+        def guarded(path,*a,**kw):
+            if path=='deploy.lock':raise PermissionError(errno.EACCES,'PRIVATE /secret username')
+            return real(path,*a,**kw)
+        with patch.object(c.os,'open',side_effect=guarded),self.assertRaises(PermissionError):self.observe()
+        self.assertEqual(self.state['lockFailure'],'permission-denied');self.assertFalse(self.state['lockFileOpened']);self.assertTrue(self.state['lockDirectoryModeSafe'])
+        self.assertIsNone(self.state['lockFileOwnerSafe']);self.assertIsNone(self.state['lockAcquired'])
+        self.assertNotIn('PRIVATE',json.dumps(c.validate(self.state)))
+    def test_directory_mode_guard_still_rejects(self):
+        self.runtime.chmod(0o720)
+        for check in (lambda:i.deployment_lock(self.runtime,os.getuid()),lambda:c.observed_lock(i,os.getuid(),self.state)):
+            with self.assertRaises(ValueError):
+                with check():pass
+        self.assertFalse(self.state['lockDirectoryModeSafe']);self.assertIsNone(self.state['lockFileOpened'])
+    def test_file_mode_single_link_and_symlink_guards(self):
+        self.lock.chmod(0o620)
+        with self.assertRaises(ValueError):self.observe()
+        self.assertFalse(self.state['lockFileModeSafe']);self.assertIsNone(self.state['lockAcquired'])
+        self.lock.chmod(0o600);os.link(self.lock,self.runtime/'other');self.state=c.result()
+        with self.assertRaises(ValueError):self.observe()
+        self.assertFalse(self.state['lockFileSingleLink'])
+        (self.runtime/'other').unlink();self.lock.unlink();self.lock.symlink_to('/dev/null');self.state=c.result()
+        with self.assertRaises(OSError):self.observe()
+        self.assertFalse(self.state['lockFileOpened'])
+    def test_contention_and_binding_drift_not_conflated(self):
+        with patch.object(i.fcntl,'flock',side_effect=BlockingIOError(errno.EAGAIN,'PRIVATE')),self.assertRaises(BlockingIOError):self.observe()
+        self.assertFalse(self.state['lockAcquired']);self.assertIsNone(self.state['lockBindingStable'])
+        self.state=c.result()
+        with c.observed_lock(i,os.getuid(),self.state) as unchanged:
+            self.lock.rename(self.runtime/'old');self.lock.write_bytes(b'')
+            with self.assertRaises(ValueError):unchanged()
+        self.assertTrue(self.state['lockAcquired']);self.assertFalse(self.state['lockBindingStable'])
+    def test_foreign_owner_and_nonregular_refused(self):
+        real=os.fstat
+        def foreign(fd):
+            v=real(fd);return types.SimpleNamespace(st_uid=999999,st_mode=v.st_mode)
+        with patch.object(c.os,'fstat',side_effect=foreign),self.assertRaises(ValueError):self.observe()
+        self.assertFalse(self.state['lockDirectoryOwnerSafe'])
+        self.lock.unlink();self.lock.mkdir();self.state=c.result()
+        with self.assertRaises(ValueError):self.observe()
+        self.assertFalse(self.state['lockFileRegular'])
+    def test_fixed_failure_allowlist_and_consistency(self):
+        for error,expected in ((PermissionError(errno.EPERM,'SECRET'),'permission-denied'),(FileNotFoundError(errno.ENOENT,'SECRET'),'missing'),(OSError(errno.ELOOP,'SECRET'),'symlink'),(BlockingIOError(errno.EAGAIN,'SECRET'),'busy'),(ValueError('SECRET'),'metadata-guard'),(RuntimeError('SECRET'),'other')):
+            state=c.result();c.lock_failure(state,error);self.assertEqual(state['lockFailure'],expected)
+            c.validate(state);self.assertNotIn('SECRET',json.dumps(state))
+        for edit in ({'lockFailure':'PRIVATE'},{'deploymentLockReady':True},{'bindingStable':True}):
+            with self.assertRaises(ValueError):c.validate({**c.result(),**edit})
+        self.lock.unlink()
+        with self.assertRaises(FileNotFoundError):self.observe()
+        self.assertEqual(self.state['lockFailure'],'missing')
+
+    def test_private_types_rejected_and_unknown_not_false(self):
+        self.assertTrue(all(c.result()[k] is None for k in c.LOCK_FIELDS))
+        for value in ('/private',1000,{'mode':384}):
+            with self.assertRaises(ValueError):c.validate({**c.result(),'lockFileOwnerSafe':value})
+
 
 class Transport(unittest.TestCase):
     def test_actual_transport_bounded_public_program_clean_environment_and_fixed_output(self):
