@@ -86,6 +86,15 @@ export async function verifyFocusPolicy({ browser, fixture, origin, output }) {
         // transferred here to assert the programmatic case without changing modality.
         await list.focus(); await ring(list, false, 'pointer/programmatic response list');
         await page.screenshot({ path: output + `focus-${name}-responses-pointer.png`, fullPage: true });
+        if (!mobile) {
+          // A system-colour focus cue must survive high-contrast pointer mode.
+          await page.emulateMedia({ forcedColors: 'active' });
+          await list.evaluate(element => { element.style.outline = '3px solid CanvasText'; });
+          await ring(list, true, 'forced-colors cue is not suppressed');
+          await list.evaluate(element => { element.style.removeProperty('outline'); });
+          await page.emulateMedia({ forcedColors: 'none' });
+          await ring(list, false, 'ordinary pointer policy restored');
+        }
         const open = page.getByRole('button', { name: /Open response from/ }).first();
         await press(open);
         const close = page.getByRole('button', { name: 'Close response', exact: true });

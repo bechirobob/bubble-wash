@@ -90,10 +90,12 @@ textarea { min-height: 120px; resize: vertical; }
    Unknown/assistive and keyboard input retain native focus-visible behavior.
    Important is limited to this presentation contract, so route CSS cannot
    accidentally restore pointer rings. Never blur or remove tabindex to hide one. */
+@media (forced-colors: none) {
 html[data-input-modality="pointer"] :focus:not(:is(
   input:not([type="button"], [type="submit"], [type="reset"], [type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]),
   select, textarea, [contenteditable]:not([contenteditable="false"])
 )) { outline: none !important; }
+}
 h1, h2, h3, h4, p { margin-top: 0; }
 h1, h2, h3, h4 { color: var(--ink-strong); letter-spacing: -.03em; font-weight: 700; }
 h1 { max-width: 760px; font-size: clamp(2.2rem, 4vw, 3rem); line-height: 1.04; margin-bottom: 1rem; }
