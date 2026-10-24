@@ -1,0 +1,95 @@
+// Disposable DB only. Run from fallback with --candidate /absolute/reviewed/candidate.
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import Database from 'better-sqlite3';
+const args=process.argv.slice(2);
+assert.equal(args[0],'--candidate'); assert.equal(args.length,2); assert.ok(path.isAbsolute(args[1]));
+const fallback=process.cwd(), candidate=args[1];
+const temporary=mkdtempSync(path.join(tmpdir(),'bubblewash-state-continuity-'));
+const file=path.join(temporary,'fixture.sqlite');
+const environment={...process.env,BUBBLEWASH_DATABASE_PATH:file,BUBBLEWASH_SESSION_SECRET:'synthetic-local-session-secret-with-at-least-32-characters',NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED:'false',RESEND_API_KEY:'',WHATSAPP_ACCESS_TOKEN:'',PAYSTACK_SECRET_KEY:'',NODE_NO_WARNINGS:'1'};
+function run(source,code){const r=spawnSync(process.execPath,['--conditions=react-server','--experimental-strip-types','--experimental-loader=./tests/alias-loader.mjs','--input-type=module','-e',code],{cwd:source,env:environment,encoding:'utf8',timeout:20000});assert.equal(r.status,0,r.stderr);return r.stdout.trim()?JSON.parse(r.stdout):null;}
+const common=`import assert from 'node:assert/strict'; import * as s from './src/lib/data-store.ts'; import {saveBookingOnce} from './src/lib/operational-store.ts'; import {upsertVendorAvailability} from './src/lib/availability-store.ts'; const db=s.getDatabase(); globalThis.fetch=async()=>{throw Error('No network allowed')}; const now=Date.now(), iso=n=>new Date(n).toISOString(); const point=(id,time)=>({driverId:id,orderId:'candidate-booking',latitude:5.6,longitude:-0.1,accuracyMeters:10,capturedAt:iso(time),receivedAt:iso(now)}); const save=(id)=>saveBookingOnce({id,createdAt:iso(now),data:{submissionType:'pickup-booking',name:'Synthetic',email:'fixture@example.invalid',phone:'0200000000',alertPreference:'Call me'}},id+'-idempotency-key',()=>{}); const enqueue=(id,channel='email')=>{const row=s.enqueueNotification({id,dedupeKey:id,channel,target:'customer',payload:{purpose:'privacy',toEmail:'fixture@example.invalid',toWhatsApp:'233550000000',subject:'Synthetic',text:'Never sent'}});db.prepare("UPDATE notification_outbox SET next_attempt_at='2000-01-01' WHERE id=?").run(id);return row;}; const begin=(row,time)=>s.beginNotificationAttempt({id:row.id,leaseToken:row.leaseToken,providerRequest:JSON.stringify({url:row.channel==='email'?'https://api.resend.com/emails':'https://graph.facebook.com/v23.0/synthetic/messages',body:'{}'}),idempotencyKey:row.channel==='email'?'synthetic-key-'+row.id:'',accountHash:'synthetic-account',now:time});`;
+const optional=['operational_work_ownership','operational_command_receipts','mobile_customer_requests','mobile_operations_receipts'];
+function snapshot(tables){const db=new Database(file,{readonly:true,fileMustExist:true});try{return Object.fromEntries(tables.map(t=>[t,db.prepare('SELECT rowid,* FROM "'+t+'" ORDER BY rowid').all()]));}finally{db.close();}}
+try{
+ const first=run(candidate,common+`
+ import {initializeStaffAccountsSchema} from './src/lib/staff-accounts.ts'; import {readFileSync} from 'node:fs'; import {automationDatabase,recordCapacityConfirmation} from './src/lib/automation-store.ts'; import {automationWorklist,manageWorkOwnership} from './src/lib/operations-automation.ts'; import {createCustomerRequest} from './src/lib/customer-requests.ts'; import {vendorCapacityCommand} from './src/lib/vendor-capacity-command.ts';
+ initializeStaffAccountsSchema(db); db.exec("CREATE TABLE staff_owner_capabilities (email TEXT PRIMARY KEY COLLATE NOCASE REFERENCES staff_accounts(email), all_staff_access INTEGER NOT NULL CHECK (all_staff_access = 1))"); db.exec(readFileSync('db/proposed/research-v1.sql','utf8'));
+ db.prepare("INSERT INTO staff_accounts VALUES ('owner@example.invalid','Owner','admin','','preserved-hash','version','active','','','time')").run(); db.prepare("INSERT INTO staff_owner_capabilities VALUES ('owner@example.invalid',1)").run(); db.prepare("INSERT INTO admin_mfa_settings VALUES ('owner@example.invalid','preserved-mfa','enrolled',NULL,NULL,'time','time')").run(); db.prepare("INSERT INTO research_responses VALUES ('research','submission','hash','consumer','version','time','{}')").run(); db.prepare("INSERT INTO research_notification_outbox(response_id,state,attempts,provider_message_id) VALUES ('research','sent',1,'research-provider')").run();
+ assert.equal(save('candidate-booking').bookingReference,'BW-001');
+ upsertVendorAvailability({vendorId:'vendor',vendorName:'Synthetic Vendor',capacityRemaining:3,availabilityStatus:'available',updatedBy:'fixture'});
+ const actor={email:'vendor@example.invalid',name:'Vendor',role:'vendor',entityId:'vendor'};
+ const get=await vendorCapacityCommand(new Request('https://fixture.invalid/api/vendor/capacity'),actor,{}).json();
+ const command={capacityRemaining:4,availabilityStatus:'available',note:'Synthetic confirmation',expectedUpdatedAt:get.vendors[0].updatedAt,expectedRevision:get.vendors[0].revision,idempotencyKey:'synthetic-capacity-key'};
+ const receipt=await vendorCapacityCommand(new Request('https://fixture.invalid/api/vendor/capacity',{method:'POST'}),actor,command).json(); assert.equal(receipt.ok,true);
+ const request={action:'quality',note:'Synthetic receipt continuity'}; const customerReceipt=createCustomerRequest('candidate-booking',request,'synthetic-customer-key'); assert.equal(customerReceipt.status,200);
+ const admin={email:'owner@example.invalid',name:'Owner',role:'admin',allStaffAccess:true};const items=automationWorklist(admin,new URLSearchParams()).items;const item=items.find(x=>x.kind==='case-followup')??items[0]; assert.ok(item);
+ const ownership={itemId:item.id,ownerEmail:'',dueAt:iso(now+3600000),note:'Synthetic work ownership',expectedRevision:item.revision,signalVersion:item.signalVersion,idempotencyKey:'synthetic-ownership-key'};assert.equal(manageWorkOwnership(admin,ownership).ok,true);
+ const stoppedGeneration=s.startDriverLiveLocation('driver-candidate','candidate-booking');
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',now+20000),stoppedGeneration),true);
+ assert.equal(s.stopDriverLiveLocation('driver-candidate').cleared,true);
+ const activeGeneration=s.startDriverLiveLocation('driver-candidate','candidate-booking');
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',now+20000),activeGeneration),true);
+ for(const id of ['queued','lease-before','lease-email','lease-whatsapp','retry'])enqueue(id,id==='lease-whatsapp'?'whatsapp':'email');
+ const leases={};for(const id of ['lease-before','lease-email','lease-whatsapp','retry']){leases[id]=s.claimNotification({id,now});assert.ok(leases[id]);if(id!=='lease-before')assert.ok(begin(leases[id],now));}
+ assert.equal(s.updateNotificationDelivery({id:'retry',leaseToken:leases.retry.leaseToken,status:'uncertain',now,retryAfterMs:0}),true);
+ console.log(JSON.stringify({now,leases,command,request,ownership,customerReceipt,stoppedGeneration,activeGeneration}));db.close();`);
+ const protectedTables=['staff_accounts','staff_owner_capabilities','admin_mfa_settings','admin_mfa_recovery_codes','research_responses','research_notification_outbox']; const protectedBefore=snapshot(protectedTables),optionalBefore=snapshot(optional);
+ const frozen=JSON.stringify(first);
+ const fallbackState=run(fallback,common+`const original=${frozen};const before=original.now,later=before+60001;
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',before+21000),original.stoppedGeneration),false);
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',before+21000),original.activeGeneration),true);
+ assert.equal(s.stopDriverLiveLocation('driver-candidate',{generation:original.stoppedGeneration,orderId:'candidate-booking'}).staleGeneration,true);
+ assert.equal(s.readDriverLiveLocation('driver-candidate').capturedAt,iso(before+21000));
+ assert.equal(s.stopDriverLiveLocation('driver-candidate',{generation:original.activeGeneration,orderId:'candidate-booking'}).cleared,true);
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',before+22000),original.activeGeneration),false);
+ const fallbackGeneration=s.startDriverLiveLocation('driver-candidate','candidate-booking');
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',before+22000),fallbackGeneration),true);
+ const fallbackStopped=s.startDriverLiveLocation('driver-fallback','candidate-booking');
+ assert.equal(s.upsertDriverLiveLocation(point('driver-fallback',before+22000),fallbackStopped),true);s.stopDriverLiveLocation('driver-fallback');
+ assert.equal(save('fallback-booking').bookingReference,'BW-002'); assert.equal(save('candidate-booking').replayed,true);
+ upsertVendorAvailability({vendorId:'vendor',vendorName:'Synthetic Vendor',capacityRemaining:2,availabilityStatus:'limited',updatedBy:'fallback'});assert.equal(db.prepare("SELECT count(*) n FROM vendor_capacity_confirmations WHERE vendor_id='vendor'").get().n,0);
+ for(const id of ['lease-before','lease-email','lease-whatsapp'])assert.equal(s.claimNotification({id,now:before+1}),null);
+ const unstarted=s.claimNotification({id:'lease-before',now:later});assert.ok(unstarted);assert.notEqual(unstarted.leaseToken,original.leases['lease-before'].leaseToken);assert.equal(unstarted.attempts,0);
+ const email=s.claimNotification({id:'lease-email',now:later});assert.ok(email);assert.equal(email.providerIdempotencyKey,'synthetic-key-lease-email');assert.equal(email.providerRequest,JSON.stringify({url:'https://api.resend.com/emails',body:'{}'}));assert.equal(s.updateNotificationDelivery({id:email.id,leaseToken:original.leases['lease-email'].leaseToken,status:'accepted',providerId:'stale',now:later}),false);assert.ok(begin(email,later));assert.equal(s.updateNotificationDelivery({id:email.id,leaseToken:email.leaseToken,status:'accepted',providerId:'synthetic-accepted',now:later}),true);
+ assert.equal(s.claimNotification({id:'lease-whatsapp',now:later}),null);assert.equal(s.readNotification('lease-whatsapp').deliveryState,'manual_review');
+ const retry=s.claimNotification({id:'retry',now:later});assert.ok(retry);assert.equal(retry.providerIdempotencyKey,'synthetic-key-retry');assert.ok(begin(retry,later));assert.equal(s.updateNotificationDelivery({id:'retry',leaseToken:retry.leaseToken,status:'uncertain',now:later,retryAfterMs:0}),true);
+ const queued=s.claimNotification({id:'queued',now:later});assert.ok(queued);assert.equal(queued.attempts,0);assert.ok(begin(queued,later));assert.equal(s.updateNotificationDelivery({id:'queued',leaseToken:queued.leaseToken,status:'accepted',providerId:'synthetic-queued',now:later}),true);
+ enqueue('fallback-queued');const pending=s.claimNotification({id:'fallback-queued',now:later});assert.ok(pending);assert.ok(begin(pending,later)); console.log(JSON.stringify({fallbackGeneration,fallbackStopped})); db.close();`);
+ assert.deepEqual(snapshot(protectedTables),protectedBefore);assert.deepEqual(snapshot(optional),optionalBefore);
+ run(candidate,common+`const original=${frozen};const later=original.now+120002;import {createCustomerRequest} from './src/lib/customer-requests.ts';import {manageWorkOwnership} from './src/lib/operations-automation.ts';import {vendorCapacityCommand} from './src/lib/vendor-capacity-command.ts';
+ const fallbackState=${JSON.stringify(fallbackState)};
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',original.now+23000),fallbackState.fallbackGeneration),true);
+ assert.equal(s.stopDriverLiveLocation('driver-candidate',{generation:original.activeGeneration,orderId:'candidate-booking'}).staleGeneration,true);
+ assert.equal(s.stopDriverLiveLocation('driver-candidate',{generation:fallbackState.fallbackGeneration,orderId:'candidate-booking'}).cleared,true);
+ assert.equal(s.upsertDriverLiveLocation(point('driver-fallback',original.now+23000),fallbackState.fallbackStopped),false);
+ assert.equal(s.readDriverLiveLocation('driver-fallback'),null);
+ const resumed=s.startDriverLiveLocation('driver-fallback','candidate-booking');
+ assert.equal(s.upsertDriverLiveLocation(point('driver-fallback',original.now+4),resumed),true);
+ assert.equal(save('resumed-booking').bookingReference,'BW-003');assert.equal(save('fallback-booking').replayed,true);
+ assert.equal(createCustomerRequest('candidate-booking',original.request,'synthetic-customer-key').body.replayed,true);
+ assert.equal(manageWorkOwnership({email:'owner@example.invalid',name:'Owner',role:'admin',allStaffAccess:true},original.ownership).replayed,true);
+ const response=await vendorCapacityCommand(new Request('https://fixture.invalid/api/vendor/capacity',{method:'POST'}),{email:'vendor@example.invalid',name:'Vendor',role:'vendor',entityId:'vendor'},original.command).json();assert.equal(response.replayed,true);assert.equal(db.prepare("SELECT capacity_remaining FROM vendor_availability WHERE vendor_id='vendor'").get().capacity_remaining,2);
+ for(const id of ['lease-email','queued'])assert.equal(s.claimNotification({id,now:later}),null);assert.equal(s.claimNotification({id:'lease-whatsapp',now:later}),null);
+ for(const id of ['retry','fallback-queued']){const row=s.claimNotification({id,now:later});assert.ok(row);assert.equal(row.providerIdempotencyKey,'synthetic-key-'+id);assert.ok(begin(row,later));assert.equal(s.updateNotificationDelivery({id,leaseToken:row.leaseToken,status:'accepted',providerId:'synthetic-resumed-'+id,now:later}),true);}
+ assert.deepEqual(db.pragma('quick_check'),[{quick_check:'ok'}]); db.close();`);
+ assert.deepEqual(snapshot(protectedTables),protectedBefore);assert.deepEqual(snapshot(optional),optionalBefore);
+ for(const route of ['src/app/api/staff/automation/[action]/route.ts','src/app/api/vendor/capacity/route.ts'])assert.equal(existsSync(path.join(fallback,route)),false);
+ assert.match(readFileSync(path.join(fallback,'src/app/api/submit/route.ts'),'utf8'),/staffUser\?\.role === "vendor" && submissionType === "vendor-application"[\s\S]*?status: 409/);
+ assert.equal(readFileSync(path.join(fallback,'src/app/api/dispatch/location/route.ts'),'utf8'),readFileSync(path.join(candidate,'src/app/api/dispatch/location/route.ts'),'utf8'));
+ // Exercise the actual worker/provider adapter across processes as well as lease fencing above.
+ environment.BUBBLEWASH_DATABASE_PATH=path.join(temporary,'worker.sqlite');
+ const workerCommon=common+`import {processNotificationOutbox} from './src/lib/notifications.ts';Object.assign(process.env,{RESEND_API_KEY:'mock-local-only-key',BUBBLEWASH_EMAIL_FROM:'Synthetic <first@example.invalid>'});const calls=[];globalThis.fetch=async(url,init)=>{calls.push({url,body:init.body,key:init.headers['Idempotency-Key']});if(process.env.SYNTHETIC_TIMEOUT==='true')throw new DOMException('Synthetic uncertain acceptance','TimeoutError');return Response.json({id:'mock-provider-accepted'});};`;
+ const originalWorker=run(candidate,workerCommon+`enqueue('candidate-worker');process.env.SYNTHETIC_TIMEOUT='true';const result=await processNotificationOutbox(1);assert.equal(result[0].status,'retrying');assert.equal(calls.length,1);console.log(JSON.stringify(calls[0]));db.close();`);
+ const fallbackWorker=run(fallback,workerCommon+`process.env.BUBBLEWASH_EMAIL_FROM='Changed <second@example.invalid>';db.prepare("UPDATE notification_outbox SET next_attempt_at='2000-01-01' WHERE id='candidate-worker'").run();const result=await processNotificationOutbox(1);assert.equal(result[0].status,'accepted');assert.deepEqual(calls,[${JSON.stringify(originalWorker)}]);assert.deepEqual(await processNotificationOutbox(1),[]);enqueue('fallback-worker');process.env.SYNTHETIC_TIMEOUT='true';assert.equal((await processNotificationOutbox(1))[0].status,'retrying');assert.equal(calls.length,2);console.log(JSON.stringify(calls[1]));db.close();`);
+ run(candidate,workerCommon+`db.prepare("UPDATE notification_outbox SET next_attempt_at='2000-01-01' WHERE id='fallback-worker'").run();assert.equal((await processNotificationOutbox(1))[0].status,'accepted');assert.deepEqual(calls,[${JSON.stringify(fallbackWorker)}]);assert.deepEqual(await processNotificationOutbox(1),[]);assert.equal(calls.length,1);db.close();`);
+ for(const source of [candidate,fallback]){
+  environment.BUBBLEWASH_DATABASE_PATH=path.join(temporary,source===candidate?'candidate-presentation.sqlite':'fallback-presentation.sqlite');
+  run(source,common+`import {queueSubmissionNotifications} from './src/lib/notifications.ts';process.env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED='true';const token='BW-R1234567890ABCDEF';const saved=saveBookingOnce({id:token,createdAt:iso(now),data:{submissionType:'pickup-booking',name:'Synthetic',email:'fixture@example.invalid',alertPreference:'Email only'}},'presentation-fixture-key',queueSubmissionNotifications);assert.equal(saved.bookingReference,'BW-001');const rows=db.prepare("SELECT target,payload FROM notification_outbox WHERE channel='email'").all();const customer=JSON.parse(rows.find(r=>r.target==='customer').payload);const operations=JSON.parse(rows.find(r=>r.target==='operations').payload);assert.ok(customer.text.includes('/track#tracking='+token));assert.equal(customer.text.includes('?id='),false);assert.equal(customer.subject.includes(token),false);assert.ok(customer.subject.includes('BW-001'));assert.equal(JSON.stringify(operations).includes(token),false);s.appendSubmissionRecord({id:'linked-record',createdAt:iso(now),data:{submissionType:'support-ticket',orderId:token}});assert.equal(s.findSubmissionRecordById('linked-record').data.bookingReference,'BW-001');db.close();`);
+ }
+ console.log(JSON.stringify({ok:true,scope:'candidate-to-fallback-to-candidate',generationAcrossBothSwitches:true,legacyAheadClockStop:true,driverStopAndLateWritePreserved:true,capacityConfirmationInvalidated:true,optionalReceiptsAndOwnershipPreserved:true,queuedLeasedAndRetryStatesPreserved:true,frozenWorkerRequestAcrossBothSwitches:true,newNotificationFragmentAndPublicLabel:true,ownerMfaResearchPreserved:true,networkRequests:0}));
+}finally{rmSync(temporary,{recursive:true,force:true});}

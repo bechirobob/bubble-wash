@@ -8,6 +8,7 @@ const maxAgeSeconds = 60 * 30;
 type CustomerSession = {
   orderId: string;
   verifiedContact?: boolean;
+  contactProof?: "mailbox-v1";
   contactFingerprint: string;
   issuedAt: number;
   expiresAt: number;
@@ -54,6 +55,7 @@ export function encodeCustomerSession(orderId: string, contact: string, verified
   const session: CustomerSession = {
     orderId,
     verifiedContact,
+    ...(verifiedContact ? { contactProof: "mailbox-v1" as const } : {}),
     contactFingerprint: customerContactFingerprint(contact),
     issuedAt: now,
     expiresAt: now + maxAgeSeconds,
@@ -70,7 +72,7 @@ export function decodeCustomerSession(value?: string) {
     if (!payload || !signature || !safeEqual(signature, sign(payload))) return null;
     const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as CustomerSession;
     if (!session.orderId || !session.contactFingerprint || session.expiresAt < Math.floor(Date.now() / 1000)) return null;
-    return session;
+    return { ...session, verifiedContact: session.verifiedContact === true && session.contactProof === "mailbox-v1" };
   } catch {
     return null;
   }

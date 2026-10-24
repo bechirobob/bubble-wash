@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentStaffUser } from "@/lib/auth";
 import {
   deleteDriverLiveLocation,
+  stopDriverLiveLocation,
+  startDriverLiveLocation,
   deleteExpiredDriverLiveLocations,
   readDriverLiveLocation,
   readDriverLiveLocations,
@@ -14,6 +16,7 @@ import {
   projectDriverLocation,
   type StoredDriverLocation,
   validateLiveLocationInput,
+  validLocationGeneration,
 } from "@/lib/dispatch-location";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { privateNoStoreHeaders, sameOriginJsonGuard } from "@/lib/security";
@@ -109,6 +112,15 @@ export async function POST(request: NextRequest) {
     } catch {
       return json({ ok: false, error: "Live location update must contain valid JSON." }, 400);
     }
+    if (body && typeof body === "object" && !Array.isArray(body) && (body as Record<string, unknown>).action === "start") {
+      const input = body as Record<string, unknown>;
+      if (Object.keys(input).some((key) => !["action", "orderId"].includes(key)) || typeof input.orderId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,119}$/.test(input.orderId)) {
+        return json({ ok: false, error: "An assigned order is required to start sharing." }, 422);
+      }
+      const order = assignedMovingOrder(input.orderId, driverId);
+      if (!order) return json({ ok: false, error: "Live location requires an active moving route assigned to this rider." }, 409);
+      return json({ ok: true, generation: startDriverLiveLocation(driverId, order.orderId) });
+    }
     const validation = validateLiveLocationInput(body, now);
     if (!validation.ok) return json({ ok: false, error: validation.error }, 422);
 
@@ -117,13 +129,14 @@ export async function POST(request: NextRequest) {
       return json({ ok: false, error: "Live location requires an active moving route assigned to this rider." }, 409);
     }
 
+    const { generation, ...reading } = validation.value;
     const stored: StoredDriverLocation = {
       driverId,
-      ...validation.value,
+      ...reading,
       receivedAt: new Date(now).toISOString(),
     };
-    if (!upsertDriverLiveLocation(stored)) {
-      return json({ ok: false, error: "This GPS reading is older than or equal to the latest accepted update." }, 409);
+    if (!upsertDriverLiveLocation(stored, generation)) {
+      return json({ ok: false, error: "This sharing session has stopped or the GPS reading is not newer. Start sharing again if needed." }, 409);
     }
 
     const location = projectDriverLocation(
@@ -157,8 +170,24 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const cleared = deleteDriverLiveLocation(driverId);
-    return json({ ok: true, cleared, location: null });
+    let body: unknown;
+    try { body = await request.json(); } catch { return json({ ok: false, error: "Location stop must contain valid JSON." }, 400); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return json({ ok: false, error: "A location stop object is required." }, 400);
+    const input = body as Record<string, unknown>;
+    if (Object.hasOwn(input, "generation")) {
+      const generation = validLocationGeneration(input.generation);
+      if (!generation || typeof input.orderId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{2,119}$/.test(input.orderId) || Object.keys(input).some((key) => !["generation", "orderId"].includes(key))) {
+        return json({ ok: false, error: "A valid sharing generation and order are required." }, 422);
+      }
+      // The persisted session was created only after rider/order ownership verification.
+      const result = stopDriverLiveLocation(driverId, { generation, orderId: input.orderId });
+      return json({ ok: true, ...result, ...(result.staleGeneration ? {} : { location: null }) });
+    }
+    // Older browsers send {} or a timestamp. Neither a device clock nor queued fixes can keep sharing alive.
+    if (Object.keys(input).some((key) => key !== "stoppedAt") || (Object.hasOwn(input, "stoppedAt") && typeof input.stoppedAt !== "string")) {
+      return json({ ok: false, error: "Unsupported location stop field." }, 400);
+    }
+    return json({ ok: true, ...stopDriverLiveLocation(driverId), location: null });
   } catch (error) {
     console.error("Bubble Wash live location clear failed", {
       message: error instanceof Error ? error.message : "Unknown error",

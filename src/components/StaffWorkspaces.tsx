@@ -9,6 +9,7 @@ import { automationActionsForOrder, paymentReadyForCloseout } from "@/lib/order-
 import { stageCountdown } from "@/lib/stage-countdown";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import { BrandLink } from "@/components/BrandLink";
+import { validLocationGeneration, LIVE_LOCATION_MAX_FUTURE_SKEW_MS, LIVE_LOCATION_MAX_CAPTURE_AGE_MS } from "@/lib/dispatch-location";
 
 const supportTypes = ["Pickup delay", "Payment issue", "Missing item", "Quality complaint", "Vendor escalation", "General question"];
 
@@ -1017,155 +1018,151 @@ function DispatchDestinationUnavailable({ order, detail = false }: { order: Orde
   </div>;
 }
 
+async function stopLocationSession(orderId: string, generation: string, keepalive = false) {
+  const response = await fetch("/api/dispatch/location", {
+    method: "DELETE", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ orderId, generation }), cache: "no-store", keepalive,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) throw new Error(data.error ?? "Dispatch could not confirm the stop.");
+}
+
 function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
   const [isWatching, setIsWatching] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [message, setMessage] = useState("Live location is off.");
   const [lastSentAt, setLastSentAt] = useState("");
   const [accuracyMeters, setAccuracyMeters] = useState(0);
   const watchIdRef = useRef<number | null>(null);
   const lastSentMsRef = useRef(0);
-  const pendingUpdateRef = useRef<Promise<void> | null>(null);
-  const sharingRef = useRef(false);
+  const watchRunRef = useRef(0);
+  const pendingUpdateRef = useRef<{ run: number; controller: AbortController } | null>(null);
+  const pendingStartRef = useRef<Promise<string> | null>(null);
+  const generationRef = useRef<string | null>(null);
   const eligible = liveLocationStages.has(order.workflowStage.key);
 
-  async function tellServerSharingStopped(keepalive = false) {
-    const response = await fetch("/api/dispatch/location", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: "{}",
-      cache: "no-store",
-      keepalive,
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.ok) throw new Error(data.error ?? "Dispatch could not confirm the stop.");
-  }
-
   function clearLocationWatch() {
-    if (watchIdRef.current !== null && typeof navigator !== "undefined" && navigator.geolocation) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-    }
+    watchRunRef.current += 1;
+    pendingUpdateRef.current?.controller.abort();
+    pendingUpdateRef.current = null;
+    if (watchIdRef.current !== null && navigator.geolocation) navigator.geolocation.clearWatch(watchIdRef.current);
     watchIdRef.current = null;
-    sharingRef.current = false;
+    generationRef.current = null;
     setIsWatching(false);
+    setIsStarting(false);
+    setLastSentAt("");
+    setAccuracyMeters(0);
   }
 
   useEffect(() => () => {
+    watchRunRef.current += 1;
+    pendingUpdateRef.current?.controller.abort();
+    pendingUpdateRef.current = null;
     if (watchIdRef.current !== null && navigator.geolocation) navigator.geolocation.clearWatch(watchIdRef.current);
-    const pendingUpdate = pendingUpdateRef.current;
-    if (sharingRef.current || pendingUpdate) {
-      const clearServerLocation = () => fetch("/api/dispatch/location", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-        cache: "no-store",
-        keepalive: true,
-      }).catch(() => undefined);
-      if (pendingUpdate) void pendingUpdate.finally(clearServerLocation);
-      else void clearServerLocation();
-    }
     watchIdRef.current = null;
-    sharingRef.current = false;
-  }, [order.orderId]);
+    const generation = generationRef.current;
+    const pendingStart = pendingStartRef.current;
+    generationRef.current = null;
+    // Stop immediately, without waiting for a queued fix. The persisted fence rejects it later.
+    if (generation) void stopLocationSession(order.orderId, generation, true).catch(() => undefined);
+    else if (pendingStart) void pendingStart.then((value) => stopLocationSession(order.orderId, value, true)).catch(() => undefined);
+  }, [order.orderId, eligible]);
 
-  useEffect(() => {
-    if (eligible || watchIdRef.current === null) return;
-    const pendingUpdate = pendingUpdateRef.current;
-    navigator.geolocation.clearWatch(watchIdRef.current);
-    watchIdRef.current = null;
-    sharingRef.current = false;
-    setIsWatching(false);
-    setLastSentAt("");
-    setAccuracyMeters(0);
-    setMessage("Live location stopped because this route leg is no longer moving.");
-    const clearServerLocation = () => fetch("/api/dispatch/location", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: "{}",
-      cache: "no-store",
-      keepalive: true,
-    }).catch(() => undefined);
-    if (pendingUpdate) void pendingUpdate.finally(clearServerLocation);
-    else void clearServerLocation();
-  }, [eligible]);
 
-  function startSharing() {
-    if (!eligible || isWatching) return;
+  async function startSharing() {
+    if (!eligible || isWatching || isStarting || isStopping || pendingStartRef.current || watchIdRef.current !== null) return;
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       setMessage("This browser does not support location sharing. Use a current mobile browser or report your checkpoint manually.");
       return;
     }
-    setMessage("Waiting for location permission and the first GPS reading…");
+    setIsStarting(true);
+    setMessage("Starting a new sharing session…");
     lastSentMsRef.current = 0;
-    const watchId = navigator.geolocation.watchPosition((position) => {
-      const now = Date.now();
-      if (pendingUpdateRef.current || (lastSentMsRef.current && now - lastSentMsRef.current < liveLocationCadenceMs)) return;
-      const latitude = Number(position.coords.latitude);
-      const longitude = Number(position.coords.longitude);
-      const accuracy = Number(position.coords.accuracy);
-      if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
-        setMessage("The browser returned an invalid location. Keep this page open and try again.");
-        return;
-      }
-      const update = (async () => {
-        try {
-          const response = await fetch("/api/dispatch/location", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              orderId: order.orderId,
-              latitude,
-              longitude,
-              accuracyMeters: Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : 0,
-              capturedAt: new Date(position.timestamp || now).toISOString(),
-            }),
-            cache: "no-store",
-          });
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok || !data.ok) throw new Error(data.error ?? "Dispatch could not receive this location.");
-          if (watchIdRef.current !== watchId) return;
-          lastSentMsRef.current = now;
-          sharingRef.current = true;
-          setLastSentAt(new Date().toISOString());
-          setAccuracyMeters(Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : 0);
-          setMessage("Live location is being shared with dispatch.");
-        } catch (error) {
-          if (watchIdRef.current === watchId) setMessage(error instanceof Error ? `${error.message} The browser will retry while this page stays open.` : "Location could not be sent. The browser will retry while this page stays open.");
-        } finally {
-          pendingUpdateRef.current = null;
+    const run = ++watchRunRef.current;
+    const pendingStart = (async () => {
+      const response = await fetch("/api/dispatch/location", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start", orderId: order.orderId }), cache: "no-store",
+      });
+      const data = await response.json().catch(() => ({}));
+      const generation = validLocationGeneration(data.generation);
+      if (!response.ok || !data.ok || !generation) throw new Error(data.error ?? "Unable to start sharing. Try again explicitly.");
+      return generation;
+    })();
+    pendingStartRef.current = pendingStart;
+    try {
+      const generation = await pendingStart;
+      if (watchRunRef.current !== run) return; // Cancel/unmount owns clearing this returned generation.
+      generationRef.current = generation;
+      setMessage("Waiting for location permission and the first GPS reading…");
+      const watchId = navigator.geolocation.watchPosition((position) => {
+        if (watchRunRef.current !== run) return;
+        const now = Date.now();
+        if (pendingUpdateRef.current?.run === run || (lastSentMsRef.current && now - lastSentMsRef.current < liveLocationCadenceMs)) return;
+        const latitude = Number(position.coords.latitude), longitude = Number(position.coords.longitude), accuracy = Number(position.coords.accuracy);
+        if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+          setMessage("The browser returned an invalid location. Keep this page open and try again.");
+          return;
         }
-      })();
-      pendingUpdateRef.current = update;
-    }, (error) => {
-      const pendingUpdate = pendingUpdateRef.current;
-      const hadShared = sharingRef.current;
-      clearLocationWatch();
-      if (pendingUpdate || hadShared) {
-        const clearServerLocation = () => tellServerSharingStopped(true).catch(() => undefined);
-        if (pendingUpdate) void pendingUpdate.finally(clearServerLocation);
-        else void clearServerLocation();
-      }
-      const reason = error.code === 1
-        ? "Location permission was denied. Allow location access for this site in browser settings, then try again."
-        : error.code === 2
-          ? "Your location is currently unavailable. Move somewhere with a clearer signal, then try again."
-          : error.code === 3
-            ? "The location request timed out. Check GPS and mobile data, then try again."
-            : "Live location could not start. Check browser location settings, then try again.";
-      setMessage(reason);
-    }, { enableHighAccuracy: true, maximumAge: 5_000, timeout: 20_000 });
-    watchIdRef.current = watchId;
-    setIsWatching(true);
+        const capturedMs = position.timestamp || now;
+        if (!Number.isFinite(capturedMs) || capturedMs > now + LIVE_LOCATION_MAX_FUTURE_SKEW_MS || capturedMs < now - LIVE_LOCATION_MAX_CAPTURE_AGE_MS) {
+          setMessage("The GPS capture time is invalid. Waiting for a new reading.");
+          return;
+        }
+        const pendingUpdate = { run, controller: new AbortController() };
+        pendingUpdateRef.current = pendingUpdate;
+        void (async () => {
+          try {
+            const response = await fetch("/api/dispatch/location", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ orderId: order.orderId, generation, latitude, longitude,
+                accuracyMeters: Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : 0,
+                capturedAt: new Date(capturedMs).toISOString() }), cache: "no-store", signal: pendingUpdate.controller.signal,
+            });
+            const data = await response.json().catch(() => ({}));
+            if (watchRunRef.current !== run) return;
+            if (response.status === 409) {
+              setMessage("This sharing session ended. Start sharing again explicitly if needed.");
+              clearLocationWatch();
+              void stopLocationSession(order.orderId, generation, true).catch(() => undefined);
+              return;
+            }
+            if (!response.ok || !data.ok) throw new Error(data.error ?? "Dispatch could not receive this location.");
+            lastSentMsRef.current = now;
+            setLastSentAt(new Date().toISOString());
+            setAccuracyMeters(Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : 0);
+            setMessage("Live location is being shared with dispatch.");
+          } catch (error) {
+            if (watchRunRef.current === run) setMessage(error instanceof Error ? error.message : "Location could not be sent.");
+          } finally { if (pendingUpdateRef.current === pendingUpdate) pendingUpdateRef.current = null; }
+        })();
+      }, (error) => {
+        if (watchRunRef.current !== run) return;
+        clearLocationWatch();
+        void stopLocationSession(order.orderId, generation, true).catch(() => undefined);
+        setMessage(error.code === 1 ? "Location permission was denied. Allow location access, then start again explicitly."
+          : "Live location stopped. Check GPS and mobile data, then start again explicitly.");
+      }, { enableHighAccuracy: true, maximumAge: 5_000, timeout: 20_000 });
+      if (watchRunRef.current !== run) navigator.geolocation.clearWatch(watchId);
+      else { watchIdRef.current = watchId; setIsWatching(true); }
+    } catch (error) {
+      if (watchRunRef.current === run) setMessage(error instanceof Error ? error.message : "Unable to start sharing.");
+    } finally {
+      if (pendingStartRef.current === pendingStart) pendingStartRef.current = null;
+      if (watchRunRef.current === run) setIsStarting(false);
+    }
   }
 
   async function stopSharing() {
+    const generation = generationRef.current;
+    const pendingStart = pendingStartRef.current;
     setIsStopping(true);
-    const pendingUpdate = pendingUpdateRef.current;
     clearLocationWatch();
     try {
-      if (pendingUpdate) await pendingUpdate.catch(() => undefined);
-      await tellServerSharingStopped();
-      setMessage("Live location is off and the dispatch marker was cleared.");
+      const activeGeneration = generation ?? (pendingStart ? await pendingStart : null);
+      if (activeGeneration) await stopLocationSession(order.orderId, activeGeneration);
+      setMessage("Live location is off and this sharing session was cleared.");
     } catch (error) {
       setMessage(error instanceof Error ? `${error.message} Sharing has stopped on this device and the last position will expire.` : "Sharing has stopped on this device and the last position will expire.");
     } finally {
@@ -1177,8 +1174,8 @@ function DriverLiveLocationSharing({ order }: { order: OrderSummary }) {
 
   return <section className="driverLiveShare" aria-labelledby={`live-share-${order.orderId}`}>
     <div className="driverLiveShareCopy"><span className="staffFieldLabel">Foreground GPS · {order.orderId}</span><h3 id={`live-share-${order.orderId}`}>Live location sharing</h3><p>{eligible ? "Share your position with Bubble Wash dispatch while traveling on this route leg." : "Live sharing becomes available after this route leg begins moving."}</p></div>
-    <div className="driverLiveShareStatus"><span className={`liveShareIndicator${lastSentAt ? " is-on" : ""}`} aria-hidden="true" /><div><strong>{isWatching ? lastSentAt ? "Sharing on" : "Starting…" : "Sharing off"}</strong><p role="status" aria-live="polite">{message}{lastSentAt ? ` Last sent ${dispatchFreshness(lastSentAt)}${accuracyMeters ? ` with about ±${Math.round(accuracyMeters)} m accuracy` : ""}.` : ""}</p></div></div>
-    <div className="driverLiveShareActions">{isWatching ? <button className="button secondary" type="button" disabled={isStopping} onClick={() => void stopSharing()}>{isStopping ? "Stopping…" : "Stop sharing"}</button> : <button className="button primary" type="button" disabled={!eligible || isStopping} onClick={startSharing}>Start live sharing</button>}<p>Location permission is requested only after you start. Keep this page open during the trip; locking the phone, closing the page, or losing data can pause updates.</p></div>
+    <div className="driverLiveShareStatus"><span className={`liveShareIndicator${lastSentAt ? " is-on" : ""}`} aria-hidden="true" /><div><strong>{isWatching || isStarting ? lastSentAt ? "Sharing on" : "Starting…" : "Sharing off"}</strong><p role="status" aria-live="polite">{message}{lastSentAt ? ` Last sent ${dispatchFreshness(lastSentAt)}${accuracyMeters ? ` with about ±${Math.round(accuracyMeters)} m accuracy` : ""}.` : ""}</p></div></div>
+    <div className="driverLiveShareActions">{isWatching || isStarting ? <button className="button secondary" type="button" disabled={isStopping} onClick={() => void stopSharing()}>{isStopping ? "Stopping…" : "Stop sharing"}</button> : <button className="button primary" type="button" disabled={!eligible || isStopping} onClick={() => void startSharing()}>Start live sharing</button>}<p>Location permission is requested only after you start. Keep this page open during the trip; locking the phone, closing the page, or losing data can pause updates.</p></div>
   </section>;
 }
 
@@ -1202,7 +1199,7 @@ function DispatchBoard({ orders, role, basePath, hasLoaded, lastSyncedAt = "", e
   return <section className={embedded ? "dispatchEmbedded" : "staffContentSection dispatchSection"} aria-labelledby={`${role}-dispatch-heading`} aria-busy={!hasLoaded}>
     <div className="staffSectionHeader dispatchHeader"><div><h2 id={`${role}-dispatch-heading`}>{role === "admin" ? "Current dispatch board" : "Today’s route map"}</h2><p>{role === "admin" ? "Assigned route work, recorded ETAs, and rider-authorized foreground locations across the pilot." : "Open a stop to see its route estimate, window, directions, and live sharing control."}</p></div>{lastSyncedAt ? <span className="dispatchSync">Board refreshed {formatMetricTime(lastSyncedAt)}</span> : null}</div>
     {!hasLoaded ? <LoadingSkeleton label="Loading dispatch routes and estimates" rows={2} variant="map" /> : error && !orders.length ? <div className="staffEmptyState" role="alert"><h3>Dispatch unavailable</h3><p>{error} The board will retry automatically.</p></div> : selectedOrder ? <>
-      {role === "driver" ? <DriverLiveLocationSharing key={selectedOrder.orderId} order={selectedOrder} /> : null}
+      {role === "driver" ? <DriverLiveLocationSharing key={`${selectedOrder.orderId}:${liveLocationStages.has(selectedOrder.workflowStage.key)}`} order={selectedOrder} /> : null}
       <div className="dispatchSummaryLine" aria-label="Dispatch summary"><span><strong>{assignedOrders.length}</strong> assigned moves</span><span><strong>{activeRiders.size}</strong> {activeRiders.size === 1 ? "rider" : "riders"} assigned</span><span><strong>{needsRider}</strong> awaiting rider</span>{role === "admin" ? <span><strong>{liveRiderCount}</strong> sharing live</span> : null}</div>
       <div className="dispatchBoard">
         {hasCustomerRoutePreview(selectedOrder) || selectedLiveLocation ? <DispatchMap order={selectedOrder} liveLocation={selectedLiveLocation} /> : <DispatchDestinationUnavailable order={selectedOrder} />}
@@ -1405,7 +1402,7 @@ function SharedOrderBoard({ role, userName, allStaffAccess = false, selectedOrde
 
           <details className="staffDetailDisclosure"><summary><span><strong>Assignment and route</strong><small>{selectedOrder.vendor} · {selectedOrder.driver}</small></span></summary><div className="staffDisclosureBody"><dl className="staffDefinitionList"><div><dt>Vendor</dt><dd>{selectedOrder.vendor}</dd></div><div><dt>Rider</dt><dd>{selectedOrder.driver}</dd></div><div><dt>Last reported checkpoint</dt><dd>{selectedOrder.dispatch?.checkpoint || selectedOrder.locationNote}</dd></div>{role !== "vendor" && selectedDispatchEta ? <><div><dt>{selectedDispatchEta.label}</dt><dd>{selectedDispatchEta.text}{selectedDispatchEta.source === "rider-reported" && selectedDispatchEta.updatedAt ? ` · reported ${dispatchFreshness(selectedDispatchEta.updatedAt)}` : ""}</dd></div><div><dt>Planning distance</dt><dd>{selectedDispatchEta.distance > 0 ? `${selectedDispatchEta.distance} km from dispatch hub to service area` : "Not available"}</dd></div></> : null}<div><dt>Priority</dt><dd>{selectedOrder.priority}</dd></div></dl>
             {role !== "support" ? <div className="staffDetailActions"><a className="button secondary" href={`/api/orders/label?orderId=${encodeURIComponent(selectedOrder.orderId)}`} target="_blank" rel="noopener noreferrer">Open printable bag QR</a></div> : null}
-            {role === "driver" ? <DriverLiveLocationSharing key={selectedOrder.orderId} order={selectedOrder} /> : null}
+            {role === "driver" ? <DriverLiveLocationSharing key={`${selectedOrder.orderId}:${liveLocationStages.has(selectedOrder.workflowStage.key)}`} order={selectedOrder} /> : null}
             {(role === "admin" || role === "driver") ? hasCustomerRoutePreview(selectedOrder) || selectedLiveLocation ? <DispatchMap order={selectedOrder} detail liveLocation={selectedLiveLocation} /> : <DispatchDestinationUnavailable order={selectedOrder} detail /> : null}
             {role === "admin" && locationError ? <p className="status error" role="alert">{locationError} Live rider markers are hidden until tracking reconnects.</p> : null}
             {canSeeCollection && hasCustomerRoutePreview(selectedOrder) && (selectedOrder.route.directionsUrl || selectedOrder.route.googleMapsUrl) ? <div className="staffDetailActions">{hasHubToCustomerDirections(selectedOrder) && selectedOrder.route.directionsUrl ? <a className="button secondary" href={selectedOrder.route.directionsUrl} target="_blank" rel="noopener noreferrer">Open pickup directions</a> : null}{selectedOrder.route.googleMapsUrl ? <a className="button secondary" href={selectedOrder.route.googleMapsUrl} target="_blank" rel="noopener noreferrer">Open {selectedOrder.workflowStage.key === "out-for-delivery" ? "destination area" : "service area"}</a> : null}</div> : null}

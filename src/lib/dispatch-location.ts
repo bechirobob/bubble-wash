@@ -38,7 +38,7 @@ export type DriverLocationView = {
   live: boolean;
 };
 
-export type ValidLiveLocationInput = Pick<StoredDriverLocation, "orderId" | "latitude" | "longitude" | "accuracyMeters" | "capturedAt">;
+export type ValidLiveLocationInput = Pick<StoredDriverLocation, "orderId" | "latitude" | "longitude" | "accuracyMeters" | "capturedAt"> & { generation: string };
 
 type ValidationResult =
   | { ok: true; value: ValidLiveLocationInput }
@@ -58,6 +58,8 @@ export function validateLiveLocationInput(body: unknown, now = Date.now()): Vali
 
   const input = body as Record<string, unknown>;
   const orderId = typeof input.orderId === "string" ? input.orderId.trim() : "";
+  const generation = validLocationGeneration(input.generation);
+  if (!generation) return { ok: false, error: "Start a new live location sharing session first." };
   const capturedAt = typeof input.capturedAt === "string" ? input.capturedAt.trim() : "";
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{2,119}$/.test(orderId)) {
     return { ok: false, error: "A valid active order ID is required." };
@@ -95,6 +97,7 @@ export function validateLiveLocationInput(body: unknown, now = Date.now()): Vali
     ok: true,
     value: {
       orderId,
+      generation,
       latitude: input.latitude,
       longitude: input.longitude,
       accuracyMeters: input.accuracyMeters,
@@ -144,4 +147,9 @@ export function isActiveMovingDriverAssignment(
   return Boolean(expected)
     && order.driverId.trim().toLowerCase() === expected
     && movingRouteStages.has(order.workflowStage.key);
+}
+
+// Server-issued UUIDs only fence requests; authentication and assignment checks remain required.
+export function validLocationGeneration(value: unknown): string | null {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value) ? value : null;
 }

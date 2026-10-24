@@ -35,6 +35,39 @@ try {
   await action('admin', 'admin-assign-vendor');
   await action('vendor', 'vendor-accept-job');
   await action('driver', 'driver-start-route');
+  // Actual authenticated browser route, including ahead-clock fixes and explicit resume.
+  async function stopBrowser(body, expected=200, extraHeaders={}) {
+    const response=await fetch(`${origin}/api/dispatch/location`,{method:'DELETE',headers:{origin:'https://127.0.0.1:3099','content-type':'application/json',cookie:cookies.driver,...extraHeaders},body:JSON.stringify(body)});
+    const data=await response.json(); assert.equal(response.status,expected,JSON.stringify(data)); checks++; return data;
+  }
+  const start = async (id=orderId, role='driver', expected=200) => (await post('/api/dispatch/location',{action:'start',orderId:id},role,expected)).data.generation;
+  await start('unassigned-order','driver',409);
+  await start(orderId,'vendor',403);
+  const generation=await start();
+  assert.match(generation,/^[0-9a-f-]{36}$/); checks++;
+  const firstPoint={orderId,generation,latitude:5.56,longitude:-0.18,accuracyMeters:10,capturedAt:new Date(Date.now()+20_000).toISOString()};
+  await post('/api/dispatch/location',firstPoint,'driver');
+  assert.equal((await stopBrowser({})).cleared,true); checks++;
+  const latePoint={...firstPoint,capturedAt:new Date(Date.now()+21_000).toISOString()};
+  await post('/api/dispatch/location',latePoint,'driver',409);
+  await post('/api/dispatch/location',{...latePoint,generation:undefined},'driver',422);
+  const resumed=await start();
+  const resumedPoint={...firstPoint,generation:resumed,capturedAt:new Date().toISOString()};
+  await post('/api/dispatch/location',resumedPoint,'driver');
+  assert.equal((await stopBrowser({generation,orderId})).staleGeneration,true); checks++;
+  assert.equal((await stopBrowser({generation:resumed,orderId:'another-order'})).staleGeneration,true); checks++;
+  const location=await (await fetch(`${origin}/api/dispatch/location`,{headers:{cookie:cookies.driver}})).json();
+  assert.equal(location.location.capturedAt,resumedPoint.capturedAt); checks++;
+  await stopBrowser({generation:resumed,orderId},403,{origin:'https://attacker.example.invalid'});
+  await stopBrowser({generation:resumed,orderId},401,{cookie:'',authorization:'Bearer synthetic-invalid-token'});
+  assert.equal((await stopBrowser({generation:resumed,orderId})).cleared,true); checks++;
+  await post('/api/dispatch/location',{...latePoint,generation:resumed},'driver',409);
+  const final=await start();
+  await post('/api/dispatch/location',{...latePoint,generation:final},'driver');
+  // Legacy timestamp is informational: even an old clock cannot retain the ahead-clock marker.
+  assert.equal((await stopBrowser({stoppedAt:'2000-01-01T00:00:00.000Z'})).cleared,true); checks++;
+  await post('/api/dispatch/location',{...latePoint,generation:final},'driver',409);
+
   await action('driver', 'driver-mark-picked-up', { pickupBagCount: '1', operatorNote: 'Received one sealed bag.' });
   await action('driver', 'driver-drop-at-vendor', { vendorRecipient: 'Laundry receiver', handoffBagCount: '1', operatorNote: 'Received at vendor desk.' });
   await action('vendor', 'vendor-log-intake', { bagTag: `${orderId}-BAG`, intakeBagCount: '1', intakeCondition: 'Count and condition matched', receivedWeightKg: '20', operatorNote: 'Calibrated scale receipt checked.' });
