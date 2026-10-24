@@ -36,7 +36,7 @@ if __name__ == '__main__':
             print('m.__file__ = '+repr('/nonexistent-bubblewash-evidence/'+name+'.py'))
             print('sys.modules['+repr(name)+'] = m')
             print('exec(compile('+repr(body)+', m.__file__, "exec"), m.__dict__)')
-        print("try:\n print(json.dumps(sys.modules['host_adapter'].inspect_host_evidence(sys.modules['evidence_guard']), sort_keys=True))\nexcept BaseException:\n print('Bounded host inspection stopped; no release acceptance.', file=sys.stderr)\n raise SystemExit(1)")
+        print("try:\n print(json.dumps(sys.modules['host_adapter'].inspect_host_evidence(sys.modules['evidence_guard']), sort_keys=True))\nexcept BaseException as error:\n print(json.dumps(sys.modules['host_adapter'].evidence_failure(error), sort_keys=True), file=sys.stderr)\n raise SystemExit(1)")
         raise SystemExit(0)
     require(re.fullmatch('[a-f0-9]{64}',args.plan_id) and re.fullmatch('[a-f0-9]{64}',args.plan_sha256), 'invalid plan identity')
     require(re.fullmatch('[a-f0-9]{40}',args.candidate_sha) and re.fullmatch('[a-f0-9]{40}',args.fallback_sha) and args.candidate_sha != args.fallback_sha, 'invalid published pair')

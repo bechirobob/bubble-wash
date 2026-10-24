@@ -43,9 +43,28 @@ SHOW = ('LoadState', 'ActiveState', 'SubState', 'MainPID', 'ControlPID', 'Job', 
 EVIDENCE_UNITS = (('system', 'bubblewash-maintenance.timer'),
                   ('system', 'bubblewash-maintenance.service'),
                   ('user', 'bubblewash-local.service'))
-EVIDENCE_PROPERTIES = ('LoadState', 'ActiveState', 'SubState', 'MainPID',
-    'ControlPID', 'ControlGroup', 'WorkingDirectory', 'EnvironmentFiles',
-    'User', 'Group', 'FragmentPath', 'DropInPaths', 'NeedDaemonReload', 'Conditions')
+EVIDENCE_COMMON_PROPERTIES = ('LoadState', 'ActiveState', 'SubState',
+    'FragmentPath', 'DropInPaths', 'NeedDaemonReload', 'Conditions')
+EVIDENCE_SERVICE_PROPERTIES = ('MainPID', 'ControlPID', 'ControlGroup',
+    'WorkingDirectory', 'EnvironmentFiles', 'User', 'Group')
+EVIDENCE_PROPERTIES = EVIDENCE_COMMON_PROPERTIES + EVIDENCE_SERVICE_PROPERTIES
+EVIDENCE_STAGES = frozenset(('INITIALIZE', 'LOCK', 'CONFIG', 'MARKER',
+    'CURRENT_BINDING', 'DATABASE_BINDING', 'UNIT_PROPERTIES', 'UNIT_CONDITIONS',
+    'UNIT_SOURCES', 'UNIT_COMMAND', 'PATH_METADATA', 'BINDING_RECHECK', 'LOCK_RECHECK'))
+EVIDENCE_STAGE = 'INITIALIZE'
+
+
+def evidence_failure(error):
+    # Never stringify exceptions: messages, filenames and command output may be private.
+    stage = EVIDENCE_STAGE if EVIDENCE_STAGE in EVIDENCE_STAGES else 'INITIALIZE'
+    category = ('MISSING' if isinstance(error, FileNotFoundError) else
+                'BUSY' if isinstance(error, BlockingIOError) else
+                'PERMISSION' if isinstance(error, PermissionError) else
+                'REFUSED' if isinstance(error, ValueError) else
+                'TIMEOUT' if isinstance(error, subprocess.TimeoutExpired) else
+                'OS_ERROR' if isinstance(error, OSError) else 'UNEXPECTED')
+    return {'schema': 'bubblewash-bounded-host-failure/v1', 'stage': stage,
+            'category': category, 'releaseAcceptance': False}
 
 
 def evidence_metadata(path):
@@ -114,6 +133,8 @@ def inspect_host_evidence(guard, run=None):
     Their digests bind review evidence without exposing embedded secrets.
     No database is opened: SQLite read-only WAL access can touch shared memory.
     """
+    global EVIDENCE_STAGE
+    EVIDENCE_STAGE = 'INITIALIZE'
     require(os.geteuid() == 0, 'root evidence reader required')
     uid = pwd.getpwnam('ubuntu').pw_uid
     host = Host.__new__(Host)
@@ -122,17 +143,22 @@ def inspect_host_evidence(guard, run=None):
     host.c = types.SimpleNamespace(core=types.SimpleNamespace(TIMER=EVIDENCE_UNITS[0][1]))
     result = {'schema': 'bubblewash-bounded-host-evidence/v1',
               'releaseAcceptance': False, 'databaseOpened': False, 'units': {}, 'paths': {}}
+    EVIDENCE_STAGE = 'LOCK'
     with guard.deployment_lock(RUNTIME, uid) as lock_unchanged:
+        EVIDENCE_STAGE = 'CONFIG'
         config = evidence_read(ENV, uid)
         values = guard.parse(config)
+        EVIDENCE_STAGE = 'MARKER'
         marker = evidence_read(RUNTIME/'current-release', uid)
         marker_values = guard.parse(marker)
+        EVIDENCE_STAGE = 'CURRENT_BINDING'
         current = CURRENT.resolve(strict=True)
         require(CURRENT.is_symlink() and current.is_dir() and
                 current.parent in (OLD_RELEASES, RELEASES), 'unexpected current release binding')
         sha = marker_values.get('sha', '')
         require(re.fullmatch('[a-f0-9]{40}', sha) and
                 marker_values.get('path') == str(current), 'current marker mismatch')
+        EVIDENCE_STAGE = 'DATABASE_BINDING'
         database = Path(values.get('BUBBLEWASH_DATABASE_PATH', ''))
         require(database.is_absolute() and database.resolve(strict=True) == database and
                 not database.is_relative_to(current) and not database.is_relative_to(RELEASES) and
@@ -145,26 +171,31 @@ def inspect_host_evidence(guard, run=None):
             'configSha256': hashlib.sha256(config).hexdigest(),
             'databasePathSha256': object_digest(str(database)), 'databaseMetadata': db_meta}
         for manager, unit in EVIDENCE_UNITS:
-            raw = host.ctl(manager, 'show', unit, '--property='+','.join(EVIDENCE_PROPERTIES))
+            EVIDENCE_STAGE = 'UNIT_PROPERTIES'
+            properties = EVIDENCE_COMMON_PROPERTIES + (EVIDENCE_SERVICE_PROPERTIES if unit.endswith('.service') else ())
+            raw = host.ctl(manager, 'show', unit, '--all', '--property='+','.join(properties))
             props = {}
             for line in raw.splitlines():
                 key, sep, value = line.partition('=')
-                require(sep and key in EVIDENCE_PROPERTIES and key not in props,
+                require(sep and key in properties and key not in props,
                         'unexpected bounded unit property')
                 props[key] = value
-            require(set(props) == set(EVIDENCE_PROPERTIES), 'incomplete bounded unit evidence')
+            require(set(props) == set(properties), 'incomplete bounded unit evidence')
             row = {'propertiesSha256': object_digest(props)}
             for key in ('LoadState', 'ActiveState', 'SubState', 'NeedDaemonReload'):
                 require(re.fullmatch('[a-z-]{1,32}', props[key]), 'invalid unit state')
                 row[key] = props[key]
             # Never expose raw ExecStart or properties: either can embed secrets.
-            for key in ('MainPID', 'ControlPID'):
+            for key in (('MainPID', 'ControlPID') if unit.endswith('.service') else ()):
                 require(props[key].isdigit(), 'invalid unit pid')
                 row[key] = int(props[key])
             for key in ('ControlGroup', 'WorkingDirectory', 'EnvironmentFiles', 'User', 'Group', 'Conditions'):
-                row[key+'Sha256'] = object_digest(props[key])
+                if key in props:
+                    row[key+'Sha256'] = object_digest(props[key])
             if props['LoadState'] == 'loaded':
+                EVIDENCE_STAGE = 'UNIT_CONDITIONS'
                 row['loadedConditions'] = evidence_conditions(host, manager, unit)
+            EVIDENCE_STAGE = 'UNIT_SOURCES'
             sources = [props['FragmentPath'], *shlex.split(props['DropInPaths'])]
             require(len(sources) <= 33, 'unit source count exceeds bound')
             row['sources'] = []
@@ -180,16 +211,20 @@ def inspect_host_evidence(guard, run=None):
                 row['sources'].append({'pathSha256': object_digest(name), 'metadata': evidence_metadata(path),
                                       'sha256': hashlib.sha256(body).hexdigest()})
             if unit.endswith('.service') and props['LoadState'] == 'loaded':
+                EVIDENCE_STAGE = 'UNIT_COMMAND'
                 row['execStartSha256'] = object_digest(host.exec_start(manager, unit))
             result['units'][manager+'/'+unit] = row
+        EVIDENCE_STAGE = 'PATH_METADATA'
         paths = (Path('/var'), Path('/var/lib'), STATE, STATE/'plans', STATE/'packages',
                  RELEASES, STATE/'installed-v1', STATE/'app-hold', STATE/'maintenance-hold',
                  RUNTIME, RUNTIME/'deploy.lock', CURRENT)
         result['paths'] = {str(path): evidence_metadata(path) for path in paths}
+        EVIDENCE_STAGE = 'BINDING_RECHECK'
         require(evidence_read(ENV, uid) == config and
                 evidence_read(RUNTIME/'current-release', uid) == marker and
                 CURRENT.resolve(strict=True) == current and
                 evidence_metadata(database) == db_meta, 'binding changed during inspection')
+        EVIDENCE_STAGE = 'LOCK_RECHECK'
         lock_unchanged()
     return result
 
