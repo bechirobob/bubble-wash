@@ -9,6 +9,9 @@ export function installFocusModality(document: Document) {
   // Native assistive activation can have no preceding key/pointer event.
   // Scripted .click() calls must not reclassify a pointer-origin action.
   const activate = (event: MouseEvent) => { if (event.isTrusted && event.detail === 0) set("keyboard"); };
+  const reset = () => { delete root.dataset.inputModality; };
+  // Browser-chrome keys may never reach this document. Return to native focus.
+  document.defaultView?.addEventListener("blur", reset);
   document.addEventListener("pointerdown", pointer, true);
   document.addEventListener("keydown", keyboard, true);
   document.addEventListener("click", activate, true);
@@ -16,6 +19,7 @@ export function installFocusModality(document: Document) {
     document.removeEventListener("pointerdown", pointer, true);
     document.removeEventListener("keydown", keyboard, true);
     document.removeEventListener("click", activate, true);
-    delete root.dataset.inputModality;
+    document.defaultView?.removeEventListener("blur", reset);
+    reset();
   };
 }

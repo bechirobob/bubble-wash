@@ -85,6 +85,12 @@ export async function verifyFocusPolicy({ browser, fixture, origin, output }) {
         // Some engines do not focus scroll containers on touch; focus is deliberately
         // transferred here to assert the programmatic case without changing modality.
         await list.focus(); await ring(list, false, 'pointer/programmatic response list');
+        // Synthetic lifecycle coverage only, not physical browser-chrome testing.
+        await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+        assert.equal(await page.locator('html').getAttribute('data-input-modality'), null);
+        await page.keyboard.press('ArrowDown'); await ring(list, true, 'keyboard after window lifecycle reset');
+        await press(list.locator('li').first().locator('strong').first());
+        await list.focus(); await ring(list, false, 'pointer after lifecycle reset');
         await page.screenshot({ path: output + `focus-${name}-responses-pointer.png`, fullPage: true });
         if (!mobile) {
           // A system-colour focus cue must survive high-contrast pointer mode.

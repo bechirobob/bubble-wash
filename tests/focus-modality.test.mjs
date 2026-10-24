@@ -5,13 +5,18 @@ import { installFocusModality } from '../src/lib/focus-modality.ts';
 
 function fixture() {
   const listeners = new Map();
+  const windowListeners = new Map();
   const document = {
     documentElement: { dataset: {} },
+    defaultView: {
+      addEventListener(type, listener) { windowListeners.set(type, listener); },
+      removeEventListener(type, listener) { assert.equal(windowListeners.get(type), listener); windowListeners.delete(type); },
+    },
     addEventListener(type, listener, capture) { assert.equal(capture, true); listeners.set(type, listener); },
     removeEventListener(type, listener, capture) { assert.equal(capture, true); assert.equal(listeners.get(type), listener); listeners.delete(type); },
   };
   const cleanup = installFocusModality(document);
-  return { document, listeners, cleanup, mode: () => document.documentElement.dataset.inputModality,
+  return { document, listeners, windowListeners, cleanup, mode: () => document.documentElement.dataset.inputModality,
     fire: (type, props = {}) => listeners.get(type)(props) };
 }
 
@@ -22,7 +27,7 @@ test('unknown modality retains browser focus; pointer capture precedes modal foc
     f.fire('click', { detail: 1 }); assert.equal(f.mode(), 'pointer');
     f.fire('keydown', { key: 'Tab' }); assert.equal(f.mode(), 'keyboard');
   }
-  f.cleanup(); assert.equal(f.mode(), undefined); assert.equal(f.listeners.size, 0);
+  f.cleanup(); assert.equal(f.mode(), undefined); assert.equal(f.listeners.size, 0); assert.equal(f.windowListeners.size, 0);
 });
 
 test('keyboard switching, assistive activation and modifiers are preserved', () => {
@@ -35,6 +40,14 @@ test('keyboard switching, assistive activation and modifiers are preserved', () 
   // Simulated trusted-event contract, not a real screen-reader test.
   f.fire('click', { detail: 0, isTrusted: true }); assert.equal(f.mode(), 'keyboard');
   f.cleanup();
+});
+
+test('leaving the document resets to native focus, then the next input selects modality', () => {
+  const f = fixture();
+  f.fire('pointerdown'); f.windowListeners.get('blur')(); assert.equal(f.mode(), undefined);
+  f.fire('keydown', { key: 'Tab' }); assert.equal(f.mode(), 'keyboard');
+  f.windowListeners.get('blur')(); assert.equal(f.mode(), undefined);
+  f.fire('pointerdown'); assert.equal(f.mode(), 'pointer'); f.cleanup();
 });
 
 test('one shared policy retains editing cues and all focusable keyboard targets', () => {
