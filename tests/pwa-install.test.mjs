@@ -23,17 +23,27 @@ test('standalone manifest keeps stable identity and fresh-home launch', async ()
   assert.equal(manifest.id, '/'); assert.equal(manifest.start_url, '/'); assert.equal(manifest.scope, '/');
   assert.equal(manifest.display, 'standalone'); assert.equal(manifest.prefer_related_applications, false);
   for (const size of [192,512]) {
-    const icon=manifest.icons.find(icon=>icon.sizes===`${size}x${size}` && icon.purpose==='any'); assert.ok(icon);
+    const icon=manifest.icons.find(icon=>icon.sizes===`${size}x${size}` && icon.purpose.split(' ').includes('any')); assert.ok(icon);
     const meta=await sharp(new URL(`../public${icon.src}`,import.meta.url).pathname).metadata();
     assert.equal(meta.width,size); assert.equal(meta.height,size); assert.equal(meta.format,'png');
+    const expected=await sharp(new URL('../public/bubble-wash-icon.jpg',import.meta.url).pathname)
+      .extract({left:128,top:80,width:960,height:960}).resize(size,size).raw().toBuffer();
+    const actual=await sharp(new URL(`../public${icon.src}`,import.meta.url).pathname).raw().toBuffer();
+    assert.deepEqual(actual,expected,'Only empty padding is cropped from the approved original artwork');
   }
-  const maskable=manifest.icons.find(icon=>icon.purpose==='maskable'); assert.ok(maskable);
+  const maskable=manifest.icons.find(icon=>icon.purpose.split(' ').includes('maskable')); assert.ok(maskable);
   const {data,info}=await sharp(new URL(`../public${maskable.src}`,import.meta.url).pathname).ensureAlpha().raw().toBuffer({resolveWithObject:true});
   assert.equal(info.width,512);assert.equal(info.height,512);
   for(let i=3;i<data.length;i+=4) assert.equal(data[i],255,'Maskable background is fully opaque');
-  const original=await sharp(new URL('../public/icon-512.png',import.meta.url).pathname).flatten({background:'#ffffff'}).raw().toBuffer();
-  const packaged=await sharp(new URL(`../public${maskable.src}`,import.meta.url).pathname).raw().toBuffer();
-  assert.deepEqual(packaged,original,'Approved logo pixels preserved; only transparent corners flattened');
+  for(let y=0;y<info.height;y++) for(let x=0;x<info.width;x++) {
+    const i=(y*info.width+x)*4;
+    const visible=Math.min(data[i],data[i+1],data[i+2])<245;
+    if(visible) assert.ok(Math.hypot(x-(info.width-1)/2,y-(info.height-1)/2)<=info.width*.4,'All visible artwork stays inside the maskable safe circle');
+    if(x===0||y===0||x===info.width-1||y===info.height-1) assert.deepEqual([...data.subarray(i,i+4)],[255,255,255,255],'No inherited dark corner pixels');
+  }
+  assert.ok(manifest.icons.every(icon=>icon.src!=='/icon-512.png'),'Install manifest uses the cleaned app assets only');
+  const page=readFileSync(new URL('../src/app/install/page.tsx',import.meta.url),'utf8');
+  assert.match(page,/className=\{styles.brand\}/);assert.match(page,/src="\/bubble-wash-icon.jpg"/);assert.doesNotMatch(page,/src="\/apple-icon.png"/);
 });
 
 test('worker passes through all successful and error HTTP responses unchanged', async () => {
