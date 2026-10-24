@@ -72,18 +72,20 @@ async function form(page, action, values, submit, testInfo, label) {
   await save(page, submit);
 }
 
-test('four-role saved workflow, responsive controls and stopped SLA', async ({ browser }, testInfo) => {
+async function runStaffWorkflow(browser, testInfo, gpsOnly = false) {
   const contexts = [];
+  const gpsRelease = [];
   const pages = {};
   const external = [];
   const errors = [];
   const width = testInfo.project.use.viewport.width;
-  const fixture = testInfo.project.name;
+  const fixture = testInfo.project.name + (gpsOnly ? '-gps' : '');
   const date = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   try {
     for (const [index, role] of Object.keys(paths).entries()) {
-      const context = await browser.newContext({ viewport: testInfo.project.use.viewport, isMobile: testInfo.project.use.isMobile, hasTouch: testInfo.project.use.hasTouch, deviceScaleFactor: testInfo.project.use.deviceScaleFactor, baseURL: 'http://localhost:3100', extraHTTPHeaders: {
-        'x-forwarded-for': `192.0.2.${index + (fixture.startsWith('webkit') ? 31 : width === 320 ? 1 : width === 390 ? 11 : 21)}`,
+      // Held-route interception must not compete with a service worker. The ordinary journey keeps real SW behavior.
+      const context = await browser.newContext({ ...(gpsOnly ? { serviceWorkers: 'block' } : {}), viewport: testInfo.project.use.viewport, isMobile: testInfo.project.use.isMobile, hasTouch: testInfo.project.use.hasTouch, deviceScaleFactor: testInfo.project.use.deviceScaleFactor, baseURL: 'http://localhost:3100', extraHTTPHeaders: {
+        'x-forwarded-for': `192.0.2.${index + (gpsOnly ? 40 : 0) + (fixture.startsWith('webkit') ? 31 : width === 320 ? 1 : width === 390 ? 11 : 21)}`,
       } });
       // These manually created contexts do not inherit Playwright's page fixture timeouts.
       context.setDefaultTimeout(15_000);
@@ -188,91 +190,121 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
     await detail('vendor'); await evidence(vendor, testInfo, 'vendor-assignment');
     await save(vendor, 'Accept assigned job');
     await detail('driver'); await save(driver, 'Start pickup route');
-    // Real authenticated UI lifecycle with a synthetic device clock and held network requests.
-    await driver.evaluate(() => {
-      window.__gps = { callback: null, error: null, starts: 0, clears: 0 };
-      Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
-        watchPosition(callback, error) { window.__gps.error = error; window.__gps.callback = callback; window.__gps.starts++; return 1; },
-        clearWatch() { window.__gps.callback = null; window.__gps.clears++; },
-      } });
-    });
-    await driver.locator('summary').filter({ hasText: 'Assignment and route' }).click();
-    const share = driver.locator('.driverLiveShare');
-    await expect(share.getByRole('button', { name: 'Start live sharing', exact: true })).toBeEnabled();
-    const starts = [], fixes = [];
-    driver.on('request', request => {
-      if (new URL(request.url()).pathname !== '/api/dispatch/location' || request.method() !== 'POST') return;
-      const body = request.postDataJSON(); (body.action === 'start' ? starts : fixes).push(body);
-    });
-    async function startGps() {
-      const response = driver.waitForResponse(response => new URL(response.url()).pathname === '/api/dispatch/location' && response.request().method() === 'POST' && response.request().postDataJSON().action === 'start');
-      await share.getByRole('button', { name: 'Start live sharing', exact: true }).click();
-      const result = await (await response).json(); expect(result.ok).toBe(true);
-      await expect(share.getByRole('button', { name: 'Stop sharing', exact: true })).toBeEnabled();
-      await expect.poll(() => driver.evaluate(() => typeof window.__gps.callback)).toBe('function');
-      return result.generation;
-    }
-    async function fixGps(ahead = 20_000) {
-      await driver.evaluate(ahead => window.__gps.callback({ coords: { latitude: 5.56, longitude: -0.18, accuracy: 10 }, timestamp: Date.now() + ahead }), ahead);
-    }
-    const firstGeneration = await startGps();
-    const firstFix = driver.waitForResponse(response => new URL(response.url()).pathname === '/api/dispatch/location' && response.request().method() === 'POST' && !response.request().postDataJSON().action);
-    await fixGps(); expect((await firstFix).status()).toBe(200);
-    await expect(share.getByRole('status')).toContainText('being shared');
-    await share.getByRole('button', { name: 'Stop sharing', exact: true }).click();
-    await expect(share.getByRole('button', { name: 'Start live sharing', exact: true })).toBeEnabled();
-    expect(await driver.evaluate(async () => (await (await fetch('/api/dispatch/location')).json()).location)).toBeNull();
+    if (gpsOnly) {
+      // Real authenticated UI lifecycle with a synthetic device clock and held network requests.
+      await driver.evaluate(() => {
+        window.__gps = { callback: null, error: null, starts: 0, clears: 0 };
+        Object.defineProperty(navigator, 'geolocation', { configurable: true, value: {
+          watchPosition(callback, error) { window.__gps.error = error; window.__gps.callback = callback; window.__gps.starts++; return 1; },
+          clearWatch() { window.__gps.callback = null; window.__gps.clears++; },
+        } });
+      });
+      await driver.locator('summary').filter({ hasText: 'Assignment and route' }).click();
+      const share = driver.locator('.driverLiveShare');
+      await expect(share.getByRole('button', { name: 'Start live sharing', exact: true })).toBeEnabled();
+      const starts = [], fixes = [];
+      const gpsStartedAt = Date.now();
+      const gpsLog = (phase, details = {}) => console.log(JSON.stringify({ fixture: 'gps-lifecycle', project: fixture, phase, elapsedMs: Date.now() - gpsStartedAt, ...details }));
+      async function gpsWait(phase, operation) {
+        gpsLog(phase + ':begin');
+        let timer;
+        try {
+          const result = await Promise.race([operation, new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`GPS ${phase} exceeded 15000ms`)), 15_000);
+          })]);
+          gpsLog(phase + ':complete');
+          return result;
+        } finally { clearTimeout(timer); }
+      }
+      gpsLog('setup', await driver.evaluate(() => ({ serviceWorkerControlled: Boolean(navigator.serviceWorker?.controller) })));
+      driver.on('response', response => {
+        if (new URL(response.url()).pathname === '/api/dispatch/location') gpsLog('response', { method: response.request().method(), status: response.status(), serviceWorker: response.fromServiceWorker() });
+      });
+      driver.on('requestfailed', request => {
+        if (new URL(request.url()).pathname === '/api/dispatch/location') gpsLog('requestfailed', { method: request.method() });
+      });
+      driver.on('request', request => {
+        if (new URL(request.url()).pathname !== '/api/dispatch/location' || request.method() !== 'POST') return;
+        const body = request.postDataJSON(); gpsLog('request', { action: body.action === 'start' ? 'start' : 'fix' }); (body.action === 'start' ? starts : fixes).push(body);
+      });
+      async function startGps() {
+        const response = driver.waitForResponse(response => new URL(response.url()).pathname === '/api/dispatch/location' && response.request().method() === 'POST' && response.request().postDataJSON().action === 'start');
+        await share.getByRole('button', { name: 'Start live sharing', exact: true }).click();
+        const result = await gpsWait('start-response', response.then(value => value.json())); expect(result.ok).toBe(true);
+        await expect(share.getByRole('button', { name: 'Stop sharing', exact: true })).toBeEnabled();
+        await expect.poll(() => driver.evaluate(() => typeof window.__gps.callback)).toBe('function');
+        return result.generation;
+      }
+      async function fixGps(ahead = 20_000) {
+        await driver.evaluate(ahead => window.__gps.callback({ coords: { latitude: 5.56, longitude: -0.18, accuracy: 10 }, timestamp: Date.now() + ahead }), ahead);
+      }
+      const firstGeneration = await startGps();
+      const firstFix = driver.waitForResponse(response => new URL(response.url()).pathname === '/api/dispatch/location' && response.request().method() === 'POST' && !response.request().postDataJSON().action);
+      await fixGps(); expect((await gpsWait('first-fix-response', firstFix)).status()).toBe(200);
+      await expect(share.getByRole('status')).toContainText('being shared');
+      await share.getByRole('button', { name: 'Stop sharing', exact: true }).click();
+      await expect(share.getByRole('button', { name: 'Start live sharing', exact: true })).toBeEnabled();
+      expect(await driver.evaluate(async () => (await (await fetch('/api/dispatch/location')).json()).location)).toBeNull();
 
-    // Cancel while the start response is held. No geolocation watch may start afterward.
-    let releaseStart, startHeld;
-    const started = new Promise(resolve => { startHeld = resolve; });
-    const holdStart = async route => {
-      if (route.request().method() !== 'POST' || route.request().postDataJSON().action !== 'start') return route.fallback();
-      const response = await route.fetch(); startHeld();
-      await new Promise(resolve => { releaseStart = resolve; }); await route.fulfill({ response });
-    };
-    await driver.route('**/api/dispatch/location', holdStart);
-    const watchCount = await driver.evaluate(() => window.__gps.starts);
-    await share.getByRole('button', { name: 'Start live sharing', exact: true }).click(); await started;
-    await share.getByRole('button', { name: 'Stop sharing', exact: true }).click(); releaseStart();
-    await expect(share.getByRole('button', { name: 'Start live sharing', exact: true })).toBeEnabled();
-    expect(await driver.evaluate(() => window.__gps.starts)).toBe(watchCount);
-    await driver.unroute('**/api/dispatch/location', holdStart);
+      // Cancel while the start response is held. No geolocation watch may start afterward.
+      let releaseStart, startHeld;
+      const started = new Promise(resolve => { startHeld = resolve; });
+      const holdStart = async route => {
+        if (route.request().method() !== 'POST' || route.request().postDataJSON().action !== 'start') return route.fallback();
+        gpsLog('held-start:intercepted');
+        const response = await route.fetch({ timeout: 15_000 }); gpsLog('held-start:server-response'); startHeld();
+        await new Promise(resolve => { releaseStart = resolve; gpsRelease.push(resolve); }); await route.fulfill({ response });
+      };
+      await driver.route('**/api/dispatch/location', holdStart);
+      const watchCount = await driver.evaluate(() => window.__gps.starts);
+      await share.getByRole('button', { name: 'Start live sharing', exact: true }).click(); await gpsWait('held-start-interception', started);
+      await share.getByRole('button', { name: 'Stop sharing', exact: true }).click(); gpsLog('held-start:release'); releaseStart();
+      await expect(share.getByRole('button', { name: 'Start live sharing', exact: true })).toBeEnabled();
+      expect(await driver.evaluate(() => window.__gps.starts)).toBe(watchCount);
+      await driver.unroute('**/api/dispatch/location', holdStart);
 
-    // New session starts only on an explicit click. An older session cannot cancel it.
-    const resumedGeneration = await startGps(); expect(resumedGeneration).not.toBe(firstGeneration);
-    const stale = await driver.evaluate(async ({ orderId, generation }) => (await (await fetch('/api/dispatch/location', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId, generation }) })).json()), { orderId: booking.id, generation: firstGeneration });
-    expect(stale.staleGeneration).toBe(true);
-    let releaseFix, fixHeld;
-    const held = new Promise(resolve => { fixHeld = resolve; });
-    const holdFix = async route => {
-      if (route.request().method() !== 'POST' || route.request().postDataJSON().action) return route.fallback();
-      fixHeld(); await new Promise(resolve => { releaseFix = resolve; }); await route.abort().catch(() => undefined);
-    };
-    await driver.route('**/api/dispatch/location', holdFix);
-    await fixGps(); await held;
-    await share.getByRole('button', { name: 'Stop sharing', exact: true }).click();
-    // Stop does not wait for the offline fix. The server fence rejects it when released.
-    await expect(share.getByRole('button', { name: 'Start live sharing', exact: true })).toBeEnabled();
-    await expect(share.getByRole('status')).toContainText('session was cleared');
-    await expect(share.locator('.liveShareIndicator.is-on')).toHaveCount(0);
-    await driver.unroute('**/api/dispatch/location', holdFix);
-    // Explicit resume is not held hostage by the old pending request.
-    const nextGeneration = await startGps(); expect(nextGeneration).not.toBe(resumedGeneration);
-    const nextFix = driver.waitForResponse(response => new URL(response.url()).pathname === '/api/dispatch/location' && response.request().method() === 'POST' && !response.request().postDataJSON().action);
-    await fixGps(); expect((await nextFix).status()).toBe(200);
-    releaseFix();
-    await expect(share.getByRole('status')).toContainText('being shared');
-    const lateStatus = await driver.evaluate(async ({ orderId, generation }) => (await fetch('/api/dispatch/location', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId, generation, latitude: 5.56, longitude: -0.18, accuracyMeters: 10, capturedAt: new Date(Date.now()+21_000).toISOString() }) })).status, { orderId: booking.id, generation: resumedGeneration });
-    expect(lateStatus).toBe(409);
-    // A device failure clears both sharing and its displayed accuracy/green marker.
-    await driver.evaluate(() => window.__gps.error({ code: 2 }));
-    await expect(share.getByRole('button', { name: 'Start live sharing', exact: true })).toBeEnabled();
-    await expect(share.getByRole('status')).not.toContainText('Last sent');
-    await expect(share.locator('.liveShareIndicator.is-on')).toHaveCount(0);
-    await expect.poll(() => driver.evaluate(async () => (await (await fetch('/api/dispatch/location')).json()).location)).toBeNull();
-    expect(fixes.every(fix => typeof fix.generation === 'string')).toBe(true);
-    expect(starts).toHaveLength(4);
+      // New session starts only on an explicit click. An older session cannot cancel it.
+      const resumedGeneration = await startGps(); expect(resumedGeneration).not.toBe(firstGeneration);
+      const stale = await driver.evaluate(async ({ orderId, generation }) => (await (await fetch('/api/dispatch/location', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId, generation }) })).json()), { orderId: booking.id, generation: firstGeneration });
+      expect(stale.staleGeneration).toBe(true);
+      let releaseFix, fixHeld;
+      const held = new Promise(resolve => { fixHeld = resolve; });
+      const holdFix = async route => {
+        if (route.request().method() !== 'POST' || route.request().postDataJSON().action) return route.fallback();
+        gpsLog('held-fix:intercepted'); fixHeld(); await new Promise(resolve => { releaseFix = resolve; gpsRelease.push(resolve); }); await route.abort().catch(() => undefined);
+      };
+      await driver.route('**/api/dispatch/location', holdFix);
+      await fixGps(); await gpsWait('held-fix-interception', held);
+      await share.getByRole('button', { name: 'Stop sharing', exact: true }).click();
+      // Stop does not wait for the offline fix. The server fence rejects it when released.
+      await expect(share.getByRole('button', { name: 'Start live sharing', exact: true })).toBeEnabled();
+      await expect(share.getByRole('status')).toContainText('session was cleared');
+      await expect(share.locator('.liveShareIndicator.is-on')).toHaveCount(0);
+      gpsLog('held-fix:remove-interceptor');
+      await driver.unroute('**/api/dispatch/location', holdFix);
+      // Explicit resume is not held hostage by the old pending request.
+      const nextGeneration = await startGps(); expect(nextGeneration).not.toBe(resumedGeneration);
+      const nextFix = driver.waitForResponse(response => new URL(response.url()).pathname === '/api/dispatch/location' && response.request().method() === 'POST' && !response.request().postDataJSON().action);
+      await fixGps(); expect((await gpsWait('resumed-fix-response', nextFix)).status()).toBe(200);
+      gpsLog('held-fix:release'); releaseFix();
+      await expect(share.getByRole('status')).toContainText('being shared');
+      const lateStatus = await driver.evaluate(async ({ orderId, generation }) => (await fetch('/api/dispatch/location', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId, generation, latitude: 5.56, longitude: -0.18, accuracyMeters: 10, capturedAt: new Date(Date.now()+21_000).toISOString() }) })).status, { orderId: booking.id, generation: resumedGeneration });
+      expect(lateStatus).toBe(409);
+      // A device failure clears both sharing and its displayed accuracy/green marker.
+      await driver.evaluate(() => window.__gps.error({ code: 2 }));
+      await expect(share.getByRole('button', { name: 'Start live sharing', exact: true })).toBeEnabled();
+      await expect(share.getByRole('status')).not.toContainText('Last sent');
+      await expect(share.locator('.liveShareIndicator.is-on')).toHaveCount(0);
+      await expect.poll(() => driver.evaluate(async () => (await (await fetch('/api/dispatch/location')).json()).location)).toBeNull();
+      expect(fixes.every(fix => typeof fix.generation === 'string')).toBe(true);
+      expect(starts).toHaveLength(4);
+      gpsLog('complete');
+      await driver.screenshot({ path: testInfo.outputPath('driver-gps-lifecycle-complete.png'), fullPage: true });
+
+      expect(external, 'No browser request may contact an external service').toEqual([]);
+      expect(errors, 'No uncaught browser errors').toEqual([]);
+      return;
+    }
 
     await form(driver, 'Mark picked up', { pickupBagCount: '1', operatorNote: 'Synthetic sealed bag received.' }, 'Confirm pickup', testInfo, 'driver-pickup');
     await form(driver, 'Drop at vendor', { vendorRecipient: 'Synthetic receiver', handoffBagCount: '1', operatorNote: 'Synthetic vendor handoff.' }, 'Confirm vendor handoff', testInfo, 'driver-vendor-handoff');
@@ -320,5 +352,13 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
       await page.screenshot({ timeout: 5_000, path: testInfo.outputPath(`${role}-failure.png`), fullPage: true }).catch(() => {});
     }
     throw error;
-  } finally { for (const context of contexts) await context.close(); }
+  } finally { for (const release of gpsRelease) release(); for (const context of contexts) await context.close(); }
+}
+
+test('four-role saved workflow, responsive controls and stopped SLA', async ({ browser }, testInfo) => {
+  await runStaffWorkflow(browser, testInfo);
+});
+
+test('authenticated GPS lifecycle with held requests and explicit resume', async ({ browser }, testInfo) => {
+  await runStaffWorkflow(browser, testInfo, true);
 });
