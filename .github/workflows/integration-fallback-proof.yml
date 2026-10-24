@@ -1,0 +1,46 @@
+name: Immutable Fallback Control Proof
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prove:
+    if: github.repository == 'bechirobob/bubble-wash'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out exact control commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          path: controls
+          persist-credentials: false
+      - name: Check out immutable fallback separately
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 80ec00902fcc5fe16a17ab814c7d191ad44afb64
+          path: pristine-fallback
+          persist-credentials: false
+      - name: Test fail-closed control proof
+        working-directory: controls
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          python3 -I -B -m unittest discover -s tests -p 'test_fallback_control_proof.py' -v
+      - name: Prove all original fallback suites without changing its source
+        run: |
+          set -euo pipefail
+          python3 -I -B controls/ops/integration-release/prove_fallback.py \
+            --control-root "$GITHUB_WORKSPACE/controls" \
+            --fallback-root "$GITHUB_WORKSPACE/pristine-fallback" \
+            --control-sha "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/integration-fallback-control-proof/fallback-control-proof.json"
+      - name: Publish only the successful public control receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: integration-fallback-control-proof
+          path: ${{ runner.temp }}/integration-fallback-control-proof/fallback-control-proof.json
+          if-no-files-found: error
+          retention-days: 90

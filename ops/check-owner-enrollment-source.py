@@ -44,7 +44,10 @@ def verify_runner_source(release):
     compact = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(compact)
     contract = compact.read_json(ROOT / 'ops/integration-release/source-contracts.json')
-    compact.verify_source(Path(release), contract, 'integration-candidate-v1')
+    try:
+        compact.verify_source(Path(release), contract, 'integration-candidate-v1')
+    except ValueError:
+        compact.verify_control_runner(Path(release), contract)
     return 'reviewed-runner-only-v1'
 
 

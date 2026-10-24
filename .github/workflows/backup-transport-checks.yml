@@ -187,7 +187,7 @@ jobs:
           python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
           python3 -m unittest discover -s tests -p 'test_preserving_deploy.py' -v
           python3 -m unittest discover -s tests -p 'test_owner_deploy.py' -v
-          python3 ops/integration-release/select_source.py --release .
+          python3 ops/integration-release/select_source.py --release . --runner-only
           python3 ops/check-owner-enrollment-source.py --verify-runner
           python3 -m unittest discover -s tests -p 'test_integration_release_adapter.py' -v
           python3 -m unittest discover -s ops/inactive-staging -p 'test_stage.py' -v

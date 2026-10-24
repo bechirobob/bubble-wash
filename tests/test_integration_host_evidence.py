@@ -181,3 +181,232 @@ class EvidenceTests(unittest.TestCase):
         self.assertNotEqual(bad.returncode,0)
 
 if __name__=='__main__':unittest.main()
+
+class CoordinatedSafetyTests(unittest.TestCase):
+    def test_production_admission_keeps_bookings_paused_and_commercial_off(self):
+        values={'BUBBLEWASH_STAFF_AUTH_DISABLED':'false','BUBBLEWASH_BOOKINGS_DISABLED':'true',
+                'BUBBLEWASH_DISABLE_DEMO_LOGIN':'true','NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED':'false'}
+        self.assertTrue(a.admit_production_configuration(values))
+        for name in values:
+            with self.subTest(name=name),self.assertRaises(ValueError):
+                a.admit_production_configuration({**values,name:'unexpected'})
+        with self.assertRaises(ValueError):a.admit_production_configuration({})
+
+    def test_private_operator_review_bound_and_expiring(self):
+        import contracts as k
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'operator.json'
+            inventory={'schema':'bubblewash-known-invokers/v1','units':{}}
+            receipt={'schema':'bubblewash-coordinated-operator-review/v1','hostMachineIdSha256':a.digest('/etc/machine-id'),
+                     'bootId':Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+                     'issuedAt':100,'expiresAt':200,'sourceContractSha256':'c'*64,
+                     'knownInvokersSha256':a.object_digest(inventory),'riskApprovalSha256':'d'*64,
+                     'reviewReference':'e'*64,'residualAssumptionSha256':k.RESIDUAL_ASSUMPTION_SHA256}
+            host=a.Host.__new__(a.Host);host.inventory=lambda:inventory
+            host.plan={'sourceContractSha256':'c'*64,'hostAcceptance':{
+                'operatorReceipt':str(path),'operatorReceiptSha256':'','knownInvokersSha256':a.object_digest(inventory),'riskApprovalSha256':'d'*64}}
+            def write(value):
+                path.write_bytes(a.canonical(value));path.chmod(0o600)
+                host.plan['hostAcceptance']['operatorReceiptSha256']=a.digest(path)
+            write(receipt)
+            with patch.object(a,'protected',return_value=()),patch.object(a.time,'time',return_value=150):
+                self.assertTrue(host.exclusion())
+                for key,value in [('expiresAt',149),('issuedAt',151),('riskApprovalSha256','0'*64),
+                                  ('residualAssumptionSha256','0'*64),('knownInvokersSha256','0'*64),
+                                  ('bootId','wrong'),('sourceContractSha256','0'*64)]:
+                    write({**receipt,key:value})
+                    with self.subTest(key=key),self.assertRaises(ValueError):host.exclusion()
+                write(receipt);path.chmod(0o644)
+                with self.assertRaises(ValueError):host.exclusion()
+                path.chmod(0o600);host.plan['hostAcceptance']['externalInvokersExcluded']=True
+                with self.assertRaises(ValueError):host.exclusion()
+
+    def test_materialization_rechecks_runtime_inside_lock_without_database_open(self):
+        import contracts as k
+        with tempfile.TemporaryDirectory() as directory,contextlib.ExitStack() as stack:
+            root=Path(directory);runtime=root/'runtime';runtime.mkdir();releases=root/'old-releases';releases.mkdir()
+            old=releases/'live';old.mkdir();current=root/'current';current.symlink_to(old)
+            (old/'.release-sha').write_text(k.LIVE_SHA)
+            database=root/'db';database.write_bytes(b'not SQLite')
+            env=root/'env';env.write_text('BUBBLEWASH_DATABASE_PATH='+str(database)+'\nBUBBLEWASH_BACKUP_OFFSITE_DIR='+str(root)+'\nBUBBLEWASH_BACKUP_STATUS_PATH='+str(root/'status')+'\nBUBBLEWASH_STAFF_AUTH_DISABLED=false\nBUBBLEWASH_BOOKINGS_DISABLED=true\nBUBBLEWASH_DISABLE_DEMO_LOGIN=true\nNEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED=false\n')
+            (runtime/'current-release').write_text('sha='+k.LIVE_SHA+'\npath='+str(old)+'\n')
+            archive=root/'archive';archive.write_bytes(b'encrypted fixture')
+            receipt=root/'receipt';receipt.write_text(json.dumps({'filename':'archive','sha256':a.digest(archive),'size':archive.stat().st_size}))
+            (root/'status').write_text('{}')
+            for name,value in {'RUNTIME':runtime,'ENV':env,'CURRENT':current,'OLD_RELEASES':releases,'RECEIPT':receipt,'STATE':root/'state'}.items():
+                stack.enter_context(patch.object(a,name,value))
+            calls=[]
+            @contextlib.contextmanager
+            def lock(*_):
+                calls.append('lock');yield lambda:calls.append('lock-recheck');calls.append('unlock')
+            guard=types.SimpleNamespace(deployment_lock=lock,parse=lambda raw:dict(line.split('=',1) for line in raw.decode().splitlines()),
+                verify_receipt=lambda *_:calls.append('backup'),check_runtime=lambda *_:calls.append('runtime'))
+            units=a.EVIDENCE_UNITS
+            c=types.SimpleNamespace(core=types.SimpleNamespace(UNITS=units,TIMER=units[0][1],APP=units[2][1],
+                    parse_properties=lambda raw:dict(line.split('=',1) for line in raw.splitlines())),
+                guards_module=lambda:guard,DurableState=lambda _:object(),SystemdReader=lambda *_:None,
+                LoadedGates=lambda *_:lambda:calls.append('gates'))
+            inventory={'units':{}}
+            for manager,unit in units:
+                fragment=root/(manager+'-'+unit);fragment.write_text('fixture')
+                inventory['units'][manager+'/'+unit]={'properties':{'FragmentPath':str(fragment),'WorkingDirectory':'','EnvironmentFiles':'','User':'','Group':''},'files':{str(fragment):a.digest(fragment)},'execStart':[]}
+            preparation=types.SimpleNamespace(__source_sha256__=k.PREPARATION_HELPER_SHA256,source_files=lambda *_:{'source':'same'},git_tree=lambda _:k.LIVE_TREE)
+            stack.enter_context(patch.dict(a.sys.modules,{'integration_preparation':preparation}))
+            stack.enter_context(patch.object(a,'load_controller',return_value=c))
+            stack.enter_context(patch.object(a.os,'geteuid',return_value=0))
+            stack.enter_context(patch.object(a.pwd,'getpwnam',return_value=types.SimpleNamespace(pw_uid=os.getuid())))
+            stack.enter_context(patch.object(a,'protected',side_effect=lambda path,**_:tuple(getattr(Path(path).stat(),key) for key in ('st_dev','st_ino'))))
+            stack.enter_context(patch.object(a.Host,'inventory',return_value=inventory))
+            stack.enter_context(patch.object(a.Host,'show',return_value='LoadState=loaded\nActiveState=active\nSubState=running\nMainPID='+str(os.getpid())+'\nControlPID=0\nJob=\nControlGroup=/test\n'))
+            stack.enter_context(patch.object(a.Host,'runtime_node',side_effect=lambda:calls.append('node')))
+            stack.enter_context(patch.object(a.sqlite3,'connect',side_effect=AssertionError('live database must not be opened')))
+            request={'backup':{'sha256':a.digest(archive),'receiptRun':'123','storeSha':'d'*40,'storeId':1}}
+            with a.locked_materialization_facts(request) as (facts,recheck):
+                self.assertEqual(facts['oldSha'],k.LIVE_SHA);self.assertEqual(facts['database'],str(database));recheck()
+            self.assertEqual(calls[0],'lock');self.assertEqual(calls[-1],'unlock')
+            self.assertEqual(calls.count('runtime'),3)
+            with self.assertRaises(ValueError):
+                with a.locked_materialization_facts(request) as (_,recheck):
+                    env.write_text(env.read_text()+'CHANGED=true\n');recheck()
+
+class MaterializationTests(unittest.TestCase):
+    def setUp(self):
+        import materialize_plan as m
+        import contracts as k
+        self.m,self.k=m,k
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name);self.state=self.root/'state';self.state.mkdir()
+        self.runtime=self.root/'runtime';self.runtime.mkdir()
+        self.contract=k.read_json(k.HERE/'source-contracts.json')
+        raw=k.canonical(self.contract);contract_hash=__import__('hashlib').sha256(raw).hexdigest()
+        self.package_id=k.object_digest({'adapterFiles':{},'sourceContractSha256':contract_hash})
+        self.package=self.state/'packages'/self.package_id;self.package.mkdir(parents=True);self.package.chmod(0o755)
+        (self.package/'source-contracts.json').write_bytes(raw)
+        (self.state/'plans').mkdir(mode=0o700)
+        private=self.state/'rehearsal-evidence'/'123-1';private.mkdir(parents=True,mode=0o700)
+        preimage=private/'preimage.sqlite';preimage.write_bytes(b'private copy');preimage.chmod(0o600)
+        bindings={label:{'commit':self.contract['profiles'][profile]['publicationCommit'],'tree':self.contract['profiles'][profile]['appInputGitTree']} for label,profile in zip(('candidate','fallback'),k.PROFILE_NAMES)}
+        pair={}
+        for label,row in bindings.items():
+            release=self.state/'releases'/row['commit'];release.mkdir(parents=True);(release/'.release-sha').write_text(row['commit'])
+            pair[label]={'sha':row['commit'],'tree':row['tree'],'runtime':{'releaseSha':row['commit']},'dependencies':{'test':'deps'}}
+        evidence={'schema':'bubblewash-inactive-preparation/v1','operation':'123-1','liveSha':k.LIVE_SHA,
+                  'maintenanceApproval':False,'sourceContractSha256':contract_hash,'preimageSha256':k.digest(preimage),'pair':pair}
+        evidence_path=private/'evidence.json';evidence_path.write_bytes(k.canonical(evidence));evidence_path.chmod(0o600)
+        owner={'schema':'bubblewash-owner-pair-review/v1','candidateSha':bindings['candidate']['commit'],'fallbackSha':bindings['fallback']['commit'],
+               'ownerFiles':self.contract['ownerFiles'],'ownerCapabilityPreserved':True,'MFAPreserved':True,'enrollmentCompatible':True,'reviewReference':'e'*64}
+        operator={'schema':'bubblewash-operator-approval/v1','candidateSha':bindings['candidate']['commit'],'fallbackSha':bindings['fallback']['commit'],
+                  'riskApprovalSha256':'a'*64,'residualAssumptionSha256':k.RESIDUAL_ASSUMPTION_SHA256,'approved':True,'reviewReference':'f'*64}
+        self.request={'packageId':self.package_id,'preparationRunId':'123','preparationEvidenceSha256':k.digest(evidence_path),
+                      'ownerEvidenceSha256':k.object_digest(owner),'operatorApprovalSha256':k.object_digest(operator),'riskApprovalSha256':'a'*64,
+                      'gitBindings':bindings,'backup':{'sha256':'b'*64,'receiptRun':'124','storeSha':'c'*40,'storeId':1},'reviewRecords':{'owner':owner,'operator':operator}}
+        self.calls=[]
+        @contextlib.contextmanager
+        def facts(*_,**__):
+            self.calls.append('locked')
+            value={key:'fixture' for key in ('old','current','marker','database')}
+            value.update(oldSha=k.LIVE_SHA,state=str(self.state),databaseIdentity=[1,2],node={'path':'node','sha256':'1'*64},guards={},units={},
+                         knownInvokersSha256='2'*64,hostMachineIdSha256='3'*64,bootId='boot',issuedAt=100,expiresAt=200)
+            yield value,lambda:self.calls.append('recheck')
+            self.calls.append('unlocked')
+        self.stack=contextlib.ExitStack();self.addCleanup(self.stack.close)
+        for obj,key,value in [(m,'HERE',self.package),(a,'STATE',self.state),(a,'RUNTIME',self.runtime)]:
+            self.stack.enter_context(patch.object(obj,key,value))
+        self.stack.enter_context(patch.object(a.os,'geteuid',return_value=0))
+        self.stack.enter_context(patch.object(m,'protected_directory',side_effect=lambda p:self.assertTrue(Path(p).is_dir())))
+        self.stack.enter_context(patch.object(a,'protected',return_value=()))
+        self.stack.enter_context(patch.object(a,'adapter_manifest',return_value={}))
+        self.stack.enter_context(patch.object(m,'verify_source',return_value=True))
+        self.stack.enter_context(patch.object(m,'runtime_manifest',side_effect=lambda root,sha:{'releaseSha':sha}))
+        self.stack.enter_context(patch.object(m,'dependency_manifest',return_value={'test':'deps'}))
+        preparation=types.SimpleNamespace(__source_sha256__=k.PREPARATION_HELPER_SHA256,source_files=lambda root,*_:bindings['candidate' if root.name==bindings['candidate']['commit'] else 'fallback']['tree'],git_tree=lambda x:x)
+        self.stack.enter_context(patch.dict(sys.modules,{'integration_preparation':preparation}))
+        self.stack.enter_context(patch.object(a,'locked_materialization_facts',side_effect=facts))
+        def validate(plan,host=True):
+            self.calls.append('validate')
+            self.assertTrue(host);self.assertEqual(plan['oldSha'],k.LIVE_SHA)
+            self.assertEqual(k.digest(plan['ownerEvidencePath']),self.request['ownerEvidenceSha256'])
+            self.assertEqual(k.digest(plan['hostAcceptance']['operatorReceipt']),plan['hostAcceptance']['operatorReceiptSha256'])
+            return True
+        self.stack.enter_context(patch.object(a,'validate_plan',side_effect=validate))
+
+    def test_writes_private_records_then_plan_under_same_lock_and_refuses_retry(self):
+        result=self.m.materialize_prepared(self.request)
+        self.assertEqual(result['status'],'plan-materialized');self.assertFalse(result['productionChanged'])
+        plan=self.state/'plans'/(self.package_id+'.json')
+        self.assertEqual(result['planSha256'],self.k.digest(plan))
+        self.assertEqual(plan.stat().st_mode & 0o777,0o600)
+        for path in (self.state/'plans'/self.package_id).iterdir():self.assertEqual(path.stat().st_mode & 0o777,0o600)
+        self.assertEqual(self.calls,['locked','recheck','validate','recheck','unlocked'])
+        before=plan.read_bytes()
+        with self.assertRaises(ValueError):self.m.materialize_prepared(self.request)
+        self.assertEqual(plan.read_bytes(),before)
+
+    def test_missing_review_or_changed_preimage_refuses_without_plan(self):
+        import copy
+        bad=copy.deepcopy(self.request);bad['reviewRecords']['operator']['approved']=False
+        with self.assertRaises(ValueError):self.m.materialize_prepared(bad)
+        preimage=self.state/'rehearsal-evidence'/'123-1'/'preimage.sqlite';preimage.write_bytes(b'changed')
+        with self.assertRaises(ValueError):self.m.materialize_prepared(self.request)
+        self.assertFalse((self.state/'plans'/(self.package_id+'.json')).exists());self.assertEqual(self.calls,[])
+
+    def test_transition_appearing_at_lock_acquisition_refuses_without_writes(self):
+        @contextlib.contextmanager
+        def raced(*_,**__):
+            (self.state/'transition.json').write_text('{}')
+            yield {},lambda:None
+        with patch.object(a,'locked_materialization_facts',side_effect=raced):
+            with self.assertRaisesRegex(ValueError,'appeared'):
+                self.m.materialize_prepared(self.request)
+        self.assertFalse((self.state/'plans'/self.package_id).exists())
+
+    def test_untrusted_preparation_module_refused_before_lock(self):
+        with patch.dict(sys.modules,{'integration_preparation':types.SimpleNamespace(__source_sha256__='0'*64)}):
+            with self.assertRaisesRegex(ValueError,'authenticated preparation'):
+                self.m.materialize_prepared(self.request)
+        self.assertEqual(self.calls,[])
+        self.assertFalse((self.state/'plans'/self.package_id).exists())
+
+    def test_expired_bound_recheck_refuses_before_writes(self):
+        original=a.locked_materialization_facts.side_effect
+        @contextlib.contextmanager
+        def expired(*args,**kwargs):
+            with original(*args,**kwargs) as (facts,_):
+                def refuse():raise ValueError('materialization observation expired')
+                yield facts,refuse
+        with patch.object(a,'locked_materialization_facts',side_effect=expired):
+            with self.assertRaisesRegex(ValueError,'expired'):
+                self.m.materialize_prepared(self.request)
+        self.assertFalse((self.state/'plans'/self.package_id).exists())
+
+    def test_mid_lock_runtime_drift_refuses_before_plan(self):
+        calls=[]
+        def image(root,sha):
+            calls.append(sha)
+            return {'releaseSha':sha} if len(calls)<=2 else {'releaseSha':sha,'changed':True}
+        with patch.object(self.m,'runtime_manifest',side_effect=image):
+            with self.assertRaisesRegex(ValueError,'runtime/dependencies changed'):
+                self.m.materialize_prepared(self.request)
+        self.assertFalse((self.state/'plans'/(self.package_id+'.json')).exists())
+        self.assertFalse((self.state/'plans'/self.package_id).exists())
+
+    def test_mid_lock_control_package_drift_refuses_before_plan(self):
+        calls=[]
+        def image():
+            calls.append(1)
+            return {} if len(calls)<=2 else {'changed':'1'*64}
+        with patch.object(a,'adapter_manifest',side_effect=image):
+            with self.assertRaisesRegex(ValueError,'control package changed'):
+                self.m.materialize_prepared(self.request)
+        self.assertFalse((self.state/'plans'/(self.package_id+'.json')).exists())
+
+    def test_post_review_dependency_drift_preserves_records_but_no_plan(self):
+        calls=[]
+        def deps(root):
+            calls.append(root)
+            return {'test':'deps'} if len(calls)<=4 else {'test':'changed'}
+        with patch.object(self.m,'dependency_manifest',side_effect=deps):
+            with self.assertRaisesRegex(ValueError,'runtime/dependencies changed'):
+                self.m.materialize_prepared(self.request)
+        self.assertFalse((self.state/'plans'/(self.package_id+'.json')).exists())
+        self.assertTrue((self.state/'plans'/self.package_id/'owner-review.json').exists())

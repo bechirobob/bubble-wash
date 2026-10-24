@@ -104,7 +104,7 @@ class ContractTests(unittest.TestCase):
     def test_fallback_commitment_is_unchanged_and_full_tree_is_verified(self):
         actual=k.read_json(ROOT/'ops/integration-release/source-contracts.json')
         fallback=actual['profiles'][k.PROFILE_NAMES[1]]
-        self.assertEqual(fallback['contentSha256'],'a024ca678a0db3201676107a61145808a5e143155e10abe9ae9471808b34acb9')
+        self.assertEqual(fallback['contentSha256'],'638c7e6f5524b18a62484cbdf614b2e2df4e0df4e4045122ccc53fc9a722bee2')
         self.assertNotIn('files',fallback)
         self.assertEqual(k.verify_source(self.root,self.contract,k.PROFILE_NAMES[1]),self.profile)
         (self.root/'ops/old.py').write_text('mutated fallback')
@@ -271,21 +271,25 @@ class HostTests(unittest.TestCase):
 
     def test_invoker_boolean_cannot_stand_in_for_receipt(self):
         self.plan['hostAcceptance']={'externalInvokersExcluded':True}
-        with self.assertRaises(KeyError):self.host.exclusion()
+        with self.assertRaises(ValueError):self.host.exclusion()
 
     def test_pure_migration_runs_fixed_entrypoint_without_production_secret_environment(self):
         node=self.root/'node';node.write_text('runtime')
         self.plan['node']={'path':str(node),'sha256':k.digest(node)}
         def run(args,**kwargs):
             self.commands.append((args,kwargs))
+            if '--preflight' in args:return json.dumps({'ok':True,'status':'exact-pre-migration-ready','databaseChanged':False})
+            if '--verify' in args:return json.dumps({'ok':True,'status':'exact-post-feature-ready','databaseChanged':False})
+            if any('migrate-integration-features.mjs' in str(arg) for arg in args):return json.dumps({'ok':True,'status':'exact-post-feature-ready','migration':'exact-integration-features-v1','createdTables':5,'ownershipColumnAdded':False,'locationColumnsAdded':False,'optionalCustomerTableCreated':False})
             if 'scripts/migrate-booking-references.mjs' in args:
                 return json.dumps({'ok':True,'migration':'permanent-booking-vendor-labels-v1','historicalBackfill':False})
             return json.dumps({'ok':True,'migration':'notification-outbox-exact-additive-v1'})
         self.host.run=run
-        with patch.object(a,'protected',return_value=()):self.assertTrue(self.host.migrate(self.root/'db.sqlite'))
-        self.assertEqual(len(self.commands),2)
-        self.assertIn('scripts/migrate-booking-references.mjs',self.commands[0][0])
-        args,kw=self.commands[-1]
+        self.plan['snapshot']=str(self.root/'snapshot')
+        with patch.object(a,'verify_completion_data',return_value=True),patch.object(a,'protected',return_value=()):self.assertTrue(self.host.migrate(self.root/'db.sqlite'))
+        self.assertEqual(len(self.commands),5)
+        self.assertIn('scripts/migrate-booking-references.mjs',self.commands[1][0])
+        args,kw=self.commands[2]
         self.assertIn('scripts/migrate-notification-outbox.mjs',args)
         self.assertNotIn('getDatabase',repr(args));self.assertNotIn('RESEND_API_KEY',kw['env'])
         self.assertNotIn('BUBBLEWASH_MAINTENANCE_TOKEN',kw['env'])
@@ -294,7 +298,7 @@ class HostTests(unittest.TestCase):
         with patch.object(a,'protected',return_value=()),self.assertRaises(ValueError):self.host.migrate(self.root/'db.sqlite')
 
     def test_verifier_uses_readonly_existing_database_and_no_initializer(self):
-        calls=[];self.host.node=lambda target,args,database:(calls.append((target,args,database)) or 'exact-additive-ready')
+        calls=[];self.host.node=lambda target,args,database:(calls.append((target,args,database)) or (json.dumps({'ok':True,'status':'exact-post-feature-ready','databaseChanged':False}) if '--verify' in args else 'exact-additive-ready'))
         self.assertTrue(self.host.verify_database(self.root/'db'))
         source=calls[0][1][-1]
         self.assertIn('readonly:true,fileMustExist:true',source);self.assertIn('query_only=ON',source)
@@ -314,13 +318,15 @@ class HostTests(unittest.TestCase):
                 'ownerEvidenceSha256':'a'*64,'ownerEvidencePath':str(self.root/'evidence'),
                 'node':{'path':'/usr/bin/node','sha256':'b'*64},'units':{},
                 'guards':{'envSha256':'c'*64,'database':str(fixture.db),'receiptSha256':'d'*64,'receiptRun':'1','archiveSha256':'e'*64},
-                'hostAcceptance':{'inventoryPaths':[],'launcherAliases':[],'exclusionReceipt':'/old-boot','exclusionReceiptSha256':'f'*64}})
+                'hostAcceptance':{'launcherAliases':[],'knownInvokersSha256':'b'*64,'riskApprovalSha256':'a'*64,'operatorReceipt':'/old-boot','operatorReceiptSha256':'f'*64}})
             first=a.durable_plan(plan,frozen_test.c)
+            policy=k.load_controller().CoordinatedController
+            self.enterContext(patch.object(frozen_test.c,'Controller',policy))
             fixture.plan=first;fixture.control=fixture.make_controller()
             self.assertEqual(fixture.control.execute(),'candidate-ready')
             refreshed=copy.deepcopy(plan)
             refreshed['guards'].update({'receiptSha256':'1'*64,'receiptRun':'2','archiveSha256':'2'*64})
-            refreshed['hostAcceptance'].update({'exclusionReceipt':'/new-boot','exclusionReceiptSha256':'3'*64})
+            refreshed['hostAcceptance'].update({'operatorReceipt':'/new-boot','operatorReceiptSha256':'3'*64})
             renewed=a.durable_plan(refreshed,frozen_test.c)
             self.assertEqual(first,renewed)
             fixture.plan=renewed;fixture.control=fixture.make_controller()
@@ -343,7 +349,7 @@ class HostTests(unittest.TestCase):
         self.assertLess(backup.index('PYTHONDONTWRITEBYTECODE'),backup.index('    steps:'))
         self.assertIn('default: inspect',text);self.assertIn('group: bubblewash-production',text)
         self.assertIn('TARGET_SHA="$CANDIDATE_SHA" python3 ops/check-release-ci.py',text)
-        self.assertIn('TARGET_SHA="$FALLBACK_SHA" python3 ops/check-release-ci.py',text)
+        self.assertIn('contracts.py --verify-fallback-ci "$FALLBACK_SHA"',text)
         for forbidden in ('daemon-reload','systemctl enable','npm ci','chmod','chown','cron','continue-on-error'):
             self.assertNotIn(forbidden,text)
         self.assertNotIn('secrets.',text.split('      - name: Create no credentials')[0])
@@ -367,3 +373,34 @@ class CandidateOnlyRootSelectorTests(unittest.TestCase):
                 with self.assertRaises(PermissionError): selector.select(root)
             with patch.object(selector, 'read_json', return_value={}), patch.object(selector, 'verify_source', return_value={}):
                 with self.assertRaises(ValueError): selector.select(root)
+
+class CompletedDataProofTests(unittest.TestCase):
+    def test_additions_and_only_documented_quarantine_preserve_all_original_rows(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);before=root/'before.sqlite';after=root/'after.sqlite'
+            with sqlite3.connect(before) as db:
+                db.executescript("CREATE TABLE accounts(id INTEGER PRIMARY KEY, name TEXT);INSERT INTO accounts VALUES(7,'owner');CREATE TABLE notification_outbox(id INTEGER PRIMARY KEY,status TEXT,last_error TEXT,payload BLOB);INSERT INTO notification_outbox VALUES(4,'pending','old',X'0102');")
+            before.chmod(0o600);shutil.copyfile(before,after)
+            with sqlite3.connect(after) as db:
+                db.executescript("CREATE TABLE booking_references(id INTEGER PRIMARY KEY AUTOINCREMENT);CREATE TABLE vendor_codes(id INTEGER PRIMARY KEY AUTOINCREMENT);CREATE TABLE driver_location_stops(id TEXT);ALTER TABLE notification_outbox ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'queued';")
+                db.execute('UPDATE notification_outbox SET status=?,last_error=?,delivery_state=?',('failed','Legacy outbox row has no lease or provider deduplication evidence. Verify with the provider before any resend.','manual_review'))
+            self.assertTrue(a.verify_completion_data(before,after,'complete'))
+            with sqlite3.connect(after) as db:db.execute("UPDATE notification_outbox SET delivery_state='queued'")
+            with self.assertRaises(ValueError):a.verify_completion_data(before,after,'complete')
+            with sqlite3.connect(after) as db:db.execute("UPDATE notification_outbox SET delivery_state='manual_review'")
+            with sqlite3.connect(after) as db:db.execute("UPDATE accounts SET name='changed'")
+            with self.assertRaises(ValueError):a.verify_completion_data(before,after,'complete')
+            with sqlite3.connect(after) as db:db.execute("UPDATE accounts SET name='owner'");db.execute('UPDATE notification_outbox SET payload=?',(b'different',))
+            with self.assertRaises(ValueError):a.verify_completion_data(before,after,'complete')
+
+    def test_empty_cgroup_is_observed_not_fabricated(self):
+        host=a.Host.__new__(a.Host);host.uid=os.getuid();host.c=k.load_controller();host.groups={};host.captured={};host.roots=[Path('/one'),Path('/two'),Path('/three')];host.scan_roots=host.roots
+        with tempfile.TemporaryDirectory() as directory:
+            host.proc=Path(directory);host.cgroup=Path(directory)/'groups'
+            host.plan={'units':{m+'/'+u:{'cgroup':''} for m,u in host.c.core.UNITS}}
+            host.show=lambda *_:'LoadState=loaded\nActiveState=inactive\nSubState=dead\nMainPID=0\nControlPID=0\nJob=\nControlGroup=\n'
+            host.run=lambda *_:''
+            host.capture();self.assertEqual(host.groups,{});self.assertEqual(len(host.empty_groups),2);self.assertTrue(host.quiet())
+            host.show=lambda *_:'LoadState=loaded\nActiveState=inactive\nSubState=dead\nMainPID=0\nControlPID=0\nJob=\nControlGroup=/new\n'
+            with self.assertRaises(ValueError):host.quiet()

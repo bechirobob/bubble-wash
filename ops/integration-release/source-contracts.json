@@ -1,5 +1,13 @@
 {
   "baseCommit": "5dc997db0393e1cf88dde29859b7e1c4550ee4ee",
+  "controlDependencies": {
+    "ops/inactive-staging/prepare_pair.py": "6f1859a34013f593d21dbd283eac05748eb6c61be2440319a50a9437c42025bd"
+  },
+  "controlRunner": {
+    "contentSha256": "d5bac1237f44cc572ab3b5afeaccd6c02fd31c1d7130389aef219c8973fe1995",
+    "files": 484,
+    "schema": "bubblewash-control-runner/v1"
+  },
   "ownerFiles": {
     "src/lib/admin-mfa.ts": "15c78716d909d298542ce777d98b8d2dae5f67a8327aa427117f9656b6dcf4f5",
     "src/lib/auth.ts": "470f0b92c371b20a88ef831f537732006d370ac02c7de9ca0727a90716f4cc81",
@@ -7,9 +15,9 @@
   },
   "profiles": {
     "integration-candidate-v1": {
-      "appInputGitTree": "71f181ba23f3786333402357d2a9da8b667f397e",
+      "appInputGitTree": "0076161b49d587787472f8c9128c6f261eedc72e",
       "contentSha256": "926109a11b123ddaacd7fca6083937c2d3f89c61df9f47ea9a74b7b0e0307ec7",
-      "publicationCommit": null,
+      "publicationCommit": "5f256800d65dbe3b69f54e95afa0e8ab30b5e881",
       "rootFiles": [
         ".env.production.example",
         ".gitignore",
@@ -25,9 +33,9 @@
       ]
     },
     "integration-fallback-v1": {
-      "appInputGitTree": "249142bb3e7cbb99b1c689d242572a122ac5f612",
-      "contentSha256": "a024ca678a0db3201676107a61145808a5e143155e10abe9ae9471808b34acb9",
-      "publicationCommit": null,
+      "appInputGitTree": "c90fe5e836022d8084d0f8f936e5d00bb8522be6",
+      "contentSha256": "638c7e6f5524b18a62484cbdf614b2e2df4e0df4e4045122ccc53fc9a722bee2",
+      "publicationCommit": "80ec00902fcc5fe16a17ab814c7d191ad44afb64",
       "rootFiles": [
         ".env.production.example",
         ".gitignore",
