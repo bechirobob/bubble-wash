@@ -8,7 +8,7 @@
   "profiles": {
     "integration-candidate-v1": {
       "appInputGitTree": "71f181ba23f3786333402357d2a9da8b667f397e",
-      "contentSha256": "eeb8c7caa9833bfb8f181822628c2a1e43051d51a7d8165b0773eb85943d9274",
+      "contentSha256": "0f939e58743a075eb9eb9f7c9660e346fa57fcc0accd316d46a5000a55de7f00",
       "publicationCommit": null,
       "rootFiles": [
         ".env.production.example",
