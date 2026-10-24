@@ -24,6 +24,7 @@ export function PublicFooter({ available }: { available: boolean }) {
         <Link href="/services">Services & pricing</Link>
         <Link href={available ? "/book" : "/services"}>{available ? "Request a pickup" : "Explore laundry plans"}</Link>
         <Link href="/track">Track an order</Link>
+        <Link href="/install">Add to home screen</Link>
       </div>
       <div>
         <h3>Order and policies</h3>
