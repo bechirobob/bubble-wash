@@ -337,4 +337,39 @@ class StorageTests(unittest.TestCase):
             with self.assertRaises(Exception):transport.write_private(path,b'replacement')
             self.assertEqual(path.read_bytes(),b'ciphertext')
 
+class WorkflowOrderingTests(unittest.TestCase):
+    def test_strict_control_selector_precedes_nested_checkout(self):
+        workflow=(ROOT/'.github/workflows/owner-document-enrollment.yml').read_text()
+        checkout='uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262'
+        control='python3 -B ops/integration-release/select_source.py --release . --profile integration-candidate-v1'
+        runtime='python3 -B ops/deploy-survey-update.py --check-runtime'
+        first=workflow.index(checkout);second=workflow.index(checkout,first+len(checkout))
+        self.assertEqual(workflow.count(control),1)
+        self.assertLess(first,workflow.index(control));self.assertLess(workflow.index(control),second)
+        self.assertLess(second,workflow.index(runtime));self.assertLess(workflow.index(runtime),workflow.index('uses: tailscale/'))
+        self.assertLess(workflow.index('"$GITHUB_RUN_ATTEMPT" == 1'),workflow.index(control))
+        self.assertLess(workflow.index('"$(git rev-parse HEAD)" == "$GITHUB_SHA"'),workflow.index(control))
+        self.assertLess(workflow.index(runtime),workflow.index('BUBBLEWASH_ADDITIONAL_OWNER_INPUT:'))
+    def test_actual_strict_selector_accepts_clean_control_and_rejects_nested_runtime(self):
+        contracts=load('workflow_order_contracts','ops/integration-release/contracts.py')
+        contract=json.loads((ROOT/'ops/integration-release/source-contracts.json').read_bytes())
+        profile=contract['profiles']['integration-candidate-v1']
+        # Reproduce a pristine control checkout, excluding the intentional later
+        # runtime checkout and installed/generated root dependencies. Never relax
+        # the real selector or its approved root-directory policy.
+        with tempfile.TemporaryDirectory(prefix='owner-control-order-') as temporary:
+            clean=Path(temporary)/'control';clean.mkdir()
+            for name in contracts.SOURCE_DIRS:
+                if (ROOT/name).exists():shutil.copytree(ROOT/name,clean/name)
+            for name in profile['rootFiles']:shutil.copyfile(ROOT/name,clean/name)
+            command=['python3','-B',str(clean/'ops/integration-release/select_source.py'),'--release',str(clean),'--profile','integration-candidate-v1']
+            accepted=subprocess.run(command,capture_output=True,text=True,timeout=30)
+            self.assertEqual(accepted.returncode,0,accepted.stderr);self.assertEqual(accepted.stdout.strip(),'integration-candidate-v1')
+            (clean/'runtime-artifact').mkdir()
+            rejected=subprocess.run(command,capture_output=True,text=True,timeout=30)
+            self.assertNotEqual(rejected.returncode,0);self.assertIn('source matches no unique reviewed integration contract',rejected.stderr)
+            (clean/'runtime-artifact').rmdir()
+            restored=subprocess.run(command,capture_output=True,text=True,timeout=30)
+            self.assertEqual(restored.returncode,0,restored.stderr)
+
 if __name__=='__main__':unittest.main()

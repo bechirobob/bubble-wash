@@ -50,6 +50,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Verify exact clean control contract before nested runtime checkout
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_RUN_ATTEMPT" == 1 && "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          python3 -B ops/integration-release/select_source.py --release . --profile integration-candidate-v1
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ inputs.expected_live_sha }}
@@ -58,13 +63,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Verify exact control and live contracts before private inputs or tailnet
+      - name: Verify exact live contract and tests before private inputs or tailnet
         env:
           RUNTIME_SHA: ${{ inputs.expected_live_sha }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_RUN_ATTEMPT" == 1 && "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
-          python3 -B ops/integration-release/select_source.py --release . --profile integration-candidate-v1
           python3 -B ops/deploy-survey-update.py --check-runtime
           npm --prefix runtime-artifact ci --no-audit --no-fund
           OWNER_TEST_RUNTIME="$PWD/runtime-artifact" python3 -B -m unittest discover -s tests -p 'test_owner_document_enrollment.py' -v
