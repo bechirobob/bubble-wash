@@ -5,18 +5,39 @@ import sys
 from pathlib import Path
 import re
 sys.dont_write_bytecode = True
-from contracts import HERE, digest, require
+from contracts import HERE, VENDOR, digest, require
 from host_adapter import adapter_manifest, completion_confirmation
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--plan-id', required=True)
-    parser.add_argument('--plan-sha256', required=True)
-    parser.add_argument('--candidate-sha', required=True)
-    parser.add_argument('--fallback-sha', required=True)
-    parser.add_argument('--mode', choices=('inspect','execute','recover','complete-labels-only'), required=True)
+    parser.add_argument('--plan-id', default='')
+    parser.add_argument('--plan-sha256', default='')
+    parser.add_argument('--candidate-sha', default='')
+    parser.add_argument('--fallback-sha', default='')
+    parser.add_argument('--mode', choices=('inspect-host-evidence','inspect','execute','recover','complete-labels-only'), required=True)
     parser.add_argument('--completion-confirmation', default='')
     args=parser.parse_args()
+    if args.mode == 'inspect-host-evidence':
+        require(not any((args.plan_id, args.plan_sha256, args.candidate_sha,
+                         args.fallback_sha, args.completion_confirmation)),
+                'evidence route takes no release inputs')
+        # Use existing reviewed modules in memory. Never stage/import host code,
+        # create files or instantiate the durable controller for this route.
+        guard_name = 'bubblewash-web-a476-baseline/ops/deploy-preserving.py'
+        require(digest(HERE/'vendor'/guard_name) == VENDOR[guard_name],
+                'historical evidence guard differs')
+        modules = [('contracts', HERE/'contracts.py'),
+                   ('host_adapter', HERE/'host_adapter.py'),
+                   ('evidence_guard', HERE/'vendor/bubblewash-web-a476-baseline/ops/deploy-preserving.py')]
+        print('import sys, types, json\nsys.dont_write_bytecode = True')
+        for name, path in modules:
+            body = path.read_text()
+            print('m = types.ModuleType('+repr(name)+')')
+            print('m.__file__ = '+repr('/nonexistent-bubblewash-evidence/'+name+'.py'))
+            print('sys.modules['+repr(name)+'] = m')
+            print('exec(compile('+repr(body)+', m.__file__, "exec"), m.__dict__)')
+        print("try:\n print(json.dumps(sys.modules['host_adapter'].inspect_host_evidence(sys.modules['evidence_guard']), sort_keys=True))\nexcept BaseException:\n print('Bounded host inspection stopped; no release acceptance.', file=sys.stderr)\n raise SystemExit(1)")
+        raise SystemExit(0)
     require(re.fullmatch('[a-f0-9]{64}',args.plan_id) and re.fullmatch('[a-f0-9]{64}',args.plan_sha256), 'invalid plan identity')
     require(re.fullmatch('[a-f0-9]{40}',args.candidate_sha) and re.fullmatch('[a-f0-9]{40}',args.fallback_sha) and args.candidate_sha != args.fallback_sha, 'invalid published pair')
     completion_confirmation(args.mode, args.completion_confirmation, args.plan_sha256)

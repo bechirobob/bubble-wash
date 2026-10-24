@@ -38,6 +38,162 @@ SHOW = ('LoadState', 'ActiveState', 'SubState', 'MainPID', 'ControlPID', 'Job', 
         'WorkingDirectory', 'EnvironmentFiles', 'User', 'Group', 'FragmentPath')
 
 
+# This pre-installation route deliberately does not instantiate the release
+# controller, create state, inspect unrelated invokers, or query SQLite.
+EVIDENCE_UNITS = (('system', 'bubblewash-maintenance.timer'),
+                  ('system', 'bubblewash-maintenance.service'),
+                  ('user', 'bubblewash-local.service'))
+EVIDENCE_PROPERTIES = ('LoadState', 'ActiveState', 'SubState', 'MainPID',
+    'ControlPID', 'ControlGroup', 'WorkingDirectory', 'EnvironmentFiles',
+    'User', 'Group', 'FragmentPath', 'DropInPaths', 'NeedDaemonReload', 'Conditions')
+
+
+def evidence_metadata(path):
+    """One object only, without traversal, dereferencing, or content disclosure."""
+    try:
+        info = Path(path).lstat()
+    except FileNotFoundError:
+        return {'present': False}
+    kind = ('directory' if stat.S_ISDIR(info.st_mode) else
+            'file' if stat.S_ISREG(info.st_mode) else
+            'symlink' if stat.S_ISLNK(info.st_mode) else 'other')
+    return {'present': True, 'kind': kind, 'uid': info.st_uid, 'gid': info.st_gid,
+            'mode': stat.S_IMODE(info.st_mode), 'device': info.st_dev,
+            'inode': info.st_ino, 'links': info.st_nlink}
+
+
+def evidence_read(path, owner, maximum=65536):
+    """Protected bounded no-follow read; do not reveal its errors or bytes."""
+    path = Path(path)
+    require(path.is_absolute() and path.resolve(strict=True) == path,
+            'evidence path is not canonical')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        before = os.fstat(fd)
+        require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and
+                before.st_uid in (0, owner) and not before.st_mode & 0o022 and
+                before.st_size <= maximum, 'unsafe evidence object')
+        raw = os.read(fd, maximum + 1)
+        fields = ('st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_gid', 'st_nlink', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+        require(len(raw) <= maximum and all(getattr(value, key) == getattr(before, key)
+                for value in (os.fstat(fd), path.stat()) for key in fields), 'evidence object changed')
+        return raw
+    finally:
+        os.close(fd)
+
+
+def evidence_conditions(host, manager, unit):
+    """Typed loaded gate conditions; unknown condition parameters are hash-only."""
+    escaped = ''.join(ch if ch.isascii() and ch.isalnum() else '_'+format(ord(ch), '02x') for ch in unit)
+    command = host.prefix(manager)+['busctl', '--system' if manager == 'system' else '--user',
+        'get-property', 'org.freedesktop.systemd1', '/org/freedesktop/systemd1/unit/'+escaped,
+        'org.freedesktop.systemd1.Unit', 'Conditions']
+    tokens = shlex.split(host.run(command))
+    require(len(tokens) >= 2 and tokens[0] == 'a(sbbsi)' and tokens[1].isdigit(),
+            'invalid typed conditions')
+    count = int(tokens[1])
+    require(count <= 128 and len(tokens) == 2+5*count, 'invalid condition count')
+    gates = []; unknown = []
+    for offset in range(2, len(tokens), 5):
+        kind, trigger, negate, parameter, state = tokens[offset:offset+5]
+        require(trigger in ('true', 'false') and negate in ('true', 'false') and
+                re.fullmatch('-?[0-9]+', state), 'invalid typed condition fields')
+        if kind == 'ConditionPathExists' and parameter in {
+                str(STATE/name) for name in ('installed-v1', 'app-hold', 'maintenance-hold')}:
+            gates.append({'name': Path(parameter).name, 'trigger': trigger == 'true',
+                          'negate': negate == 'true', 'result': int(state)})
+        else:
+            unknown.append(tokens[offset:offset+5])
+    return {'gates': gates, 'otherCount': len(unknown), 'otherSha256': object_digest(unknown)}
+
+
+def inspect_host_evidence(guard, run=None):
+    """Read-only pre-installation evidence, not release or security acceptance.
+
+    Config, argv, Conditions and unit source bodies never leave the host.
+    Their digests bind review evidence without exposing embedded secrets.
+    No database is opened: SQLite read-only WAL access can touch shared memory.
+    """
+    require(os.geteuid() == 0, 'root evidence reader required')
+    uid = pwd.getpwnam('ubuntu').pw_uid
+    host = Host.__new__(Host)
+    host.uid, host.run = uid, run or Host.command
+    import types
+    host.c = types.SimpleNamespace(core=types.SimpleNamespace(TIMER=EVIDENCE_UNITS[0][1]))
+    result = {'schema': 'bubblewash-bounded-host-evidence/v1',
+              'releaseAcceptance': False, 'databaseOpened': False, 'units': {}, 'paths': {}}
+    with guard.deployment_lock(RUNTIME, uid) as lock_unchanged:
+        config = evidence_read(ENV, uid)
+        values = guard.parse(config)
+        marker = evidence_read(RUNTIME/'current-release', uid)
+        marker_values = guard.parse(marker)
+        current = CURRENT.resolve(strict=True)
+        require(CURRENT.is_symlink() and current.is_dir() and
+                current.parent in (OLD_RELEASES, RELEASES), 'unexpected current release binding')
+        sha = marker_values.get('sha', '')
+        require(re.fullmatch('[a-f0-9]{40}', sha) and
+                marker_values.get('path') == str(current), 'current marker mismatch')
+        database = Path(values.get('BUBBLEWASH_DATABASE_PATH', ''))
+        require(database.is_absolute() and database.resolve(strict=True) == database and
+                not database.is_relative_to(current) and not database.is_relative_to(RELEASES) and
+                not database.is_relative_to(OLD_RELEASES), 'unsafe database binding')
+        db_meta = evidence_metadata(database)
+        require(db_meta.get('kind') == 'file' and db_meta['links'] == 1,
+                'database binding is not regular')
+        result['binding'] = {'currentSha': sha, 'currentPathSha256': object_digest(str(current)),
+            'markerSha256': hashlib.sha256(marker).hexdigest(),
+            'configSha256': hashlib.sha256(config).hexdigest(),
+            'databasePathSha256': object_digest(str(database)), 'databaseMetadata': db_meta}
+        for manager, unit in EVIDENCE_UNITS:
+            raw = host.ctl(manager, 'show', unit, '--property='+','.join(EVIDENCE_PROPERTIES))
+            props = {}
+            for line in raw.splitlines():
+                key, sep, value = line.partition('=')
+                require(sep and key in EVIDENCE_PROPERTIES and key not in props,
+                        'unexpected bounded unit property')
+                props[key] = value
+            require(set(props) == set(EVIDENCE_PROPERTIES), 'incomplete bounded unit evidence')
+            row = {'propertiesSha256': object_digest(props)}
+            for key in ('LoadState', 'ActiveState', 'SubState', 'NeedDaemonReload'):
+                require(re.fullmatch('[a-z-]{1,32}', props[key]), 'invalid unit state')
+                row[key] = props[key]
+            # Never expose raw ExecStart or properties: either can embed secrets.
+            for key in ('MainPID', 'ControlPID'):
+                require(props[key].isdigit(), 'invalid unit pid')
+                row[key] = int(props[key])
+            for key in ('ControlGroup', 'WorkingDirectory', 'EnvironmentFiles', 'User', 'Group', 'Conditions'):
+                row[key+'Sha256'] = object_digest(props[key])
+            if props['LoadState'] == 'loaded':
+                row['loadedConditions'] = evidence_conditions(host, manager, unit)
+            sources = [props['FragmentPath'], *shlex.split(props['DropInPaths'])]
+            require(len(sources) <= 33, 'unit source count exceeds bound')
+            row['sources'] = []
+            for name in filter(None, sources):
+                path = Path(name)
+                allowed = (Path('/etc/systemd/system'), Path('/etc/systemd/user'),
+                    Path('/usr/lib/systemd/system'), Path('/usr/lib/systemd/user'),
+                    Path('/run/systemd/system'), Path('/run/systemd/user'),
+                    HOME/'.config/systemd/user')
+                require(any(path.is_relative_to(parent) for parent in allowed),
+                        'unit source outside bounded roots')
+                body = evidence_read(path, uid if manager == 'user' else 0)
+                row['sources'].append({'pathSha256': object_digest(name), 'metadata': evidence_metadata(path),
+                                      'sha256': hashlib.sha256(body).hexdigest()})
+            if unit.endswith('.service') and props['LoadState'] == 'loaded':
+                row['execStartSha256'] = object_digest(host.exec_start(manager, unit))
+            result['units'][manager+'/'+unit] = row
+        paths = (Path('/var'), Path('/var/lib'), STATE, STATE/'plans', STATE/'packages',
+                 RELEASES, STATE/'installed-v1', STATE/'app-hold', STATE/'maintenance-hold',
+                 RUNTIME, RUNTIME/'deploy.lock', CURRENT)
+        result['paths'] = {str(path): evidence_metadata(path) for path in paths}
+        require(evidence_read(ENV, uid) == config and
+                evidence_read(RUNTIME/'current-release', uid) == marker and
+                CURRENT.resolve(strict=True) == current and
+                evidence_metadata(database) == db_meta, 'binding changed during inspection')
+        lock_unchanged()
+    return result
+
+
 def protected(path, owner=0, parents=False):
     path = Path(path)
     require(path.is_absolute() and path.resolve(strict=True) == path, 'protected path noncanonical')
