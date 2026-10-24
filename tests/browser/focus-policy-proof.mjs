@@ -101,7 +101,20 @@ export async function verifyFocusPolicy({ browser, fixture, origin, output }) {
         await close.waitFor(); assert.equal((await outline(close)).focused, true);
         await ring(close, false, 'pointer-opened dialog close');
         await page.screenshot({ path: output + `focus-${name}-dialog-pointer.png`, fullPage: true });
-        await page.keyboard.press('Tab'); await ring(close, true, 'dialog keyboard focus');
+        // Native dialogs may visit browser chrome after their final control.
+        // Inspect the actual focus path; never require the previous button to
+        // retain focus or programmatically move focus to satisfy the assertion.
+        await page.keyboard.press('Tab');
+        const focusHop = await page.evaluate(() => ({
+          tag: document.activeElement?.tagName,
+          browserBoundary: document.activeElement === document.body,
+          insideDialog: Boolean(document.querySelector('dialog[open]')?.contains(document.activeElement)),
+        }));
+        console.log(`focus-path ${name} ${JSON.stringify(focusHop)}`);
+        if (focusHop.browserBoundary) await page.keyboard.press('Tab');
+        const activeDialogTarget = page.locator('dialog[open]:focus, dialog[open] :focus');
+        assert.equal(await activeDialogTarget.count(), 1, 'Tab returns to modal, never a background control');
+        await ring(activeDialogTarget, true, 'actual dialog keyboard focus');
         await page.keyboard.press('Escape');
         assert.equal(await page.getByRole('dialog').isVisible(), false);
         await tabTo(page, list); await ring(list, true, 'keyboard response list');
