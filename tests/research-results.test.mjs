@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
-import { buildResults, parseResponse, parseFilters, questionSummary, questionApplicability, flagRepeatedContacts } from '../src/lib/research/results.ts';
+import { buildResults, parseResponse, parseFilters, questionSummary, questionApplicability, flagRepeatedContacts, questionsFor } from '../src/lib/research/results.ts';
 import { readResearchResults, readResearchResponse } from '../src/lib/research/results-store.ts';
 import { forms, researchAnalysis } from '../src/lib/research/model.ts';
 import { schemaVersion } from '../src/lib/research/policy.ts';
@@ -145,4 +145,29 @@ test('results scope neutral edges and bounded scrolling without depending on bro
   assert.match(css, /@media\(max-width:600px\)\{\.page :global\(\.boundedListViewport\)\{max-block-size:min\(60dvh,28rem\)/);
   const workspace = readFileSync(new URL('../src/components/StaffWorkspaces.tsx', import.meta.url), 'utf8');
   assert.match(workspace, /role === "admin" && allStaffAccess \? <nav[^}]+[\s\S]*?<Link href="\/admin\/surveys">Survey results<\/Link><\/nav> : null/);
+});
+
+test('informational contact group is not a missing answer, but real blanks remain counted', () => {
+  const answers = Object.fromEntries(questionsFor('consumer')
+    .filter(question => question.suggested_input_type !== 'optional_contact_group')
+    .map(question => [question.id, question.options?.[0] ?? 'Synthetic answer']));
+  assert.equal(q('H4').suggested_input_type, 'optional_contact_group');
+  assert.equal(Object.hasOwn(answers, 'H4'), false);
+  for (const gate of ['H1', 'H2', 'H3']) {
+    const complete = { ...answers, H1: 'No', H2: 'No', H3: 'No', [gate]: 'Yes', E1: '5' };
+    assert.equal(questionApplicability(q('H4'), complete, 'consumer'), 'eligible');
+    const saved = row(complete);
+    const payloadBefore = saved.payload;
+    assert.equal(parseResponse(saved).flags.includes('Some answers blank'), false);
+    const result = buildResults([saved], filters('sample=all&question=E1'));
+    assert.equal(result.totals.blanks, 0);
+    assert.equal(result.questions.some(question => question.id === 'H4'), false);
+    assert.equal(result.question.blank, 0);
+    const missingRealAnswer = row({ ...complete, E1: '' });
+    assert.equal(parseResponse(missingRealAnswer).flags.includes('Some answers blank'), true);
+    const incomplete = buildResults([missingRealAnswer], filters('sample=all&question=E1'));
+    assert.equal(incomplete.totals.blanks, 1);
+    assert.equal(incomplete.question.blank, 1);
+    assert.equal(saved.payload, payloadBefore);
+  }
 });

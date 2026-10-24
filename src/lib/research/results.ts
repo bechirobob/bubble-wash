@@ -47,7 +47,7 @@ export function parseResponse(row: ResearchRow): ParsedResponse {
   const result: ParsedResponse = { row, answers, analysis, identity: { name: text(identity.name), organisation: text(identity.organisation), email: text(identity.email), phone: text(identity.phone) }, schemaKnown, synthetic, malformed, flags };
   if (schemaKnown && !malformed) {
     const questions = questionsFor(row.instrument);
-    const blanks = questions.filter(q => questionApplicability(q, answers, row.instrument as InstrumentId) === 'eligible' && !answered(answers[q.id])).length;
+    const blanks = questions.filter(q => q.suggested_input_type !== 'optional_contact_group' && questionApplicability(q, answers, row.instrument as InstrumentId) === 'eligible' && !answered(answers[q.id])).length;
     if (blanks) flags.push('Some answers blank');
   }
   return result;
