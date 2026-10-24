@@ -34,8 +34,11 @@ class EvidenceTests(unittest.TestCase):
             if 'busctl' in cmd:
                 return 'a(sasbttttuii) 1 "/usr/bin/node" 2 "/usr/bin/node" "SECRET_ARG" false 0 0 0 0 0 0 0'
             self.assertIn('show',cmd);self.assertNotIn('list-units',cmd)
-            props=dict.fromkeys(a.EVIDENCE_PROPERTIES,'')
-            props.update(LoadState='loaded',ActiveState='active',SubState='running',MainPID='1',ControlPID='0',NeedDaemonReload='no',Conditions='SECRET_CONDITION')
+            self.assertIn('--all',cmd)
+            requested=next(part.removeprefix('--property=') for part in cmd if part.startswith('--property=')).split(',')
+            props=dict.fromkeys(requested,'')
+            props.update(LoadState='loaded',ActiveState='active',SubState='running',NeedDaemonReload='no',Conditions='SECRET_CONDITION')
+            if 'MainPID' in props:props.update(MainPID='1',ControlPID='0')
             return '\n'.join(k+'='+v for k,v in props.items())
         self.run=run
         self.stack=contextlib.ExitStack();self.addCleanup(self.stack.close)
@@ -126,6 +129,38 @@ class EvidenceTests(unittest.TestCase):
         host=types.SimpleNamespace(prefix=lambda _:[],run=lambda _: 'a(sbbsi) 1 "ConditionPathExists" maybe false "/x" 1')
         with self.assertRaises(ValueError):a.evidence_conditions(host,'system','bubblewash-maintenance.service')
 
+    def test_timer_has_only_applicable_properties(self):
+        result=a.inspect_host_evidence(g,self.run)
+        timer=result['units']['system/bubblewash-maintenance.timer']
+        self.assertNotIn('MainPID',timer)
+        self.assertNotIn('ControlGroupSha256',timer)
+        self.assertIn('loadedConditions',timer)
+        first=self.calls[0]
+        requested=next(part for part in first if part.startswith('--property='))
+        self.assertNotIn('MainPID',requested)
+        self.assertNotIn('EnvironmentFiles',requested)
+        self.assertIn('--all',first)
+
+    def test_missing_service_property_still_refused(self):
+        def run(cmd):
+            raw=self.run(cmd)
+            if 'show' in cmd and any(x.endswith('.service') for x in cmd):
+                raw='\n'.join(line for line in raw.splitlines() if not line.startswith('MainPID='))
+            return raw
+        with self.assertRaises(ValueError):a.inspect_host_evidence(g,run)
+        self.assertEqual(a.EVIDENCE_STAGE,'UNIT_PROPERTIES')
+
+    def test_failure_diagnostic_redacts_exception(self):
+        (self.runtime/'deploy.lock').unlink()
+        try:a.inspect_host_evidence(g,self.run)
+        except FileNotFoundError as error:result=a.evidence_failure(error)
+        self.assertEqual(result['stage'],'LOCK');self.assertEqual(result['category'],'MISSING')
+        self.assertNotIn(str(self.root),json.dumps(result))
+        with patch.object(a,'EVIDENCE_STAGE','SECRET_STAGE'):
+            result=a.evidence_failure(ValueError('SECRET_VALUE /private/path'))
+        self.assertEqual(result['stage'],'INITIALIZE');self.assertEqual(result['category'],'REFUSED')
+        self.assertNotIn('SECRET',json.dumps(result))
+
     def test_stream_no_plan_no_host_imports(self):
         command=[sys.executable,'-B',str(ROOT/'ops/integration-release/stream_host.py'),'--mode','inspect-host-evidence']
         value=subprocess.run(command,capture_output=True,text=True)
@@ -135,6 +170,13 @@ class EvidenceTests(unittest.TestCase):
         smoke=subprocess.run([sys.executable,'-I','-B','-'], input=initialize+"\nassert callable(sys.modules['host_adapter'].inspect_host_evidence)\nprint('initialized')\n",capture_output=True,text=True)
         self.assertEqual(smoke.returncode,0,smoke.stderr)
         self.assertEqual(smoke.stdout.strip(),'initialized')
+        tail=value.stdout[len(initialize):]
+        inject="\nm=sys.modules['host_adapter']\nm.EVIDENCE_STAGE='UNIT_PROPERTIES'\nm.inspect_host_evidence=lambda guard: (_ for _ in ()).throw(ValueError('SECRET_ENV /private/path'))\n"
+        failed=subprocess.run([sys.executable,'-I','-B','-'],input=initialize+inject+tail,capture_output=True,text=True)
+        self.assertEqual(failed.returncode,1);self.assertEqual(failed.stdout,'')
+        report=json.loads(failed.stderr)
+        self.assertEqual(report['stage'],'UNIT_PROPERTIES');self.assertEqual(report['category'],'REFUSED')
+        self.assertNotIn('SECRET_ENV',failed.stderr);self.assertNotIn('/private/path',failed.stderr)
         bad=subprocess.run(command+['--plan-id','a'*64],capture_output=True,text=True)
         self.assertNotEqual(bad.returncode,0)
 
