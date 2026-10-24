@@ -350,7 +350,7 @@ class BoundaryTests(unittest.TestCase):
             fakefacts=types.SimpleNamespace(trusted_executable=lambda p:p,source=lambda *args:{'sha256':host.NODE_SHA256},bounded=lambda *args,**kwargs:b'v22.0.0\n')
             fakeoperator=types.SimpleNamespace(verify_source=mock.Mock(),verify_runtime=mock.Mock())
             collision={'duplicatePresent':False}
-            with mock.patch.multiple(host,core=fakecore,guards=fakeguards,scanner=fakescanner,facts=fakefacts,operator=fakeoperator),mock.patch.object(host.preflight,'owner_delivery_configuration',return_value={'personalMfaKeyReady':True}),mock.patch.object(host,'inspect_database',return_value=(collision,'e'*64)),mock.patch.object(host,'invoke_capsule') as writer:
+            with mock.patch.multiple(host,core=fakecore,guards=fakeguards,scanner=fakescanner,facts=fakefacts,operator=fakeoperator),mock.patch.object(host.preflight,'owner_delivery_configuration',return_value={'personalMfaKeyReady':True}),mock.patch.object(host,'inspect_database',return_value=(collision,'e'*64)),mock.patch.object(host,'runtime_configuration'),mock.patch.object(host,'invoke_capsule') as writer:
                 result=json.loads(host.operation(copy.deepcopy(REQUEST),owner,lambda:None));self.assertEqual(result['state'],'clear');writer.assert_not_called()
                 fakescanner.source_snapshot.side_effect=[({},('source',)),({},('changed',))]
                 with self.assertRaises(Exception):host.operation(copy.deepcopy(REQUEST),owner,lambda:None)
@@ -441,5 +441,89 @@ class WorkflowOrderingTests(unittest.TestCase):
             (clean/'runtime-artifact').rmdir()
             restored=subprocess.run(command,capture_output=True,text=True,timeout=30)
             self.assertEqual(restored.returncode,0,restored.stderr)
+
+class AppUidRuntimeTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory(prefix='owner-appuid-');self.root=Path(self.temp.name);self.release=self.root/'release';self.release.mkdir();self.proc=self.root/'proc';self.proc.mkdir();self.database=self.root/'existing.sqlite';self.database.touch();self.node=self.root/'node';self.node.touch();self.uid=os.getuid();self.main=222;self.listener=333;self.calls=[]
+        self.values={'NODE_ENV':'production','BUBBLEWASH_DISABLE_DEMO_LOGIN':'true','BUBBLEWASH_RESEARCH_OPEN':'true','BUBBLEWASH_RESEARCH_EMAIL_ENABLED':'true','BUBBLEWASH_STAFF_AUTH_DISABLED':'false','BUBBLEWASH_BOOKINGS_DISABLED':'true','BUBBLEWASH_DATABASE_PATH':str(self.database),'PRESERVED_SETTING':'synthetic-private-value'}
+        for pid in (self.main,self.listener):
+            directory=self.proc/str(pid);directory.mkdir();(directory/'cwd').symlink_to(self.release,target_is_directory=True);(directory/'exe').symlink_to(self.node);(directory/'cgroup').write_bytes(b'0::/same-service\n');self.write_stat(pid,'12345');self.write_env(pid,self.values)
+        self.operator=load('appuid_original_operator','ops/run-research-test.py')
+        self.facts=types.SimpleNamespace(require=host.require,trusted_executable=lambda path:path,bounded=self.bounded)
+        def path(value):return self.proc if str(value)=='/proc' else Path(value)
+        self.patches=[mock.patch.multiple(host,core=core,guards=guards,preflight=preflight,operator=self.operator,facts=self.facts),mock.patch.object(preflight,'PROC',self.proc),mock.patch.object(self.operator,'Path',side_effect=path)]
+        for patch in self.patches:patch.start()
+    def tearDown(self):
+        for patch in reversed(self.patches):patch.stop()
+        self.temp.cleanup()
+    def write_stat(self,pid,start):
+        (self.proc/str(pid)/'stat').write_text(str(pid)+' (fixture) S '+'0 '*18+start+'\n')
+    def write_env(self,pid,values):
+        (self.proc/str(pid)/'environ').write_bytes(b'\0'.join((key+'='+value).encode() for key,value in values.items())+b'\0')
+    def bounded(self,args,**kwargs):
+        self.calls.append((args,kwargs));self.assertNotIn('runuser',args);self.assertNotIn('sudo',args)
+        self.assertEqual(kwargs['env']['XDG_RUNTIME_DIR'],f'/run/user/{self.uid}');self.assertEqual(kwargs['env']['DBUS_SESSION_BUS_ADDRESS'],f'unix:path=/run/user/{self.uid}/bus')
+        if args[0]=='/usr/bin/ss':return ('LISTEN 0 511 *:3000 *:* users:(("node",pid='+str(self.listener)+',fd=18))\n').encode()
+        self.assertEqual(args[:4],['/usr/bin/systemctl','--user','show','bubblewash-local.service'])
+        if args[-1]=='--property=MainPID':return ('MainPID='+str(self.main)+'\n').encode()
+        return ('LoadState=loaded\nActiveState=active\nNeedDaemonReload=no\nMainPID='+str(self.main)+'\nWorkingDirectory='+str(self.release)+'\nEnvironmentFiles='+str(self.operator.ENV)+' (ignore_errors=no)\n').encode()
+    def verify(self):return host.runtime_configuration(self.release,self.values,str(self.node),self.uid,self.database)
+    def test_actual_nonroot_runuser_reproduction(self):
+        executable=shutil.which('runuser');self.assertIsNotNone(executable);self.assertGreater(os.getuid(),0)
+        result=subprocess.run([executable,'-u',pwd.getpwuid(os.getuid()).pw_name,'--','/usr/bin/true'],capture_output=True,text=True,timeout=5)
+        self.assertNotEqual(result.returncode,0);self.assertIn('non-root',result.stderr)
+    def test_same_uid_direct_runtime_checks_pass_with_all_original_guards(self):
+        self.assertGreater(self.uid,0);self.verify();self.assertTrue(self.calls)
+        self.assertTrue(all(args[0] in ('/usr/bin/systemctl','/usr/bin/ss') for args,_ in self.calls))
+    def test_each_process_rejects_any_protected_env_drift(self):
+        for pid in (self.main,self.listener):
+            changed=dict(self.values,PRESERVED_SETTING='changed')
+            self.write_env(pid,changed)
+            with self.subTest(pid=pid):
+                with self.assertRaises(Exception):self.verify()
+            self.write_env(pid,self.values)
+    def test_each_process_rejects_closed_flags_or_unsafe_production_mode(self):
+        for pid in (self.main,self.listener):
+            for key in ('BUBBLEWASH_RESEARCH_OPEN','BUBBLEWASH_RESEARCH_EMAIL_ENABLED','BUBBLEWASH_DISABLE_DEMO_LOGIN','NODE_ENV'):
+                changed=dict(self.values);changed[key]='false';self.write_env(pid,changed)
+                with self.subTest(pid=pid,key=key):
+                    with self.assertRaises(Exception):self.verify()
+                self.write_env(pid,self.values)
+    def test_cwd_and_cgroup_binding_remain_enforced(self):
+        (self.proc/str(self.listener)/'cgroup').write_bytes(b'0::/different-service\n')
+        with self.assertRaises(Exception):self.verify()
+        (self.proc/str(self.listener)/'cgroup').write_bytes(b'0::/same-service\n');cwd=self.proc/str(self.main)/'cwd';cwd.unlink();cwd.symlink_to(self.root,target_is_directory=True)
+        with self.assertRaises(Exception):self.verify()
+    def test_process_start_time_drift_refuses(self):
+        original=preflight.process_identity;counts={}
+        def changed(pid):
+            counts[pid]=counts.get(pid,0)+1
+            value=original(pid)
+            return (value[0],b'changed') if counts[pid]>=4 else value
+        with mock.patch.object(preflight,'process_identity',side_effect=changed):
+            with self.assertRaises(Exception):self.verify()
+    def test_final_service_or_listener_pid_change_refuses(self):
+        for field in ('main','listener'):
+            original=self.bounded;counts={'pid':0,'ss':0}
+            def changing(args,**kwargs):
+                result=original(args,**kwargs)
+                if args[-1]=='--property=MainPID':
+                    counts['pid']+=1
+                    if field=='main' and counts['pid']==2:return b'MainPID=444\n'
+                if args[0]=='/usr/bin/ss':
+                    counts['ss']+=1
+                    if field=='listener' and counts['ss']==3:return b'LISTEN users:(("node",pid=444,fd=18))\n'
+                return result
+            with mock.patch.object(self.facts,'bounded',side_effect=changing):
+                with self.subTest(field=field):
+                    with self.assertRaises(Exception):self.verify()
+    def test_uid_mismatch_refuses_before_commands(self):
+        with self.assertRaises(Exception):host.runtime_configuration(self.release,self.values,str(self.node),self.uid+1,self.database)
+        self.assertEqual(self.calls,[])
+    def test_initial_and_precommit_sites_use_full_same_uid_verifier(self):
+        tree=ast.parse((ROOT/'ops/owner-document-host.py').read_text());operation=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='operation');before=next(n for n in ast.walk(operation) if isinstance(n,ast.FunctionDef) and n.name=='before_commit')
+        self.assertEqual(sum(isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='runtime_configuration' for n in ast.walk(operation)),2)
+        self.assertTrue(any(isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='runtime_configuration' for n in ast.walk(before)))
+        self.assertFalse(any(isinstance(n,ast.Attribute) and n.attr=='runtime_flags' for n in ast.walk(operation)))
 
 if __name__=='__main__':unittest.main()
