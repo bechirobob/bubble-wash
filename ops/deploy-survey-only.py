@@ -909,7 +909,102 @@ def normalize_release(args):
     return result
 
 
+RESTART_ADDITIONS = frozenset(('BUBBLEWASH_RESEARCH_RESEND_KEY', 'BUBBLEWASH_RESEARCH_EMAIL_ENABLED'))
+
+
+def closed_restart_values(expected, observed):
+    """Only these two already-installed inactive additions may still be absent."""
+    closed(expected)
+    closed(observed)
+    require(re.fullmatch(r're_[A-Za-z0-9_-]{16,200}', expected.get('BUBBLEWASH_RESEARCH_RESEND_KEY', '')) and
+            expected.get('BUBBLEWASH_RESEARCH_EMAIL_ENABLED') == 'false')
+    require(all(observed.get(key) == value for key, value in expected.items() if key not in RESTART_ADDITIONS))
+    require(all(key not in observed or observed[key] == expected[key] for key in RESTART_ADDITIONS))
+
+
+def closed_restart_runtime(current, values):
+    # Core service/listener/source/cgroup policy is unchanged. The two permitted
+    # inactive additions are checked individually below, never simply ignored.
+    legacy = {key: value for key, value in values.items() if key not in RESTART_ADDITIONS}
+    core.check_runtime(current, legacy)
+    main = core.parse(core.ctl('show', core.UNIT, '--property=MainPID').encode()).get('MainPID', '')
+    listeners = core.command(['ss', '-H', '-ltnp', 'sport = :3000'])
+    listening = set(re.findall(r'pid=(\d+)', listeners))
+    processes = {main, *listening}
+    require(len(listening) == 1 and len(processes) in (1, 2) and
+            all(re.fullmatch(r'[1-9][0-9]*', pid) for pid in processes))
+    identities = []
+    for pid in sorted(processes):
+        with (Path('/proc') / pid / 'environ').open('rb') as handle:
+            raw = handle.read(131073)
+        require(len(raw) <= 131072)
+        observed = dict(item.decode().split('=', 1) for item in raw.split(b'\0') if b'=' in item)
+        closed_restart_values(values, observed)
+        identities.append((pid, hashlib.sha256(raw).hexdigest()))
+    core.check_runtime(current, legacy)
+    return tuple(identities)
+
+
+def restart_closed(args):
+    result = {'schema': 'bubblewash-closed-restart/v1', 'ok': False, 'stage': 'binding',
+              'restartAttempted': False, 'automaticRetry': False, 'status': 'refused-no-restart'}
+    require(os.geteuid() == 0 and args.expected_live == pins['baseSha'] and re.fullmatch(r'[a-f0-9]{40}', args.sha))
+    owner = pwd.getpwnam('ubuntu')
+    previous = signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(InspectTimeout()))
+    signal.setitimer(signal.ITIMER_REAL, 180)
+    try:
+        with core.deployment_lock(core.RUNTIME, owner.pw_uid) as lock_unchanged:
+            current, marker = baseline_binding(owner)
+            result['stage'] = 'source'
+            inspect_source(current, owner, 'baseline')
+            def source():
+                require(core.source_manifest(current) == pins['baselineSource'])
+                return {name: file_identity(current / name, owner, digest) for name, digest in pins['baselineFiles'].items()}
+            sources = source()
+            result['stage'] = 'config'
+            raw, identity = environment_snapshot(core.ENV, owner, None)
+            digest = hashlib.sha256(raw).hexdigest()
+            values = core.parse(raw)
+            closed(values)
+            require(values.get('BUBBLEWASH_STAFF_AUTH_DISABLED') == 'false' and
+                    values.get('BUBBLEWASH_BOOKINGS_DISABLED') == 'true' and
+                    values.get('BUBBLEWASH_DISABLE_DEMO_LOGIN') == 'true' and values.get('NODE_ENV') in (None, 'production'))
+            def bound():
+                lock_unchanged()
+                require(baseline_binding(owner) == (current, marker) and source() == sources and
+                        environment_snapshot(core.ENV, owner, digest) == (raw, identity))
+            result['stage'] = 'runtime-preflight'
+            processes = closed_restart_runtime(current, values)
+            result['stage'] = 'health-before'
+            core.health(3000)
+            result['stage'] = 'binding-before'
+            bound()
+            require(closed_restart_runtime(current, values) == processes)
+            bound()
+            result['stage'] = 'restart'
+            result['restartAttempted'] = True  # An uncertain command is never repeated.
+            core.ctl('restart', core.UNIT)
+            result['stage'] = 'health-after'
+            core.health(3000)
+            result['stage'] = 'runtime-verification'
+            runtime_flags(current, values, False)  # Full unchanged equality, no projection.
+            result['stage'] = 'public-health'
+            core.public_health()
+            result['stage'] = 'binding-after'
+            bound()
+            result.update(ok=True, status='restarted-closed', stage='complete')
+    except BaseException:
+        result['status'] = 'restart-unconfirmed' if result['restartAttempted'] else 'refused-no-restart'
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+    print(json.dumps(result, separators=(',', ':')), flush=True)
+    return result
+
+
 def main(args):
+    if args.mode == 'restart-closed':
+        return restart_closed(args)
     if args.mode == 'normalize-baseline':
         return normalize_release(args)
     if args.mode == 'inspect':
@@ -1021,7 +1116,7 @@ def main(args):
 
 def arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', choices=('deploy', 'activate', 'inspect', 'normalize-baseline'), default='deploy')
+    parser.add_argument('--mode', choices=('deploy', 'activate', 'inspect', 'normalize-baseline', 'restart-closed'), default='deploy')
     parser.add_argument('--candidate')
     parser.add_argument('--apply-normalization', action='store_true')
     for key in ('sha', 'expected-live', 'backup-sha256', 'receipt-run', 'store-sha',
@@ -1041,7 +1136,7 @@ def entry():
     except BaseException:
         print(json.dumps({'ok': False, 'status': 'review-required', 'stage': STAGE, 'automaticRetry': False}), flush=True)
         raise SystemExit(1)
-    if args.mode == 'normalize-baseline' and not result['ok']:
+    if args.mode in ('normalize-baseline', 'restart-closed') and not result['ok']:
         raise SystemExit(1)
 
 

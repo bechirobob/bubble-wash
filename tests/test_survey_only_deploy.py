@@ -942,5 +942,149 @@ class BaselineNormalization(unittest.TestCase):
                 self.assertTrue("if: inputs.mode == 'deploy'" in block or "if: inputs.mode == 'activate'" in block)
 
 
+class ClosedRestart(unittest.TestCase):
+    setUp = ReadOnlyInspection.setUp
+
+    def prepare(self):
+        self.args.mode = 'restart-closed'
+        self.values = {'NODE_ENV': 'production', 'BUBBLEWASH_STAFF_AUTH_DISABLED': 'false',
+                       'BUBBLEWASH_BOOKINGS_DISABLED': 'true', 'BUBBLEWASH_DISABLE_DEMO_LOGIN': 'true',
+                       'BUBBLEWASH_DATABASE_PATH': str(self.db), 'BUBBLEWASH_RESEARCH_RESEND_KEY': 're_abcdefghijklmnopqrst',
+                       'BUBBLEWASH_RESEARCH_EMAIL_ENABLED': 'false'}
+        self.raw = ''.join(key+'='+value+'\n' for key,value in self.values.items()).encode()
+        self.env.write_bytes(self.raw)
+        self.db_before = self.db.read_bytes()
+        self.preflight = self.stack.enter_context(mock.patch.object(adapter, 'closed_restart_runtime', return_value=(('123','fixed-proof'),)))
+        self.ctl = self.stack.enter_context(mock.patch.object(core, 'ctl'))
+        self.health = self.stack.enter_context(mock.patch.object(core, 'health'))
+        self.public = self.stack.enter_context(mock.patch.object(core, 'public_health'))
+        self.flags = self.stack.enter_context(mock.patch.object(adapter, 'runtime_flags'))
+        for name in ('replace_environment','add_research_schema','marked_test_accepted'):
+            self.forbidden.append(self.stack.enter_context(mock.patch.object(adapter, name, side_effect=AssertionError('write forbidden'))))
+        self.forbidden.append(self.stack.enter_context(mock.patch.object(adapter.sqlite3, 'connect', side_effect=AssertionError('database open forbidden'))))
+
+    def run_restart(self):
+        import contextlib,io
+        output=io.StringIO()
+        with contextlib.redirect_stdout(output): result=adapter.main(self.args)
+        self.assertEqual(json.loads(output.getvalue()),result)
+        self.assertNotIn(str(self.root),output.getvalue());self.assertNotIn('re_abcdefghijklmnopqrst',output.getvalue())
+        self.assertEqual(self.db.read_bytes(),self.db_before)
+        self.assertEqual(self.current.resolve(),self.old)
+        for operation in self.forbidden: operation.assert_not_called()
+        return result
+
+    def test_exact_two_absent_additions_or_equal_present_values_are_allowed(self):
+        expected={'NODE_ENV':'production','EXISTING':'unchanged','BUBBLEWASH_RESEARCH_RESEND_KEY':'re_abcdefghijklmnopqrst','BUBBLEWASH_RESEARCH_EMAIL_ENABLED':'false'}
+        for absent in (adapter.RESTART_ADDITIONS, frozenset(), frozenset(('BUBBLEWASH_RESEARCH_RESEND_KEY',))):
+            adapter.closed_restart_values(expected,{key:value for key,value in expected.items() if key not in absent})
+
+    def test_different_or_enabled_additions_and_any_legacy_drift_refuse(self):
+        expected={'NODE_ENV':'production','EXISTING':'unchanged','BUBBLEWASH_RESEARCH_RESEND_KEY':'re_abcdefghijklmnopqrst','BUBBLEWASH_RESEARCH_EMAIL_ENABLED':'false'}
+        for key,value in [('EXISTING','different'),('BUBBLEWASH_RESEARCH_RESEND_KEY','re_differentabcdefghijk'),('BUBBLEWASH_RESEARCH_EMAIL_ENABLED','true'),('BUBBLEWASH_RESEARCH_OPEN','true')]:
+            with self.assertRaises(ValueError):adapter.closed_restart_values(expected,{**expected,key:value})
+        with self.assertRaises(ValueError):adapter.closed_restart_values(expected,{'NODE_ENV':'production'})
+        with self.assertRaises(ValueError):adapter.closed_restart_values({**expected,'BUBBLEWASH_RESEARCH_EMAIL_ENABLED':'true'},expected)
+
+    def test_real_preflight_checks_both_processes_and_only_projects_two_fields(self):
+        import io
+        expected={'NODE_ENV':'production','EXISTING':'unchanged','BUBBLEWASH_RESEARCH_RESEND_KEY':'re_abcdefghijklmnopqrst','BUBBLEWASH_RESEARCH_EMAIL_ENABLED':'false'}
+        legacy={key:value for key,value in expected.items() if key not in adapter.RESTART_ADDITIONS}
+        environments={'123':legacy,'456':expected}
+        class Proc:
+            def __init__(self,value):self.value=str(value)
+            def __truediv__(self,value):return Proc(self.value+'/'+str(value))
+            def open(self,mode):return io.BytesIO(b'\0'.join((key+'='+value).encode() for key,value in environments[self.value.split('/')[2]].items()))
+        with mock.patch.object(adapter,'Path',Proc),mock.patch.object(core,'check_runtime') as check,\
+             mock.patch.object(core,'ctl',return_value='MainPID=123\n'),mock.patch.object(core,'command',return_value='pid=456,'):
+            result=adapter.closed_restart_runtime(self.old,expected)
+            self.assertEqual([x[0] for x in result],['123','456'])
+            self.assertEqual(check.call_args_list,[mock.call(self.old,legacy),mock.call(self.old,legacy)])
+            environments['456']={**expected,'BUBBLEWASH_RESEARCH_RESEND_KEY':'different'}
+            with self.assertRaises(ValueError):adapter.closed_restart_runtime(self.old,expected)
+
+    def test_success_restarts_once_then_requires_full_unprojected_closed_equality(self):
+        self.prepare(); result=self.run_restart()
+        self.assertTrue(result['ok']);self.assertEqual(result['status'],'restarted-closed');self.assertEqual(result['stage'],'complete')
+        self.ctl.assert_called_once_with('restart',core.UNIT)
+        self.flags.assert_called_once_with(self.old,self.values,False)
+        self.assertEqual(self.health.call_args_list,[mock.call(3000),mock.call(3000)])
+        self.assertEqual(self.preflight.call_count,2);self.public.assert_called_once()
+        self.assertEqual(self.env.read_bytes(),self.raw);self.assertFalse(result['automaticRetry'])
+
+    def test_preflight_drift_prevents_restart_and_all_writes(self):
+        self.prepare();self.preflight.side_effect=ValueError('private runtime mismatch')
+        result=self.run_restart();self.assertFalse(result['ok']);self.assertEqual(result['stage'],'runtime-preflight')
+        self.assertEqual(result['status'],'refused-no-restart');self.ctl.assert_not_called()
+        self.assertEqual(self.env.read_bytes(),self.raw)
+
+    def test_late_config_drift_is_not_overwritten_or_restarted(self):
+        self.prepare();calls=0;unknown=self.raw+b'UNRELATED=changed\n'
+        def drift(*args):
+            nonlocal calls
+            calls+=1
+            if calls==2:self.env.write_bytes(unknown)
+            return (('123','fixed-proof'),)
+        self.preflight.side_effect=drift
+        result=self.run_restart();self.assertFalse(result['ok']);self.assertEqual(result['stage'],'binding-before')
+        self.ctl.assert_not_called();self.assertEqual(self.env.read_bytes(),unknown)
+
+    def test_late_source_drift_prevents_restart(self):
+        self.prepare();calls=0
+        def drift(*args):
+            nonlocal calls
+            calls+=1
+            if calls==2:(self.old/'package.json').write_text('changed source')
+            return (('123','fixed-proof'),)
+        self.preflight.side_effect=drift
+        result=self.run_restart();self.assertFalse(result['ok']);self.ctl.assert_not_called()
+
+    def test_new_untracked_source_after_preflight_prevents_restart(self):
+        self.prepare();calls=0
+        def drift(*args):
+            nonlocal calls
+            calls+=1
+            if calls==2:(self.old/'src'/'untracked.ts').write_text('unexpected source')
+            return (('123','fixed-proof'),)
+        self.preflight.side_effect=drift
+        result=self.run_restart();self.assertFalse(result['ok']);self.ctl.assert_not_called()
+        self.assertEqual(result['stage'],'binding-before')
+
+    def test_changed_process_identity_prevents_restart(self):
+        self.prepare();self.preflight.side_effect=[(('123','before'),),(('456','after'),)]
+        result=self.run_restart();self.assertFalse(result['ok']);self.ctl.assert_not_called()
+
+    def test_uncertain_restart_command_never_retries(self):
+        self.prepare();self.ctl.side_effect=TimeoutError('private timeout details')
+        result=self.run_restart();self.assertEqual(result['status'],'restart-unconfirmed');self.assertEqual(result['stage'],'restart')
+        self.ctl.assert_called_once_with('restart',core.UNIT);self.flags.assert_not_called()
+        self.assertEqual(self.env.read_bytes(),self.raw)
+
+    def test_post_restart_health_failure_does_not_write_restore_or_restart_again(self):
+        self.prepare();self.health.side_effect=[None,ValueError('private health failure')]
+        result=self.run_restart();self.assertEqual(result['status'],'restart-unconfirmed');self.assertEqual(result['stage'],'health-after')
+        self.ctl.assert_called_once_with('restart',core.UNIT);self.assertEqual(self.env.read_bytes(),self.raw)
+
+    def test_post_restart_full_equality_failure_is_not_ignored(self):
+        self.prepare();self.flags.side_effect=ValueError('full config mismatch')
+        result=self.run_restart();self.assertFalse(result['ok']);self.assertEqual(result['stage'],'runtime-verification')
+        self.ctl.assert_called_once_with('restart',core.UNIT);self.assertEqual(self.env.read_bytes(),self.raw)
+
+    def test_existing_open_config_refuses_before_restart(self):
+        self.prepare();self.env.write_bytes(self.raw+b'BUBBLEWASH_RESEARCH_OPEN=true\n')
+        result=self.run_restart();self.assertFalse(result['ok']);self.assertEqual(result['stage'],'config');self.ctl.assert_not_called()
+
+    def test_restart_workflow_is_explicit_and_cannot_stage_deploy_or_activate(self):
+        text=(ROOT/'.github/workflows/survey-only-deploy.yml').read_text()
+        self.assertIn("inputs.mode != 'restart-closed'",text)
+        step=next(block for block in text.split('      - name:') if '--mode restart-closed' in block)
+        self.assertIn("if: inputs.mode == 'restart-closed'",step)
+        self.assertNotIn('--candidate',step);self.assertNotIn('apply_normalization',step)
+        self.assertLess(text.index('Test exact read-only inspection controls'),text.index('Connect through existing approved production tailnet'))
+        for block in text.split('      - name:'):
+            if any(term in block for term in ('git -C runtime-artifact archive','--mode activate',"--candidate '$RELEASE_DIR'")):
+                self.assertTrue("if: inputs.mode == 'deploy'" in block or "if: inputs.mode == 'activate'" in block)
+
+
 if __name__ == '__main__':
     unittest.main()
