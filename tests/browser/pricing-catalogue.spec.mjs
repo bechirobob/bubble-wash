@@ -170,9 +170,19 @@ test('slow hydration keeps estimate controls safe, then preserves the decimal qu
 
 test('touch selection has no sticky ring and keyboard selection retains its ring', async ({ page }, testInfo) => {
   await page.goto('/services');
+  await page.evaluate(() => {
+    window.__pricingPointerEvents = [];
+    for (const type of ['pointerdown', 'click', 'keydown']) document.addEventListener(type, event => {
+      const target = event.target;
+      if (!target?.closest?.('.focusedPlanSegment')) return;
+      window.__pricingPointerEvents.push({ type, tag: target.tagName, detail: event.detail ?? null, trusted: event.isTrusted, key: event.key ?? null, modality: document.documentElement.dataset.inputModality });
+    });
+  });
   const segment = page.locator('.focusedPlanSegment').first();
   if (testInfo.project.use.hasTouch) await segment.tap(); else await segment.click();
   await expect(page.locator('.focusedPlanCard h3')).toHaveText('Weekly');
+  console.log('pricing pointer provenance', JSON.stringify(await page.evaluate(() => window.__pricingPointerEvents)));
+  await expect(page.locator('html')).toHaveAttribute('data-input-modality', 'pointer');
   await expect.poll(() => segment.evaluate(node => getComputedStyle(node).outlineStyle)).toBe('none');
   await page.keyboard.press('ArrowRight');
   const selected = page.locator('.focusedPlanSegment').nth(1);

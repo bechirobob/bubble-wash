@@ -6,9 +6,12 @@ import { installFocusModality } from '../src/lib/focus-modality.ts';
 function fixture() {
   const listeners = new Map();
   const windowListeners = new Map();
+  const timers = new Map(); let timerId = 0;
   const document = {
     documentElement: { dataset: {} },
     defaultView: {
+      setTimeout(fn) { timers.set(++timerId, fn); return timerId; },
+      clearTimeout(id) { timers.delete(id); },
       addEventListener(type, listener) { windowListeners.set(type, listener); },
       removeEventListener(type, listener) { assert.equal(windowListeners.get(type), listener); windowListeners.delete(type); },
     },
@@ -16,7 +19,7 @@ function fixture() {
     removeEventListener(type, listener, capture) { assert.equal(capture, true); assert.equal(listeners.get(type), listener); listeners.delete(type); },
   };
   const cleanup = installFocusModality(document);
-  return { document, listeners, windowListeners, cleanup, mode: () => document.documentElement.dataset.inputModality,
+  return { document, listeners, windowListeners, cleanup, pendingTimers: () => timers.size, flush: () => { for (const fn of [...timers.values()]) fn(); }, mode: () => document.documentElement.dataset.inputModality,
     fire: (type, props = {}) => listeners.get(type)(props) };
 }
 
@@ -75,4 +78,54 @@ test('native radio wrappers show keyboard focus without reintroducing pointer ri
     assert.ok(!css.includes(`.${wrapper}:focus-within`));
   }
   assert.match(css, /@media \(forced-colors: active\) \{\s*\.focusedPlanSegment:has\(input:checked\)/);
+});
+
+test('pointer label forwarding is causal, one-shot, and does not swallow assistive activation', () => {
+  const f = fixture();
+  const input = { closest: () => null };
+  const other = { closest: () => null };
+  const labelText = { closest: () => ({ control: input }) };
+  f.fire('pointerdown');
+  f.fire('click', { isTrusted: true, detail: 1, target: labelText });
+  f.fire('click', { isTrusted: true, detail: 0, target: input });
+  assert.equal(f.mode(), 'pointer', 'native label forwarding retains touch/mouse provenance');
+  f.fire('click', { isTrusted: true, detail: 0, target: input });
+  assert.equal(f.mode(), 'keyboard', 'a subsequent genuine assistive activation is not suppressed');
+  f.fire('pointerdown');
+  f.fire('click', { isTrusted: true, detail: 1, target: labelText });
+  f.fire('click', { isTrusted: true, detail: 0, target: other });
+  assert.equal(f.mode(), 'keyboard', 'unrelated control never inherits label provenance');
+  f.fire('pointerdown');
+  f.fire('click', { isTrusted: true, detail: 1, target: labelText });
+  f.flush();
+  f.fire('click', { isTrusted: true, detail: 0, target: input });
+  assert.equal(f.mode(), 'keyboard', 'cancelled label activation expires after its event turn');
+  f.fire('pointerdown');
+  f.fire('click', { isTrusted: true, detail: 1, target: labelText });
+  f.fire('keydown', { key: 'ArrowRight' });
+  f.fire('click', { isTrusted: true, detail: 0, target: input });
+  assert.equal(f.mode(), 'keyboard', 'keyboard activation clears pointer-label provenance');
+  f.cleanup();
+});
+
+test('blur and cleanup discard a pending label-forwarding target and timer', () => {
+  const f = fixture();
+  const input = { closest: () => null };
+  const labelText = { closest: () => ({ control: input }) };
+  f.fire('pointerdown');
+  f.fire('click', { isTrusted: true, detail: 1, target: labelText });
+  assert.equal(f.pendingTimers(), 1);
+  f.windowListeners.get('blur')();
+  assert.equal(f.mode(), undefined);
+  assert.equal(f.pendingTimers(), 0);
+  f.fire('click', { isTrusted: true, detail: 0, target: input });
+  assert.equal(f.mode(), 'keyboard', 'activation after window return uses native assistive fallback');
+  f.fire('pointerdown');
+  f.fire('click', { isTrusted: true, detail: 1, target: labelText });
+  assert.equal(f.pendingTimers(), 1);
+  f.cleanup();
+  assert.equal(f.pendingTimers(), 0);
+  assert.equal(f.mode(), undefined);
+  assert.equal(f.listeners.size, 0);
+  assert.equal(f.windowListeners.size, 0);
 });
