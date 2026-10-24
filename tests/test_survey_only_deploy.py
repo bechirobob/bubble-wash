@@ -528,5 +528,212 @@ class ActivationOrchestration(unittest.TestCase):
         f.ctl.assert_not_called()
 
 
+class ReadOnlyInspection(unittest.TestCase):
+    def setUp(self):
+        import contextlib
+        import types
+        self.stack = contextlib.ExitStack(); self.addCleanup(self.stack.close)
+        self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix='inspect-test-', dir=ROOT)))
+        self.home = self.root / 'home'; self.home.mkdir()
+        self.releases = self.home / 'bubblewash-releases'; self.releases.mkdir()
+        self.old = self.releases / 'old-baseline'; self.old.mkdir()
+        self.sha = 'd' * 40
+        self.candidate = self.releases / ('20261024T014545Z-' + self.sha[:12]); self.candidate.mkdir()
+        for release in (self.old, self.candidate):
+            for name in (*core.CRITICAL_FILES, 'package.json', 'package-lock.json', 'next.config.mjs', 'tsconfig.json'):
+                p = release / name; p.parent.mkdir(parents=True, exist_ok=True); p.write_text('synthetic identical source\n')
+        def file_map(release):
+            return {p.relative_to(release).as_posix(): core.digest(p) for p in sorted(release.rglob('*')) if p.is_file()}
+        self.pins = {**PINS, 'baselineFiles': file_map(self.old), 'runtimeFiles': file_map(self.candidate),
+                     'baselineSource': core.source_manifest(self.old), 'candidateSource': core.source_manifest(self.candidate)}
+        (self.old / '.release-sha').write_text(PINS['baseSha'] + '\n')
+        (self.candidate / '.release-sha').write_text(self.sha + '\n')
+        self.current = self.home / 'current'; self.current.symlink_to(self.old)
+        self.runtime = self.home / 'runtime'; self.runtime.mkdir()
+        self.marker = self.runtime / 'current-release'; self.marker.write_text(f"sha={PINS['baseSha']}\npath={self.old}\n")
+        self.db = self.root / 'existing.sqlite'
+        with sqlite3.connect(self.db) as db: db.execute('create table existing(id integer primary key, value text)')
+        self.db.chmod(0o600)
+        env_parent = self.home / '.config' / 'bubblewash'; env_parent.mkdir(parents=True)
+        self.env = env_parent / 'env'
+        self.env.write_text(f'BUBBLEWASH_DATABASE_PATH={self.db}\nBUBBLEWASH_RESEARCH_RESEND_KEY=private-sentinel-not-for-output\n')
+        self.env.chmod(0o600)
+        self.receipt = self.root / 'receipt.json'
+        self.receipt.write_text(json.dumps({'sha256': 'a'*64, 'runId': '4', 'storageSha': 'b'*40, 'storageRepositoryId': 7}))
+        self.owner = types.SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+        self.args = types.SimpleNamespace(mode='inspect', candidate=str(self.candidate), sha=self.sha,
+            expected_live=PINS['baseSha'], backup_sha256='a'*64, receipt_run='4', store_sha='b'*40, store_id='7')
+        for name, value in [('HOME', self.home), ('CURRENT', self.current), ('RUNTIME', self.runtime), ('ENV', self.env), ('RECEIPT', self.receipt)]:
+            self.stack.enter_context(mock.patch.object(core, name, value))
+        self.stack.enter_context(mock.patch.object(adapter, 'pins', self.pins))
+        self.stack.enter_context(mock.patch.object(adapter.os, 'geteuid', return_value=0))
+        self.stack.enter_context(mock.patch.object(adapter.pwd, 'getpwnam', return_value=self.owner))
+        self.locked = False
+        @contextlib.contextmanager
+        def lock(*_):
+            self.locked = True
+            try: yield lambda: self.assertTrue(self.locked)
+            finally: self.locked = False
+        self.stack.enter_context(mock.patch.object(core, 'deployment_lock', lock))
+        def app(owner, operation):
+            self.assertTrue(self.locked)
+            operation()
+        self.drop = self.stack.enter_context(mock.patch.object(adapter, 'app_operation', side_effect=app))
+        self.forbidden = []
+        for module, names in [(core, ('command', 'ctl', 'activate', 'rehearse')),
+                              (adapter, ('migrate_as_app', 'add_research_schema', 'activate_flags', 'marked_test_accepted'))]:
+            for name in names:
+                self.forbidden.append(self.stack.enter_context(mock.patch.object(module, name, side_effect=AssertionError('mutation route reached'))))
+
+    def run_inspection(self):
+        import contextlib, io
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output): result = adapter.main(self.args)
+        self.assertEqual(json.loads(output.getvalue()), result)
+        for operation in self.forbidden: operation.assert_not_called()
+        self.assertNotIn('private-sentinel', output.getvalue())
+        self.assertNotIn(str(self.root), output.getvalue())
+        self.drop.assert_called_once()
+        return result
+
+    def test_full_inspect_never_reaches_build_service_ddl_or_row_read(self):
+        before = self.db.read_bytes(); statements = []; real_connect = sqlite3.connect
+        def connect(target, *args, **kwargs):
+            result = real_connect(target, *args, **kwargs)
+            if isinstance(target, str) and target.startswith('file:'):
+                self.assertTrue(target.endswith('?mode=ro')); self.assertTrue(kwargs['uri'])
+                result.set_trace_callback(statements.append)
+            return result
+        with mock.patch.object(adapter.sqlite3, 'connect', side_effect=connect):
+            result = self.run_inspection()
+        self.assertTrue(result['ok']); self.assertEqual(result['researchSchema'], 'absent')
+        self.assertEqual(result['binding'], {'pointerClaim': 'baseline', 'markerClaim': 'baseline', 'markerPathMatchesPointer': True})
+        self.assertEqual(result['receipt'], 'matches-input-pins')
+        self.assertEqual(before, self.db.read_bytes())
+        self.assertEqual(statements, ['PRAGMA query_only=ON', 'BEGIN', 'SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name'])
+
+    def test_actual_core_parser_selects_only_database_path_bytes(self):
+        real_parse = core.parse; seen = []
+        def parse(raw): seen.append(raw); return real_parse(raw)
+        with mock.patch.object(core, 'parse', side_effect=parse):
+            path, digest, identity = adapter.inspect_database_path(self.owner)
+        self.assertEqual(path, self.db)
+        self.assertEqual(seen, [f'BUBBLEWASH_DATABASE_PATH={self.db}'.encode()])
+        self.assertEqual(len(digest), 64); self.assertTrue(identity)
+
+    def test_source_failure_still_reports_pointer_schema_and_receipt(self):
+        self.candidate.chmod(0o770)
+        result = self.run_inspection()
+        self.assertFalse(result['ok']); self.assertEqual(result['source']['candidate'], 'refused')
+        failure = next(x for x in result['failures'] if x['scope'] == 'candidate')
+        self.assertEqual(failure['guard'], 'ANCESTOR_MODE'); self.assertIsInstance(failure['ancestorDepth'], int)
+        self.assertEqual(result['researchSchema'], 'absent'); self.assertEqual(result['receipt'], 'matches-input-pins')
+        self.assertEqual(result['binding']['pointerClaim'], 'baseline')
+
+    def test_file_hash_failure_has_fixed_map_index_not_filename(self):
+        (self.candidate / 'package.json').write_text('changed synthetic bytes')
+        result = self.run_inspection()
+        failure = next(x for x in result['failures'] if x['guard'] == 'FILE_HASH')
+        self.assertEqual(failure['scope'], 'candidate'); self.assertIsInstance(failure['fileIndex'], int)
+        self.assertNotIn('package.json', json.dumps(result))
+
+    def test_extra_source_file_reports_manifest_mismatch(self):
+        (self.candidate / 'src/extra.ts').write_text('unexpected source')
+        result = self.run_inspection()
+        self.assertIn('SOURCE_MANIFEST_MISMATCH', [x['guard'] for x in result['failures']])
+
+    def test_candidate_marker_and_receipt_pin_fail_independently(self):
+        (self.candidate / '.release-sha').write_text('e' * 40)
+        self.args.backup_sha256 = 'c' * 64
+        result = self.run_inspection(); guards = [x['guard'] for x in result['failures']]
+        self.assertIn('CANDIDATE_MARKER', guards); self.assertIn('RECEIPT_PIN', guards)
+        self.assertEqual(result['researchSchema'], 'absent')
+
+    def test_current_candidate_and_complete_schema_are_observed_without_old_source_assumption(self):
+        self.current.unlink(); self.current.symlink_to(self.candidate)
+        self.marker.write_text(f'sha={self.sha}\npath={self.candidate}\n')
+        with sqlite3.connect(self.db) as db: db.executescript(SQL.decode())
+        result = self.run_inspection()
+        self.assertEqual(result['binding']['pointerClaim'], 'candidate')
+        self.assertEqual(result['source']['baseline'], 'not-current')
+        self.assertEqual(result['researchSchema'], 'complete')
+
+    def test_partial_schema_is_reported_without_repair(self):
+        with sqlite3.connect(self.db) as db: db.execute('create table research_responses(id text)')
+        before = self.db.read_bytes(); result = self.run_inspection()
+        self.assertEqual(result['researchSchema'], 'partial'); self.assertEqual(before, self.db.read_bytes())
+
+    def test_missing_wal_sidecars_refuse_before_sqlite_connection(self):
+        with sqlite3.connect(self.db) as db: db.execute('pragma journal_mode=WAL')
+        self.assertFalse(Path(str(self.db) + '-wal').exists())
+        with mock.patch.object(adapter.sqlite3, 'connect') as connect:
+            with self.assertRaises(adapter.InspectRefusal) as raised: adapter.inspect_schema(self.db, self.owner)
+            self.assertEqual(raised.exception.result['guard'], 'DATABASE_WAL_UNAVAILABLE')
+            connect.assert_not_called()
+        self.assertFalse(Path(str(self.db) + '-wal').exists()); self.assertFalse(Path(str(self.db) + '-shm').exists())
+
+    def test_existing_wal_reads_committed_schema_without_writing_wal(self):
+        writer = sqlite3.connect(self.db)
+        try:
+            writer.execute('pragma journal_mode=WAL'); writer.executescript(SQL.decode()); writer.commit()
+            wal = Path(str(self.db) + '-wal'); before = wal.read_bytes(); main = self.db.read_bytes()
+            self.assertEqual(adapter.inspect_schema(self.db, self.owner), 'complete')
+            self.assertEqual(wal.read_bytes(), before); self.assertEqual(self.db.read_bytes(), main)
+        finally: writer.close()
+
+    def test_inspect_workflow_is_isolated_from_staging_build_and_activation(self):
+        text = (ROOT / '.github/workflows/survey-only-deploy.yml').read_text()
+        self.assertIn("inputs.mode != 'inspect'", text)
+        blocks = text.split('      - name:')
+        for block in blocks:
+            if any(term in block for term in ('git -C runtime-artifact archive', '--mode activate', "--candidate '$RELEASE_DIR'")):
+                self.assertTrue("if: inputs.mode == 'deploy'" in block or "if: inputs.mode == 'activate'" in block)
+        inspect_step = next(block for block in blocks if '--mode inspect' in block)
+        self.assertIn("if: inputs.mode == 'inspect'", inspect_step)
+        self.assertIn("--candidate '$STAGED_CANDIDATE'", inspect_step)
+        self.assertLess(text.index('Test exact read-only inspection controls'), text.index('Connect through existing approved production tailnet'))
+
+    def test_candidate_directory_symlink_refuses_before_marker_read(self):
+        outside = self.root / 'outside'; outside.mkdir(); (outside / '.release-sha').write_text(self.sha)
+        import shutil
+        shutil.rmtree(self.candidate); self.candidate.symlink_to(outside, target_is_directory=True)
+        real_read = adapter.inspect_read
+        def read(path, *args, **kwargs):
+            self.assertNotEqual(path, self.candidate / '.release-sha')
+            return real_read(path, *args, **kwargs)
+        with mock.patch.object(adapter, 'inspect_read', side_effect=read): result = self.run_inspection()
+        self.assertIn('CANDIDATE_CANONICAL', [x['guard'] for x in result['failures']])
+
+    def test_metadata_read_does_not_mistake_its_own_atime_update_for_mutation(self):
+        path = self.root / 'metadata'; path.write_bytes(b'fixed public metadata')
+        os.utime(path, (1, path.stat().st_mtime))
+        self.assertEqual(adapter.inspect_read(path, self.owner, 'current'), b'fixed public metadata')
+
+    def test_metadata_read_rejects_size_and_inode_drift(self):
+        import types
+        path = self.root / 'metadata'; path.write_bytes(b'fixed public metadata')
+        before = path.stat()
+        fields = (*adapter.IDENTITY, 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+        for changed in ('st_size', 'st_ino'):
+            values = {key: getattr(before, key) for key in fields}; values[changed] += 1
+            after = types.SimpleNamespace(**values)
+            with mock.patch.object(adapter.os, 'fstat', side_effect=[before, after]):
+                with self.assertRaises(adapter.InspectRefusal) as failure: adapter.inspect_read(path, self.owner, 'current')
+            self.assertEqual(failure.exception.result['guard'], 'METADATA_CHANGED')
+
+    def test_unknown_current_release_is_explicitly_refused(self):
+        (self.old / '.release-sha').write_text('e' * 40)
+        result = self.run_inspection()
+        self.assertEqual(result['binding']['pointerClaim'], 'other')
+        self.assertIn('CURRENT_RELEASE_IDENTITY', [x['guard'] for x in result['failures']])
+
+    def test_metadata_bound_and_leaf_symlink_refuse_before_content_read(self):
+        large = self.root / 'large'; large.write_bytes(b'x' * 129)
+        with self.assertRaises(adapter.InspectRefusal) as failure: adapter.inspect_read(large, self.owner, 'candidate', 128)
+        self.assertEqual(failure.exception.result['guard'], 'METADATA_BOUND')
+        link = self.root / 'link'; link.symlink_to(large)
+        with self.assertRaises(OSError): adapter.inspect_read(link, self.owner, 'candidate')
+
+
 if __name__ == '__main__':
     unittest.main()
