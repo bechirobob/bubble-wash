@@ -60,12 +60,12 @@ def identity(value):
 @contextmanager
 def deployment_lock(runtime, app_uid):
     require(runtime.resolve(strict=True) == runtime)
-    directory = os.open(runtime, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    directory = os.open(runtime, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     lock = None
     try:
         ds = os.fstat(directory)
         require(ds.st_uid in (0, app_uid) and not ds.st_mode & 0o022)
-        lock = os.open('deploy.lock', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        lock = os.open('deploy.lock', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=directory)
         ls = os.fstat(lock)
         require(stat.S_ISREG(ls.st_mode) and ls.st_nlink == 1 and ls.st_uid in (0, app_uid) and not ls.st_mode & 0o022)
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -155,17 +155,19 @@ def main():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     require(os.geteuid() == 0 and len(sys.argv) == 1)
     # Host identity is bound by the fixed authenticated root@hermes transport.
-    key = sys.stdin.buffer.read(205)
-    require(len(key) <= 203)
     account = pwd.getpwnam('ubuntu')
     app_uid = account.pw_uid
     require(app_uid > 0)
-    # Irreversibly drop root before any app-owned file/directory is opened.
-    os.setgroups([])
-    os.setgid(account.pw_gid)
-    os.setuid(app_uid)
-    require(os.geteuid() == app_uid and os.getuid() == app_uid)
+    # Only the existing read-only lock descriptor is acquired as root.
     with deployment_lock(RUNTIME, app_uid) as unchanged:
+        os.setgroups([])
+        os.setgid(account.pw_gid)
+        os.setuid(app_uid)
+        require(os.geteuid() == app_uid and os.getuid() == app_uid)
+        unchanged()
+        # No credential input, environment or app source access before the drop.
+        key = sys.stdin.buffer.read(205)
+        require(len(key) <= 203)
         result = subprocess.run(['/usr/bin/systemctl', '--user', 'show', 'bubblewash-local.service',
                                  '--property=LoadState,EnvironmentFiles'], capture_output=True, timeout=20, check=True,
                                 env={'PATH': '/usr/bin:/bin', 'HOME': '/home/ubuntu', 'XDG_RUNTIME_DIR': f'/run/user/{app_uid}'})

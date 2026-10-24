@@ -152,15 +152,20 @@ class Files(unittest.TestCase):
 
 
 class PrivilegeBoundary(unittest.TestCase):
-    def test_drop_before_lock_service_or_file_operations(self):
+    def test_root_lock_then_drop_before_secret_service_or_file_operations(self):
         from types import SimpleNamespace
         import contextlib
         import io
         calls = []
         @contextlib.contextmanager
         def lock(*args):
-            self.assertEqual(calls, ['groups', 'gid', 'uid'])
-            yield lambda: None
+            self.assertEqual(calls, [])
+            calls.append('lock')
+            def unchanged():self.assertEqual(calls, ['lock','groups','gid','uid'])
+            yield unchanged
+        class Input:
+            def read(inner, size):
+                self.assertEqual(calls,['lock','groups','gid','uid']);return KEY
         with patch.object(m.os, 'geteuid', side_effect=[0, 1000]), \
              patch.object(m.os, 'getuid', return_value=1000), \
              patch.object(m.os, 'uname', side_effect=AssertionError('OS hostname is not the authenticated tailnet identity')), \
@@ -172,11 +177,24 @@ class PrivilegeBoundary(unittest.TestCase):
              patch.object(m, 'install', return_value='installed-disabled'), \
              patch.object(m.subprocess, 'run', return_value=SimpleNamespace(stdout=b'LoadState=loaded\nEnvironmentFiles=/home/ubuntu/.config/bubblewash/env (ignore_errors=no)\n')) as run, \
              patch.object(m.sys, 'argv', ['installer']), \
-             patch.object(m.sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(KEY))), \
+             patch.object(m.sys, 'stdin', SimpleNamespace(buffer=Input())), \
              contextlib.redirect_stdout(io.StringIO()):
             m.main()
         self.assertEqual(run.call_args.args[0][0], '/usr/bin/systemctl')
         self.assertEqual(run.call_args.kwargs['env']['PATH'], '/usr/bin:/bin')
+
+    def test_drop_failure_closes_lock_without_secret_or_app_access(self):
+        import contextlib
+        from types import SimpleNamespace
+        events=[]
+        @contextlib.contextmanager
+        def lock(*args):
+            events.append('lock')
+            try:yield lambda:None
+            finally:events.append('closed')
+        with patch.object(m.os,'geteuid',return_value=0),patch.object(m.sys,'argv',['installer']),patch.object(m.pwd,'getpwnam',return_value=SimpleNamespace(pw_uid=1000,pw_gid=1000)),patch.object(m,'deployment_lock',side_effect=lock),patch.object(m.os,'setgroups'),patch.object(m.os,'setgid'),patch.object(m.os,'setuid',side_effect=PermissionError),patch.object(m.sys,'stdin',None),patch.object(m,'install') as install,patch.object(m.subprocess,'run') as run:
+            with self.assertRaises(PermissionError):m.main()
+        install.assert_not_called();run.assert_not_called();self.assertEqual(events,['lock','closed'])
 
     def test_nonroot_refused_before_secret_read_or_app_access(self):
         with patch.object(m.os, 'geteuid', return_value=1000), patch.object(m.sys, 'stdin', None), patch.object(m, 'deployment_lock') as lock:

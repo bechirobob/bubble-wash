@@ -122,7 +122,7 @@ def _observed_lock(i, uid, state):
     state['lockCanonical']=False
     check('lockCanonical',runtime.resolve(strict=True)==runtime)
     state['lockDirectoryOpened']=False
-    directory=os.open(runtime,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    directory=os.open(runtime,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
     state['lockDirectoryOpened']=True
     lock=None
     try:
@@ -130,7 +130,7 @@ def _observed_lock(i, uid, state):
         check('lockDirectoryOwnerSafe',ds.st_uid in (0,uid))
         check('lockDirectoryModeSafe',not ds.st_mode & 0o022)
         state['lockFileOpened']=False
-        lock=os.open('deploy.lock',os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory)
+        lock=os.open('deploy.lock',os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC,dir_fd=directory)
         state['lockFileOpened']=True
         ls=os.fstat(lock)
         check('lockFileRegular',stat.S_ISREG(ls.st_mode))
@@ -155,16 +155,14 @@ def _observed_lock(i, uid, state):
         os.close(directory)
 
 
-def run(i, uid, state):
-    with observed_lock(i,uid,state) as unchanged:
-        state['deploymentLockReady']=True
-        response=subprocess.run(['/usr/bin/systemctl','--user','show','bubblewash-local.service',
-            '--property=LoadState,EnvironmentFiles'],capture_output=True,timeout=20,check=True,
-            env={'PATH':'/usr/bin:/bin','HOME':'/home/ubuntu','XDG_RUNTIME_DIR':f'/run/user/{uid}'})
-        properties=dict(line.split('=',1) for line in response.stdout.decode().splitlines() if '=' in line)
-        i.require(properties.get('LoadState')=='loaded' and properties.get('EnvironmentFiles')==f'{i.ENV} (ignore_errors=no)')
-        state['serviceBindingReady']=True
-        inspect_file(i,uid,unchanged,state)
+def run(i, uid, state, unchanged):
+    response=subprocess.run(['/usr/bin/systemctl','--user','show','bubblewash-local.service',
+        '--property=LoadState,EnvironmentFiles'],capture_output=True,timeout=20,check=True,
+        env={'PATH':'/usr/bin:/bin','HOME':'/home/ubuntu','XDG_RUNTIME_DIR':f'/run/user/{uid}'})
+    properties=dict(line.split('=',1) for line in response.stdout.decode().splitlines() if '=' in line)
+    i.require(properties.get('LoadState')=='loaded' and properties.get('EnvironmentFiles')==f'{i.ENV} (ignore_errors=no)')
+    state['serviceBindingReady']=True
+    inspect_file(i,uid,unchanged,state)
     return state
 
 def main(i):
@@ -174,10 +172,13 @@ def main(i):
         # Host identity is bound by the fixed authenticated root@hermes transport.
         i.require(os.geteuid()==0 and len(sys.argv)==1)
         account=pwd.getpwnam('ubuntu');i.require(account.pw_uid>0)
-        os.setgroups([]);os.setgid(account.pw_gid);os.setuid(account.pw_uid)
-        i.require(os.geteuid()==account.pw_uid and os.getuid()==account.pw_uid)
-        state['appIdentityReady']=True
-        run(i,account.pw_uid,state)
+        with observed_lock(i,account.pw_uid,state) as unchanged:
+            state['deploymentLockReady']=True
+            os.setgroups([]);os.setgid(account.pw_gid);os.setuid(account.pw_uid)
+            i.require(os.geteuid()==account.pw_uid and os.getuid()==account.pw_uid)
+            state['appIdentityReady']=True
+            unchanged()
+            run(i,account.pw_uid,state,unchanged)
     except BaseException:
         state['bindingStable']=False;state['dedicatedKeyPresent']=None;state['emailFlagDisabled']=None
     print(json.dumps(validate(state),sort_keys=True,separators=(',',':')))

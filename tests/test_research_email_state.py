@@ -70,11 +70,29 @@ class ReadOnlyState(unittest.TestCase):
             with self.assertRaises(ValueError):c.parse_environment(raw)
     def test_uid_drop_precedes_app_paths_and_failures_emit_only_schema(self):
         events=[]
-        def run(installer,uid,state):
-            self.assertEqual(events,['groups','gid','uid']);raise RuntimeError('re_SECRET /private')
+        def run(installer,uid,state,unchanged):
+            self.assertEqual(events,['lock','groups','gid','uid']);raise RuntimeError('re_SECRET /private')
+        @contextlib.contextmanager
+        def lock(installer,uid,state):
+            self.assertEqual(events,[]);events.append('lock')
+            state.update(dict.fromkeys(c.LOCK_FIELDS,True))
+            def unchanged():self.assertEqual(events,['lock','groups','gid','uid'])
+            yield unchanged
         output=io.StringIO()
-        with patch.object(c.os,'geteuid',side_effect=[0,1000]),patch.object(c.os,'getuid',return_value=1000),patch.object(c.os,'uname',side_effect=AssertionError('OS hostname is not the authenticated tailnet identity')),patch.object(c.sys,'argv',['checker']),patch.object(c.pwd,'getpwnam',return_value=types.SimpleNamespace(pw_uid=1000,pw_gid=1000)),patch.object(c.os,'setgroups',side_effect=lambda _:events.append('groups')),patch.object(c.os,'setgid',side_effect=lambda _:events.append('gid')),patch.object(c.os,'setuid',side_effect=lambda _:events.append('uid')),patch.object(c,'run',side_effect=run),contextlib.redirect_stdout(output):c.main(i)
+        with patch.object(c,'observed_lock',side_effect=lock),patch.object(c.os,'geteuid',side_effect=[0,1000]),patch.object(c.os,'getuid',return_value=1000),patch.object(c.os,'uname',side_effect=AssertionError('OS hostname is not the authenticated tailnet identity')),patch.object(c.sys,'argv',['checker']),patch.object(c.pwd,'getpwnam',return_value=types.SimpleNamespace(pw_uid=1000,pw_gid=1000)),patch.object(c.os,'setgroups',side_effect=lambda _:events.append('groups')),patch.object(c.os,'setgid',side_effect=lambda _:events.append('gid')),patch.object(c.os,'setuid',side_effect=lambda _:events.append('uid')),patch.object(c,'run',side_effect=run),contextlib.redirect_stdout(output):c.main(i)
         value=json.loads(output.getvalue());c.validate(value);self.assertTrue(value['appIdentityReady']);self.assertIsNone(value['dedicatedKeyPresent']);self.assertNotIn('SECRET',output.getvalue())
+    def test_failed_uid_drop_does_not_read_env_and_releases_lock(self):
+        events=[]
+        @contextlib.contextmanager
+        def lock(installer,uid,state):
+            events.append('lock');state.update(dict.fromkeys(c.LOCK_FIELDS,True))
+            try:yield lambda:None
+            finally:events.append('closed')
+        output=io.StringIO()
+        with patch.object(c.os,'geteuid',return_value=0),patch.object(c.sys,'argv',['checker']),patch.object(c.pwd,'getpwnam',return_value=types.SimpleNamespace(pw_uid=1000,pw_gid=1000)),patch.object(c,'observed_lock',side_effect=lock),patch.object(c.os,'setgroups'),patch.object(c.os,'setgid'),patch.object(c.os,'setuid',side_effect=PermissionError),patch.object(c,'run') as run,contextlib.redirect_stdout(output):c.main(i)
+        run.assert_not_called();self.assertEqual(events,['lock','closed'])
+        value=json.loads(output.getvalue());self.assertFalse(value['appIdentityReady']);self.assertIsNone(value['dedicatedKeyPresent'])
+
     def test_nonroot_refused_before_app_paths(self):
         output=io.StringIO()
         with patch.object(c.os,'geteuid',return_value=1000),patch.object(c,'run') as run,contextlib.redirect_stdout(output):c.main(i)
@@ -143,6 +161,20 @@ class LockDiagnostics(unittest.TestCase):
         self.lock.unlink();self.lock.mkdir();self.state=c.result()
         with self.assertRaises(ValueError):self.observe()
         self.assertFalse(self.state['lockFileRegular'])
+    def test_lock_descriptors_readonly_cloexec_and_no_content_reads(self):
+        real=os.open;fds=[]
+        def opening(path,flags,*args,**kwargs):
+            self.assertFalse(flags & (os.O_WRONLY|os.O_RDWR|os.O_CREAT|os.O_TRUNC))
+            self.assertTrue(flags & os.O_CLOEXEC)
+            fd=real(path,flags,*args,**kwargs);fds.append(fd)
+            self.assertFalse(os.get_inheritable(fd));return fd
+        with patch.object(c.os,'open',side_effect=opening),patch.object(c.os,'read',side_effect=AssertionError('lock content read')):
+            self.observe()
+            with i.deployment_lock(self.runtime,os.getuid()) as unchanged:unchanged()
+        self.assertEqual(len(fds),4)
+        for fd in fds:
+            with self.assertRaises(OSError):os.fstat(fd)
+
     def test_fixed_failure_allowlist_and_consistency(self):
         for error,expected in ((PermissionError(errno.EPERM,'SECRET'),'permission-denied'),(FileNotFoundError(errno.ENOENT,'SECRET'),'missing'),(OSError(errno.ELOOP,'SECRET'),'symlink'),(BlockingIOError(errno.EAGAIN,'SECRET'),'busy'),(ValueError('SECRET'),'metadata-guard'),(RuntimeError('SECRET'),'other')):
             state=c.result();c.lock_failure(state,error);self.assertEqual(state['lockFailure'],expected)
