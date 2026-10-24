@@ -179,17 +179,17 @@ class EvidenceTests(unittest.TestCase):
         command=[sys.executable,'-B',str(ROOT/'ops/integration-release/stream_host.py'),'--mode','inspect-host-evidence']
         value=subprocess.run(command,capture_output=True,text=True)
         self.assertEqual(value.returncode,0,value.stderr);compile(value.stdout,'stream','exec')
-        self.assertIn('inspect_host_evidence',value.stdout)
+        self.assertIn("sys.modules['binding_diagnostic'].inspect_binding",value.stdout)
         initialize=value.stdout.rsplit("try:\n print(json.dumps",1)[0]
-        smoke=subprocess.run([sys.executable,'-I','-B','-'], input=initialize+"\nassert callable(sys.modules['host_adapter'].inspect_host_evidence)\nprint('initialized')\n",capture_output=True,text=True)
+        smoke=subprocess.run([sys.executable,'-I','-B','-'], input=initialize+"\nassert callable(sys.modules['binding_diagnostic'].inspect_binding)\nprint('initialized')\n",capture_output=True,text=True)
         self.assertEqual(smoke.returncode,0,smoke.stderr)
         self.assertEqual(smoke.stdout.strip(),'initialized')
         tail=value.stdout[len(initialize):]
-        inject="\nm=sys.modules['host_adapter']\nm.EVIDENCE_STAGE='UNIT_PROPERTIES'\nm.inspect_host_evidence=lambda guard: (_ for _ in ()).throw(ValueError('SECRET_ENV /private/path'))\n"
+        inject="\nm=sys.modules['binding_diagnostic']\nm.inspect_binding=lambda *args: (_ for _ in ()).throw(ValueError('SECRET_ENV /private/path'))\n"
         failed=subprocess.run([sys.executable,'-I','-B','-'],input=initialize+inject+tail,capture_output=True,text=True)
         self.assertEqual(failed.returncode,1);self.assertEqual(failed.stdout,'')
         report=json.loads(failed.stderr)
-        self.assertEqual(report['stage'],'UNIT_PROPERTIES');self.assertEqual(report['category'],'REFUSED')
+        self.assertEqual(report,{'ok':False,'status':'binding-diagnostic-unavailable','releaseAcceptance':False,'automaticRetry':False})
         self.assertNotIn('SECRET_ENV',failed.stderr);self.assertNotIn('/private/path',failed.stderr)
         bad=subprocess.run(command+['--plan-id','a'*64],capture_output=True,text=True)
         self.assertNotEqual(bad.returncode,0)
