@@ -4,13 +4,20 @@ import { fixtureRequestPolicy } from './request-policy.mjs';
 test.beforeEach(async({page})=>{await page.route('**/*',route=>fixtureRequestPolicy(route.request().url())===null?route.abort('blockedbyclient'):route.continue());});
 const opening = page => page.getByRole('dialog', { name: 'Bubble Wash opening' });
 
-test('fresh home opens once, skips without click-through, and keeps the actual home', async ({ page }) => {
+test('fresh home opens once, skips without click-through, and keeps the actual home', async ({ page }, testInfo) => {
   await page.goto('/');
   await expect(opening(page)).toBeVisible();
   await expect(page.locator('#home-title')).toHaveText('Laundry pickupfor your business.');
   await page.getByRole('button', { name: 'Skip intro' }).click();
   await expect(opening(page)).not.toBeVisible();
   await expect(page).toHaveURL(/\/$/);
+  const surfaces = await page.locator('.publicSite').evaluate(root => ({
+    blue: getComputedStyle(root.querySelector('.publicBandBlue')).backgroundColor,
+    white: getComputedStyle(root).backgroundColor,
+    sage: getComputedStyle(root.querySelector('.publicBandSage')).backgroundColor,
+  }));
+  expect(surfaces).toEqual({blue:'rgb(237, 245, 252)',white:'rgb(255, 255, 255)',sage:'rgb(242, 246, 240)'});
+  await page.screenshot({path:testInfo.outputPath('public-three-tone.png'),fullPage:true});
   await page.getByRole('link', { name: 'Track an order', exact: false }).first().click();
   await expect(page).toHaveURL(/\/track$/);
   await page.goBack();
@@ -145,7 +152,19 @@ test.describe('interim survey open-fixture acceptance',()=>{
     await expect(page.getByText(/Your response is not anonymous/)).toBeVisible();
     await expect(page.getByText(/Identifiable website research records/)).not.toBeVisible();
     await information.focus();await information.press('Enter');await expect(page.getByText(/up to 12 months from collection/)).toBeVisible();
-    await information.press('Enter');await page.screenshot({path:testInfo.outputPath('survey-details.png'),fullPage:true});
+    await information.press('Enter');
+    const identity = await page.locator('main').evaluate(root => {
+      const css = element => getComputedStyle(element);
+      return {font:css(root).fontFamily,bodyFont:css(document.body).fontFamily,
+        heading:css(root.querySelector('h1')).backgroundColor,
+        details:css(root.querySelector('details')).backgroundColor,
+        button:css(root.querySelector('button[type="submit"]')).backgroundColor};
+    });
+    expect(identity.font).toBe(identity.bodyFont);
+    expect(identity.heading).toBe('rgb(237, 245, 252)');
+    expect(identity.details).toBe('rgb(242, 246, 240)');
+    expect(identity.button).toBe('rgb(8, 101, 132)');
+    await page.screenshot({path:testInfo.outputPath('survey-details.png'),fullPage:true});
     await expect(page.getByText('Optional questions for work, study or home',{exact:true})).toHaveCount(0);
     await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();await page.getByRole('button',{name:'Continue',exact:true}).click();
     await page.getByRole('radio',{name:'25 to 34',exact:true}).check();await page.getByRole('radio',{name:'Other (specify)',exact:true}).check();
