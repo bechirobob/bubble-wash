@@ -120,7 +120,9 @@ test('results UI hides internal row IDs and uses shared neutral decorative edges
   const css = readFileSync(new URL('../src/components/research/results.module.css', import.meta.url), 'utf8');
   assert.doesNotMatch(ui, /response\.id\.slice/);
   assert.doesNotMatch(css, /border(?:-(?:top|bottom|left|right|color))?:[^;{}]*#[0-9a-fA-F]{3,8}/);
-  assert.match(css, /var\(--line\)/); assert.match(css, /var\(--focus-ring\)/);
+  assert.match(css, /var\(--line\)/);
+  const shared = readFileSync(new URL('../src/app/globals.css', import.meta.url), 'utf8');
+  assert.match(shared, /outline: 3px solid var\(--focus-ring\)/);
 });
 
 test('unanswered-area filter never treats interview absence as unanswered consumer A3', () => {

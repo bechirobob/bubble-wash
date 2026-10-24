@@ -3,6 +3,7 @@ import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { chromium } from '@playwright/test';
 import Database from 'better-sqlite3';
+import { verifyFocusPolicy } from './focus-policy-proof.mjs';
 const fixture = JSON.parse(readFileSync('/tmp/bubblewash-results-fixture-proof.json','utf8'));
 const origin = 'http://localhost:3217';
 const output = resolve('test-results/survey-results') + '/';
@@ -72,6 +73,7 @@ try {
   const db=new Database(fixture.directory+'/synthetic.sqlite');db.prepare("UPDATE staff_accounts SET status='suspended' WHERE email='owner@example.invalid'").run();
   for(const path of ['/api/admin/research/results','/api/admin/research/responses',`/api/admin/research/responses/${fixture.firstId}`])assert.equal((await owner.request.get(origin+path)).status(),403);
   db.prepare("UPDATE staff_accounts SET status='active' WHERE email='owner@example.invalid'").run();db.close();tests.push('suspended owner session denied immediately on all read endpoints');
+  tests.push(...await verifyFocusPolicy({ browser, fixture, origin, output }));
   assert.deepEqual(failures,[]);tests.push('no browser runtime errors');
   await owner.close();writeFileSync(output+'results.json',JSON.stringify({ok:true,tests,failures,syntheticOnly:true,origin},null,2));console.log(JSON.stringify({ok:true,tests,output},null,2));
 } finally {await browser.close();}

@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 
+import { installFocusModality } from "@/lib/focus-modality";
+
 type InstallPrompt = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
@@ -26,6 +28,8 @@ export function WebAppProvider({ children }: { children: React.ReactNode }) {
   const [installing, setInstalling] = useState(false);
   const [message, setMessage] = useState("");
   const busy = useRef(false);
+
+  useEffect(() => installFocusModality(document), []);
 
   useEffect(() => {
     const display = window.matchMedia("(display-mode: standalone)");
