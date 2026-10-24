@@ -1,4 +1,4 @@
-"""Private host operation, streamed in memory; never installed or run as root."""
+"""Private host operation, streamed in memory; app work runs only after irreversible privilege drop."""
 from contextlib import contextmanager
 import hashlib
 import json
@@ -142,12 +142,12 @@ def verify_runtime(f, preflight, release, node, uid, database):
     f.require(identity == preflight.process_identity(listener) and main_identity == preflight.process_identity(main))
 
 
-def run(request, f, installer, preflight, uid, gid):
+def run(request, f, installer, preflight, uid, gid, lock_unchanged):
     request = validate_request(request)
-    # Actual app-UID lock, parent, file and executable guards below are authoritative.
+    # Retained root-acquired lock; all environment/source/app work is app-UID only.
     attempted = False
     try:
-        with installer.deployment_lock(RUNTIME, uid) as lock_unchanged, retained_environment(f, installer, uid, gid) as (raw, env_unchanged):
+        with retained_environment(f, installer, uid, gid) as (raw, env_unchanged):
             configured = preflight.parse_env(raw.decode())
             f.require(configured.get('NODE_ENV', 'production') == 'production' and configured.get('BUBBLEWASH_DATABASE_DRIVER') == 'sqlite')
             database_path = configured.get('BUBBLEWASH_DATABASE_PATH', '')
@@ -207,12 +207,14 @@ def main(f, installer, preflight):
         # Host identity is bound by the fixed authenticated root@hermes transport.
         f.require(os.geteuid() == 0)
         account = pwd.getpwnam('ubuntu'); f.require(account.pw_uid > 0)
-        os.setgroups([]); os.setgid(account.pw_gid); os.setuid(account.pw_uid)
-        f.require(os.geteuid() == account.pw_uid and os.getuid() == account.pw_uid)
-        signal.alarm(5)
-        raw = sys.stdin.buffer.read(128 * 1024 + 1); f.require(len(raw) <= 128 * 1024)
-        request = validate_request(f.strict_json(raw)); signal.alarm(120)
-        result = run(request, f, installer, preflight, account.pw_uid, account.pw_gid)
+        with installer.deployment_lock(RUNTIME, account.pw_uid) as lock_unchanged:
+            os.setgroups([]); os.setgid(account.pw_gid); os.setuid(account.pw_uid)
+            f.require(os.geteuid() == account.pw_uid and os.getuid() == account.pw_uid)
+            lock_unchanged()
+            signal.alarm(5)
+            raw = sys.stdin.buffer.read(128 * 1024 + 1); f.require(len(raw) <= 128 * 1024)
+            request = validate_request(f.strict_json(raw)); signal.alarm(120)
+            result = run(request, f, installer, preflight, account.pw_uid, account.pw_gid, lock_unchanged)
     except BaseException: pass
     finally: signal.alarm(0)
     print(json.dumps(result, separators=(',', ':')))

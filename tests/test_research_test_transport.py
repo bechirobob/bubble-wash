@@ -184,7 +184,8 @@ class Host(unittest.TestCase):
         for item in self.patches: item.start(); self.addCleanup(item.stop)
 
     def operation(self, value=None):
-        return h.run(value or self.value, self.facts, i, p, os.getuid(), os.getgid())
+        with i.deployment_lock(self.runtime,os.getuid()) as unchanged:
+            return h.run(value or self.value, self.facts, i, p, os.getuid(), os.getgid(),unchanged)
 
     def test_host_check_uses_existing_lock_env_and_private_stdin_only(self):
         self.assertEqual(self.operation(), {'attempted': False, 'status': 'ready'})
@@ -240,20 +241,38 @@ class Host(unittest.TestCase):
             self.assertEqual(self.operation(), {'attempted': None, 'status': 'review-required'})
             self.assertEqual(len(calls), 1)
 
-    def test_main_irreversibly_drops_uid_before_any_app_file(self):
+    def test_main_acquires_only_lock_before_drop_and_private_request(self):
         events = []
         facts = SimpleNamespace(require=f.require, strict_json=f.strict_json)
         def operation(*args):
-            self.assertEqual(events, ['groups', 'gid', 'uid'])
+            self.assertEqual(events, ['lock','groups', 'gid', 'uid'])
             return {'attempted': False, 'status': 'ready'}
-        with patch.object(h.os, 'geteuid', side_effect=[0, 1000]), patch.object(h.os, 'getuid', return_value=1000), \
+        @contextlib.contextmanager
+        def lock(*args):
+            self.assertEqual(events,[]);events.append('lock')
+            def unchanged():self.assertEqual(events,['lock','groups','gid','uid'])
+            yield unchanged
+        class Input:
+            def read(inner,size):
+                self.assertEqual(events,['lock','groups','gid','uid']);return json.dumps(self.value).encode()
+        with patch.object(i,'deployment_lock',side_effect=lock), patch.object(h.os, 'geteuid', side_effect=[0, 1000]), patch.object(h.os, 'getuid', return_value=1000), \
              patch.object(h.os, 'uname', side_effect=AssertionError('OS hostname is not the authenticated tailnet identity')), \
              patch.object(h.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=1000, pw_gid=1000)), \
              patch.object(h.os, 'setgroups', side_effect=lambda _: events.append('groups')), patch.object(h.os, 'setgid', side_effect=lambda _: events.append('gid')), \
              patch.object(h.os, 'setuid', side_effect=lambda _: events.append('uid')), patch.object(h, 'run', side_effect=operation), \
-             patch.object(h.sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(json.dumps(self.value).encode()))), contextlib.redirect_stdout(io.StringIO()) as output:
+             patch.object(h.sys, 'stdin', SimpleNamespace(buffer=Input())), contextlib.redirect_stdout(io.StringIO()) as output:
             h.main(facts, i, p)
         self.assertEqual(json.loads(output.getvalue()), {'attempted': False, 'status': 'ready'})
+
+    def test_failed_uid_drop_releases_lock_without_private_input_or_app(self):
+        events=[]
+        @contextlib.contextmanager
+        def lock(*args):
+            events.append('lock')
+            try:yield lambda:None
+            finally:events.append('closed')
+        with patch.object(h.os,'geteuid',return_value=0),patch.object(h.pwd,'getpwnam',return_value=SimpleNamespace(pw_uid=1000,pw_gid=1000)),patch.object(i,'deployment_lock',side_effect=lock),patch.object(h.os,'setgroups'),patch.object(h.os,'setgid'),patch.object(h.os,'setuid',side_effect=PermissionError),patch.object(h.sys,'stdin',None),patch.object(h,'run') as run,contextlib.redirect_stdout(io.StringIO()) as output:h.main(self.facts,i,p)
+        run.assert_not_called();self.assertEqual(events,['lock','closed']);self.assertEqual(json.loads(output.getvalue()),{'attempted':False,'status':'blocked'})
 
     def test_nonroot_operator_never_reads_request_or_runs_app(self):
         with patch.object(h.os,'geteuid',return_value=1000),patch.object(h.sys,'stdin',None),patch.object(h,'run') as run,contextlib.redirect_stdout(io.StringIO()) as output:
