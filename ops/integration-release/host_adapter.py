@@ -52,7 +52,7 @@ EVIDENCE_SERVICE_PROPERTIES = ('MainPID', 'ControlPID', 'ControlGroup',
 EVIDENCE_PROPERTIES = EVIDENCE_COMMON_PROPERTIES + EVIDENCE_SERVICE_PROPERTIES
 EVIDENCE_STAGES = frozenset(('INITIALIZE', 'LOCK', 'CONFIG', 'MARKER',
     'CURRENT_BINDING', 'DATABASE_BINDING', 'UNIT_PROPERTIES', 'UNIT_CONDITIONS',
-    'UNIT_SOURCES', 'UNIT_COMMAND', 'PATH_METADATA', 'BINDING_RECHECK', 'LOCK_RECHECK'))
+    'UNIT_SOURCES', 'UNIT_COMMAND', 'NODE_IDENTITY', 'PATH_METADATA', 'BINDING_RECHECK', 'LOCK_RECHECK'))
 EVIDENCE_STAGE = 'INITIALIZE'
 
 
@@ -128,7 +128,7 @@ def evidence_conditions(host, manager, unit):
     return {'gates': gates, 'otherCount': len(unknown), 'otherSha256': object_digest(unknown)}
 
 
-def inspect_host_evidence(guard, run=None):
+def inspect_host_evidence(guard, run=None, proc=Path('/proc')):
     """Read-only pre-installation evidence, not release or security acceptance.
 
     Config, argv, Conditions and unit source bodies never leave the host.
@@ -172,6 +172,7 @@ def inspect_host_evidence(guard, run=None):
             'markerSha256': hashlib.sha256(marker).hexdigest(),
             'configSha256': hashlib.sha256(config).hexdigest(),
             'databasePathSha256': object_digest(str(database)), 'databaseMetadata': db_meta}
+        node_recheck = None
         for manager, unit in EVIDENCE_UNITS:
             EVIDENCE_STAGE = 'UNIT_PROPERTIES'
             properties = EVIDENCE_COMMON_PROPERTIES + (EVIDENCE_SERVICE_PROPERTIES if unit.endswith('.service') else ())
@@ -216,6 +217,11 @@ def inspect_host_evidence(guard, run=None):
                 EVIDENCE_STAGE = 'UNIT_COMMAND'
                 row['execStartSha256'] = object_digest(host.exec_start(manager, unit))
             result['units'][manager+'/'+unit] = row
+            if (manager, unit) == ('user', 'bubblewash-local.service'):
+                EVIDENCE_STAGE = 'NODE_IDENTITY'
+                require(props['LoadState'] == 'loaded' and props['ActiveState'] == 'active',
+                        'known app must be running for Node evidence')
+                result['node'], node_recheck = inspect_node_process(props['MainPID'], current, uid, proc)
         EVIDENCE_STAGE = 'PATH_METADATA'
         paths = (Path('/var'), Path('/var/lib'), STATE, STATE/'plans', STATE/'packages',
                  RELEASES, STATE/'installed-v1', STATE/'app-hold', STATE/'maintenance-hold',
@@ -226,9 +232,41 @@ def inspect_host_evidence(guard, run=None):
                 evidence_read(RUNTIME/'current-release', uid) == marker and
                 CURRENT.resolve(strict=True) == current and
                 evidence_metadata(database) == db_meta, 'binding changed during inspection')
+        EVIDENCE_STAGE = 'NODE_IDENTITY'
+        require(node_recheck is not None, 'Node evidence missing')
+        pid_properties = host.ctl('user', 'show', 'bubblewash-local.service', '--all', '--property=MainPID').strip()
+        require(pid_properties == 'MainPID='+str(result['units']['user/bubblewash-local.service']['MainPID']),
+                'known app PID changed during inspection')
+        node_recheck()
         EVIDENCE_STAGE = 'LOCK_RECHECK'
         lock_unchanged()
     return result
+
+
+def inspect_node_process(pid, current, uid, proc=Path('/proc')):
+    """Public binary pin only. Never reads process argv or environment."""
+    require(type(pid) is str and pid.isdigit() and int(pid) > 1, 'known app PID invalid')
+    process = proc/pid
+    start = process_identity(pid, proc)
+    process_info = process.stat()
+    require(process_info.st_uid == uid and (process/'cwd').resolve(strict=True) == current,
+            'Node process is not the known application')
+    executable = (process/'exe').resolve(strict=True)
+    require(executable.name in ('node', 'nodejs'), 'known app executable is not Node')
+    identity = protected(executable, owner=0, parents=True)
+    metadata = tuple(getattr(executable.stat(), key) for key in ('st_size','st_mtime_ns','st_ctime_ns'))
+    pin = digest(executable)
+    def unchanged():
+        require((process.stat().st_dev, process.stat().st_ino) == (process_info.st_dev, process_info.st_ino)
+                and process.stat().st_uid == uid and process_identity(pid,proc) == start
+                and (process/'cwd').resolve(strict=True) == current
+                and (process/'exe').resolve(strict=True) == executable, 'Node process changed')
+        require(protected(executable, owner=0, parents=True) == identity
+                and tuple(getattr(executable.stat(), key) for key in ('st_size','st_mtime_ns','st_ctime_ns')) == metadata
+                and digest(executable) == pin, 'Node binary changed')
+        return True
+    unchanged()
+    return {'path': str(executable), 'sha256': pin}, unchanged
 
 
 def protected(path, owner=0, parents=False):
