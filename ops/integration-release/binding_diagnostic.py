@@ -17,6 +17,71 @@ CATEGORIES = ('IDENTITY','PACKAGE_CONTRACT','LOCK','CURRENT_POINTER','CURRENT_MA
  'DATABASE_RECHECK','RECEIPT_RECHECK','NODE_RECHECK','LOCK_RECHECK')
 
 
+def inspect_archive(path, owner_uid, expected_size, expected_sha):
+    """Inspect only the expected encrypted archive; never return paths or bytes."""
+    import stat
+    path = Path(path)
+    report = {'absolute':path.is_absolute(),'canonical':False,'exportDirectoryMatch':path.parent==Path('/home/ubuntu/bubblewash-backups/github-staging'),'ancestors':[],
+              'leaf':{'present':False},'expectedSize':expected_size,'sizeMatch':False,'hashMatch':'not-run','stable':'not-run'}
+    if not report['absolute'] or len(path.parts)>32:
+        return report
+    try:
+        report['canonical'] = path.resolve(strict=True)==path
+    except (OSError, RuntimeError):
+        pass
+    safe_chain = True
+    for depth, parent in enumerate(reversed(path.parents)):
+        try:
+            info = parent.lstat()
+            row = {'depth':depth,'present':True,'directory':stat.S_ISDIR(info.st_mode),
+                   'uid':info.st_uid,'gid':info.st_gid,'mode':stat.S_IMODE(info.st_mode),
+                   'device':info.st_dev,'inode':info.st_ino,'symlink':stat.S_ISLNK(info.st_mode),
+                   'ownerAllowed':info.st_uid in (0,owner_uid),'writeProtected':not bool(info.st_mode & 0o022)}
+            safe_chain = safe_chain and row['directory'] and row['ownerAllowed']
+            report['ancestors'].append(row)
+            if not row['directory']:
+                return report  # Never follow an unexpected ancestor symlink.
+        except OSError:
+            report['ancestors'].append({'depth':depth,'present':False})
+            return report
+    try:
+        before=path.lstat()
+        leaf={'present':True,'regular':stat.S_ISREG(before.st_mode),'uid':before.st_uid,'gid':before.st_gid,
+              'mode':stat.S_IMODE(before.st_mode),'links':before.st_nlink,'size':before.st_size,
+              'device':before.st_dev,'inode':before.st_ino,'symlink':stat.S_ISLNK(before.st_mode),
+              'ownerAllowed':before.st_uid in (0,owner_uid),'writeProtected':not bool(before.st_mode & 0o022)}
+        report['leaf']=leaf
+        report['sizeMatch']=before.st_size==expected_size
+        # Metadata may explain a refusal. Hash only a bounded, canonical regular
+        # ciphertext file, held with no-follow and rechecked for concurrent change.
+        if not (report['canonical'] and safe_chain and leaf['regular'] and leaf['ownerAllowed'] and
+                leaf['links']==1 and 0<=before.st_size<=512*1024**2):
+            return report
+        fields=('st_dev','st_ino','st_mode','st_uid','st_gid','st_nlink','st_size','st_mtime_ns','st_ctime_ns')
+        identity=lambda item:tuple(getattr(item,k) for k in fields)
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        try:
+            if identity(os.fstat(fd))!=identity(before):
+                report['stable']=False;return report
+            digest=hashlib.sha256();size=0
+            while True:
+                raw=os.read(fd,min(1024**2,before.st_size-size+1))
+                if not raw:break
+                size+=len(raw)
+                if size>before.st_size:
+                    report['stable']=False;return report
+                digest.update(raw)
+            report['stable']=(size==before.st_size and identity(os.fstat(fd))==identity(before) and
+                              identity(path.lstat())==identity(before) and path.resolve(strict=True)==path)
+            if report['stable']:
+                report['hashMatch']=digest.hexdigest()==expected_sha
+        finally:
+            os.close(fd)
+    except (OSError, RuntimeError):
+        report['hashMatch']='unavailable'
+    return report
+
+
 def inspect_binding(core, guards, scanner, contracts, adapter, preparation):
     checks = dict.fromkeys(CATEGORIES, 'not-run')
     facts = {}
@@ -57,7 +122,8 @@ def inspect_binding(core, guards, scanner, contracts, adapter, preparation):
     def result():
         return {'schema':'bubblewash-preparation-binding-diagnostic/v1','operation':operation,
                 'releaseAcceptance':False,'databaseOpened':False,'hostStateChanged':False,
-                'automaticRetry':False,'checks':checks,'retainedPaths':known}
+                'automaticRetry':False,'checks':checks,'retainedPaths':known,
+                'archiveDiagnostic':facts.get('ARCHIVE_DIAGNOSTIC',{'status':'not-run'})}
     if not check('IDENTITY',identity):
         return result()
     owner = facts['IDENTITY']
@@ -114,6 +180,10 @@ def inspect_binding(core, guards, scanner, contracts, adapter, preparation):
                 archive = Path(values.get('BUBBLEWASH_BACKUP_OFFSITE_DIR',''))/receipt['filename']
                 require(guards.file_identity(archive,owner,REQUEST['backupSha256']) and archive.stat().st_size==receipt['size'])
             check('ARCHIVE_BINDING',archive_check)
+            try:
+                facts['ARCHIVE_DIAGNOSTIC']=inspect_archive(Path(values.get('BUBBLEWASH_BACKUP_OFFSITE_DIR',''))/receipt['filename'],owner.pw_uid,receipt['size'],REQUEST['backupSha256'])
+            except Exception:
+                facts['ARCHIVE_DIAGNOSTIC']={'status':'unavailable'}
             check('BACKUP_VERIFICATION',lambda:core.verify_receipt(receipt,json.loads(guards.inspect_read(Path(values.get('BUBBLEWASH_BACKUP_STATUS_PATH','')),owner,'backup')),time.time(),REQUEST['receiptRun'],REQUEST['storeSha'],REQUEST['storeId']))
         def node_check():
             adapter.protected(REQUEST['node']['path'],parents=True)
