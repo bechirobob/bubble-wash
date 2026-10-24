@@ -31,6 +31,21 @@ try {
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);
   const coloredBorders = await page.locator('main').evaluate(root => [...root.querySelectorAll('*')].filter(element => { const style = getComputedStyle(element); return ['Top','Right','Bottom','Left'].some(side => { const color = style['border'+side+'Color'].match(/\d+/g)?.map(Number); return parseFloat(style['border'+side+'Width']) > 0 && style['border'+side+'Style'] !== 'none' && color && (color[0] !== color[1] || color[1] !== color[2]); }); }).map(element => element.tagName + '.' + element.className));
   assert.deepEqual(coloredBorders, []); tests.push('rendered decorative borders are neutral');
+  const identity = await page.locator('main').evaluate(root => {
+    const css = element => getComputedStyle(element);
+    const title = root.querySelector('h1');
+    return { font: css(root).fontFamily, bodyFont: css(document.body).fontFamily,
+      header: css(title.parentElement.parentElement).backgroundColor,
+      summary: css(root.querySelector('[aria-busy]')).backgroundColor,
+      work: css(root.querySelector('#patterns-panel section')).backgroundColor,
+      chart: css(root.querySelector('[role="tabpanel"] [style*="width"]')).backgroundColor };
+  });
+  assert.equal(identity.font, identity.bodyFont);
+  assert.equal(identity.header, 'rgb(237, 245, 252)');
+  assert.equal(identity.summary, 'rgb(242, 246, 240)');
+  assert.equal(identity.work, 'rgb(255, 255, 255)');
+  assert.equal(identity.chart, 'rgb(8, 101, 132)');
+  tests.push('results use the public system font and blue, white and sage identity');
   await page.screenshot({path:output+'desktop-patterns.png',fullPage:true});
   await page.getByRole('combobox',{name:'Choose a question',exact:true}).selectOption('C1');await page.getByText(/Multiple answers allowed/).waitFor();assert.equal(await page.getByText(/^100%/).count()>0,true);
   tests.push('multi-select renders respondent denominator and multiple-selection explanation');

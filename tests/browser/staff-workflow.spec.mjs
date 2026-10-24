@@ -23,6 +23,19 @@ async function evidence(page, testInfo, label) {
   console.log(`[${testInfo.project.name}] evidence: ${label}`);
   await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  const identity = await page.locator('.portalPage').evaluate(root => {
+    const css = element => getComputedStyle(element);
+    return { font: css(root).fontFamily, bodyFont: css(document.body).fontFamily,
+      header: css(root.querySelector('.staffViewHeader')).backgroundColor,
+      navigation: css(root.querySelector('.staffSectionNav')).backgroundColor,
+      work: css(root.querySelector('.staffView')).backgroundColor,
+      shadows: [...root.querySelectorAll('*')].filter(element => css(element).boxShadow !== 'none').length };
+  });
+  expect(identity.font).toBe(identity.bodyFont);
+  expect(identity.header).toBe('rgb(237, 245, 252)');
+  expect(identity.navigation).toBe('rgb(242, 246, 240)');
+  expect(identity.work).toBe('rgb(255, 255, 255)');
+  expect(identity.shadows).toBe(0);
   await page.screenshot({ path: testInfo.outputPath(`${label}.png`), fullPage: true, animations: 'disabled' });
 }
 async function save(page, label, endpoint = '/api/orders/advance') {
