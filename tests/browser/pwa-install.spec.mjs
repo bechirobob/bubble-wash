@@ -119,7 +119,12 @@ test('offline navigation is generic and never caches pages or queues a POST',asy
 
 test('service worker keeps security and cache headers and usable manifest icons',async({page,request})=>{
   await page.goto('/install');await controlled(page);
-  const favicon = await request.get('/favicon.ico');
+  const browserIcons = page.locator('link[rel="icon"], link[rel="shortcut icon"]');
+  await expect(browserIcons).toHaveCount(1);
+  const faviconUrl = await browserIcons.getAttribute('href');
+  expect(faviconUrl).toMatch(/^\/favicon\.ico\?[a-f0-9]+$/);
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href','/apple-icon.png');
+  const favicon = await request.get(faviconUrl);
   expect(favicon.status()).toBe(200);
   expect(await favicon.body()).toEqual(readFileSync(new URL('../../src/app/favicon.ico', import.meta.url)));
   const worker=await request.get('/sw.js');expect(worker.status()).toBe(200);expect(worker.headers()['cache-control']).toContain('no-store');
