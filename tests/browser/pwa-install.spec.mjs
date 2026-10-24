@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { fixtureRequestPolicy } from './request-policy.mjs';
 
 test.beforeEach(async({page})=>{
@@ -36,6 +37,17 @@ test('install page is compact, branded and exposes truthful platform guidance',a
   await expect(page.getByRole('heading',{name:'iPhone or iPad',exact:true})).toBeVisible();
   await expect(page.getByText('Turn on Open as Web App if shown, then tap Add.',{exact:true})).toBeVisible();
   await expect(page.getByText(/does not save submissions offline/)).toBeVisible();
+  const layout = await page.evaluate(() => ({
+    viewport: innerWidth, document: document.documentElement.scrollWidth,
+    overflowing: [...document.querySelectorAll('body *')].map(element => {
+      const box = element.getBoundingClientRect();
+      return { tag: element.tagName, id: element.id, className: typeof element.className === 'string' ? element.className : '', left: box.left, right: box.right, width: box.width };
+    }).filter(box => box.right > innerWidth + 0.5 || box.left < -0.5).slice(0, 20),
+  }));
+  if (layout.document > layout.viewport) {
+    console.log(JSON.stringify({ fixture: 'install-layout', project: testInfo.project.name, ...layout }));
+    await page.screenshot({path:testInfo.outputPath('install-overflow-diagnostic.png'),fullPage:true});
+  }
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.screenshot({path:testInfo.outputPath('install-manual-guidance.png'),fullPage:true});
   await syntheticPrompt(page);await expect(page.getByRole('button',{name:'Install Bubble Wash',exact:true})).toBeVisible();
@@ -107,6 +119,9 @@ test('offline navigation is generic and never caches pages or queues a POST',asy
 
 test('service worker keeps security and cache headers and usable manifest icons',async({page,request})=>{
   await page.goto('/install');await controlled(page);
+  const favicon = await request.get('/favicon.ico');
+  expect(favicon.status()).toBe(200);
+  expect(await favicon.body()).toEqual(readFileSync(new URL('../../src/app/favicon.ico', import.meta.url)));
   const worker=await request.get('/sw.js');expect(worker.status()).toBe(200);expect(worker.headers()['cache-control']).toContain('no-store');
   const manifest=await (await request.get('/site.webmanifest')).json();expect(manifest.start_url).toBe('/');expect(manifest.display).toBe('standalone');
   for(const icon of manifest.icons){const result=await request.get(icon.src);expect(result.status()).toBe(200);expect(result.headers()['content-type']).toBe('image/png');}

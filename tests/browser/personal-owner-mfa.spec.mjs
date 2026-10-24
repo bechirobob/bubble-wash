@@ -1,5 +1,9 @@
 import { test, expect } from '@playwright/test';
 
+// These two tests require intercepted synthetic login responses. Real worker/login
+// behavior remains covered by the separate PWA and four-role browser suites.
+test.use({ serviceWorkers: 'block' });
+
 // Synthetic presentation diagnostics only: never print credentials, codes or response prose.
 function observeLogin(page, testInfo) {
   const counts = { request: 0, mock: 0, response: 0, failed: 0 };

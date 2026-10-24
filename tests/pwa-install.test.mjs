@@ -79,3 +79,22 @@ test('worker script is not cached and no new permissions are requested', async()
   assert.doesNotMatch(provider,/Notification\.requestPermission|pushManager|localStorage|sessionStorage|location\.reload/);
   assert.match(provider,/updateViaCache: "none"/);
 });
+
+test('favicon ICO contains only resized approved clean Bubble Wash artwork', async () => {
+  const ico = readFileSync(new URL('../src/app/favicon.ico', import.meta.url));
+  const clean = readFileSync(new URL('../public/icon-192.png', import.meta.url));
+  assert.equal(ico.readUInt16LE(0), 0); assert.equal(ico.readUInt16LE(2), 1);
+  const sizes = [16, 32, 48, 192]; assert.equal(ico.readUInt16LE(4), sizes.length);
+  let next = 6 + 16 * sizes.length;
+  for (const [index, size] of sizes.entries()) {
+    const entry = 6 + index * 16;
+    assert.equal(ico[entry], size); assert.equal(ico[entry + 1], size);
+    const length = ico.readUInt32LE(entry + 8), offset = ico.readUInt32LE(entry + 12);
+    assert.equal(offset, next); assert.ok(offset + length <= ico.length);
+    const image = ico.subarray(offset, offset + length);
+    const expected = size === 192 ? clean : await sharp(clean).resize(size, size).png().toBuffer();
+    assert.deepEqual(image, expected, 'Every favicon frame uses the clean approved art, not the framework triangle');
+    next += length;
+  }
+  assert.equal(next, ico.length);
+});
