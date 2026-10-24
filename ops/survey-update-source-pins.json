@@ -1,55 +1,33 @@
 {
   "allowedChanges": [
-    ".github/workflows/browser-regression.yml",
-    "next.config.mjs",
-    "public/icon-192.png",
-    "public/icon-maskable-512.png",
-    "public/site.webmanifest",
-    "public/sw.js",
-    "src/app/admin/surveys/page.tsx",
-    "src/app/api/admin/research/responses/[id]/route.ts",
-    "src/app/api/admin/research/responses/route.ts",
-    "src/app/api/admin/research/results/route.ts",
-    "src/app/favicon.ico",
-    "src/app/install/page.tsx",
-    "src/app/layout.tsx",
-    "src/components/PublicChrome.tsx",
-    "src/components/StaffWorkspaces.tsx",
-    "src/components/WebAppInstall.module.css",
-    "src/components/WebAppInstall.tsx",
-    "src/components/WebAppProvider.tsx",
-    "src/components/research/ResearchResults.tsx",
+    "src/app/globals.css",
+    "src/app/survey/page.tsx",
+    "src/components/research/research.module.css",
     "src/components/research/results.module.css",
-    "src/lib/research/access.ts",
-    "src/lib/research/results-store.ts",
-    "src/lib/research/results.ts",
-    "tests/browser/personal-owner-mfa.spec.mjs",
-    "tests/browser/pwa-install.spec.mjs",
+    "tests/browser/opening-intro.spec.mjs",
     "tests/browser/research-results-proof.mjs",
-    "tests/browser/start-results-fixture.mjs",
-    "tests/pwa-install.test.mjs",
-    "tests/research-results-http.mjs",
-    "tests/research-results.test.mjs"
+    "tests/browser/staff-workflow.spec.mjs",
+    "tests/research-visual-consistency.test.mjs"
   ],
-  "baseSha": "401d73719e5624c2b80ac4f9e77c492cf7ab77fa",
-  "baseTree": "bc129cdd5457aceb535dec171632d75a1918b6d0",
+  "baseSha": "0b1f77e2157bf9df95d58385bbe4a693e8f378c7",
+  "baseTree": "10155b99a70adbd4dfaca3b0d7a1654361f8b465",
   "baselineContent": {
-    "directories": 86,
-    "files": 297,
-    "sha256": "476dfb10936560f84d73c629c40af9e6051848fd8b761e9fb6324a1909910df0"
+    "directories": 92,
+    "files": 319,
+    "sha256": "d8b3b118867fec2bfedfdac317503c7ab51a3a4f05f9ca269f996fb7a42a7d74"
   },
   "baselineSource": {
-    "next.config.mjs": "5953ea9f63a70e14ae51eef4b14f4765da6a7c8fe7168fc55234472fdaf37665",
+    "next.config.mjs": "63c864146f78e9f7968165558e073463104f24f9b03684f10b839b1621bcacc2",
     "package-lock.json": "5ee351083ccf449022dfcd3f466cea7e541423294a4854458feb719a3350d966",
     "package.json": "e01b6015c536c3086bac51d6318d2afd4acd9b84ec79eff30deac52a733c5a9d",
-    "src": "a3cef1b62b39259a356bd367d984484c79b344616cff13bbd88d98da444c2bc8",
+    "src": "8479d571c4231c3b4dbbff13eae5156d2f751397ef983e64ed683cd5d51b27c7",
     "tsconfig.json": "2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c"
   },
   "candidateSource": {
     "next.config.mjs": "63c864146f78e9f7968165558e073463104f24f9b03684f10b839b1621bcacc2",
     "package-lock.json": "5ee351083ccf449022dfcd3f466cea7e541423294a4854458feb719a3350d966",
     "package.json": "e01b6015c536c3086bac51d6318d2afd4acd9b84ec79eff30deac52a733c5a9d",
-    "src": "8479d571c4231c3b4dbbff13eae5156d2f751397ef983e64ed683cd5d51b27c7",
+    "src": "af1eb8b8dc1da2ffe0866414b15278f81649bfedaad40e1777e72526b231b64a",
     "tsconfig.json": "2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c"
   },
   "criticalFiles": [
@@ -69,11 +47,11 @@
   },
   "runtimeContent": {
     "directories": 92,
-    "files": 319,
-    "sha256": "d8b3b118867fec2bfedfdac317503c7ab51a3a4f05f9ca269f996fb7a42a7d74"
+    "files": 320,
+    "sha256": "2b66afc75f53279f36794ffdea277bd921132d4858955be2364f404bc89b3d54"
   },
-  "runtimeSha": "0b1f77e2157bf9df95d58385bbe4a693e8f378c7",
-  "runtimeTree": "10155b99a70adbd4dfaca3b0d7a1654361f8b465",
+  "runtimeSha": "4170cc99a6903fdb08d9dc2624a96d6457fd7ab5",
+  "runtimeTree": "b89ead47951ed69824a4e0a727fb597605e2c46d",
   "schema": "bubblewash-survey-update/v2",
   "sourceScope": {
     "directories": [

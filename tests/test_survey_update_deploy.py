@@ -416,10 +416,10 @@ class Update(unittest.TestCase):
 class Contract(unittest.TestCase):
     def test_exact_immutable_dependencies_and_original_historical_pins(self):
         for name,digest in PINS['dependencies'].items():self.assertEqual(hashlib.sha256((ROOT/'ops'/name).read_bytes()).hexdigest(),digest)
-        self.assertEqual(PINS['baseSha'],'401d73719e5624c2b80ac4f9e77c492cf7ab77fa')
-        self.assertEqual(PINS['runtimeTree'],'10155b99a70adbd4dfaca3b0d7a1654361f8b465')
-        self.assertEqual(PINS['runtimeSha'],'0b1f77e2157bf9df95d58385bbe4a693e8f378c7')
-        self.assertEqual(PINS['baselineContent']['files'],297);self.assertEqual(PINS['runtimeContent']['files'],319);self.assertEqual(len(PINS['allowedChanges']),30)
+        self.assertEqual(PINS['baseSha'],'0b1f77e2157bf9df95d58385bbe4a693e8f378c7')
+        self.assertEqual(PINS['runtimeTree'],'b89ead47951ed69824a4e0a727fb597605e2c46d')
+        self.assertEqual(PINS['runtimeSha'],'4170cc99a6903fdb08d9dc2624a96d6457fd7ab5')
+        self.assertEqual(PINS['baselineContent']['files'],319);self.assertEqual(PINS['runtimeContent']['files'],320);self.assertEqual(len(PINS['allowedChanges']),8)
         self.assertEqual(len(PINS['sourceScope']['rootFiles']),10);self.assertEqual(len(PINS['sourceScope']['directories']),9)
         self.assertNotIn('baselineFiles',PINS);self.assertNotIn('runtimeFiles',PINS)
         self.assertEqual(PINS['sourceScope']['excludedSubtrees'],['tooling/next-eslint-glob/node_modules'])
