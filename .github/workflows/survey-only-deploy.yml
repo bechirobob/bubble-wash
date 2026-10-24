@@ -8,7 +8,10 @@ on:
         required: true
         default: verify
         type: choice
-        options: [verify, deploy, activate]
+        options: [verify, deploy, activate, inspect]
+      staged_candidate:
+        description: 'Inspect only: already-staged exact release directory; never creates or builds it'
+        type: string
       verification_run:
         description: 'Activate only: successful first-attempt verify/deploy run for these exact controls and runtime'
         type: string
@@ -29,7 +32,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   verify:
-    if: inputs.mode != 'activate' && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    if: inputs.mode != 'activate' && inputs.mode != 'inspect' && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -106,12 +109,13 @@ jobs:
           retention-days: 7
   deploy:
     needs: verify
-    if: always() && !cancelled() && (inputs.mode == 'deploy' || inputs.mode == 'activate') && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main' && (needs.verify.result == 'success' || (inputs.mode == 'activate' && needs.verify.result == 'skipped'))
+    if: always() && !cancelled() && (inputs.mode == 'deploy' || inputs.mode == 'activate' || inputs.mode == 'inspect') && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main' && (needs.verify.result == 'success' || ((inputs.mode == 'activate' || inputs.mode == 'inspect') && needs.verify.result == 'skipped'))
     environment: backup-storage
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
       RUNTIME_SHA: ${{ inputs.runtime_sha }}
+      STAGED_CANDIDATE: ${{ inputs.staged_candidate }}
       VERIFICATION_RUN: ${{ inputs.verification_run }}
       BACKUP_SHA: ${{ inputs.backup_sha256 }}
       RECEIPT_RUN: ${{ inputs.receipt_run }}
@@ -138,6 +142,14 @@ jobs:
       - name: Reuse terminal exact hosted verification before separately approved activation
         if: inputs.mode == 'activate'
         run: python3 -B ops/deploy-survey-only.py --check-hosted-run
+      - name: Test exact read-only inspection controls before any host connection
+        if: inputs.mode == 'inspect'
+        run: python3 -B -m unittest discover -s tests -p 'test_survey_only_deploy.py' -v
+      - name: Bind the existing staged candidate for read-only inspection
+        if: inputs.mode == 'inspect'
+        run: |
+          set -euo pipefail
+          [[ "$STAGED_CANDIDATE" =~ ^/home/ubuntu/bubblewash-releases/[0-9]{8}T[0-9]{6}Z-${RUNTIME_SHA:0:12}$ ]]
       - name: Verify existing private backup destination without installing access
         env:
           GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
@@ -172,3 +184,9 @@ jobs:
           set -euo pipefail
           python3 -B ops/deploy-survey-only.py --emit > "$RUNNER_TEMP/survey-activate.py"
           tailscale ssh root@hermes "python3 -I -B - --mode activate --sha '$RUNTIME_SHA' --expected-live '5dc997db0393e1cf88dde29859b7e1c4550ee4ee' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < "$RUNNER_TEMP/survey-activate.py"
+      - name: Inspect exact staged source and current survey schema without mutation
+        if: inputs.mode == 'inspect'
+        run: |
+          set -euo pipefail
+          python3 -B ops/deploy-survey-only.py --emit > "$RUNNER_TEMP/survey-inspect.py"
+          tailscale ssh root@hermes "python3 -I -B - --mode inspect --candidate '$STAGED_CANDIDATE' --sha '$RUNTIME_SHA' --expected-live '5dc997db0393e1cf88dde29859b7e1c4550ee4ee' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < "$RUNNER_TEMP/survey-inspect.py"

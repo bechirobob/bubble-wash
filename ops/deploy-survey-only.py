@@ -521,7 +521,221 @@ def activate_flags(args):
         print('{"ok":true,"collectionOpen":true,"emailEnabled":true,"fixedRecipient":true}', flush=True)
 
 
+class InspectTimeout(BaseException):
+    pass
+
+
+class InspectRefusal(Exception):
+    def __init__(self, code, scope='none', depth=None, index=None):
+        self.result = {'guard': code, 'scope': scope, 'ancestorDepth': depth, 'fileIndex': index}
+
+
+def inspect_require(value, code, scope='none', depth=None, index=None):
+    if not value:
+        raise InspectRefusal(code, scope, depth, index)
+
+
+def inspect_path(path, owner, scope, directory=False, index=None):
+    try:
+        inspect_require(path.is_absolute() and path.resolve(strict=True) == path, 'PATH_CANONICAL', scope, index=index)
+        for depth, item in enumerate((*reversed(path.parents), path)):
+            info = item.lstat()
+            inspect_require(info.st_uid in (0, owner.pw_uid), 'ANCESTOR_OWNER', scope, depth, index)
+            inspect_require(not info.st_mode & 0o022, 'ANCESTOR_MODE', scope, depth, index)
+            if item != path or directory:
+                inspect_require(stat.S_ISDIR(info.st_mode), 'ANCESTOR_TYPE', scope, depth, index)
+            else:
+                inspect_require(stat.S_ISREG(info.st_mode), 'FILE_TYPE', scope, index=index)
+                inspect_require(info.st_nlink == 1, 'FILE_LINKS', scope, index=index)
+        return path.stat()
+    except (OSError, ValueError):
+        raise InspectRefusal('PATH_UNAVAILABLE', scope, index=index) from None
+
+
+def inspect_source(release, owner, scope):
+    expected = pins['baselineSource' if scope == 'baseline' else 'candidateSource']
+    files = pins['baselineFiles' if scope == 'baseline' else 'runtimeFiles']
+    inspect_path(release, owner, scope, True)
+    # Fixed map index, never an arbitrary filename or host path, leaves the host.
+    for index, (relative, digest) in enumerate(files.items()):
+        inspect_require(not Path(relative).is_absolute() and '..' not in Path(relative).parts, 'PIN_PATH', scope, index=index)
+        path = release / relative
+        info = inspect_path(path, owner, scope, index=index)
+        inspect_require(info.st_size <= 8 * 1024 * 1024, 'FILE_BOUND', scope, index=index)
+        inspect_require(core.digest(path) == digest, 'FILE_HASH', scope, index=index)
+    try:
+        actual = core.source_manifest(release)
+    except (OSError, ValueError):
+        raise InspectRefusal('SOURCE_MANIFEST_UNREADABLE', scope) from None
+    inspect_require(actual == expected, 'SOURCE_MANIFEST_MISMATCH', scope)
+
+
+def inspect_read(path, owner, scope, limit=65536):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        inspect_require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and
+                        info.st_uid in (0, owner.pw_uid) and not info.st_mode & 0o022, 'METADATA_FILE', scope)
+        inspect_require(info.st_size <= limit, 'METADATA_BOUND', scope)
+        raw = os.read(fd, limit + 1)
+        after = os.fstat(fd)
+        inspect_require(len(raw) == info.st_size and all(getattr(after, key) == getattr(info, key)
+                        for key in (*IDENTITY, 'st_size', 'st_mtime_ns', 'st_ctime_ns')), 'METADATA_CHANGED', scope)
+        return raw
+    finally:
+        os.close(fd)
+
+
+def inspect_binding(candidate, runtime_sha, owner):
+    inspect_require(candidate.parent == core.HOME / 'bubblewash-releases' and
+                    re.fullmatch(r'[0-9]{8}T[0-9]{6}Z-' + runtime_sha[:12], candidate.name), 'CANDIDATE_PATH', 'candidate')
+    inspect_require(core.CURRENT.is_symlink(), 'CURRENT_LINK', 'current')
+    current = core.CURRENT.resolve(strict=True)
+    marker_raw = inspect_read(core.RUNTIME / 'current-release', owner, 'current')
+    inspect_require(len(marker_raw) <= 65536, 'CURRENT_MARKER_BOUND', 'current')
+    marker = core.parse(marker_raw)
+    # Claims are independently followed by exact source-map validation below.
+    claim = (inspect_read(current / '.release-sha', owner, 'current', 128).decode().strip()
+             if current.parent == core.HOME / 'bubblewash-releases' else '')
+    pointer = 'candidate' if current == candidate and claim == runtime_sha else 'baseline' if current != candidate and claim == pins['baseSha'] else 'other'
+    marked = 'candidate' if marker.get('sha') == runtime_sha else 'baseline' if marker.get('sha') == pins['baseSha'] else 'other'
+    binding = {'pointerClaim': pointer, 'markerClaim': marked,
+               'markerPathMatchesPointer': marker.get('path') == str(current)}
+    return current, marker_raw, binding
+
+
+def inspect_database_path(owner):
+    # Approved descriptor-bound config read. Select only the nonsecret DB path;
+    # do not parse/look up any key or retain/transmit unrelated values.
+    raw, identity = environment_snapshot(core.ENV, owner, None)
+    selected = [line for line in raw.decode().splitlines()
+                if re.match(r'^\s*BUBBLEWASH_DATABASE_PATH\s*=', line)]
+    digest = hashlib.sha256(raw).hexdigest()
+    del raw
+    inspect_require(len(selected) == 1, 'DATABASE_CONFIG_BINDING', 'database')
+    values = core.parse(selected[0].encode())
+    path = Path(values.get('BUBBLEWASH_DATABASE_PATH', ''))
+    return path, digest, identity
+
+
+def inspect_schema(path, owner):
+    database_identity(path, owner)
+    with path.open('rb') as handle:
+        header = handle.read(100)
+    inspect_require(len(header) == 100 and header.startswith(b'SQLite format 3\x00'), 'DATABASE_FORMAT', 'database')
+    # Read-only SQLite never writes a WAL; require existing coordination files so
+    # it cannot initialize missing WAL/SHM sidecars. Never use immutable=1 on WAL.
+    if header[18:20] == b'\x02\x02' or Path(str(path) + '-wal').exists():
+        inspect_require(all(Path(str(path) + suffix).is_file() and not Path(str(path) + suffix).is_symlink()
+                            for suffix in ('-wal', '-shm')), 'DATABASE_WAL_UNAVAILABLE', 'database')
+    inspect_require(not Path(str(path) + '-journal').exists(), 'DATABASE_JOURNAL_ACTIVE', 'database')
+    connection = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=5, isolation_level=None)
+    try:
+        connection.execute('PRAGMA query_only=ON')
+        connection.execute('BEGIN')
+        present = [row for row in schema(connection) if row[1] in OBJECTS or row[2] in TABLES or row[1].startswith('research_')]
+        _, expected = approved_schema(pins['schemaSql'].encode(), pins['schemaSha256'])
+        return 'absent' if not present else 'complete' if present == expected else 'partial'
+    finally:
+        connection.close()
+
+
+def inspect_release(args):
+    result = {'schema': 'bubblewash-survey-inspection/v1', 'readOnly': True,
+              'binding': {'pointerClaim': 'unavailable', 'markerClaim': 'unavailable', 'markerPathMatchesPointer': None},
+              'source': {'baseline': 'unavailable', 'candidate': 'unavailable', 'criticalBytes': 'unavailable'},
+              'researchSchema': 'unavailable', 'receipt': 'unavailable', 'failures': []}
+    def attempt(operation, fallback, code, scope):
+        try:
+            return operation()
+        except InspectRefusal as error:
+            result['failures'].append(error.result)
+        except Exception:
+            result['failures'].append({'guard': code, 'scope': scope, 'ancestorDepth': None, 'fileIndex': None})
+        return fallback
+    def body(owner, lock_unchanged):
+        candidate = Path(args.candidate)
+        binding = attempt(lambda: inspect_binding(candidate, args.sha, owner), None, 'CURRENT_MARKER_UNREADABLE', 'current')
+        current = marker_raw = None
+        if binding:
+            current, marker_raw, result['binding'] = binding
+            if result['binding']['pointerClaim'] not in ('baseline', 'candidate'):
+                result['failures'].append({'guard': 'CURRENT_RELEASE_IDENTITY', 'scope': 'current', 'ancestorDepth': None, 'fileIndex': None})
+            if result['binding']['pointerClaim'] != result['binding']['markerClaim'] or not result['binding']['markerPathMatchesPointer']:
+                result['failures'].append({'guard': 'CURRENT_MARKER_MISMATCH', 'scope': 'current', 'ancestorDepth': None, 'fileIndex': None})
+        def candidate_source():
+            inspect_require(candidate.parent == core.HOME / 'bubblewash-releases' and
+                            re.fullmatch(r'[0-9]{8}T[0-9]{6}Z-' + args.sha[:12], candidate.name), 'CANDIDATE_PATH', 'candidate')
+            inspect_require(candidate.resolve(strict=True) == candidate and candidate.is_dir(), 'CANDIDATE_CANONICAL', 'candidate')
+            inspect_require(inspect_read(candidate / '.release-sha', owner, 'candidate', 128).decode().strip() == args.sha, 'CANDIDATE_MARKER', 'candidate')
+            inspect_source(candidate, owner, 'candidate')
+            return 'pass'
+        result['source']['candidate'] = attempt(candidate_source, 'refused', 'SOURCE_UNREADABLE', 'candidate')
+        if current is not None and result['binding']['pointerClaim'] == 'baseline':
+            def baseline_source():
+                inspect_source(current, owner, 'baseline')
+                return 'pass'
+            result['source']['baseline'] = attempt(baseline_source, 'refused', 'SOURCE_UNREADABLE', 'baseline')
+            if result['source']['baseline'] == result['source']['candidate'] == 'pass':
+                def critical():
+                    inspect_require(all(core.digest(current / p) == core.digest(candidate / p) for p in core.CRITICAL_FILES), 'CRITICAL_BYTES', 'critical')
+                    # Final reuse of the exact deployment source guard, not a substitute.
+                    verify_sources(current, candidate, owner)
+                    return 'pass'
+                result['source']['criticalBytes'] = attempt(critical, 'refused', 'SOURCE_GUARD', 'critical')
+        elif current == candidate:
+            result['source']['baseline'] = 'not-current'
+            result['source']['criticalBytes'] = 'not-comparable'
+        config = attempt(lambda: inspect_database_path(owner), None, 'DATABASE_CONFIG_UNREADABLE', 'database')
+        if config:
+            database, config_hash, config_identity = config
+            result['researchSchema'] = attempt(lambda: inspect_schema(database, owner), 'unavailable', 'SCHEMA_READ_FAILED', 'database')
+            def config_stable():
+                repeated, identity = environment_snapshot(core.ENV, owner, config_hash)
+                del repeated
+                inspect_require(identity == config_identity, 'CONFIG_CHANGED', 'database')
+            attempt(config_stable, None, 'CONFIG_CHANGED', 'database')
+        def receipt():
+            raw = inspect_read(core.RECEIPT, owner, 'backup')
+            inspect_require(len(raw) <= 65536, 'RECEIPT_BOUND', 'backup')
+            value = json.loads(raw)
+            inspect_require(value.get('sha256') == args.backup_sha256 and str(value.get('runId')) == args.receipt_run and
+                            value.get('storageSha') == args.store_sha and value.get('storageRepositoryId') == int(args.store_id),
+                            'RECEIPT_PIN', 'backup')
+            return 'matches-input-pins'
+        result['receipt'] = attempt(receipt, 'refused', 'RECEIPT_LOAD', 'backup')
+        def stable():
+            lock_unchanged()
+            if current is not None:
+                inspect_require(core.CURRENT.resolve(strict=True) == current and
+                                inspect_read(core.RUNTIME / 'current-release', owner, 'current') == marker_raw, 'CURRENT_CHANGED', 'current')
+        attempt(stable, None, 'LOCK_CHANGED', 'current')
+    require(os.geteuid() == 0 and args.expected_live == pins['baseSha'] and
+            re.fullmatch(r'[a-f0-9]{40}', args.sha) and re.fullmatch(r'[a-f0-9]{40}', args.store_sha) and
+            re.fullmatch(r'[a-f0-9]{64}', args.backup_sha256) and re.fullmatch(r'[1-9][0-9]*', args.receipt_run) and
+            re.fullmatch(r'[1-9][0-9]*', args.store_id))
+    owner = pwd.getpwnam('ubuntu')
+    def locked():
+        with core.deployment_lock(core.RUNTIME, owner.pw_uid) as lock_unchanged:
+            # Unlike deploy, inspection needs no privileged action after this.
+            app_operation(owner, lambda: body(owner, lock_unchanged))
+    previous = signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(InspectTimeout()))
+    signal.setitimer(signal.ITIMER_REAL, 90)
+    try:
+        attempt(locked, None, 'LOCK_OR_DROP', 'current')
+    except InspectTimeout:
+        result['failures'].append({'guard': 'INSPECTION_TIMEOUT', 'scope': 'none', 'ancestorDepth': None, 'fileIndex': None})
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+    result['ok'] = not result['failures']
+    print(json.dumps(result, separators=(',', ':')), flush=True)
+    return result
+
+
 def main(args):
+    if args.mode == 'inspect':
+        return inspect_release(args)
     if args.mode == 'activate':
         return activate_flags(args)
     require(os.geteuid() == 0 and args.expected_live == pins['baseSha'])
@@ -629,7 +843,7 @@ def main(args):
 
 def arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', choices=('deploy', 'activate'), default='deploy')
+    parser.add_argument('--mode', choices=('deploy', 'activate', 'inspect'), default='deploy')
     parser.add_argument('--candidate')
     for key in ('sha', 'expected-live', 'backup-sha256', 'receipt-run', 'store-sha',
                 'store-id'):
