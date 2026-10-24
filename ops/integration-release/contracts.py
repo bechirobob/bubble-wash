@@ -16,7 +16,7 @@ LIVE_TREE = '24fbe62668c996d0821153cf341b24765ef653b1'
 COORDINATED_UNITS = ('system/bubblewash-maintenance.timer', 'system/bubblewash-maintenance.service', 'user/bubblewash-local.service')
 RESIDUAL_ASSUMPTION = 'Deployment coordinates the three known Bubble Wash units under the exclusive deployment lock and persistent holds. Privileged root, ubuntu and other operators or unknown invokers are not technically excluded; they must not write the database or launch Bubble Wash during the approved window.'
 RESIDUAL_ASSUMPTION_SHA256 = hashlib.sha256(RESIDUAL_ASSUMPTION.encode()).hexdigest()
-PREPARATION_HELPER_SHA256 = '6f1859a34013f593d21dbd283eac05748eb6c61be2440319a50a9437c42025bd'
+PREPARATION_HELPER_SHA256 = '1b3ca324c50241d561868f432b081bb761875c9cd696df30846a976997529a2e'
 FALLBACK_CONTROL_PROOF = {
     'controlSha': 'a01336dd8a873f31d41fa4343631ddd7a8c03819',
     'runId': 40139632801,

@@ -441,4 +441,81 @@ class PreparationTests(unittest.TestCase):
             self.assertEqual(calls,[]);reserve.assert_not_called()
 
 
+class PrivateCopyLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.root=Path(self.tmp.name);self.source=self.root/'source.sqlite';self.destination=self.root/'private.sqlite'
+
+    def live(self,mode='WAL'):
+        db=sqlite3.connect(self.source);self.addCleanup(db.close)
+        self.assertEqual(db.execute('PRAGMA journal_mode='+mode).fetchone()[0],mode.lower())
+        db.executescript("CREATE TABLE original(id INTEGER PRIMARY KEY,value BLOB); INSERT INTO original VALUES(77,X'0001'); PRAGMA user_version=19;")
+        return db
+
+    def test_closed_private_copy_is_standalone_and_original_wal_unchanged(self):
+        import gc,hashlib
+        live=self.live()
+        before={suffix:hashlib.sha256(Path(str(self.source)+suffix).read_bytes()).hexdigest() for suffix in ('','-wal')}
+        p.private_copy(self.source,self.destination,time.monotonic()+10);gc.collect()
+        self.assertEqual(live.execute('PRAGMA journal_mode').fetchone(),('wal',))
+        self.assertEqual(before,{suffix:hashlib.sha256(Path(str(self.source)+suffix).read_bytes()).hexdigest() for suffix in ('','-wal')})
+        self.assertEqual(self.destination.read_bytes()[18:20],b'\x01\x01')
+        self.assertEqual(self.destination.stat().st_mode & 0o777,0o600)
+        self.assertFalse(any(Path(str(self.destination)+suffix).exists() for suffix in ('-wal','-shm','-journal')))
+        initial=hashlib.sha256(self.destination.read_bytes()).hexdigest()
+        # Exercise the historical admission rule and two subsequent readonly
+        # backups, as candidate/fallback rehearsals do. Do not weaken its guard.
+        for attempt in range(2):
+            header=self.destination.read_bytes()[:100]
+            if header[18:20]==b'\x02\x02':
+                for suffix in ('-wal','-shm'):
+                    sidecar=Path(str(self.destination)+suffix)
+                    self.assertTrue(sidecar.is_file() and not sidecar.is_symlink())
+            source=sqlite3.connect(self.destination.as_uri()+'?mode=ro',uri=True)
+            target=sqlite3.connect(self.root/('probe-'+str(attempt)+'.sqlite'))
+            try:
+                source.execute('PRAGMA query_only=ON');source.backup(target)
+                self.assertEqual(target.execute('PRAGMA quick_check').fetchall(),[('ok',)])
+                self.assertEqual(target.execute('PRAGMA user_version').fetchone(),(19,))
+                self.assertEqual(target.execute('SELECT rowid,* FROM original').fetchall(),[(77,77,b'\x00\x01')])
+            finally:target.close();source.close()
+            gc.collect();self.assertEqual(hashlib.sha256(self.destination.read_bytes()).hexdigest(),initial)
+
+    def test_delete_source_remains_delete(self):
+        live=self.live('DELETE');p.private_copy(self.source,self.destination,time.monotonic()+10)
+        self.assertEqual(live.execute('PRAGMA journal_mode').fetchone(),('delete',))
+        self.assertEqual(self.destination.read_bytes()[18:20],b'\x01\x01')
+
+    def test_existing_destination_never_overwritten(self):
+        self.live();self.destination.write_bytes(b'keep')
+        with self.assertRaises(FileExistsError):p.private_copy(self.source,self.destination,time.monotonic()+10)
+        self.assertEqual(self.destination.read_bytes(),b'keep')
+
+    def test_wal_source_without_sidecars_still_refused(self):
+        live=self.live();live.close()
+        self.assertEqual(self.source.read_bytes()[18:20],b'\x02\x02')
+        with self.assertRaises(FileNotFoundError):p.private_copy(self.source,self.destination,time.monotonic()+10)
+        self.assertFalse(self.destination.exists())
+
+    def test_failed_normalization_is_not_success_and_keeps_private_attempt(self):
+        live=self.live();connect=sqlite3.connect
+        # sqlite backup requires a real Connection target; intercept execute on
+        # a Connection subclass rather than replacing the SQLite object.
+        class RefusingConnection(sqlite3.Connection):
+            def execute(self,sql,*args,**kwargs):
+                if sql=='PRAGMA journal_mode=DELETE':return types.SimpleNamespace(fetchone=lambda:('wal',))
+                return super().execute(sql,*args,**kwargs)
+        def factory(database,*args,**kwargs):
+            if Path(database)==self.destination:kwargs['factory']=RefusingConnection
+            return connect(database,*args,**kwargs)
+        with mock.patch.object(p.sqlite3,'connect',side_effect=factory):
+            with self.assertRaises(ValueError):p.private_copy(self.source,self.destination,time.monotonic()+10)
+        self.assertTrue(self.destination.exists())
+        self.assertEqual(live.execute('PRAGMA journal_mode').fetchone(),('wal',))
+
+    def test_elapsed_backup_deadline_still_refuses(self):
+        self.live()
+        with self.assertRaises(ValueError):p.private_copy(self.source,self.destination,time.monotonic()-1)
+        self.assertTrue(self.destination.exists())
+
 if __name__=='__main__':unittest.main()
