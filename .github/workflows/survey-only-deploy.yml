@@ -8,7 +8,11 @@ on:
         required: true
         default: verify
         type: choice
-        options: [verify, deploy, activate, inspect]
+        options: [verify, deploy, activate, inspect, normalize-baseline]
+      apply_normalization:
+        description: 'Normalize-baseline only: separately approved clearing of022 on verified tracked legacy source; false only validates'
+        type: boolean
+        default: false
       staged_candidate:
         description: 'Inspect only: already-staged exact release directory; never creates or builds it'
         type: string
@@ -32,7 +36,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   verify:
-    if: inputs.mode != 'activate' && inputs.mode != 'inspect' && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    if: inputs.mode != 'activate' && inputs.mode != 'inspect' && inputs.mode != 'normalize-baseline' && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -109,12 +113,13 @@ jobs:
           retention-days: 7
   deploy:
     needs: verify
-    if: always() && !cancelled() && (inputs.mode == 'deploy' || inputs.mode == 'activate' || inputs.mode == 'inspect') && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main' && (needs.verify.result == 'success' || ((inputs.mode == 'activate' || inputs.mode == 'inspect') && needs.verify.result == 'skipped'))
+    if: always() && !cancelled() && (inputs.mode == 'deploy' || inputs.mode == 'activate' || inputs.mode == 'inspect' || inputs.mode == 'normalize-baseline') && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main' && (needs.verify.result == 'success' || ((inputs.mode == 'activate' || inputs.mode == 'inspect' || inputs.mode == 'normalize-baseline') && needs.verify.result == 'skipped'))
     environment: backup-storage
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
       RUNTIME_SHA: ${{ inputs.runtime_sha }}
+      APPLY_NORMALIZATION: ${{ inputs.apply_normalization }}
       STAGED_CANDIDATE: ${{ inputs.staged_candidate }}
       VERIFICATION_RUN: ${{ inputs.verification_run }}
       BACKUP_SHA: ${{ inputs.backup_sha256 }}
@@ -143,7 +148,7 @@ jobs:
         if: inputs.mode == 'activate'
         run: python3 -B ops/deploy-survey-only.py --check-hosted-run
       - name: Test exact read-only inspection controls before any host connection
-        if: inputs.mode == 'inspect'
+        if: inputs.mode == 'inspect' || inputs.mode == 'normalize-baseline'
         run: python3 -B -m unittest discover -s tests -p 'test_survey_only_deploy.py' -v
       - name: Bind the existing staged candidate for read-only inspection
         if: inputs.mode == 'inspect'
@@ -190,3 +195,12 @@ jobs:
           set -euo pipefail
           python3 -B ops/deploy-survey-only.py --emit > "$RUNNER_TEMP/survey-inspect.py"
           tailscale ssh root@hermes "python3 -I -B - --mode inspect --candidate '$STAGED_CANDIDATE' --sha '$RUNTIME_SHA' --expected-live '5dc997db0393e1cf88dde29859b7e1c4550ee4ee' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < "$RUNNER_TEMP/survey-inspect.py"
+      - name: Validate or separately normalize only pinned legacy source permissions
+        if: inputs.mode == 'normalize-baseline'
+        run: |
+          set -euo pipefail
+          [[ "$APPLY_NORMALIZATION" == 'true' || "$APPLY_NORMALIZATION" == 'false' ]]
+          apply=''
+          if [[ "$APPLY_NORMALIZATION" == 'true' ]]; then apply='--apply-normalization'; fi
+          python3 -B ops/deploy-survey-only.py --emit > "$RUNNER_TEMP/survey-normalize.py"
+          tailscale ssh root@hermes "python3 -I -B - --mode normalize-baseline $apply --sha '$RUNTIME_SHA' --expected-live '5dc997db0393e1cf88dde29859b7e1c4550ee4ee' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < "$RUNNER_TEMP/survey-normalize.py"

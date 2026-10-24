@@ -193,15 +193,31 @@ test.describe('interim survey open-fixture acceptance',()=>{
     await expect(page.getByRole('heading',{name:'Thank you!',exact:true})).toBeVisible();
   });
   test('consumer interview retains all qualifying probes and submits once',async({page})=>{
-    await enter(page,'consumer-interview');await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();await page.getByRole('button',{name:'Continue',exact:true}).click();const seen=new Set();
+    const answer='Clearly marked synthetic interview answer.';
+    const progress=page.getByRole('progressbar',{name:'Questionnaire progress'});
+    const next=async()=>{
+      const step=await progress.count()?Number(await progress.getAttribute('value')):0;
+      await page.getByRole('button',{name:'Continue',exact:true}).click();
+      await expect(progress,'Continue commits exactly the next questionnaire step').toHaveAttribute('value',String(step+1));
+    };
+    await enter(page,'consumer-interview');await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();await next();const seen=new Set();
     for(let i=0;i<20&&!await page.getByRole('button',{name:'Submit response',exact:true}).isVisible();i++){
       await eligibility(page,['student','business','corporate','household']);
-      for(const name of ['Students:','Business owners:','Office workers:','Households:'])if(await page.locator('legend').filter({hasText:name}).count()&&await page.locator('textarea').count())seen.add(name);
-      const inputs=page.locator('textarea');for(let j=0;j<await inputs.count();j++)await inputs.nth(j).fill('Clearly marked synthetic interview answer.');await page.getByRole('button',{name:'Continue',exact:true}).click();
+      // Snapshot exact field identities only after the prior step has committed.
+      // Positional locators must not resolve against a different step mid-loop.
+      const ids=await page.locator('textarea').evaluateAll(elements=>elements.map(element=>element.id));
+      for(const id of ids){
+        const input=page.locator('textarea[id="'+id+'"]');
+        await input.fill(answer);
+        await expect(input,'Controlled answer retained for '+id).toHaveValue(answer);
+        if(id.startsWith('probe-'))seen.add(id);
+      }
+      await next();
     }
-    expect([...seen].sort()).toEqual(['Business owners:','Households:','Office workers:','Students:']);
+    const probes=['probe-student','probe-business','probe-corporate','probe-household'];
+    expect([...seen].sort(),'Every qualifying probe field was filled').toEqual([...probes].sort());
     const saved=page.waitForResponse(r=>r.url().endsWith('/api/research/responses')&&r.request().method()==='POST');await page.getByRole('button',{name:'Submit response',exact:true}).click();const response=await saved;expect(response.status()).toBe(200);
-    const answers=response.request().postDataJSON().answers;for(const key of ['probe-student','probe-business','probe-corporate','probe-household'])expect(answers[key]).toBe('Clearly marked synthetic interview answer.');await expect(page.getByRole('heading',{name:'Thank you!',exact:true})).toBeVisible();
+    const answers=response.request().postDataJSON().answers;for(const key of probes)expect(answers[key],'Submitted answer retained for '+key).toBe(answer);await expect(page.getByRole('heading',{name:'Thank you!',exact:true})).toBeVisible();
   });
   test('business journey saves once and shows compact confirmation',async({page},testInfo)=>{
     await enter(page,'business-interview');await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();

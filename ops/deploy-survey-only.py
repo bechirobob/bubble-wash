@@ -733,7 +733,185 @@ def inspect_release(args):
     return result
 
 
+NORMALIZE_COUNTS = (267, 79)
+
+
+def normalize_baseline_sources(current, owner, bound, result):
+    """Only the pinned legacy source nodes. No recursive chmod or source execution."""
+    files = pins['baselineFiles']
+    directories = sorted({str(parent) for name in files for parent in Path(name).parents
+                          if str(parent) != '.'}, key=lambda name: (len(Path(name).parts), name))
+    inspect_require((len(files), len(directories)) == NORMALIZE_COUNTS, 'NORMALIZE_SCOPE', 'baseline')
+    inspect_require(all(not Path(name).is_absolute() and '..' not in Path(name).parts and
+                        str(Path(name)) == name for name in files), 'PIN_PATH', 'baseline')
+    # These ancestors, including release root, are validated but never modified.
+    root_info = safe_path(current, owner, True)
+    root_fd = os.open(current, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    records = {}
+    fields = (*IDENTITY, 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+    metadata = lambda info: tuple(getattr(info, key) for key in fields)
+    root_identity = metadata(root_info)
+    def same_record(record):
+        fd, parent, name, identity, _digest, _directory = record
+        inspect_require(metadata(os.fstat(fd)) == identity and
+                        metadata(os.stat(name, dir_fd=parent, follow_symlinks=False)) == identity,
+                        'NORMALIZE_IDENTITY_CHANGED', 'baseline')
+    def read_hash(record):
+        fd, _parent, _name, identity, _digest, directory = record
+        inspect_require(not directory and os.fstat(fd).st_size <= 8 * 1024 * 1024,
+                        'FILE_BOUND', 'baseline')
+        same_record(record)
+        os.lseek(fd, 0, os.SEEK_SET)
+        digest = hashlib.sha256(); size = 0
+        while True:
+            block = os.read(fd, 65536)
+            if not block:
+                break
+            size += len(block)
+            inspect_require(size <= 8 * 1024 * 1024, 'FILE_BOUND', 'baseline')
+            digest.update(block)
+        same_record(record)
+        inspect_require(size == identity[len(IDENTITY)], 'NORMALIZE_IDENTITY_CHANGED', 'baseline')
+        return digest.hexdigest()
+    def stable():
+        bound()
+        inspect_require(metadata(os.fstat(root_fd)) == root_identity and
+                        metadata(current.lstat()) == root_identity and
+                        current.resolve(strict=True) == current, 'NORMALIZE_ROOT_CHANGED', 'baseline')
+        safe_path(current, owner, True)
+        for record in records.values():
+            same_record(record)
+    def content():
+        actual = {name: read_hash(records[name]) for name in files}
+        inspect_require(actual == files, 'FILE_HASH', 'baseline')
+        # Check only names in pinned source directories; never open/traverse extras.
+        for name in directories:
+            if name == 'src' or name.startswith('src/'):
+                expected = {Path(item).name for item in (*files, *directories)
+                            if str(Path(item).parent) == name}
+                inspect_require(set(os.listdir(records[name][0])) == expected,
+                                'SOURCE_MANIFEST_MISMATCH', 'baseline')
+        rows = sorted((name[4:], digest) for name, digest in actual.items() if name.startswith('src/'))
+        manifest = {'src': hashlib.sha256(json.dumps(rows, separators=(',', ':')).encode()).hexdigest()}
+        manifest.update({name: actual[name] for name in ('package.json', 'package-lock.json', 'next.config.mjs', 'tsconfig.json')})
+        inspect_require(manifest == pins['baselineSource'], 'SOURCE_MANIFEST_MISMATCH', 'baseline')
+        inspect_require(all(actual[name] == pins['runtimeFiles'][name] for name in core.CRITICAL_FILES),
+                        'CRITICAL_BYTES', 'critical')
+    try:
+        inspect_require(metadata(os.fstat(root_fd)) == root_identity, 'NORMALIZE_ROOT_CHANGED', 'baseline')
+        for name, directory in [(name, True) for name in directories] + [(name, False) for name in files]:
+            relative = Path(name); parent_name = str(relative.parent)
+            parent = root_fd if parent_name == '.' else records[parent_name][0]
+            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | (os.O_DIRECTORY if directory else 0)
+            fd = os.open(relative.name, flags, dir_fd=parent)
+            try:
+                info = os.fstat(fd)
+                inspect_require((stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode) and info.st_nlink == 1),
+                                'NORMALIZE_TYPE_LINK', 'baseline')
+                inspect_require(info.st_uid in (0, owner.pw_uid) and
+                                (not info.st_mode & 0o022 or info.st_uid == owner.pw_uid),
+                                'NORMALIZE_OWNER', 'baseline')
+                # No set-ID/sticky/ACL semantics are silently changed by fchmod.
+                inspect_require(not info.st_mode & 0o7000 and not os.listxattr(fd), 'NORMALIZE_METADATA', 'baseline')
+                record = [fd, parent, relative.name, metadata(info), files.get(name), directory]
+                same_record(record)
+                records[name] = record
+            except BaseException:
+                os.close(fd)
+                raise
+        stable()
+        content()
+        stable()
+        content()
+        counts = {'files': {}, 'directories': {}}
+        for record in records.values():
+            mode = format(stat.S_IMODE(record[3][2]), '04o')
+            kind = 'directories' if record[5] else 'files'
+            counts[kind][mode] = counts[kind].get(mode, 0) + 1
+        result.update(prevalidated=True, observedModes=counts,
+                      eligibleFiles=len(files), eligibleDirectories=len(directories),
+                      needsChange=sum(bool(record[3][2] & 0o022) for record in records.values()))
+        # Emit actual bounded mode counts only after the entire source is verified,
+        # before the first change. No path, file content, key or account is emitted.
+        print(json.dumps({'schema': result['schema'], 'phase': 'prevalidated',
+                          **{key: result[key] for key in ('eligibleFiles', 'eligibleDirectories', 'observedModes', 'needsChange')}},
+                         separators=(',', ':')), flush=True)
+        if not result['applyRequested']:
+            result['status'] = 'validated-no-change'
+            return
+        stable()
+        for record in records.values():
+            if not record[3][2] & 0o022:
+                continue
+            stable()
+            old = record[3]
+            target = stat.S_IMODE(old[2]) & ~0o022
+            result['attemptedChanges'] += 1
+            os.fchmod(record[0], target)
+            after = os.fstat(record[0])
+            inspect_require(stat.S_IMODE(after.st_mode) == target and
+                            all(getattr(after, key) == old[fields.index(key)] for key in
+                                ('st_dev', 'st_ino', 'st_uid', 'st_gid', 'st_nlink', 'st_size', 'st_mtime_ns')),
+                            'NORMALIZE_POST_CHANGE', 'baseline')
+            record[3] = metadata(after)
+            same_record(record)
+            result['changed'] += 1
+        stable()
+        content()
+        # Reapply the unchanged strict path/hash policy after normalization.
+        for name, digest in files.items():
+            file_identity(current / name, owner, digest)
+        stable()
+        result['status'] = 'normalized' if result['changed'] else 'already-safe'
+    finally:
+        for record in reversed(list(records.values())):
+            os.close(record[0])
+        os.close(root_fd)
+
+
+def baseline_binding(owner):
+    inspect_require(core.CURRENT.is_symlink(), 'CURRENT_LINK', 'current')
+    current = core.CURRENT.resolve(strict=True)
+    inspect_require(current.parent == core.HOME / 'bubblewash-releases', 'CURRENT_RELEASE_IDENTITY', 'current')
+    marker = inspect_read(core.RUNTIME / 'current-release', owner, 'current')
+    parsed = core.parse(marker)
+    inspect_require(parsed.get('sha') == pins['baseSha'] and parsed.get('path') == str(current) and
+                    inspect_read(current / '.release-sha', owner, 'current', 128).decode().strip() == pins['baseSha'],
+                    'CURRENT_RELEASE_IDENTITY', 'current')
+    return current, marker
+
+
+def normalize_release(args):
+    result = {'schema': 'bubblewash-baseline-normalization/v1', 'applyRequested': bool(args.apply_normalization),
+              'prevalidated': False, 'attemptedChanges': 0, 'changed': 0, 'automaticRetry': False,
+              'status': 'refused', 'guard': None, 'ok': False}
+    def body(owner, lock_unchanged):
+        current, marker = baseline_binding(owner)
+        def bound():
+            lock_unchanged()
+            inspect_require(baseline_binding(owner) == (current, marker), 'CURRENT_CHANGED', 'current')
+        normalize_baseline_sources(current, owner, bound, result)
+    require(os.geteuid() == 0 and args.expected_live == pins['baseSha'] and re.fullmatch(r'[a-f0-9]{40}', args.sha))
+    owner = pwd.getpwnam('ubuntu')
+    previous = signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(InspectTimeout()))
+    signal.setitimer(signal.ITIMER_REAL, 90)
+    try:
+        with core.deployment_lock(core.RUNTIME, owner.pw_uid) as lock_unchanged:
+            app_operation(owner, lambda: body(owner, lock_unchanged))
+        result['ok'] = True
+    except BaseException as error:
+        result['guard'] = error.result['guard'] if isinstance(error, InspectRefusal) else ('NORMALIZE_TIMEOUT' if isinstance(error, InspectTimeout) else 'NORMALIZE_REFUSED')
+        result['status'] = 'partial-or-uncertain' if result['attemptedChanges'] else 'refused-no-change'
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+    print(json.dumps(result, separators=(',', ':')), flush=True)
+    return result
+
+
 def main(args):
+    if args.mode == 'normalize-baseline':
+        return normalize_release(args)
     if args.mode == 'inspect':
         return inspect_release(args)
     if args.mode == 'activate':
@@ -843,8 +1021,9 @@ def main(args):
 
 def arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', choices=('deploy', 'activate', 'inspect'), default='deploy')
+    parser.add_argument('--mode', choices=('deploy', 'activate', 'inspect', 'normalize-baseline'), default='deploy')
     parser.add_argument('--candidate')
+    parser.add_argument('--apply-normalization', action='store_true')
     for key in ('sha', 'expected-live', 'backup-sha256', 'receipt-run', 'store-sha',
                 'store-id'):
         parser.add_argument('--' + key, required=True)
@@ -857,9 +1036,12 @@ def entry():
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGHUP, interrupted)
     try:
-        main(arguments())
+        args = arguments()
+        result = main(args)
     except BaseException:
         print(json.dumps({'ok': False, 'status': 'review-required', 'stage': STAGE, 'automaticRetry': False}), flush=True)
+        raise SystemExit(1)
+    if args.mode == 'normalize-baseline' and not result['ok']:
         raise SystemExit(1)
 
 
