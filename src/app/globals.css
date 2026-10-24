@@ -1670,6 +1670,7 @@ input, select, textarea { font-size: 1rem; }
 .planChoices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .planChoice { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 16px 0; border-block: 2px solid transparent; border-top-color: var(--line-strong); cursor: pointer; }
 .planChoice:has(input:checked) { border-bottom-color: var(--brand); }
+html[data-input-modality="keyboard"] .planChoice:has(input:focus),
 html:not([data-input-modality="pointer"]) .planChoice:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
 .planChoiceName { display: flex; align-items: baseline; gap: 8px; color: var(--ink-strong); line-height: 1.35; }
 .planChoiceName input { flex: 0 0 auto; width: 16px; height: 16px; min-height: 16px; padding: 0; margin: 0; accent-color: var(--brand); }
@@ -1841,6 +1842,7 @@ html:not([data-input-modality="pointer"]) .planChoice:has(input:focus-visible) {
 .focusedPlanSegment:first-child { border-radius: calc(var(--radius-md) - 1px) 0 0 calc(var(--radius-md) - 1px); }
 .focusedPlanSegment:last-child { border-radius: 0 calc(var(--radius-md) - 1px) calc(var(--radius-md) - 1px) 0; }
 .focusedPlanSegment:has(input:checked) { background: var(--brand); color: #fff; }
+html[data-input-modality="keyboard"] .focusedPlanSegment:has(input:focus),
 html:not([data-input-modality="pointer"]) .focusedPlanSegment:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 3px; z-index: 1; }
 .focusedPlanCard { min-width: 0; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--paper); }
 .focusedPlanCard .sectionLabel { margin-bottom: 9px; }

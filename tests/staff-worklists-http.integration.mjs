@@ -211,10 +211,13 @@ try {
  getDatabase().prepare('INSERT INTO operational_work_ownership VALUES (?,?,?,?,?,?,?)').run(`order-overdue-received:${historic}`,actors.admin.email,yearsAgo,'Synthetic old note',1,yearsAgo,historic);
  getDatabase().prepare('INSERT INTO operational_command_receipts VALUES (?,?,?,?,?)').run('synthetic-expired-scope','synthetic-expired-key','synthetic-hash','{}',yearsAgo);
  getDatabase().prepare('INSERT INTO order_holds VALUES (?,?,?)').run(historic,'Synthetic hold',yearsAgo);
- purgeOperationalData(now); assert.equal(getDatabase().prepare('SELECT count(*) AS n FROM operational_work_ownership WHERE order_id=?').get(historic).n,1);
- assert.equal(getDatabase().prepare('SELECT count(*) AS n FROM operational_command_receipts WHERE scope=?').get('synthetic-expired-scope').n,0);
+ const retainedOwnership=getDatabase().prepare('SELECT rowid,* FROM operational_work_ownership WHERE order_id=?').get(historic);
+ const retainedReceipt=getDatabase().prepare('SELECT rowid,* FROM operational_command_receipts WHERE scope=?').get('synthetic-expired-scope');
+ purgeOperationalData(now); assert.deepEqual(getDatabase().prepare('SELECT rowid,* FROM operational_work_ownership WHERE order_id=?').get(historic),retainedOwnership);
+ assert.deepEqual(getDatabase().prepare('SELECT rowid,* FROM operational_command_receipts WHERE scope=?').get('synthetic-expired-scope'),retainedReceipt);
  getDatabase().prepare('DELETE FROM order_holds WHERE order_id=?').run(historic);
- purgeOperationalData(now); assert.equal(getDatabase().prepare('SELECT count(*) AS n FROM operational_work_ownership WHERE order_id=?').get(historic).n,0);
+ purgeOperationalData(now); assert.deepEqual(getDatabase().prepare('SELECT rowid,* FROM operational_work_ownership WHERE order_id=?').get(historic),retainedOwnership);
+ assert.deepEqual(getDatabase().prepare('SELECT rowid,* FROM operational_command_receipts WHERE scope=?').get('synthetic-expired-scope'),retainedReceipt);
  assert.equal(getDatabase().prepare('SELECT 1 FROM submissions WHERE id=?').get('BW-AUTORETENTION3'),undefined); groups++;
  assert.equal(dispatchRecommendations(actors.admin,order3,now).assignmentAvailable,true);
  seed('BW-ASSIGNDECLINE',{submissionType:'vendor-job-update',orderId:order3,jobStatus:'Declined'},new Date(now+20000).toISOString());

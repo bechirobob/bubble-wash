@@ -33,9 +33,19 @@ def verify_runner_source(release):
             matches.append(source_contract)
         except (OSError, ValueError, KeyError, TypeError):
             continue
-    if len(matches) != 1:
-        raise ValueError('Runner checkout lacks one exact reviewed source contract.')
-    return matches[0]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        raise ValueError('Runner checkout matches multiple source contracts.')
+    # CI checkout recognition is not a host enrollment profile. Reconciled app
+    # previews must satisfy the complete reviewed content commitment, while
+    # check_source and all host selectors retain their historical exact pins.
+    spec = importlib.util.spec_from_file_location('runner_integration_contract', ROOT / 'ops/integration-release/contracts.py')
+    compact = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(compact)
+    contract = compact.read_json(ROOT / 'ops/integration-release/source-contracts.json')
+    compact.verify_source(Path(release), contract, 'integration-candidate-v1')
+    return 'reviewed-runner-only-v1'
 
 
 if __name__ == '__main__':

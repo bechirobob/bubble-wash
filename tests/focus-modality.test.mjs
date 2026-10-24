@@ -65,3 +65,14 @@ test('one shared policy retains editing cues and all focusable keyboard targets'
   const provider = readFileSync(new URL('../src/components/WebAppProvider.tsx', import.meta.url), 'utf8');
   assert.match(provider, /useEffect\(\(\) => installFocusModality\(document\), \[\]\)/);
 });
+
+// Visible native-radio wrappers follow the same explicit keyboard policy as the
+// input itself: WebKit need not expose :focus-visible after native arrow changes.
+test('native radio wrappers show keyboard focus without reintroducing pointer rings', () => {
+  const css = readFileSync(new URL('../src/app/globals.css', import.meta.url), 'utf8');
+  for (const wrapper of ['planChoice', 'focusedPlanSegment']) {
+    assert.ok(css.includes(`html[data-input-modality="keyboard"] .${wrapper}:has(input:focus),\nhtml:not([data-input-modality="pointer"]) .${wrapper}:has(input:focus-visible) {`));
+    assert.ok(!css.includes(`.${wrapper}:focus-within`));
+  }
+  assert.match(css, /@media \(forced-colors: active\) \{\s*\.focusedPlanSegment:has\(input:checked\)/);
+});

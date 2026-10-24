@@ -4,6 +4,14 @@ import { test, expect } from '@playwright/test';
 test.afterEach(async ({ page }, testInfo) => {
   if (testInfo.status === testInfo.expectedStatus || page.isClosed()) return;
   if (!['/services'].includes(new URL(page.url()).pathname)) return;
+  const focus = await page.locator('.focusedPlanSegment input:checked').evaluate(input => ({
+    modality: document.documentElement.dataset.inputModality ?? 'unknown',
+    focused: document.activeElement === input,
+    nativeFocusVisible: input.matches(':focus-visible'),
+    labelOutline: getComputedStyle(input.closest('label')).outline,
+    inputOutline: getComputedStyle(input).outline,
+  })).catch(() => null);
+  console.log('pricing keyboard focus failure', JSON.stringify(focus));
   await page.screenshot({ path: testInfo.outputPath('failure.png'), fullPage: true, animations: 'disabled', timeout: 5000 }).catch(() => {});
 });
 
@@ -44,6 +52,7 @@ test('native frequency keyboard navigation updates the selected plan and support
   await expect(catalogue.getByRole('status')).toContainText('Twice weekly selected');
   const second = catalogue.getByRole('radio', { name: 'Twice weekly, 2 pickups / week', exact: true });
   await expect(second).toBeFocused();
+  await expect(page.locator('html')).toHaveAttribute('data-input-modality', 'keyboard');
   await expect.poll(() => second.evaluate(input => {
     const style = getComputedStyle(input.closest('label'));
     return style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2 && style.outlineColor !== 'transparent';
@@ -168,5 +177,7 @@ test('touch selection has no sticky ring and keyboard selection retains its ring
   await page.keyboard.press('ArrowRight');
   const selected = page.locator('.focusedPlanSegment').nth(1);
   await expect(selected.locator('input')).toBeChecked();
+  await expect(selected.locator('input')).toBeFocused();
+  await expect(page.locator('html')).toHaveAttribute('data-input-modality', 'keyboard');
   await expect.poll(() => selected.evaluate(node => getComputedStyle(node).outlineStyle)).not.toBe('none');
 });
