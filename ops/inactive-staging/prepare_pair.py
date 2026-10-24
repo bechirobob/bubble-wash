@@ -171,6 +171,10 @@ def private_copy(database, destination, deadline):
         def progress(*_):
             require(time.monotonic() < deadline)
         source.backup(target, pages=128, progress=progress, sleep=0.1)
+        # Normalize only this new private destination. A WAL-mode backup can
+        # retain a WAL header after close removes its sidecars, which the
+        # unchanged historical rehearsal correctly refuses as a source.
+        require(target.execute('PRAGMA journal_mode=DELETE').fetchone() == ('delete',))
         require(target.execute('PRAGMA quick_check').fetchall() == [('ok',)])
     finally:
         if target is not None: target.close()

@@ -1,0 +1,57 @@
+name: Reviewed Backup Directory Mode Repair
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Exact reviewed main commit for this single-directory repair'
+        required: true
+        type: string
+      confirmation:
+        description: 'Enter repair-backup-directory-group-write for the approved 0775 to 0755 correction only'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  repair:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Require exact reviewed main and literal confirmation
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMATION" == repair-backup-directory-group-write && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check exact sources and focused repair tests before connecting
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+          python3 -B -m unittest discover -s tests -p 'test_repair_backup_mode.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_backup_mode_transport.py' -v
+          python3 -B ops/integration-release/stream_backup_mode.py --source-sha "$SOURCE_SHA" --confirmation "$CONFIRMATION" > "$RUNNER_TEMP/backup-directory-repair.py"
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+      - name: Connect using existing approved production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Apply only the approved directory correction under the deployment lock
+        run: |
+          set -euo pipefail
+          tailscale ssh root@hermes 'python3 -I -B -' < "$RUNNER_TEMP/backup-directory-repair.py"
