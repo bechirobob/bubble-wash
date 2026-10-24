@@ -15,6 +15,7 @@ import {
 const now = Date.parse("2026-07-18T12:00:00.000Z");
 const valid = {
   orderId: "BW-LIVE-123",
+  generation: "89a2112d-3c1d-48d1-a9d2-baaeddd532b9",
   latitude: 5.6037,
   longitude: -0.187,
   accuracyMeters: 18.5,
@@ -96,4 +97,12 @@ test("only an exact rider assignment in a moving route stage can share location"
   assert.equal(isActiveMovingDriverAssignment({ driverId: "driver-two", workflowStage: { key: "driver-en-route" } }, "driver-one"), false);
   assert.equal(isActiveMovingDriverAssignment({ driverId: "driver-one", workflowStage: { key: "ready" } }, "driver-one"), false);
   assert.equal(isActiveMovingDriverAssignment({ driverId: "", workflowStage: { key: "driver-en-route" } }, "driver-one"), false);
+});
+test("location updates require an explicit server-issued generation", async () => {
+  const { validLocationGeneration } = await import("../src/lib/dispatch-location.ts");
+  for (const generation of [undefined, "", "legacy", "89a2112d-3c1d-18d1-a9d2-baaeddd532b9", valid.generation + " "]) {
+    assert.equal(validLocationGeneration(generation), null);
+    assert.equal(validateLiveLocationInput({ ...valid, generation }, now).ok, false);
+  }
+  assert.equal(validLocationGeneration(valid.generation), valid.generation);
 });

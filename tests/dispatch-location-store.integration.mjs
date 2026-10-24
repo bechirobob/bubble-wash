@@ -19,12 +19,13 @@ const first = {
   capturedAt: captured(-10_000),
   receivedAt: captured(-9_000),
 };
-assert.equal(store.upsertDriverLiveLocation(first), true);
+const generation = store.startDriverLiveLocation(first.driverId, first.orderId);
+assert.equal(store.upsertDriverLiveLocation(first, generation), true);
 assert.deepEqual(store.readDriverLiveLocation(first.driverId), first);
 assert.deepEqual(store.readDriverLiveLocation(first.driverId.toUpperCase()), first);
 
-assert.equal(store.upsertDriverLiveLocation({ ...first, latitude: 5.61 }), false);
-assert.equal(store.upsertDriverLiveLocation({ ...first, capturedAt: captured(-11_000) }), false);
+assert.equal(store.upsertDriverLiveLocation({ ...first, latitude: 5.61 }, generation), false);
+assert.equal(store.upsertDriverLiveLocation({ ...first, capturedAt: captured(-11_000) }, generation), false);
 assert.equal(store.readDriverLiveLocation(first.driverId)?.latitude, first.latitude);
 
 const latest = {
@@ -34,7 +35,7 @@ const latest = {
   capturedAt: captured(-8_000),
   receivedAt: captured(-7_000),
 };
-assert.equal(store.upsertDriverLiveLocation(latest), true);
+assert.equal(store.upsertDriverLiveLocation(latest, generation), true);
 assert.deepEqual(store.readDriverLiveLocation(first.driverId), latest);
 assert.equal(store.readDriverLiveLocations().length, 1);
 
@@ -45,7 +46,8 @@ const second = {
   capturedAt: captured(-6_000),
   receivedAt: captured(-5_000),
 };
-assert.equal(store.upsertDriverLiveLocation(second), true);
+const secondGeneration = store.startDriverLiveLocation(second.driverId, second.orderId);
+assert.equal(store.upsertDriverLiveLocation(second, secondGeneration), true);
 assert.deepEqual(store.readDriverLiveLocations().map((item) => item.driverId), [second.driverId, first.driverId]);
 
 assert.equal(store.deleteDriverLiveLocation(first.driverId), true);
@@ -55,4 +57,21 @@ assert.equal(store.deleteExpiredDriverLiveLocations(captured(1)), 1);
 assert.deepEqual(store.readDriverLiveLocations(), []);
 assert.equal(store.databaseReadiness(), true);
 
-console.log(JSON.stringify({ ok: true, checks: 17 }));
+// Clock skew never grants permission to keep sharing after a stop.
+const ahead = { ...first, capturedAt: captured(20_000) };
+assert.equal(store.upsertDriverLiveLocation(ahead, generation), true);
+assert.equal(store.stopDriverLiveLocation(first.driverId).cleared, true);
+assert.equal(store.readDriverLiveLocation(first.driverId), null);
+assert.equal(store.upsertDriverLiveLocation({ ...ahead, capturedAt: captured(21_000) }, generation), false);
+assert.equal(store.upsertDriverLiveLocation(ahead), false);
+const resumed = store.startDriverLiveLocation(first.driverId, first.orderId);
+assert.notEqual(resumed, generation);
+assert.equal(store.upsertDriverLiveLocation(first, generation), false);
+assert.equal(store.upsertDriverLiveLocation(first, resumed), true);
+assert.equal(store.stopDriverLiveLocation(first.driverId, { generation, orderId: first.orderId }).staleGeneration, true);
+assert.deepEqual(store.readDriverLiveLocation(first.driverId), first);
+assert.equal(store.stopDriverLiveLocation(first.driverId, { generation: resumed, orderId: second.orderId }).staleGeneration, true);
+assert.equal(store.upsertDriverLiveLocation({ ...first, orderId: second.orderId, capturedAt: captured(22_000) }, resumed), false);
+assert.equal(store.stopDriverLiveLocation(first.driverId, { generation: resumed, orderId: first.orderId }).cleared, true);
+assert.equal(store.upsertDriverLiveLocation(ahead, resumed), false);
+console.log(JSON.stringify({ ok: true, checks: 32, generationFencing: true }));

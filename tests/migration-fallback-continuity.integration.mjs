@@ -29,17 +29,28 @@ try{
  const request={action:'quality',note:'Synthetic receipt continuity'}; const customerReceipt=createCustomerRequest('candidate-booking',request,'synthetic-customer-key'); assert.equal(customerReceipt.status,200);
  const admin={email:'owner@example.invalid',name:'Owner',role:'admin',allStaffAccess:true};const items=automationWorklist(admin,new URLSearchParams()).items;const item=items.find(x=>x.kind==='case-followup')??items[0]; assert.ok(item);
  const ownership={itemId:item.id,ownerEmail:'',dueAt:iso(now+3600000),note:'Synthetic work ownership',expectedRevision:item.revision,signalVersion:item.signalVersion,idempotencyKey:'synthetic-ownership-key'};assert.equal(manageWorkOwnership(admin,ownership).ok,true);
- s.upsertDriverLiveLocation(point('driver-candidate',now-1000));s.stopDriverLiveLocation('driver-candidate',iso(now));
+ const stoppedGeneration=s.startDriverLiveLocation('driver-candidate','candidate-booking');
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',now+20000),stoppedGeneration),true);
+ assert.equal(s.stopDriverLiveLocation('driver-candidate').cleared,true);
+ const activeGeneration=s.startDriverLiveLocation('driver-candidate','candidate-booking');
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',now+20000),activeGeneration),true);
  for(const id of ['queued','lease-before','lease-email','lease-whatsapp','retry'])enqueue(id,id==='lease-whatsapp'?'whatsapp':'email');
  const leases={};for(const id of ['lease-before','lease-email','lease-whatsapp','retry']){leases[id]=s.claimNotification({id,now});assert.ok(leases[id]);if(id!=='lease-before')assert.ok(begin(leases[id],now));}
  assert.equal(s.updateNotificationDelivery({id:'retry',leaseToken:leases.retry.leaseToken,status:'uncertain',now,retryAfterMs:0}),true);
- console.log(JSON.stringify({now,leases,command,request,ownership,customerReceipt}));db.close();`);
+ console.log(JSON.stringify({now,leases,command,request,ownership,customerReceipt,stoppedGeneration,activeGeneration}));db.close();`);
  const protectedTables=['staff_accounts','staff_owner_capabilities','admin_mfa_settings','admin_mfa_recovery_codes','research_responses','research_notification_outbox']; const protectedBefore=snapshot(protectedTables),optionalBefore=snapshot(optional);
  const frozen=JSON.stringify(first);
- run(fallback,common+`const original=${frozen};const before=original.now,later=before+60001;
- assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',before-500)),false);assert.equal(s.readDriverLiveLocation('driver-candidate'),null);
- assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',before+1)),true);assert.equal(s.stopDriverLiveLocation('driver-candidate',iso(before)).newerLocationRetained,true);assert.equal(s.readDriverLiveLocation('driver-candidate').capturedAt,iso(before+1));
- assert.equal(s.upsertDriverLiveLocation(point('driver-fallback',before+2)),true);s.stopDriverLiveLocation('driver-fallback',iso(before+3));
+ const fallbackState=run(fallback,common+`const original=${frozen};const before=original.now,later=before+60001;
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',before+21000),original.stoppedGeneration),false);
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',before+21000),original.activeGeneration),true);
+ assert.equal(s.stopDriverLiveLocation('driver-candidate',{generation:original.stoppedGeneration,orderId:'candidate-booking'}).staleGeneration,true);
+ assert.equal(s.readDriverLiveLocation('driver-candidate').capturedAt,iso(before+21000));
+ assert.equal(s.stopDriverLiveLocation('driver-candidate',{generation:original.activeGeneration,orderId:'candidate-booking'}).cleared,true);
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',before+22000),original.activeGeneration),false);
+ const fallbackGeneration=s.startDriverLiveLocation('driver-candidate','candidate-booking');
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',before+22000),fallbackGeneration),true);
+ const fallbackStopped=s.startDriverLiveLocation('driver-fallback','candidate-booking');
+ assert.equal(s.upsertDriverLiveLocation(point('driver-fallback',before+22000),fallbackStopped),true);s.stopDriverLiveLocation('driver-fallback');
  assert.equal(save('fallback-booking').bookingReference,'BW-002'); assert.equal(save('candidate-booking').replayed,true);
  upsertVendorAvailability({vendorId:'vendor',vendorName:'Synthetic Vendor',capacityRemaining:2,availabilityStatus:'limited',updatedBy:'fallback'});assert.equal(db.prepare("SELECT count(*) n FROM vendor_capacity_confirmations WHERE vendor_id='vendor'").get().n,0);
  for(const id of ['lease-before','lease-email','lease-whatsapp'])assert.equal(s.claimNotification({id,now:before+1}),null);
@@ -48,10 +59,17 @@ try{
  assert.equal(s.claimNotification({id:'lease-whatsapp',now:later}),null);assert.equal(s.readNotification('lease-whatsapp').deliveryState,'manual_review');
  const retry=s.claimNotification({id:'retry',now:later});assert.ok(retry);assert.equal(retry.providerIdempotencyKey,'synthetic-key-retry');assert.ok(begin(retry,later));assert.equal(s.updateNotificationDelivery({id:'retry',leaseToken:retry.leaseToken,status:'uncertain',now:later,retryAfterMs:0}),true);
  const queued=s.claimNotification({id:'queued',now:later});assert.ok(queued);assert.equal(queued.attempts,0);assert.ok(begin(queued,later));assert.equal(s.updateNotificationDelivery({id:'queued',leaseToken:queued.leaseToken,status:'accepted',providerId:'synthetic-queued',now:later}),true);
- enqueue('fallback-queued');const pending=s.claimNotification({id:'fallback-queued',now:later});assert.ok(pending);assert.ok(begin(pending,later)); db.close();`);
+ enqueue('fallback-queued');const pending=s.claimNotification({id:'fallback-queued',now:later});assert.ok(pending);assert.ok(begin(pending,later)); console.log(JSON.stringify({fallbackGeneration,fallbackStopped})); db.close();`);
  assert.deepEqual(snapshot(protectedTables),protectedBefore);assert.deepEqual(snapshot(optional),optionalBefore);
  run(candidate,common+`const original=${frozen};const later=original.now+120002;import {createCustomerRequest} from './src/lib/customer-requests.ts';import {manageWorkOwnership} from './src/lib/operations-automation.ts';import {vendorCapacityCommand} from './src/lib/vendor-capacity-command.ts';
- assert.equal(s.upsertDriverLiveLocation(point('driver-fallback',original.now+2)),false);assert.equal(s.readDriverLiveLocation('driver-fallback'),null);assert.equal(s.upsertDriverLiveLocation(point('driver-fallback',original.now+4)),true);
+ const fallbackState=${JSON.stringify(fallbackState)};
+ assert.equal(s.upsertDriverLiveLocation(point('driver-candidate',original.now+23000),fallbackState.fallbackGeneration),true);
+ assert.equal(s.stopDriverLiveLocation('driver-candidate',{generation:original.activeGeneration,orderId:'candidate-booking'}).staleGeneration,true);
+ assert.equal(s.stopDriverLiveLocation('driver-candidate',{generation:fallbackState.fallbackGeneration,orderId:'candidate-booking'}).cleared,true);
+ assert.equal(s.upsertDriverLiveLocation(point('driver-fallback',original.now+23000),fallbackState.fallbackStopped),false);
+ assert.equal(s.readDriverLiveLocation('driver-fallback'),null);
+ const resumed=s.startDriverLiveLocation('driver-fallback','candidate-booking');
+ assert.equal(s.upsertDriverLiveLocation(point('driver-fallback',original.now+4),resumed),true);
  assert.equal(save('resumed-booking').bookingReference,'BW-003');assert.equal(save('fallback-booking').replayed,true);
  assert.equal(createCustomerRequest('candidate-booking',original.request,'synthetic-customer-key').body.replayed,true);
  assert.equal(manageWorkOwnership({email:'owner@example.invalid',name:'Owner',role:'admin',allStaffAccess:true},original.ownership).replayed,true);
@@ -73,5 +91,5 @@ try{
   environment.BUBBLEWASH_DATABASE_PATH=path.join(temporary,source===candidate?'candidate-presentation.sqlite':'fallback-presentation.sqlite');
   run(source,common+`import {queueSubmissionNotifications} from './src/lib/notifications.ts';process.env.NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED='true';const token='BW-R1234567890ABCDEF';const saved=saveBookingOnce({id:token,createdAt:iso(now),data:{submissionType:'pickup-booking',name:'Synthetic',email:'fixture@example.invalid',alertPreference:'Email only'}},'presentation-fixture-key',queueSubmissionNotifications);assert.equal(saved.bookingReference,'BW-001');const rows=db.prepare("SELECT target,payload FROM notification_outbox WHERE channel='email'").all();const customer=JSON.parse(rows.find(r=>r.target==='customer').payload);const operations=JSON.parse(rows.find(r=>r.target==='operations').payload);assert.ok(customer.text.includes('/track#tracking='+token));assert.equal(customer.text.includes('?id='),false);assert.equal(customer.subject.includes(token),false);assert.ok(customer.subject.includes('BW-001'));assert.equal(JSON.stringify(operations).includes(token),false);s.appendSubmissionRecord({id:'linked-record',createdAt:iso(now),data:{submissionType:'support-ticket',orderId:token}});assert.equal(s.findSubmissionRecordById('linked-record').data.bookingReference,'BW-001');db.close();`);
  }
- console.log(JSON.stringify({ok:true,scope:'candidate-to-fallback-to-candidate',driverStopAndLateWritePreserved:true,capacityConfirmationInvalidated:true,optionalReceiptsAndOwnershipPreserved:true,queuedLeasedAndRetryStatesPreserved:true,frozenWorkerRequestAcrossBothSwitches:true,newNotificationFragmentAndPublicLabel:true,ownerMfaResearchPreserved:true,networkRequests:0}));
+ console.log(JSON.stringify({ok:true,scope:'candidate-to-fallback-to-candidate',generationAcrossBothSwitches:true,legacyAheadClockStop:true,driverStopAndLateWritePreserved:true,capacityConfirmationInvalidated:true,optionalReceiptsAndOwnershipPreserved:true,queuedLeasedAndRetryStatesPreserved:true,frozenWorkerRequestAcrossBothSwitches:true,newNotificationFragmentAndPublicLabel:true,ownerMfaResearchPreserved:true,networkRequests:0}));
 }finally{rmSync(temporary,{recursive:true,force:true});}
