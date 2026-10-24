@@ -176,7 +176,8 @@ if __name__ == '__main__':
                 'historical evidence guard differs')
         modules = [('contracts', HERE/'contracts.py'),
                    ('host_adapter', HERE/'host_adapter.py'),
-                   ('evidence_guard', HERE/'vendor/bubblewash-web-a476-baseline/ops/deploy-preserving.py')]
+                   ('evidence_guard', HERE/'vendor/bubblewash-web-a476-baseline/ops/deploy-preserving.py'),
+                   ('binding_diagnostic', HERE/'binding_diagnostic.py')]
         print('import sys, types, json\nsys.dont_write_bytecode = True')
         for name, path in modules:
             body = path.read_text()
@@ -184,7 +185,15 @@ if __name__ == '__main__':
             print('m.__file__ = '+repr('/nonexistent-bubblewash-evidence/'+name+'.py'))
             print('sys.modules['+repr(name)+'] = m')
             print('exec(compile('+repr(body)+', m.__file__, "exec"), m.__dict__)')
-        print("try:\n print(json.dumps(sys.modules['host_adapter'].inspect_host_evidence(sys.modules['evidence_guard']), sort_keys=True))\nexcept BaseException as error:\n print(json.dumps(sys.modules['host_adapter'].evidence_failure(error), sort_keys=True), file=sys.stderr)\n raise SystemExit(1)")
+        dependencies, pins, guard_pins = embedded_dependencies()
+        print('import hashlib')
+        for name, body in dependencies.items():
+            print('m=types.ModuleType('+repr(name)+');m.__file__='+repr('/nonexistent-binding/'+name+'.py')+';sys.modules['+repr(name)+']=m')
+            print('exec(compile('+repr(body)+',m.__file__,"exec"),m.__dict__)')
+            print('m.__source_sha256__=hashlib.sha256('+repr(body)+'.encode()).hexdigest();m.__source_verified__=True')
+        print("core=sys.modules['preparation_core'];guards=sys.modules['preparation_guards'];scanner=sys.modules['preparation_scanner'];guards.core=core;scanner.core=core;scanner.guards=guards")
+        print('guards.pins='+repr(guard_pins)+';scanner.pins='+repr(pins))
+        print("try:\n print(json.dumps(sys.modules['binding_diagnostic'].inspect_binding(core,guards,scanner,sys.modules['contracts'],sys.modules['host_adapter'],sys.modules['integration_preparation']),sort_keys=True))\nexcept BaseException:\n print(json.dumps({'ok':False,'status':'binding-diagnostic-unavailable','releaseAcceptance':False,'automaticRetry':False}),file=sys.stderr)\n raise SystemExit(1)")
         raise SystemExit(0)
     require(re.fullmatch('[a-f0-9]{64}',args.plan_id) and re.fullmatch('[a-f0-9]{64}',args.plan_sha256), 'invalid plan identity')
     require(re.fullmatch('[a-f0-9]{40}',args.candidate_sha) and re.fullmatch('[a-f0-9]{40}',args.fallback_sha) and args.candidate_sha != args.fallback_sha, 'invalid published pair')
