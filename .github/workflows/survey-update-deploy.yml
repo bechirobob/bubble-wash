@@ -85,4 +85,4 @@ jobs:
       - name: Build, rehearse unchanged copies, and switch code with exact open configuration
         run: |
           set -euo pipefail
-          tailscale ssh root@hermes "python3 -I -B - --candidate '$RELEASE_DIR' --sha '$RUNTIME_SHA' --expected-live '4170cc99a6903fdb08d9dc2624a96d6457fd7ab5' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < "$RUNNER_TEMP/survey-update.py"
+          tailscale ssh root@hermes "python3 -I -B - --candidate '$RELEASE_DIR' --sha '$RUNTIME_SHA' --expected-live 'a666c0b7d6aa48ac20b9ae65345955dbcc17c665' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < "$RUNNER_TEMP/survey-update.py"
