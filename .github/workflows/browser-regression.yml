@@ -79,6 +79,19 @@ jobs:
       - name: Build production runtime for synthetic test data
         id: build
         run: npm run build
+      - name: Verify owner-only results with synthetic responses and capture previews
+        run: |
+          set -euo pipefail
+          node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/alias-loader.mjs tests/browser/start-results-fixture.mjs &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid" 2>/dev/null || true; wait "$fixture_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://localhost:3217/login >/dev/null; then break; fi
+            if ! kill -0 "$fixture_pid" 2>/dev/null; then exit 1; fi
+            sleep 1
+          done
+          node tests/research-results-http.mjs
+          node tests/browser/research-results-proof.mjs
       - name: Verify synthetic edge, logins, cookies, redirects and script assets
         run: node tests/browser/fixture-smoke.mjs
       - name: Run four-role journeys at mobile and desktop sizes
@@ -115,6 +128,8 @@ jobs:
           path: |
             test-results/browser/**/*.png
             test-results/survey-browser/**/*.png
+            test-results/survey-results/*.png
+            test-results/survey-results/results.json
           if-no-files-found: ignore
           retention-days: 7
       - name: Preserve synthetic worklist screenshots for review

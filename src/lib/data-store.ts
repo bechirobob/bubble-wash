@@ -917,9 +917,7 @@ export function purgeOperationalData(now = Date.now(), householdLaunchDate = pro
       WHERE status = 'enrolled' AND recovery_bundle_encrypted IS NOT NULL AND updated_at < ?
     `).run(isoDaysAgo(1)).changes;
     result.workflowClaims = db.prepare("DELETE FROM workflow_action_claims WHERE claimed_at < ?").run(isoDaysAgo(90)).changes;
-    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='operational_command_receipts'").get()) {
-      result.operationalCommandReceipts = db.prepare("DELETE FROM operational_command_receipts WHERE created_at < ?").run(isoDaysAgo(90)).changes;
-    }
+    // New worklist receipts are retained until a separate retention policy is approved.
     result.notificationLogs = db.prepare("DELETE FROM notification_outbox WHERE updated_at < ?").run(isoDaysAgo(90)).changes;
     result.optedOutSignups = db.prepare("DELETE FROM early_access_signups WHERE marketing_status = 'opted_out' AND updated_at < ?").run(isoDaysAgo(30)).changes;
     const launch = /^\d{4}-\d{2}-\d{2}$/.test(householdLaunchDate) ? new Date(`${householdLaunchDate}T00:00:00.000Z`).getTime() : Number.NaN;
@@ -946,10 +944,7 @@ export function purgeOperationalData(now = Date.now(), householdLaunchDate = pro
       db.prepare("DELETE FROM driver_live_locations WHERE order_id = ? COLLATE NOCASE").run(orderId);
       db.prepare("DELETE FROM workflow_action_claims WHERE order_id = ? COLLATE NOCASE").run(orderId);
       db.prepare("DELETE FROM delivery_proofs WHERE order_id = ? COLLATE NOCASE").run(orderId);
-      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='operational_work_ownership'").get()) {
-        const columns = db.prepare("PRAGMA table_info(operational_work_ownership)").all() as { name: string }[];
-        if (columns.some((column) => column.name === "order_id")) db.prepare("DELETE FROM operational_work_ownership WHERE order_id = ? COLLATE NOCASE").run(orderId);
-      }
+      // New worklist ownership records are outside the inherited retention policy.
       deletedOrderRecords += db.prepare(`
         DELETE FROM submissions WHERE id = @orderId COLLATE NOCASE OR json_extract(data, '$.orderId') = @orderId COLLATE NOCASE
       `).run({ orderId }).changes;

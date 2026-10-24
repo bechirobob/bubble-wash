@@ -13,6 +13,11 @@ const border = /^border(?:-(?:top|right|bottom|left|block|inline)(?:-(?:start|en
 const functional = new Map([
   ['.navCta|border', '1px solid var(--brand)'],
   ['.liveShareIndicator.is-on|border-color', 'var(--brand)'],
+  ['.planGrid|border-top', '2px solid var(--brand-dark)'],
+  ['.quoteSummary, .trackingResult, .bookingConfirmation|border-top', '2px solid var(--brand-dark)'],
+  ['.planRecommendation|border-top', '2px solid var(--brand-dark)'],
+  ['.publicSite .quoteSummary|border-top', '2px solid var(--brand)'],
+  ['.planChoice:has(input:checked)|border-bottom-color', 'var(--brand)'],
 ]);
 function auditCss(source, filename) {
   const tree = postcss.parse(source, { from: filename });
@@ -23,9 +28,12 @@ function auditCss(source, filename) {
     if (prop === 'filter') assert.doesNotMatch(value, /drop-shadow|url\(/i, filename);
     if (/^border-image/.test(prop)) assert.equal(value, 'none', 'Border images cannot bypass neutral edges');
     if (/^--(?:line(?:-strong|-active)?|focus-ring|surface)$/.test(prop)) assert.ok(/^#([\da-f]{2})\1\1$/i.test(value), `${selector} ${prop} must stay neutral`);
-    if (/^--status-.*-line$/.test(prop)) assert.equal(value, 'var(--line-strong)');
+    if (/^--status-.*-line$/.test(prop)) {
+      const liveStatus = { '--status-info-line':'#a9d0dc', '--status-success-line':'#b5d2bf', '--status-warning-line':'#ddc98d', '--status-danger-line':'#dfb8b2' };
+      assert.equal(value, selector === ':root' ? liveStatus[prop] : 'var(--line-strong)');
+    }
     if (!border.test(prop) && !['outline', 'outline-color'].includes(prop)) return;
-    const exception = functional.get(`${selector}|${prop}`);
+    const exception = selector === '.install' && prop === 'border' && filename.endsWith('/WebAppInstall.module.css') ? '1px solid var(--brand)' : functional.get(`${selector}|${prop}`);
     if (exception) { assert.equal(value, exception); return; }
     if (/CanvasText|Highlight/.test(value)) {
       let parent = declaration.parent;
@@ -39,7 +47,7 @@ function auditCss(source, filename) {
   });
 }
 
-test('all authored CSS borders and shadows follow the shared neutral contract', () => {
+test('authored CSS retains exact live public accents and neutral staff boundaries without shadows', () => {
   for (const filename of [...files(join(root, 'src')), ...files(join(root, 'public'))].filter(file => file.endsWith('.css'))) auditCss(readFileSync(filename, 'utf8'), filename);
   for (const mutation of [':root { --line: #dbe8ec }', '.newCard { border-left: 3px solid red }', '.newCard { border-color: var(--danger) }', '.newCard { border-image: linear-gradient(red, blue) 1 }', '.newCard { box-shadow: 0 2px 8px blue }', '.newCard { filter: drop-shadow(0 2px 8px blue) }']) assert.throws(() => auditCss(mutation, 'regression.css'));
 });
@@ -68,4 +76,13 @@ test('inline styles and SVG assets cannot bypass the decoration contract', () =>
     };
     visit(ast);
   }
+});
+
+test('public accent palette and scoped neutral staff policy are both present', () => {
+  const css=readFileSync(join(root,'src/app/globals.css'),'utf8');
+  assert.match(css,/--brand: #086584/);
+  assert.match(css,/--status-info-line: #a9d0dc/);
+  assert.match(css,/\.portalPage \{ --status-info-line: var\(--line-strong\)/);
+  assert.match(css,/\.staffSectionNav a\[aria-current="page"\] \{[^}]*border-bottom-color: var\(--line-active\)/);
+  assert.match(css,/\.publicSite \.quoteSummary \{[^}]*border-top: 2px solid var\(--brand\)/);
 });

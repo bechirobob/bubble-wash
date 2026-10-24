@@ -158,3 +158,15 @@ test('slow hydration keeps estimate controls safe, then preserves the decimal qu
     await page.unroute(scripts);
   }
 });
+
+test('touch selection has no sticky ring and keyboard selection retains its ring', async ({ page }, testInfo) => {
+  await page.goto('/services');
+  const segment = page.locator('.focusedPlanSegment').first();
+  if (testInfo.project.use.hasTouch) await segment.tap(); else await segment.click();
+  await expect(page.locator('.focusedPlanCard h3')).toHaveText('Weekly');
+  await expect.poll(() => segment.evaluate(node => getComputedStyle(node).outlineStyle)).toBe('none');
+  await page.keyboard.press('ArrowRight');
+  const selected = page.locator('.focusedPlanSegment').nth(1);
+  await expect(selected.locator('input')).toBeChecked();
+  await expect.poll(() => selected.evaluate(node => getComputedStyle(node).outlineStyle)).not.toBe('none');
+});

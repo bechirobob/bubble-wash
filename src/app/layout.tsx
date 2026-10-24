@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { WebAppProvider } from "@/components/WebAppProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,12 +9,9 @@ export const metadata: Metadata = {
   alternates: { canonical: "/" },
   applicationName: "Bubble Wash",
   manifest: "/site.webmanifest",
+  appleWebApp: { capable: true, title: "Bubble Wash", statusBarStyle: "default" },
   icons: {
-    icon: [
-      { url: "/favicon.png", type: "image/png", sizes: "32x32" },
-      { url: "/bubble-wash-icon.jpg", type: "image/jpeg", sizes: "1170x1170" },
-    ],
-    shortcut: "/favicon.png",
+    // Next serves the versioned browser icon from app/favicon.ico.
     apple: "/apple-icon.png",
   },
   openGraph: {
@@ -63,7 +61,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   };
   return (
     <html lang="en">
-      <body><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replaceAll("<", "\\u003c") }} />{children}</body>
+      <body><script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replaceAll("<", "\\u003c") }} /><WebAppProvider>{children}</WebAppProvider></body>
     </html>
   );
 }

@@ -1478,7 +1478,7 @@ export function PortalShell({ heading, title, allStaffAccess = false, role, page
     <main className="portalPage">
       <header className="staffTopbar">
         <BrandLink />
-        <div className="staffAccount">{role === "admin" && allStaffAccess ? <nav aria-label="Staff workspaces"><Link href="/vendors">Vendors</Link>{" · "}<Link href="/drivers">Drivers</Link>{" · "}<Link href="/support">Support</Link></nav> : null}{role === "admin" && pageRole !== "admin" ? <Link className="staffAdminHome" href="/admin">Admin home</Link> : null}<span><strong>{userName}</strong><small>{title}</small></span><button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button></div>
+        <div className="staffAccount">{role === "admin" && allStaffAccess ? <nav aria-label="Staff workspaces"><Link href="/vendors">Vendors</Link>{" · "}<Link href="/drivers">Drivers</Link>{" · "}<Link href="/support">Support</Link>{" · "}<Link href="/admin/surveys">Survey results</Link></nav> : null}{role === "admin" && pageRole !== "admin" ? <Link className="staffAdminHome" href="/admin">Admin home</Link> : null}<span><strong>{userName}</strong><small>{title}</small></span><button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button></div>
       </header>
       <nav className="staffSectionNav" aria-label={`${pageRole} workspace sections`}>
         {navigation.map((item) => {

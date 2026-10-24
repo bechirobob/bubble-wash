@@ -4,13 +4,20 @@ import { fixtureRequestPolicy } from './request-policy.mjs';
 test.beforeEach(async({page})=>{await page.route('**/*',route=>fixtureRequestPolicy(route.request().url())===null?route.abort('blockedbyclient'):route.continue());});
 const opening = page => page.getByRole('dialog', { name: 'Bubble Wash opening' });
 
-test('fresh home opens once, skips without click-through, and keeps the actual home', async ({ page }) => {
+test('fresh home opens once, skips without click-through, and keeps the actual home', async ({ page }, testInfo) => {
   await page.goto('/');
   await expect(opening(page)).toBeVisible();
   await expect(page.locator('#home-title')).toHaveText('Laundry pickupfor your business.');
   await page.getByRole('button', { name: 'Skip intro' }).click();
   await expect(opening(page)).not.toBeVisible();
   await expect(page).toHaveURL(/\/$/);
+  const surfaces = await page.locator('.publicSite').evaluate(root => ({
+    blue: getComputedStyle(root.querySelector('.publicBandBlue')).backgroundColor,
+    white: getComputedStyle(root).backgroundColor,
+    sage: getComputedStyle(root.querySelector('.publicBandSage')).backgroundColor,
+  }));
+  expect(surfaces).toEqual({blue:'rgb(237, 245, 252)',white:'rgb(255, 255, 255)',sage:'rgb(242, 246, 240)'});
+  await page.screenshot({path:testInfo.outputPath('public-three-tone.png'),fullPage:true});
   await page.getByRole('link', { name: 'Track an order', exact: false }).first().click();
   await expect(page).toHaveURL(/\/track$/);
   await page.goBack();
@@ -145,7 +152,19 @@ test.describe('interim survey open-fixture acceptance',()=>{
     await expect(page.getByText(/Your response is not anonymous/)).toBeVisible();
     await expect(page.getByText(/Identifiable website research records/)).not.toBeVisible();
     await information.focus();await information.press('Enter');await expect(page.getByText(/up to 12 months from collection/)).toBeVisible();
-    await information.press('Enter');await page.screenshot({path:testInfo.outputPath('survey-details.png'),fullPage:true});
+    await information.press('Enter');
+    const identity = await page.locator('main').evaluate(root => {
+      const css = element => getComputedStyle(element);
+      return {font:css(root).fontFamily,bodyFont:css(document.body).fontFamily,
+        heading:css(root.querySelector('h1')).backgroundColor,
+        details:css(root.querySelector('details')).backgroundColor,
+        button:css(root.querySelector('button[type="submit"]')).backgroundColor};
+    });
+    expect(identity.font).toBe(identity.bodyFont);
+    expect(identity.heading).toBe('rgb(237, 245, 252)');
+    expect(identity.details).toBe('rgb(242, 246, 240)');
+    expect(identity.button).toBe('rgb(8, 101, 132)');
+    await page.screenshot({path:testInfo.outputPath('survey-details.png'),fullPage:true});
     await expect(page.getByText('Optional questions for work, study or home',{exact:true})).toHaveCount(0);
     await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();await page.getByRole('button',{name:'Continue',exact:true}).click();
     await page.getByRole('radio',{name:'25 to 34',exact:true}).check();await page.getByRole('radio',{name:'Other (specify)',exact:true}).check();
@@ -192,13 +211,29 @@ test.describe('interim survey open-fixture acceptance',()=>{
     const submitted=response.request().postDataJSON();expect(submitted.answers['icp-student']).toBe('Yes');expect(submitted.answers['icp-corporate']).toBe('No');expect(submitted.answers['icp-household']).toBe('No');expect(submitted.answers.F3a).toBeUndefined();expect(submitted.answers.F4a).toBeUndefined();
     await expect(page.getByRole('heading',{name:'Thank you!',exact:true})).toBeVisible();
   });
-  test('consumer interview retains all qualifying probes and submits once',async({page})=>{
+  for(const focusWitness of [false,true])test('consumer interview retains all qualifying probes and submits once [event order '+(focusWitness?'heading witness':'progress only')+']',async({page},testInfo)=>{
+    // Isolated synthetic fixture only. Do not record answer text, contact details,
+    // URLs, cookies or response bodies. Capture the bounded native event order.
+    await page.addInitScript(()=>{
+      const records=[];
+      const identity=element=>element instanceof Element?{tag:element.tagName,id:/^(?:\d+|probe-(?:student|business|corporate|household))$/.test(element.id)?element.id:''}:{tag:'',id:''};
+      const capture=event=>{
+        const target=event.target;
+        if(!(target instanceof Element)||!['TEXTAREA','H1','BUTTON'].includes(target.tagName))return;
+        if(records.length===160)records.shift();
+        records.push({event:event.type,target:identity(target),active:identity(document.activeElement),trusted:event.isTrusted,at:Math.round(performance.now()*10)/10});
+      };
+      for(const type of ['focusin','focusout','beforeinput','input'])document.addEventListener(type,capture,true);
+      Object.defineProperty(window,'__syntheticInterviewEventOrder',{value:records});
+    });
+    try{
     const answer='Clearly marked synthetic interview answer.';
     const progress=page.getByRole('progressbar',{name:'Questionnaire progress'});
     const next=async()=>{
       const step=await progress.count()?Number(await progress.getAttribute('value')):0;
       await page.getByRole('button',{name:'Continue',exact:true}).click();
       await expect(progress,'Continue commits exactly the next questionnaire step').toHaveAttribute('value',String(step+1));
+      if(focusWitness)await expect(page.locator('main h1'),'Destination heading receives the scheduled step focus').toBeFocused();
     };
     await enter(page,'consumer-interview');await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();await next();const seen=new Set();
     for(let i=0;i<20&&!await page.getByRole('button',{name:'Submit response',exact:true}).isVisible();i++){
@@ -218,6 +253,10 @@ test.describe('interim survey open-fixture acceptance',()=>{
     expect([...seen].sort(),'Every qualifying probe field was filled').toEqual([...probes].sort());
     const saved=page.waitForResponse(r=>r.url().endsWith('/api/research/responses')&&r.request().method()==='POST');await page.getByRole('button',{name:'Submit response',exact:true}).click();const response=await saved;expect(response.status()).toBe(200);
     const answers=response.request().postDataJSON().answers;for(const key of probes)expect(answers[key],'Submitted answer retained for '+key).toBe(answer);await expect(page.getByRole('heading',{name:'Thank you!',exact:true})).toBeVisible();
+    }finally{
+      const records=await page.evaluate(()=>window.__syntheticInterviewEventOrder??[]);
+      console.log('SYNTHETIC_INTERVIEW_EVENT_ORDER '+JSON.stringify({project:testInfo.project.name,mode:focusWitness?'heading-witness':'progress-only',records}));
+    }
   });
   test('business journey saves once and shows compact confirmation',async({page},testInfo)=>{
     await enter(page,'business-interview');await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();

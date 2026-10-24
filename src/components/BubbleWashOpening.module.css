@@ -1,3 +1,4 @@
+.opening { --line:#dedede; --line-strong:#858585; --line-active:#333333; --focus-ring:#222222; }
 .opening {
   position: fixed;
   inset: 0;
@@ -63,7 +64,7 @@
   font-size: 14px;
   cursor: pointer;
 }
-.skip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
+.skip:focus-visible { outline-offset: 4px; }
 @keyframes mergeLeft {
   0%, 12% { transform: translate(-48%, -5%) scale(.5); opacity: 1; }
   70% { transform: translate(-10%, 0) scale(.55); opacity: 1; }

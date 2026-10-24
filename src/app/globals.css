@@ -7,30 +7,32 @@
   --surface: #ffffff;
   --surface-soft: #f8fbfc;
   --ink: #102a38;
-  --ink-strong: #082f40;
-  --muted: #526573;
+  --ink-strong: #123e50;
+  --muted: #506671;
   --soft: #62737e;
-  /* Decorative edges stay neutral across public and staff surfaces. */
   --line: #dedede;
   --line-strong: #858585;
+  --brand: #086584;
+  --brand-dark: #064b64;
+  --brand-soft: #eaf6fa;
+  --aqua: #d9f2f5;
+  --wash-blue: #edf5fc;
+  --wash-sage: #f2f6f0;
+  --wash-aqua: #e5f3f7;
   --line-active: #333333;
   --focus-ring: #222222;
-  --brand: #0b4960;
-  --brand-dark: #083545;
-  --brand-soft: #e8f3f5;
-  --aqua: #d9f2f5;
   --status-info: #0b5b76;
   --status-info-surface: #eaf5f8;
-  --status-info-line: var(--line-strong);
+  --status-info-line: #a9d0dc;
   --status-success: #2f6847;
   --status-success-surface: #edf6f0;
-  --status-success-line: var(--line-strong);
+  --status-success-line: #b5d2bf;
   --status-warning: #7a5908;
   --status-warning-surface: #fbf6e7;
-  --status-warning-line: var(--line-strong);
+  --status-warning-line: #ddc98d;
   --status-danger: #a43d32;
   --status-danger-surface: #fbefed;
-  --status-danger-line: var(--line-strong);
+  --status-danger-line: #dfb8b2;
   --status-neutral: var(--muted);
   --skeleton-base: #e5eef1;
   --skeleton-highlight: #f7fafb;
@@ -46,8 +48,6 @@
 }
 
 * { box-sizing: border-box; }
-/* No authored shadow decoration; native controls and focus outlines remain intact. */
-*, *::before, *::after { box-shadow: none; text-shadow: none; }
 html { scroll-behavior: smooth; font-size: 16px; }
 html { background: #fff; }
 html, body { margin: 0; min-height: 100%; }
@@ -81,9 +81,20 @@ input, select, textarea {
   min-height: 44px;
 }
 textarea { min-height: 120px; resize: vertical; }
-input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible, summary:focus-visible {
+:focus-visible, html[data-input-modality="keyboard"] :focus, input:focus, select:focus, textarea:focus, [contenteditable]:not([contenteditable="false"]):focus {
   outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
+}
+/* Shared input policy, not a viewport rule: touch/mouse and their programmatic
+   focus transfers do not draw navigation rings. Editing controls keep their cue.
+   Unknown/assistive and keyboard input retain native focus-visible behavior.
+   Important is limited to this presentation contract, so route CSS cannot
+   accidentally restore pointer rings. Never blur or remove tabindex to hide one. */
+@media (forced-colors: none) {
+html[data-input-modality="pointer"] :focus:not(:is(
+  input:not([type="button"], [type="submit"], [type="reset"], [type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]),
+  select, textarea, [contenteditable]:not([contenteditable="false"])
+)) { outline: none !important; }
 }
 h1, h2, h3, h4, p { margin-top: 0; }
 h1, h2, h3, h4 { color: var(--ink-strong); letter-spacing: -.03em; font-weight: 700; }
@@ -284,7 +295,7 @@ small { display: block; color: var(--soft); line-height: 1.35; }
 .landingCta p:last-child { margin-bottom: 0; }
 .landingCta .button { flex: 0 0 auto; }
 
-.planGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 42px; border-top: 2px solid var(--line-active); }
+.planGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 42px; border-top: 2px solid var(--brand-dark); }
 .planGrid > article { padding: 26px 0 30px; border-bottom: 1px solid var(--line); }
 .planTitle { display: flex; justify-content: space-between; gap: 24px; align-items: start; }
 .planTitle > strong { color: var(--ink-strong); text-align: right; white-space: nowrap; }
@@ -419,13 +430,13 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .checkOption input, .termsCheck input { width: 17px; min-height: 17px; margin: 3px 0 0; padding: 0; accent-color: var(--brand); }
 .checkOption strong, .checkOption small { display: block; }
 .checkOption small { margin-top: 2px; }
-.quoteSummary, .trackingResult, .bookingConfirmation { border-top: 2px solid var(--line-active); padding-top: 18px; }
+.quoteSummary, .trackingResult, .bookingConfirmation { border-top: 2px solid var(--brand-dark); padding-top: 18px; }
 .quoteTotal { display: block; margin-top: 24px; color: var(--ink-strong); font-size: 2.35rem; line-height: 1; letter-spacing: -.035em; }
 .quotePeriod { display: block; margin: 7px 0 20px; color: var(--muted); }
 .bookingFieldset { display: grid; gap: 14px; margin-top: 6px; }
 .fieldHelp { margin: -3px 0 2px; max-width: 760px; }
 .recommendationPrompt { margin: 2px 0 0; padding: 12px 0; border-block: 1px solid var(--line); color: var(--muted); }
-.planRecommendation { margin-top: 6px; padding: 20px 0 4px; border-top: 2px solid var(--line-active); border-bottom: 1px solid var(--line); }
+.planRecommendation { margin-top: 6px; padding: 20px 0 4px; border-top: 2px solid var(--brand-dark); border-bottom: 1px solid var(--line); }
 .planRecommendationHeader { display: flex; align-items: start; justify-content: space-between; gap: 28px; }
 .planRecommendationHeader h3 { font-size: 1.45rem; margin-bottom: 5px; }
 .planRecommendationHeader p:not(.sectionLabel) { margin-bottom: 8px; }
@@ -779,7 +790,7 @@ dd { margin: 4px 0 0; color: var(--muted); }
   min-height: 360px;
   position: relative;
   overflow: hidden;
-  background: #eef3f1;
+  background: var(--wash-sage);
 }
 .dispatchMapCanvas::before,
 .dispatchMapCanvas::after {
@@ -791,7 +802,7 @@ dd { margin: 4px 0 0; color: var(--muted); }
   top: 47%;
   border-block: 1px solid var(--line);
   transform: rotate(-14deg);
-  background: #f8faf9;
+  background: var(--surface);
   z-index: 0;
 }
 .dispatchMapCanvas::after { top: 68%; transform: rotate(18deg); }
@@ -801,7 +812,7 @@ dd { margin: 4px 0 0; color: var(--muted); }
   position: absolute;
   top: -15%;
   border-inline: 1px solid var(--line);
-  background: #f8faf9;
+  background: var(--surface);
   z-index: 0;
 }
 .dispatchStreetOne { left: 22%; transform: rotate(11deg); }
@@ -936,7 +947,7 @@ dd { margin: 4px 0 0; color: var(--muted); }
   text-align: left;
 }
 .dispatchStopRow:hover { background: var(--surface-soft); }
-.dispatchStopRow[aria-pressed="true"] { border-left: 4px solid var(--line-active); padding-left: 14px; background: #f3f7f5; }
+.dispatchStopRow[aria-pressed="true"] { border-left: 4px solid var(--line-active); padding-left: 14px; background: var(--wash-blue); }
 .dispatchStopRow span { min-width: 0; }
 .dispatchStopRow span:last-child { text-align: right; }
 .dispatchStopRow strong,
@@ -1514,7 +1525,7 @@ input, select, textarea { font-size: 1rem; }
 /* Public layout: open sections, compact scale and original brand artwork. */
 .brandArtwork { position: relative; width: 84px; height: 60px; overflow: hidden; mix-blend-mode: multiply; }
 .brandArtwork .brandMark { position: absolute; width: 134px; height: 134px; left: 50%; top: 50%; transform: translate(-51%, -48%); object-fit: contain; }
-.publicSite { --brand: #086584; --brand-dark: #064b64; --brand-soft: #eaf6fa; --ink-strong: #123e50; --muted: #506671; --wash-blue: #edf5fc; --wash-sage: #f2f6f0; --wash-aqua: #e5f3f7; background: #fff; }
+.publicSite { background: var(--page); }
 .publicBand { width: 100%; }
 .publicBandBlue { background: var(--wash-blue); }
 .publicBandSage { background: var(--wash-sage); }
@@ -1587,7 +1598,7 @@ input, select, textarea { font-size: 1rem; }
 .publicSite .planTitle > strong small { font-size: .75rem; }
 .publicSite .zoneGrid { grid-template-columns: repeat(2,minmax(0,1fr)); border-top: 1px solid var(--line); gap: 0 36px; }
 .publicSite .zoneGrid article, .publicSite .zoneGrid article + article { border: 0; border-bottom: 1px solid var(--line); padding: 20px 0; }
-.publicSite .quoteSummary { background: transparent; padding: 20px 0 0; border-top: 2px solid var(--line-active); }
+.publicSite .quoteSummary { background: transparent; padding: 20px 0 0; border-top: 2px solid var(--brand); }
 .publicSite .quoteTotal { font-size: clamp(1.8rem,3vw,2.3rem); }
 .publicSite .earlyAccessHero { padding-block: 36px; gap: 48px; }
 .publicSite .earlyAccessHero h1 { font-size: clamp(2rem,3.5vw,2.7rem); }
@@ -1658,8 +1669,8 @@ input, select, textarea { font-size: 1rem; }
 /* Native radio choices keep touch and keyboard selection in sync with the estimate. */
 .planChoices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .planChoice { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 16px 0; border-block: 2px solid transparent; border-top-color: var(--line-strong); cursor: pointer; }
-.planChoice:has(input:checked) { border-bottom-color: var(--line-active); }
-.planChoice:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
+.planChoice:has(input:checked) { border-bottom-color: var(--brand); }
+html:not([data-input-modality="pointer"]) .planChoice:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
 .planChoiceName { display: flex; align-items: baseline; gap: 8px; color: var(--ink-strong); line-height: 1.35; }
 .planChoiceName input { flex: 0 0 auto; width: 16px; height: 16px; min-height: 16px; padding: 0; margin: 0; accent-color: var(--brand); }
 .planChoiceSchedule { font-size: .85rem; color: var(--muted); }
@@ -1711,6 +1722,23 @@ input, select, textarea { font-size: 1rem; }
   .estimateInputs { grid-template-columns: 1fr; gap: 18px; }
   .estimateWeight { max-width: 280px; }
 }
+
+/* Retain the reviewed neutral staff boundaries with the current shared palette. */
+.portalPage { --status-info-line: var(--line-strong); --status-success-line: var(--line-strong); --status-warning-line: var(--line-strong); --status-danger-line: var(--line-strong); }
+.portalPage, .portalPage *, .portalPage *::before, .portalPage *::after { box-shadow: none; text-shadow: none; }
+.portalPage .staffSectionNav a[aria-current="page"] { color: var(--brand-dark); border-bottom-color: var(--line-active); }
+.portalPage .staffActivityList { border-top: 2px solid var(--line-active); }
+.portalPage .staffOrderRow.timer-due { border-left: 3px solid var(--line-active); padding-left: 14px; }
+.portalPage .staffOrderRow.timer-breached { border-left: 3px solid var(--line-active); padding-left: 14px; }
+.portalPage .staffTextFilters button.active { color: var(--brand-dark); border-bottom-color: var(--line-active); }
+.portalPage .dispatchStopRow[aria-pressed="true"] { border-left: 4px solid var(--line-active); padding-left: 14px; background: #f3f7f5; }
+.portalPage .staffActivityRow.is-new { border-left: 3px solid var(--line-active); padding-left: 14px; }
+.portalPage .staffOnboardingList { border-top: 2px solid var(--line-active); }
+.portalPage .staffStandaloneEditor { border-top: 2px solid var(--line-active); }
+.portalPage .overviewList, .portalPage .staffPriorityList, .portalPage .staffOrderList, .portalPage .staffRosterList, .portalPage .staffCaseList, .portalPage .staffActivityList { border-top-color: var(--line-active); }
+.portalPage .staffPriorityRow.timer-due, .portalPage .staffOrderRow.timer-due, .portalPage .staffPriorityRow.timer-breached, .portalPage .staffOrderRow.timer-breached { border-left-color: var(--line-active); }
+.portalPage .dispatchEmbedded, .portalPage .staffDetailHeader { border-bottom-color: var(--line-active); }
+
 
 /* Worker workspaces: compact shared rhythm, visible navigation and readable queues. */
 .portalPage .staffTopbar { margin-top: 8px; padding-bottom: 8px; gap: 16px; }
@@ -1779,6 +1807,14 @@ input, select, textarea { font-size: 1rem; }
   .portalPage .staffSectionNav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+/* One Bubble Wash identity: blue orientation, white work surfaces, sage secondary areas. */
+.portalPage .staffViewHeader { background: var(--wash-blue); margin-inline: -12px; padding-inline: 12px; }
+.portalPage .staffSectionNav { background: var(--wash-sage); margin-inline: -12px; padding-inline: 12px; }
+.portalPage .staffTopbar, .portalPage .staffView { background: var(--surface); }
+.surveyLanding { max-width: 680px; margin: 40px auto; padding: 24px; font-family: var(--font-sans); }
+.surveyLanding h1 { background: var(--wash-blue); padding: 12px; margin-inline: -12px; }
+.surveyLanding ul { background: var(--wash-sage); padding-block: 1px; }
+
 /* One bounded scrolling surface per long list; paging controls stay outside it. */
 .boundedList { min-width: 0; margin-block: 12px; }
 .boundedListRange { margin: 0 0 8px; color: var(--muted); font-size: .875rem; }
@@ -1805,7 +1841,7 @@ input, select, textarea { font-size: 1rem; }
 .focusedPlanSegment:first-child { border-radius: calc(var(--radius-md) - 1px) 0 0 calc(var(--radius-md) - 1px); }
 .focusedPlanSegment:last-child { border-radius: 0 calc(var(--radius-md) - 1px) calc(var(--radius-md) - 1px) 0; }
 .focusedPlanSegment:has(input:checked) { background: var(--brand); color: #fff; }
-.focusedPlanSegment:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 3px; z-index: 1; }
+html:not([data-input-modality="pointer"]) .focusedPlanSegment:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 3px; z-index: 1; }
 .focusedPlanCard { min-width: 0; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--paper); }
 .focusedPlanCard .sectionLabel { margin-bottom: 9px; }
 .publicSite .focusedPlanCard h3 { margin-bottom: 14px; font-size: clamp(1.35rem, 2.4vw, 1.65rem); overflow-wrap: anywhere; }
@@ -1855,3 +1891,4 @@ input, select, textarea { font-size: 1rem; }
   .focusedPlanSegment:has(input:checked) { outline: 2px solid Highlight; outline-offset: -3px; }
   .focusedPlanCompareChoice[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: -3px; }
 }
+
