@@ -36,6 +36,7 @@ class EvidenceTests(unittest.TestCase):
             self.assertIn('show',cmd);self.assertNotIn('list-units',cmd)
             self.assertIn('--all',cmd)
             requested=next(part.removeprefix('--property=') for part in cmd if part.startswith('--property=')).split(',')
+            if requested == ['MainPID']:return 'MainPID=1'
             props=dict.fromkeys(requested,'')
             props.update(LoadState='loaded',ActiveState='active',SubState='running',NeedDaemonReload='no',Conditions='SECRET_CONDITION')
             if 'MainPID' in props:props.update(MainPID='1',ControlPID='0')
@@ -50,6 +51,7 @@ class EvidenceTests(unittest.TestCase):
             self.stack.enter_context(patch.object(a,name,side_effect=AssertionError('forbidden release path')))
         self.stack.enter_context(patch.object(a.Host,'inventory',side_effect=AssertionError('forbidden inventory')))
         self.stack.enter_context(patch.object(a.sqlite3,'connect',side_effect=AssertionError('DB must not open')))
+        self.stack.enter_context(patch.object(a,'inspect_node_process',return_value=({'path':'/usr/bin/node','sha256':'a'*64},lambda:True)))
 
     def test_exact_units_no_secrets_no_mutation(self):
         before={str(p):p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
@@ -57,13 +59,25 @@ class EvidenceTests(unittest.TestCase):
         after={str(p):p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
         self.assertEqual(before,after)
         self.assertEqual(set(result['units']),{m+'/'+u for m,u in a.EVIDENCE_UNITS})
-        self.assertEqual(len(self.calls),8)
+        self.assertEqual(len(self.calls),9)
         self.assertEqual(result['units']['user/bubblewash-local.service']['loadedConditions']['gates'][1], {'name': 'app-hold', 'trigger': False, 'negate': True, 'result': 1})
         rendered=json.dumps(result)
         for secret in ('DO_NOT_DISCLOSE','SECRET_ARG','SECRET_CONDITION',str(self.database)):
             self.assertNotIn(secret,rendered)
         self.assertFalse(result['releaseAcceptance']);self.assertFalse(result['databaseOpened'])
         self.assertFalse(result['paths'][str(a.STATE)]['present'])
+
+    def test_live_main_pid_change_refused_before_return(self):
+        def run(cmd):
+            raw=self.run(cmd)
+            return 'MainPID=2' if '--property=MainPID' in cmd else raw
+        with self.assertRaises(ValueError):a.inspect_host_evidence(g,run)
+        self.assertEqual(a.EVIDENCE_STAGE,'NODE_IDENTITY')
+
+    def test_node_recheck_failure_refused_before_return(self):
+        def changed():raise ValueError('changed')
+        with patch.object(a,'inspect_node_process',return_value=({'path':'/usr/bin/node','sha256':'a'*64},changed)):
+            with self.assertRaises(ValueError):a.inspect_host_evidence(g,self.run)
 
     def test_missing_lock_not_created(self):
         (self.runtime/'deploy.lock').unlink()
@@ -410,3 +424,46 @@ class MaterializationTests(unittest.TestCase):
                 self.m.materialize_prepared(self.request)
         self.assertFalse((self.state/'plans'/(self.package_id+'.json')).exists())
         self.assertTrue((self.state/'plans'/self.package_id/'owner-review.json').exists())
+
+
+class NodeEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name);self.current=self.root/'current';self.current.mkdir()
+        self.proc=self.root/'proc';self.proc.mkdir();self.process=self.proc/'123';self.process.mkdir()
+        self.binary=self.root/'node';self.binary.write_bytes(b'public synthetic Node binary');self.binary.chmod(0o755)
+        (self.process/'stat').write_text('123 (node) S '+' '.join(['0']*18+['99']+['0']*20))
+        (self.process/'exe').symlink_to(self.binary);(self.process/'cwd').symlink_to(self.current)
+        # Parent directories are a synthetic /tmp fixture, not host-protected.
+        # Keep the exact protected-file call and test its rejection separately.
+        self.protected=patch.object(a,'protected',side_effect=lambda p,**kw:(self.assertEqual(kw,{'owner':0,'parents':True}) or (Path(p).stat().st_dev,Path(p).stat().st_ino)))
+        self.protected.start();self.addCleanup(self.protected.stop)
+
+    def test_public_node_pin_only_and_stable_recheck(self):
+        result,check=a.inspect_node_process('123',self.current,os.getuid(),self.proc)
+        self.assertEqual(result,{'path':str(self.binary),'sha256':a.digest(self.binary)})
+        self.assertTrue(check());self.assertEqual(set(result),{'path','sha256'})
+        self.assertFalse((self.process/'cmdline').exists());self.assertFalse((self.process/'environ').exists())
+
+    def test_pid_reuse_binary_replacement_and_cwd_change_are_refused(self):
+        for change in ('pid','binary','cwd'):
+            with self.subTest(change=change):
+                result,check=a.inspect_node_process('123',self.current,os.getuid(),self.proc)
+                original=(self.process/'stat').read_text()
+                if change=='pid':(self.process/'stat').write_text(original.replace('99','100'))
+                elif change=='binary':self.binary.write_bytes(b'replaced')
+                else:(self.process/'cwd').unlink();(self.process/'cwd').symlink_to(self.root)
+                with self.assertRaises(ValueError):check()
+                if change=='pid':(self.process/'stat').write_text(original)
+                elif change=='binary':self.binary.write_bytes(b'public synthetic Node binary')
+                else:(self.process/'cwd').unlink();(self.process/'cwd').symlink_to(self.current)
+
+    def test_protection_wrong_owner_and_non_node_are_refused(self):
+        with patch.object(a,'protected',side_effect=ValueError('unsafe binary')):
+            with self.assertRaises(ValueError):a.inspect_node_process('123',self.current,os.getuid(),self.proc)
+        with self.assertRaises(ValueError):a.inspect_node_process('123',self.current,os.getuid()+1,self.proc)
+        other=self.root/'unrecognized';other.write_bytes(b'other')
+        (self.process/'exe').unlink();(self.process/'exe').symlink_to(other)
+        with self.assertRaises(ValueError):a.inspect_node_process('123',self.current,os.getuid(),self.proc)
+        for pid in ('0','1','abc','-2'):
+            with self.assertRaises(ValueError):a.inspect_node_process(pid,self.current,os.getuid(),self.proc)

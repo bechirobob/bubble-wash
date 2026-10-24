@@ -17,6 +17,11 @@ p = importlib.util.module_from_spec(spec); spec.loader.exec_module(p)
 
 
 class PreparationTests(unittest.TestCase):
+    def test_normal_backup_checks_cannot_generate_runner_bytecode(self):
+        workflow = (MODULE.parents[2]/'.github/workflows/nightly-backup.yml').read_text()
+        self.assertIn("run: PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s .github/backup -p 'test_*.py' -v", workflow)
+        self.assertLess(workflow.index('Verify encrypted backup transport before host access'), workflow.index('Connect to the production tailnet'))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)

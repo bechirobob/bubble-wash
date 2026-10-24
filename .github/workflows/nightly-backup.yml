@@ -31,7 +31,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Verify encrypted backup transport before host access
-        run: python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s .github/backup -p 'test_*.py' -v
       - name: Require private backup destination before host access
         env:
           GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}

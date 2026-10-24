@@ -17,7 +17,12 @@ COORDINATED_UNITS = ('system/bubblewash-maintenance.timer', 'system/bubblewash-m
 RESIDUAL_ASSUMPTION = 'Deployment coordinates the three known Bubble Wash units under the exclusive deployment lock and persistent holds. Privileged root, ubuntu and other operators or unknown invokers are not technically excluded; they must not write the database or launch Bubble Wash during the approved window.'
 RESIDUAL_ASSUMPTION_SHA256 = hashlib.sha256(RESIDUAL_ASSUMPTION.encode()).hexdigest()
 PREPARATION_HELPER_SHA256 = '6f1859a34013f593d21dbd283eac05748eb6c61be2440319a50a9437c42025bd'
-FALLBACK_CONTROL_PROOF = None  # Bind only the actual successful hosted proof receipt.
+FALLBACK_CONTROL_PROOF = {
+    'controlSha': 'a01336dd8a873f31d41fa4343631ddd7a8c03819',
+    'runId': 40139632801,
+    'artifactId': 12578210919,
+    'artifactSha256': 'f97e4cdd041a2f7deb6113c0adfd500ed0cc51cbd7eb317f96d5eee02a6f1019',
+}  # Actual successful hosted proof, independently downloaded and verified.
 
 PROFILE_NAMES = ('integration-candidate-v1', 'integration-fallback-v1')
 VENDOR = {
