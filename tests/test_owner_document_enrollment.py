@@ -63,6 +63,15 @@ try {
  db.prepare("INSERT INTO research_responses VALUES ('existing-response','existing-key','existing-hash','consumer','1','2026-01-01','{}')").run();
  db.prepare("INSERT INTO research_notification_outbox(response_id,state) VALUES ('existing-response','sent')").run();
  const before=dump(),beforeSchema=schema();
+ test('single-line public SPKI round-trips through unchanged crypto',()=>{
+   const input=key.publicKey.split('\n').filter(x=>x&&!x.startsWith('-----')).join('');
+   const code="import importlib.util,sys;spec=importlib.util.spec_from_file_location('public_key_fixture',sys.argv[1]);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);sys.stdout.write(m.public_key_from_input(sys.stdin.read()))";
+   const normalized=spawnSync('python3',['-B','-c',code,path.join(path.dirname(capsulePath),'owner-document-transport.py')],{input,encoding:'utf8'});
+   assert.equal(normalized.status,0,normalized.stderr);assert.equal(normalized.stdout,key.publicKey);
+   const plain={email:request.email,name:request.name,role:'admin',allStaffAccess:true,ttlHours:24,context,createdAt:new Date().toISOString(),expiresAt:new Date(Date.now()+86400000).toISOString(),activationUrl:'https://bubblewash.co/staff/activate#'+'A'.repeat(43)};
+   plain.expiresAt=new Date(Date.parse(plain.createdAt)+86400000).toISOString();
+   assert.deepEqual(c.unseal(c.seal(plain,normalized.stdout,context),key.privateKey,expected),plain);
+ });
  test('Python schema digest matches actual pinned runtime schema',()=>{
    const code="import sqlite3,json,hashlib,sys;db=sqlite3.connect(sys.argv[1]);schema=db.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').fetchall();print(hashlib.sha256(json.dumps(schema,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest())";
    const result=spawnSync('python3',['-c',code,request.dbPath],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);assert.equal(result.stdout.trim(),request.schemaSha256);
@@ -144,7 +153,7 @@ class CapsuleTests(unittest.TestCase):
                 self.assertEqual((RUNTIME/path).read_bytes(),(reference/path).read_bytes())
         result=subprocess.run(['node','--conditions=react-server','--experimental-strip-types','--input-type=module','-e',NODE_TESTS,'synthetic-fixture',str(ROOT/'ops/owner-document-capsule.mjs'),str(RUNTIME)],capture_output=True,text=True,timeout=90)
         self.assertEqual(result.returncode,0,result.stderr)
-        result=json.loads(result.stdout);self.assertTrue(result['ok']);self.assertEqual(len(result['checks']),22)
+        result=json.loads(result.stdout);self.assertTrue(result['ok']);self.assertEqual(len(result['checks']),23)
 
 class RequestTests(unittest.TestCase):
     def test_key_free_check_accepts_no_storage_or_public_key(self):
@@ -162,6 +171,67 @@ class RequestTests(unittest.TestCase):
         for key,value in [('GITHUB_REF','refs/heads/other'),('GITHUB_RUN_ATTEMPT','2'),('ACTIONS_STEP_DEBUG','true'),('RUNNER_DEBUG','1'),('GITHUB_REPOSITORY','other/repo'),('OWNER_MODE','issue-document')]:
             env=self.environment();env[key]=value
             with self.assertRaises(Exception):transport.input_request(env,pins)
+    def test_single_line_spki_roundtrip_and_identical_der_hash(self):
+        # Public encoding fixture only; the unchanged capsule tests enforce RSA.
+        raw=b'public-encoding-fixture-only' * 16
+        value=base64.b64encode(raw).decode('ascii');pem=transport.public_key_from_input(value)
+        self.assertEqual(host.public_der(pem),raw)
+        self.assertEqual(hashlib.sha256(host.public_der(pem)).digest(),hashlib.sha256(raw).digest())
+        self.assertTrue(all(len(line)<=64 for line in pem.splitlines()[1:-1]))
+    def test_public_key_input_rejects_noncanonical_or_multiline_values(self):
+        valid=base64.b64encode(b'public-fixture' * 31).decode('ascii')
+        invalid=[None,1,'',valid+'\n',' '+valid,valid[:64]+'\n'+valid[64:],valid.replace('A','-',1) if 'A' in valid else valid+'-',valid.rstrip('='),valid+'=',base64.b64encode(b'x'*300).decode(),base64.b64encode(b'x'*1024).decode(),'-----BEGIN PUBLIC KEY-----\n'+valid+'\n-----END PUBLIC KEY-----','-----BEGIN PRIVATE KEY-----']
+        for value in invalid:
+            with self.subTest(value_type=type(value).__name__):
+                with self.assertRaises(Exception):transport.public_key_from_input(value)
+    def test_issue_request_normalizes_public_input_before_existing_validation(self):
+        env=self.environment();raw=b'public-fixture' * 31
+        env.update(OWNER_MODE='issue-document',ISSUANCE_APPROVED='true',HANDOVER_READY='true',HANDOFF_PUBLIC_KEY=base64.b64encode(raw).decode(),BACKUP_SHA='b'*64,RECEIPT_RUN='123',BACKUP_STORE_SHA='d'*40,BACKUP_STORE_ID='123')
+        request,validator=transport.input_request(env,pins)
+        self.assertEqual(validator.public_der(request['publicKey']),raw);self.assertEqual(request['recipient'],REQUEST['recipient'])
+        self.assertNotIn('BUBBLEWASH_ADDITIONAL_OWNER_INPUT',env)
+    def issue_environment(self):
+        env=self.environment();env.update(OWNER_MODE='issue-document',ISSUANCE_APPROVED='true',HANDOVER_READY='true',HANDOFF_PUBLIC_KEY=base64.b64encode(b'public-fixture' * 31).decode(),BACKUP_SHA='b'*64,RECEIPT_RUN='123',BACKUP_STORE_SHA='d'*40,BACKUP_STORE_ID='123');return env
+    def test_all_seven_dispatch_fields_are_wired_without_shell_interpolation(self):
+        # Existing authenticated GitHub form observed read-only: string fields
+        # are INPUT type=text, mode is SELECT, boolean is checkbox value=true.
+        # Workflow expressions convert typed booleans to literal true/false env.
+        # Exact new owner form is still inspected after merge, before dispatch.
+        import re
+        workflow=(ROOT/'.github/workflows/owner-document-enrollment.yml').read_text()
+        fields=re.findall(r'^      ([a-z0-9_]+):$',workflow.split('permissions:')[0],re.MULTILINE)
+        self.assertEqual(fields,['expected_live_sha','mode','issuance_approved','handover_ready','handoff_public_key','backup_sha256','receipt_run'])
+        bindings={'RUNTIME_SHA':'expected_live_sha','OWNER_MODE':'mode','ISSUANCE_APPROVED':'issuance_approved','HANDOVER_READY':'handover_ready','HANDOFF_PUBLIC_KEY':'handoff_public_key','BACKUP_SHA':'backup_sha256','RECEIPT_RUN':'receipt_run'}
+        for env,field in bindings.items():self.assertIn(env+': ${{ inputs.'+field+' }}',workflow)
+        self.assertIn('options: [check, issue-document]',workflow);self.assertEqual(workflow.count('type: boolean'),2)
+        self.assertNotIn('run: ${{',workflow)
+    def test_check_mode_never_issues_under_either_boolean_encoding(self):
+        for approved in ('true','false'):
+            for ready in ('true','false'):
+                env=self.environment();env.update(OWNER_MODE='check',ISSUANCE_APPROVED=approved,HANDOVER_READY=ready,HANDOFF_PUBLIC_KEY='ignored in check',BACKUP_SHA='ignored in check',RECEIPT_RUN='ignored in check')
+                request,_=transport.input_request(env,pins)
+                self.assertEqual(request['mode'],'check');self.assertEqual(request['approved'],approved=='true');self.assertEqual(request['publicKey'],'');self.assertIsNone(request['backup'])
+    def test_issue_mode_requires_both_literal_true_boolean_encodings(self):
+        for field in ('ISSUANCE_APPROVED','HANDOVER_READY'):
+            for value in ('false','TRUE','False','1','',None,True,False):
+                env=self.issue_environment();env[field]=value
+                with self.subTest(field=field,value=value):
+                    with self.assertRaises(Exception):transport.input_request(env,pins)
+        request,_=transport.input_request(self.issue_environment(),pins);self.assertEqual(request['mode'],'issue-document');self.assertTrue(request['approved'])
+    def test_runtime_and_mode_dispatch_inputs_are_exact_in_both_modes(self):
+        for mode in ('check','issue-document'):
+            for field,values in [('RUNTIME_SHA',('',pins['runtimeSha'].upper(),'0'*40,pins['runtimeSha']+'\n')),('OWNER_MODE',('issue','send','issue-document ','CHECK',''))]:
+                for value in values:
+                    env=self.issue_environment() if mode=='issue-document' else self.environment();env[field]=value
+                    with self.subTest(mode=mode,field=field):
+                        with self.assertRaises(Exception):transport.input_request(env,pins)
+    def test_issue_backup_and_receipt_dispatch_inputs_are_strict(self):
+        for field,values in [('BACKUP_SHA',('','a'*63,'A'*64,'a'*65,'b'*64+'\n')),('RECEIPT_RUN',('','0','0123','-1','1.0','123\n','run123'))]:
+            for value in values:
+                env=self.issue_environment();env[field]=value
+                with self.subTest(field=field):
+                    with self.assertRaises(Exception):transport.input_request(env,pins)
+        request,_=transport.input_request(self.issue_environment(),pins);self.assertEqual(request['backup']['sha256'],'b'*64);self.assertEqual(request['backup']['runId'],'123')
     def test_ssh_environment_cannot_inherit_credentials(self):
         with mock.patch.dict(os.environ,{'HOME':'/home/runner','SECRET':'not inherited','GH_TOKEN':'synthetic'}):
             self.assertEqual(transport.runner_environment(),{'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','HOME':'/home/runner','LC_ALL':'C'})

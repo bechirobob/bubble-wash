@@ -24,7 +24,7 @@ on:
         default: false
         type: boolean
       handoff_public_key:
-        description: One-operation RSA3072 public PEM only; never provide the private key here
+        description: Single-line canonical base64 SPKI DER for the one-operation RSA3072 public key; no PEM headers, whitespace or private key
         required: false
         type: string
       backup_sha256:
