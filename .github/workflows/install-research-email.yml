@@ -6,6 +6,11 @@ on:
         description: 'Exact reviewed main commit containing this installer'
         required: true
         type: string
+      repair_config_parent:
+        description: 'Approved one-time .config mode repair from 0775 to 0755 only'
+        required: true
+        default: false
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -38,5 +43,6 @@ jobs:
           ping: hermes
       - name: Install dedicated survey key disabled without restarting
         env:
+          REPAIR_CONFIG_PARENT: ${{ inputs.repair_config_parent }}
           BUBBLEWASH_RESEARCH_RESEND_KEY: ${{ secrets.BUBBLEWASH_RESEARCH_RESEND_KEY }}
         run: python3 ops/transport-research-email.py

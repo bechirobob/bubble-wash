@@ -151,6 +151,52 @@ class Files(unittest.TestCase):
         self.assertEqual(self.env.read_bytes(), self.raw)
 
 
+
+class ConfigModeRepair(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.root=Path(self.tmp.name);self.config=self.root/'config';self.config.mkdir(mode=0o775);self.config.chmod(0o775)
+        self.child=self.config/'bubblewash';self.child.mkdir(mode=0o700)
+        self.env=self.child/'env';self.env.write_bytes(b'UNCHANGED=synthetic');self.env.chmod(0o600)
+        for name,value in (('ENV',self.env),('CONFIG_PARENT',self.config)):
+            p=patch.object(m,name,value);p.start();self.addCleanup(p.stop)
+    def repair(self,unchanged=lambda:None):m.repair_config_directory(os.getuid(),unchanged)
+    def test_changes_only_mode_preserves_owner_group_inode_and_descendants(self):
+        before=self.config.stat();child=m.identity(self.child.stat());env=m.identity(self.env.stat())
+        with patch.object(m.os,'read',side_effect=AssertionError('no content read')):self.repair()
+        after=self.config.stat();self.assertEqual(after.st_mode&0o7777,0o755)
+        for field in ('st_uid','st_gid','st_ino','st_dev','st_nlink'):self.assertEqual(getattr(before,field),getattr(after,field))
+        self.assertEqual(child,m.identity(self.child.stat()));self.assertEqual(env,m.identity(self.env.stat()))
+        self.assertEqual(self.env.read_bytes(),b'UNCHANGED=synthetic')
+    def test_wrong_prestate_symlink_attributes_owner_and_uid_fail_before_chmod(self):
+        self.config.chmod(0o755)
+        with patch.object(m.os,'fchmod') as change,self.assertRaises(ValueError):self.repair()
+        change.assert_not_called();self.config.chmod(0o775)
+        with patch.object(m.os,'listxattr',return_value=['system.posix_acl_access']),patch.object(m.os,'fchmod') as change,self.assertRaises(ValueError):self.repair()
+        change.assert_not_called()
+        with patch.object(m.os,'geteuid',return_value=os.getuid()+1),patch.object(m.os,'fchmod') as change,self.assertRaises(ValueError):self.repair()
+        change.assert_not_called()
+        real=self.root/'real';self.config.rename(real);self.config.symlink_to(real,target_is_directory=True)
+        with patch.object(m.os,'fchmod') as change,self.assertRaises(ValueError):self.repair()
+        change.assert_not_called()
+    def test_before_change_drift_never_chmods_replacement(self):
+        old=self.root/'old'
+        def drift():self.config.rename(old);self.config.mkdir(mode=0o775)
+        with patch.object(m.os,'fchmod') as change,self.assertRaises(ValueError):self.repair(drift)
+        change.assert_not_called();self.assertEqual(old.stat().st_mode&0o7777,0o775)
+    def test_post_change_binding_drift_is_uncertain_not_success_or_rollback(self):
+        real=os.fchmod;old=self.root/'old'
+        def change(fd,mode):
+            real(fd,mode);self.config.rename(old);self.config.mkdir(mode=0o775)
+        with patch.object(m.os,'fchmod',side_effect=change),self.assertRaises(ValueError):self.repair()
+        self.assertEqual(old.stat().st_mode&0o7777,0o755)
+    def test_existing_group_preserved_not_reassigned(self):
+        source=(ROOT/'ops/install-research-email.py').read_text()
+        helper=source[source.index('def repair_config_directory'):source.index('def main(')]
+        self.assertNotIn('chown',helper);self.assertNotIn('app_gid',helper)
+        self.assertIn('before.st_gid',helper)
+
+
 class PrivilegeBoundary(unittest.TestCase):
     def test_root_lock_then_drop_before_secret_service_or_file_operations(self):
         from types import SimpleNamespace
@@ -161,11 +207,11 @@ class PrivilegeBoundary(unittest.TestCase):
         def lock(*args):
             self.assertEqual(calls, [])
             calls.append('lock')
-            def unchanged():self.assertEqual(calls, ['lock','groups','gid','uid'])
+            def unchanged():self.assertEqual(calls[:4], ['lock','groups','gid','uid'])
             yield unchanged
         class Input:
             def read(inner, size):
-                self.assertEqual(calls,['lock','groups','gid','uid']);return KEY
+                self.assertEqual(calls,['lock','groups','gid','uid','repair']);return KEY
         with patch.object(m.os, 'geteuid', side_effect=[0, 1000]), \
              patch.object(m.os, 'getuid', return_value=1000), \
              patch.object(m.os, 'uname', side_effect=AssertionError('OS hostname is not the authenticated tailnet identity')), \
@@ -174,12 +220,13 @@ class PrivilegeBoundary(unittest.TestCase):
              patch.object(m.os, 'setgid', side_effect=lambda x: calls.append('gid')), \
              patch.object(m.os, 'setuid', side_effect=lambda x: calls.append('uid')), \
              patch.object(m, 'deployment_lock', side_effect=lock), \
+             patch.object(m, 'repair_config_directory', side_effect=lambda *args: calls.append('repair')), \
              patch.object(m, 'install', return_value='installed-disabled'), \
              patch.object(m.subprocess, 'run', return_value=SimpleNamespace(stdout=b'LoadState=loaded\nEnvironmentFiles=/home/ubuntu/.config/bubblewash/env (ignore_errors=no)\n')) as run, \
              patch.object(m.sys, 'argv', ['installer']), \
              patch.object(m.sys, 'stdin', SimpleNamespace(buffer=Input())), \
              contextlib.redirect_stdout(io.StringIO()):
-            m.main()
+            m.main(repair_config_parent=True)
         self.assertEqual(run.call_args.args[0][0], '/usr/bin/systemctl')
         self.assertEqual(run.call_args.kwargs['env']['PATH'], '/usr/bin:/bin')
 
@@ -223,6 +270,30 @@ class Transport(unittest.TestCase):
              contextlib.redirect_stdout(output):
             t.main()
         self.assertNotIn(KEY.decode(), output.getvalue())
+
+    def test_explicit_repair_boolean_in_actual_emitted_program_and_invalid_refusal(self):
+        import contextlib,io,shlex
+        from types import SimpleNamespace
+        spec=importlib.util.spec_from_file_location('repair_transport',ROOT/'ops/transport-research-email.py');t=importlib.util.module_from_spec(spec);spec.loader.exec_module(t)
+        for flag in (None,'false','true'):
+            expected=flag=='true'
+            source=('def main(repair_config_parent=False):\n assert repair_config_parent is '+repr(expected)+'\n print("installed-disabled")\n').encode()
+            def run(argv,**kwargs):
+                self.assertNotIn(KEY.decode(),repr(argv));self.assertEqual(kwargs['input'],KEY)
+                self.assertNotIn('REPAIR_CONFIG_PARENT',os.environ)
+                command=shlex.split(argv[3]);self.assertEqual(command[:4],['/usr/bin/python3','-I','-B','-c'])
+                output=io.StringIO()
+                with contextlib.redirect_stdout(output):exec(command[4],{})
+                return SimpleNamespace(returncode=0,stdout=output.getvalue().encode(),stderr=b'')
+            env={'BUBBLEWASH_RESEARCH_RESEND_KEY':KEY.decode()}
+            if flag is not None:env['REPAIR_CONFIG_PARENT']=flag
+            with patch.dict(os.environ,env,clear=True),patch.object(t.Path,'read_bytes',return_value=source),patch.object(t.subprocess,'run',side_effect=run),contextlib.redirect_stdout(io.StringIO()):t.main()
+        with patch.dict(os.environ,{'BUBBLEWASH_RESEARCH_RESEND_KEY':KEY.decode(),'REPAIR_CONFIG_PARENT':'yes'},clear=True),patch.object(t.subprocess,'run') as run:
+            with self.assertRaises(ValueError):t.main()
+        run.assert_not_called()
+        workflow=(ROOT/'.github/workflows/install-research-email.yml').read_text()
+        self.assertIn('default: false',workflow);self.assertIn('REPAIR_CONFIG_PARENT: ${{ inputs.repair_config_parent }}',workflow)
+
 
 
 if __name__ == '__main__':
