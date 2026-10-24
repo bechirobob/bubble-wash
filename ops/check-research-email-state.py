@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Read-only dedicated-key presence check. No value, hash, path or error output."""
 import json
+import errno
+from contextlib import contextmanager
 import os
 import pwd
 import resource
@@ -14,6 +16,10 @@ def require(value):
 
 FIELDS = ('appIdentityReady','deploymentLockReady','serviceBindingReady','parentGuardChecked',
           'parentGuardEligible','fileSafetyReady','parseReady','bindingStable')
+
+LOCK_FIELDS = ('lockCanonical', 'lockDirectoryOpened', 'lockDirectoryOwnerSafe',
+    'lockDirectoryModeSafe', 'lockFileOpened', 'lockFileRegular', 'lockFileSingleLink',
+    'lockFileOwnerSafe', 'lockFileModeSafe', 'lockAcquired', 'lockBindingStable')
 
 def parse_environment(raw):
     require(len(raw) <= 65536 and b'\x00' not in raw)
@@ -34,11 +40,15 @@ def parse_environment(raw):
 
 
 def result():
-    return {**dict.fromkeys(FIELDS, False), 'dedicatedKeyPresent':None, 'emailFlagDisabled':None}
+    return {**dict.fromkeys(FIELDS, False), **dict.fromkeys(LOCK_FIELDS), 'lockFailure':None, 'dedicatedKeyPresent':None, 'emailFlagDisabled':None}
 
 def validate(value):
-    if type(value) is not dict or set(value) != {*FIELDS,'dedicatedKeyPresent','emailFlagDisabled'}:
+    if type(value) is not dict or set(value) != {*FIELDS,*LOCK_FIELDS,'lockFailure','dedicatedKeyPresent','emailFlagDisabled'}:
         raise ValueError('invalid state')
+    if not all(value[k] is None or type(value[k]) is bool for k in LOCK_FIELDS): raise ValueError('invalid state')
+    if value['lockFailure'] not in (None,'permission-denied','missing','symlink','busy','metadata-guard','other'): raise ValueError('invalid state')
+    if value['deploymentLockReady'] and not all(value[k] is True for k in LOCK_FIELDS): raise ValueError('invalid state')
+    if value['bindingStable'] and value['lockBindingStable'] is not True: raise ValueError('invalid state')
     if not all(type(value[k]) is bool for k in FIELDS): raise ValueError('invalid state')
     if not all(value[k] is None or type(value[k]) is bool for k in ('dedicatedKeyPresent','emailFlagDisabled')): raise ValueError('invalid state')
     if value['bindingStable'] and not all(value[k] for k in FIELDS if k not in ('parentGuardEligible','bindingStable')): raise ValueError('invalid state')
@@ -79,8 +89,74 @@ def inspect_file(i, uid, unchanged, state):
         if fd is not None:os.close(fd)
         os.close(directory)
 
+
+def lock_failure(state, error):
+    code=getattr(error,'errno',None)
+    state['lockFailure']=('permission-denied' if code in (errno.EACCES,errno.EPERM) else
+        'missing' if code==errno.ENOENT else 'symlink' if code==errno.ELOOP else
+        'busy' if code in (errno.EAGAIN,errno.EWOULDBLOCK) else
+        'metadata-guard' if isinstance(error,ValueError) else 'other')
+    state['deploymentLockReady']=False
+
+@contextmanager
+def observed_lock(i, uid, state):
+    entered=False
+    try:
+        with _observed_lock(i,uid,state) as check:
+            entered=True
+            def unchanged():
+                try:check()
+                except BaseException as error:
+                    lock_failure(state,error);raise
+            yield unchanged
+    except BaseException as error:
+        if not entered:lock_failure(state,error)
+        raise
+
+@contextmanager
+def _observed_lock(i, uid, state):
+    """Same existing lock guards, with fixed non-secret outcomes only."""
+    runtime=i.RUNTIME
+    def check(name, condition):
+        state[name]=bool(condition);i.require(condition)
+    state['lockCanonical']=False
+    check('lockCanonical',runtime.resolve(strict=True)==runtime)
+    state['lockDirectoryOpened']=False
+    directory=os.open(runtime,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    state['lockDirectoryOpened']=True
+    lock=None
+    try:
+        ds=os.fstat(directory)
+        check('lockDirectoryOwnerSafe',ds.st_uid in (0,uid))
+        check('lockDirectoryModeSafe',not ds.st_mode & 0o022)
+        state['lockFileOpened']=False
+        lock=os.open('deploy.lock',os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory)
+        state['lockFileOpened']=True
+        ls=os.fstat(lock)
+        check('lockFileRegular',stat.S_ISREG(ls.st_mode))
+        check('lockFileSingleLink',ls.st_nlink==1)
+        check('lockFileOwnerSafe',ls.st_uid in (0,uid))
+        check('lockFileModeSafe',not ls.st_mode & 0o022)
+        state['lockAcquired']=False
+        i.fcntl.flock(lock,i.fcntl.LOCK_EX|i.fcntl.LOCK_NB)
+        state['lockAcquired']=True
+        def unchanged():
+            state['lockBindingStable']=False
+            i.require(runtime.resolve(strict=True)==runtime)
+            fields=('st_dev','st_ino','st_mode','st_uid','st_gid','st_nlink')
+            i.require(all(getattr(runtime.lstat(),k)==getattr(ds,k) for k in fields))
+            i.require(all(getattr(os.stat('deploy.lock',dir_fd=directory,follow_symlinks=False),k)==getattr(ls,k) for k in fields))
+            i.require(os.fstat(lock).st_nlink==1)
+            state['lockBindingStable']=True
+        unchanged()
+        yield unchanged
+    finally:
+        if lock is not None:os.close(lock)
+        os.close(directory)
+
+
 def run(i, uid, state):
-    with i.deployment_lock(i.RUNTIME,uid) as unchanged:
+    with observed_lock(i,uid,state) as unchanged:
         state['deploymentLockReady']=True
         response=subprocess.run(['/usr/bin/systemctl','--user','show','bubblewash-local.service',
             '--property=LoadState,EnvironmentFiles'],capture_output=True,timeout=20,check=True,
