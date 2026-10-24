@@ -2,10 +2,20 @@ import { test, expect } from '@playwright/test';
 import { fixtureRequestPolicy } from './request-policy.mjs';
 
 test.beforeEach(async({page})=>{
+  await page.addInitScript(() => {
+    const add = window.addEventListener;
+    window.__pwaListenerReady = false;
+    window.addEventListener = function(type, listener, options) {
+      const result = add.call(this, type, listener, options);
+      if (type === 'beforeinstallprompt') window.__pwaListenerReady = true;
+      return result;
+    };
+  });
   await page.route('**/*',route=>fixtureRequestPolicy(route.request().url())===null?route.abort('blockedbyclient'):route.continue());
 });
 
 async function syntheticPrompt(page, outcome='dismissed') {
+  await page.waitForFunction(() => window.__pwaListenerReady === true);
   await page.evaluate(outcome=>{
     window.__pwaPrompts=0;
     const event=new Event('beforeinstallprompt',{cancelable:true});
@@ -27,6 +37,7 @@ test('install page is compact, branded and exposes truthful platform guidance',a
   await expect(page.getByText('Turn on Open as Web App if shown, then tap Add.',{exact:true})).toBeVisible();
   await expect(page.getByText(/does not save submissions offline/)).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.screenshot({path:testInfo.outputPath('install-manual-guidance.png'),fullPage:true});
   await syntheticPrompt(page);await expect(page.getByRole('button',{name:'Install Bubble Wash',exact:true})).toBeVisible();
   const button=page.getByRole('button',{name:'Install Bubble Wash',exact:true});
   expect(await button.evaluate(element=>getComputedStyle(element).boxShadow)).toBe('none');
