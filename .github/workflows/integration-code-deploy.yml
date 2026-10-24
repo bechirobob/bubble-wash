@@ -4,26 +4,26 @@ on:
     inputs:
       candidate_sha:
         description: 'Published reviewed candidate main commit with exact CI success'
-        required: true
+        required: false
         type: string
       fallback_sha:
         description: 'Published independent reviewed fallback main commit with exact CI success'
-        required: true
+        required: false
         type: string
       plan_id:
         description: '64-hex host-local reviewed plan/package identifier; no installation performed'
-        required: true
+        required: false
         type: string
       plan_sha256:
         description: 'Exact separately reviewed materialized host plan SHA-256'
-        required: true
+        required: false
         type: string
       mode:
         description: 'Inspect by default. Execute requires approved installed host gates and migration window; recovery uses current data.'
         required: true
         default: inspect
         type: choice
-        options: [inspect, execute, recover, complete-labels-only]
+        options: [inspect-host-evidence, inspect, execute, recover, complete-labels-only]
       completion_confirmation:
         description: 'Completion only, after explicit approval: complete-labels-only: followed by the exact full plan SHA-256. Otherwise leave empty.'
         required: false
@@ -52,6 +52,10 @@ jobs:
       - name: Require exact published identities and reviewed plan
         run: |
           set -euo pipefail
+          if [[ "$RELEASE_MODE" == inspect-host-evidence ]]; then
+            [[ -z "$CANDIDATE_SHA$FALLBACK_SHA$PLAN_ID$PLAN_SHA256$COMPLETION_CONFIRMATION" ]]
+            exit 0
+          fi
           [[ "$CANDIDATE_SHA" =~ ^[a-f0-9]{40}$ && "$FALLBACK_SHA" =~ ^[a-f0-9]{40}$ ]]
           [[ "$PLAN_ID" =~ ^[a-f0-9]{64}$ && "$PLAN_SHA256" =~ ^[a-f0-9]{64}$ ]]
           [[ "$CANDIDATE_SHA" == "$GITHUB_SHA" && "$CANDIDATE_SHA" != "$FALLBACK_SHA" ]]
@@ -63,9 +67,10 @@ jobs:
           fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ inputs.candidate_sha }}
+          ref: ${{ inputs.candidate_sha || github.sha }}
           persist-credentials: false
       - name: Verify the exact candidate and retained historical guard
+        if: inputs.mode != 'inspect-host-evidence'
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$CANDIDATE_SHA" ]]
@@ -74,6 +79,14 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_integration_release_adapter.py' -v
           TARGET_SHA="$CANDIDATE_SHA" python3 ops/check-release-ci.py
           TARGET_SHA="$FALLBACK_SHA" python3 ops/check-release-ci.py
+      - name: Test bounded pre-installation evidence route
+        if: inputs.mode == 'inspect-host-evidence'
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          python3 -B ops/integration-release/select_source.py --release . --profile integration-candidate-v1
+          python3 -B -m unittest discover -s tests -p 'test_integration_host_evidence.py' -v
+          python3 -B ops/integration-release/stream_host.py --mode inspect-host-evidence > /dev/null
       - name: Create no credentials; connect through existing approved production tailnet
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
         with:
@@ -84,5 +97,10 @@ jobs:
       - name: Consume pre-staged reviewed package, never install gates or resume maintenance
         run: |
           set -euo pipefail
+          if [[ "$RELEASE_MODE" == inspect-host-evidence ]]; then
+            python3 -B ops/integration-release/stream_host.py --mode inspect-host-evidence |
+              tailscale ssh root@hermes 'python3 -I -B -'
+            exit 0
+          fi
           python3 ops/integration-release/stream_host.py --plan-id "$PLAN_ID" --plan-sha256 "$PLAN_SHA256" --candidate-sha "$CANDIDATE_SHA" --fallback-sha "$FALLBACK_SHA" --mode "$RELEASE_MODE" --completion-confirmation "$COMPLETION_CONFIRMATION" |
             tailscale ssh root@hermes 'python3 -I -B -'
