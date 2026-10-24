@@ -16,7 +16,7 @@ test("all existing role workspaces retain their shared authenticated shell", () 
 test("rider routes remain available in an accessible native disclosure", () => {
   assert.match(source, /<details className="staffRouteDisclosure"><summary>/);
   assert.match(source, /<DispatchBoard orders=\{orders\} role="driver"/);
-  assert.match(source, /<DriverLiveLocationSharing key=\{selectedOrder.orderId\}/);
+  assert.ok(source.includes('<DriverLiveLocationSharing key={`${selectedOrder.orderId}:${liveLocationStages.has(selectedOrder.workflowStage.key)}`}'));
 });
 
 test("staff navigation does not depend on hidden horizontal scrolling", () => {
@@ -81,4 +81,17 @@ test("order queue headers and rows reserve the same action column width", () => 
 
 test("structured form fields do not stretch beside labels with help text", () => {
   assert.match(css, /\.portalPage \.structuredActionForm \.two \{ align-items: start; \}/);
+});
+
+
+test("GPS lifecycle fences pending work and resets presentation on cancellation", () => {
+  const component = source.slice(source.indexOf("function DriverLiveLocationSharing"), source.indexOf("function DispatchBoard"));
+  assert.match(component, /action: "start", orderId: order.orderId/);
+  assert.match(component, /if \(watchRunRef.current !== run\) return; \/\/ Cancel\/unmount/);
+  assert.match(component, /pendingStart.then\(\(value\) => stopLocationSession\(order.orderId, value, true\)\)/);
+  assert.match(component, /pendingUpdateRef.current\?\.controller.abort\(\)/);
+  assert.match(component, /if \(pendingUpdateRef.current === pendingUpdate\) pendingUpdateRef.current = null/);
+  assert.doesNotMatch(component, /watchRunRef.current === run \+ 1/);
+  const clear = component.slice(component.indexOf("function clearLocationWatch"), component.indexOf("useEffect"));
+  assert.match(clear, /setLastSentAt\(""\)/); assert.match(clear, /setAccuracyMeters\(0\)/);
 });

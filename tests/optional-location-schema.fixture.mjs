@@ -16,14 +16,15 @@ try {
  assert.equal(exists(),false);
  assert.equal(store.readDriverLocationStop('synthetic-driver'),null);assert.equal(exists(),false);
  const cutoff=new Date().toISOString();
- if(process.argv[2]==='share')assert.equal(store.upsertDriverLiveLocation({driverId:'synthetic-driver',orderId:'synthetic-order',latitude:5.6,longitude:-0.1,accuracyMeters:10,capturedAt:cutoff,receivedAt:cutoff}),true);
- else store.stopDriverLiveLocation('synthetic-driver',cutoff);
+ const generation=store.startDriverLiveLocation('synthetic-driver','synthetic-order');
+ if(process.argv[2]==='share')assert.equal(store.upsertDriverLiveLocation({driverId:'synthetic-driver',orderId:'synthetic-order',latitude:5.6,longitude:-0.1,accuracyMeters:10,capturedAt:cutoff,receivedAt:cutoff},generation),true);
+ else store.stopDriverLiveLocation('synthetic-driver');
  assert.equal(exists(),true);
  const before=db.prepare('SELECT * FROM driver_live_locations').all();
  assert.throws(()=>inspectFreshReset(db,process.env,directory),/unreviewed table/);
  assert.deepEqual(db.prepare('SELECT * FROM driver_live_locations').all(),before);
- store.stopDriverLiveLocation('synthetic-driver',cutoff);
- assert.equal(store.readDriverLocationStop('synthetic-driver'),cutoff);
- assert.equal(store.upsertDriverLiveLocation({driverId:'synthetic-driver',orderId:'synthetic-order',latitude:5.6,longitude:-0.1,accuracyMeters:10,capturedAt:cutoff,receivedAt:cutoff}),false);
+ store.stopDriverLiveLocation('synthetic-driver');
+ assert.ok(store.readDriverLocationStop('synthetic-driver')); 
+ assert.equal(store.upsertDriverLiveLocation({driverId:'synthetic-driver',orderId:'synthetic-order',latitude:5.6,longitude:-0.1,accuracyMeters:10,capturedAt:cutoff,receivedAt:cutoff},generation),false);
  console.log(`PASS optional location schema: first ${process.argv[2]}, startup/read unchanged, activated reset refused, late share blocked`);
 }finally{process.chdir(cwd);rmSync(directory,{recursive:true,force:true});}
