@@ -1,7 +1,7 @@
 {
   "schema": "bubblewash-survey-only/v1",
   "baseSha": "5dc997db0393e1cf88dde29859b7e1c4550ee4ee",
-  "runtimeTree": "0915c6e57103233c323941769752d9076814f4eb",
+  "runtimeTree": "bc129cdd5457aceb535dec171632d75a1918b6d0",
   "runtimeFiles": {
     ".env.production.example": "8139384fe3a2d23b948dedf93243effe4cbb05439dc55289d16593af39a8decb",
     ".github/backup/backup_release.py": "86d085e65b0e6dba906b57c296868da41b01c83982e5b93d6430fd73f05f6992",
@@ -246,7 +246,7 @@
     "tests/browser/fixture-edge.mjs": "15dd62b49b8b2233ec9c0035e328ff794678bffc1890e51f5b9e8ecf293e4680",
     "tests/browser/fixture-smoke.mjs": "242c82c54d1b8f86a66f8b60e3f138043996e6d476090e9b07f5d6bc62436538",
     "tests/browser/login-hydration.spec.mjs": "ea3a4bff733e66c1721dd1bb97978524fcd6516f18aaef706d55e4f4db773196",
-    "tests/browser/opening-intro.spec.mjs": "ed2a693ecf12f39d4b2462b405c95d6fa2e5a58067b4c2cf589cfa12a0655709",
+    "tests/browser/opening-intro.spec.mjs": "be3e4ba2f44162d8cbd924e3f7bfcd360cad7a45d4c2d9cd326a32b2d1a571ea",
     "tests/browser/personal-owner-mfa.spec.mjs": "4519d88305bb919588633f6509a9e27d8dbadde9e9f33e45443bfdcf78a5b3f5",
     "tests/browser/prefetch-lifecycle.mjs": "69f3598815b3ba0aaba5cf6a73a212fd6629c8742bd17c9821fd2259a97872eb",
     "tests/browser/request-policy.mjs": "aecc6f9f14d5029a6acf7dd2b611941383b0a08f032c0305a355b54aff7d2af4",

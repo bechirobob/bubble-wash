@@ -735,5 +735,212 @@ class ReadOnlyInspection(unittest.TestCase):
         with self.assertRaises(OSError): adapter.inspect_read(link, self.owner, 'candidate')
 
 
+class BaselineNormalization(unittest.TestCase):
+    setUp = ReadOnlyInspection.setUp
+
+    def prepare(self, apply=True):
+        self.args.mode = 'normalize-baseline'
+        self.args.apply_normalization = apply
+        directories = {str(parent) for name in self.pins['baselineFiles'] for parent in Path(name).parents if str(parent) != '.'}
+        self.stack.enter_context(mock.patch.object(adapter, 'NORMALIZE_COUNTS', (len(self.pins['baselineFiles']), len(directories))))
+        self.file = self.old / 'package.json'; self.file.chmod(0o666)
+        self.directory = self.old / 'src'; self.directory.chmod(0o777)
+        self.extra = self.old / 'untracked-private'; self.extra.write_text('never read or normalize this'); self.extra.chmod(0o666)
+        self.before = {name: (core.digest(self.old / name), (self.old / name).stat().st_uid, (self.old / name).stat().st_gid)
+                       for name in self.pins['baselineFiles']}
+        for name in ('environment_snapshot', 'inspect_schema'):
+            self.forbidden.append(self.stack.enter_context(mock.patch.object(adapter, name, side_effect=AssertionError('private read forbidden'))))
+        self.forbidden.append(self.stack.enter_context(mock.patch.object(adapter.sqlite3, 'connect', side_effect=AssertionError('database forbidden'))))
+
+    def run_normalization(self):
+        import contextlib, io
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output): result = adapter.main(self.args)
+        lines = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(lines[-1], result)
+        self.assertNotIn(str(self.root), output.getvalue())
+        self.assertNotIn('private-sentinel', output.getvalue())
+        for operation in self.forbidden: operation.assert_not_called()
+        self.drop.assert_called_once()
+        return result, lines
+
+    def test_validation_reports_all_modes_before_any_opt_in_change(self):
+        self.prepare(False)
+        with mock.patch.object(adapter.os, 'fchmod') as chmod: result, lines = self.run_normalization()
+        chmod.assert_not_called()
+        self.assertTrue(result['ok']); self.assertTrue(result['prevalidated'])
+        self.assertEqual(result['status'], 'validated-no-change'); self.assertEqual(result['needsChange'], 2)
+        self.assertEqual(lines[0]['phase'], 'prevalidated')
+        self.assertEqual(result['observedModes']['files']['0666'], 1)
+        self.assertEqual(result['observedModes']['directories']['0777'], 1)
+        self.assertEqual(self.file.stat().st_mode & 0o777, 0o666)
+
+    def test_only_pinned_descriptors_lose022_and_preserve_bytes_owner_and_other_bits(self):
+        self.prepare()
+        root_mode = self.old.stat().st_mode
+        result, lines = self.run_normalization()
+        self.assertTrue(result['ok']); self.assertEqual(result['changed'], 2)
+        self.assertEqual(result['status'], 'normalized'); self.assertFalse(result['automaticRetry'])
+        self.assertEqual(self.file.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(self.directory.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(self.old.stat().st_mode, root_mode)
+        self.assertEqual(self.extra.stat().st_mode & 0o777, 0o666)
+        self.assertEqual(self.before, {name: (core.digest(self.old / name), (self.old / name).stat().st_uid, (self.old / name).stat().st_gid)
+                                      for name in self.pins['baselineFiles']})
+        self.assertEqual(lines[0]['phase'], 'prevalidated')
+        self.assertEqual(self.current.resolve(), self.old)
+
+    def assert_zero_change(self):
+        with mock.patch.object(adapter.os, 'fchmod') as chmod: result, lines = self.run_normalization()
+        chmod.assert_not_called(); self.assertFalse(result['ok'])
+        self.assertEqual(result['attemptedChanges'], 0); self.assertEqual(result['changed'], 0)
+        self.assertEqual(result['status'], 'refused-no-change')
+        self.assertEqual(self.directory.stat().st_mode & 0o777, 0o777)
+        self.assertFalse(any(line.get('phase') == 'prevalidated' for line in lines))
+        return result
+
+    def test_all_hashes_validated_before_any_chmod(self):
+        self.prepare(); (self.old / sorted(self.pins['baselineFiles'])[-1]).write_text('changed last file')
+        self.assertEqual(self.assert_zero_change()['guard'], 'FILE_HASH')
+
+    def test_full_manifest_is_verified_independently_of_permission_bits(self):
+        self.prepare(); self.pins['baselineSource'] = {**self.pins['baselineSource'], 'src': 'f'*64}
+        self.assertEqual(self.assert_zero_change()['guard'], 'SOURCE_MANIFEST_MISMATCH')
+
+    def test_critical_byte_mismatch_refuses_before_permissions(self):
+        self.prepare(); name = core.CRITICAL_FILES[0]
+        (self.candidate / name).write_text('different critical bytes')
+        self.pins['runtimeFiles'][name] = core.digest(self.candidate / name)
+        self.pins['candidateSource'] = core.source_manifest(self.candidate)
+        self.assertEqual(self.assert_zero_change()['guard'], 'CRITICAL_BYTES')
+
+    def test_untracked_source_refuses_without_opening_or_traversing_it(self):
+        self.prepare(); extra = self.old / 'src' / 'unknown'; extra.mkdir(); (extra / 'private').write_text('must never open')
+        real_open = os.open
+        def guarded(path, *args, **kwargs):
+            self.assertNotIn(str(path), ('unknown', 'private'))
+            return real_open(path, *args, **kwargs)
+        with mock.patch.object(adapter.os, 'open', side_effect=guarded):
+            self.assertEqual(self.assert_zero_change()['guard'], 'SOURCE_MANIFEST_MISMATCH')
+
+    def test_symlink_file_refuses_before_read_and_no_chmod(self):
+        self.prepare(); self.file.unlink(); self.file.symlink_to(self.extra)
+        self.assert_zero_change()
+
+    def test_hard_link_file_refuses(self):
+        self.prepare(); os.link(self.file, self.old / 'extra-link')
+        self.assertEqual(self.assert_zero_change()['guard'], 'NORMALIZE_TYPE_LINK')
+
+    def test_special_mode_refuses_before_fchmod_can_clear_unrelated_bits(self):
+        self.prepare(); self.file.chmod(0o4666)
+        self.assertEqual(self.assert_zero_change()['guard'], 'NORMALIZE_METADATA')
+
+    def test_acl_or_unknown_extended_metadata_refuses(self):
+        self.prepare()
+        with mock.patch.object(adapter.os, 'listxattr', return_value=['system.posix_acl_access']):
+            self.assertEqual(self.assert_zero_change()['guard'], 'NORMALIZE_METADATA')
+
+    def test_owner_mismatch_refuses_before_mutation(self):
+        import types
+        self.prepare(); real_fstat = os.fstat; inode = self.file.stat().st_ino
+        def changed(fd):
+            value = real_fstat(fd)
+            if value.st_ino != inode: return value
+            fields = (*adapter.IDENTITY, 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+            return types.SimpleNamespace(**{key: value.st_uid + 12345 if key == 'st_uid' else getattr(value, key) for key in fields})
+        with mock.patch.object(adapter.os, 'fstat', side_effect=changed):
+            self.assertEqual(self.assert_zero_change()['guard'], 'NORMALIZE_OWNER')
+
+    def test_current_pointer_drift_refuses_before_any_chmod(self):
+        self.prepare(); original = adapter.baseline_binding; calls = 0
+        def changed(*args):
+            nonlocal calls
+            calls += 1
+            current, marker = original(*args)
+            return current, marker if calls == 1 else marker + b'changed'
+        with mock.patch.object(adapter, 'baseline_binding', side_effect=changed):
+            self.assertEqual(self.assert_zero_change()['guard'], 'CURRENT_CHANGED')
+
+    def test_named_file_replacement_after_open_refuses(self):
+        self.prepare(); real_read = os.read; inode = self.file.stat().st_ino; replaced = False
+        def changed(fd, size):
+            nonlocal replaced
+            data = real_read(fd, size)
+            if os.fstat(fd).st_ino == inode and not replaced:
+                replaced = True
+                replacement = self.old / 'replacement'; replacement.write_bytes(self.file.read_bytes())
+                os.replace(replacement, self.file)
+            return data
+        with mock.patch.object(adapter.os, 'read', side_effect=changed):
+            self.assertEqual(self.assert_zero_change()['guard'], 'NORMALIZE_IDENTITY_CHANGED')
+
+    def test_renamed_ancestor_refuses_before_any_permission_change(self):
+        self.prepare(); original = adapter.baseline_binding; calls = 0
+        def replaced(*args):
+            nonlocal calls
+            result = original(*args); calls += 1
+            if calls == 3:
+                old = self.old / 'src'; old.rename(self.old / 'renamed-src'); old.mkdir()
+            return result
+        with mock.patch.object(adapter, 'baseline_binding', side_effect=replaced):
+            with mock.patch.object(adapter.os, 'fchmod') as chmod: result, _ = self.run_normalization()
+        chmod.assert_not_called(); self.assertFalse(result['ok'])
+        self.assertEqual(result['attemptedChanges'], 0)
+        self.assertIn(result['guard'], ('NORMALIZE_ROOT_CHANGED', 'NORMALIZE_IDENTITY_CHANGED'))
+
+    def test_no_staged_candidate_is_required_or_read_for_baseline_normalization(self):
+        self.prepare(); self.args.candidate = None
+        import shutil
+        shutil.rmtree(self.candidate)
+        result, _ = self.run_normalization()
+        self.assertTrue(result['ok']); self.assertEqual(result['changed'], 2)
+
+    def test_root_and_external_ancestors_are_never_chmod_targets(self):
+        self.prepare(); real_chmod = os.fchmod; root_inode = self.old.stat().st_ino
+        external_inodes = {path.stat().st_ino for path in self.old.parents}
+        def target(fd, mode):
+            self.assertNotEqual(os.fstat(fd).st_ino, root_inode)
+            self.assertNotIn(os.fstat(fd).st_ino, external_inodes)
+            return real_chmod(fd, mode)
+        with mock.patch.object(adapter.os, 'fchmod', side_effect=target): result, _ = self.run_normalization()
+        self.assertTrue(result['ok'])
+
+    def test_partial_failure_counts_attempts_never_retries_or_restores_write_bits(self):
+        self.prepare(); real_chmod = os.fchmod; calls = []
+        def fail_second(fd, mode):
+            calls.append(mode)
+            if len(calls) == 2: raise OSError('private exception must not be printed')
+            return real_chmod(fd, mode)
+        with mock.patch.object(adapter.os, 'fchmod', side_effect=fail_second): result, _ = self.run_normalization()
+        self.assertFalse(result['ok']); self.assertEqual(result['status'], 'partial-or-uncertain')
+        self.assertEqual(result['changed'], 1); self.assertEqual(result['attemptedChanges'], 2)
+        self.assertEqual(calls, [0o755, 0o644])
+        self.assertEqual(self.directory.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(self.file.stat().st_mode & 0o777, 0o666)
+
+    def test_post_chmod_mismatch_is_uncertain_not_success(self):
+        self.prepare()
+        with mock.patch.object(adapter.os, 'fchmod'): result, _ = self.run_normalization()
+        self.assertFalse(result['ok']); self.assertEqual(result['status'], 'partial-or-uncertain')
+        self.assertEqual(result['changed'], 0); self.assertEqual(result['attemptedChanges'], 1)
+        self.assertEqual(result['guard'], 'NORMALIZE_POST_CHANGE')
+
+    def test_full_scope_is_fixed_and_rejects_missing_pin(self):
+        self.prepare(); self.pins['baselineFiles'].pop('package.json')
+        self.assertEqual(self.assert_zero_change()['guard'], 'NORMALIZE_SCOPE')
+
+    def test_normalization_workflow_has_explicit_opt_in_and_no_deploy_chaining(self):
+        text = (ROOT / '.github/workflows/survey-only-deploy.yml').read_text()
+        self.assertIn("inputs.mode != 'normalize-baseline'", text)
+        self.assertIn('apply_normalization:', text)
+        self.assertIn("if [[ \"$APPLY_NORMALIZATION\" == 'true' ]]; then apply='--apply-normalization'; fi", text)
+        step = next(block for block in text.split('      - name:') if '--mode normalize-baseline' in block)
+        self.assertIn("if: inputs.mode == 'normalize-baseline'", step)
+        self.assertNotIn('chmod -R', step); self.assertNotIn('systemctl', step)
+        for block in text.split('      - name:'):
+            if any(term in block for term in ('git -C runtime-artifact archive', '--mode activate', "--candidate '$RELEASE_DIR'")):
+                self.assertTrue("if: inputs.mode == 'deploy'" in block or "if: inputs.mode == 'activate'" in block)
+
+
 if __name__ == '__main__':
     unittest.main()
