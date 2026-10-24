@@ -187,6 +187,7 @@ test('four-role saved workflow, responsive controls and stopped SLA', async ({ b
         clearWatch() { window.__gps.callback = null; window.__gps.clears++; },
       } });
     });
+    await driver.locator('summary').filter({ hasText: 'Assignment and route' }).click();
     const share = driver.locator('.driverLiveShare');
     await expect(share.getByRole('button', { name: 'Start live sharing', exact: true })).toBeEnabled();
     const starts = [], fixes = [];
