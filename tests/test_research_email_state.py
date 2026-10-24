@@ -39,6 +39,22 @@ class ReadOnlyState(unittest.TestCase):
         self.assertTrue(value['parentGuardChecked']);self.assertFalse(value['parentGuardEligible'])
         self.assertTrue(value['bindingStable']);self.assertTrue(value['dedicatedKeyPresent'])
         self.assertEqual(stat.S_IMODE(self.parent.stat().st_mode),0o720)
+    def test_exact_existing_two_parent_modes_without_extra_probe(self):
+        self.parent.chmod(0o720);self.root.chmod(0o702)
+        value=self.inspect()
+        self.assertEqual(value['configParentMode'],0o720)
+        self.assertEqual(value['configGrandparentMode'],0o702)
+        self.assertTrue(value['configParentGroupWritable']);self.assertFalse(value['configParentWorldWritable'])
+        self.assertFalse(value['configGrandparentGroupWritable']);self.assertTrue(value['configGrandparentWorldWritable'])
+        self.assertFalse(value['parentGuardEligible']);self.assertTrue(value['bindingStable'])
+        self.assertEqual(stat.S_IMODE(self.parent.stat().st_mode),0o720)
+        self.assertEqual(stat.S_IMODE(self.root.stat().st_mode),0o702)
+        self.assertNotIn(str(self.root),json.dumps(value));self.assertNotIn('re_SYNTHETIC',json.dumps(value))
+    def test_parent_diagnostics_unknown_and_strict_numeric_allowlist(self):
+        self.assertTrue(all(c.result()[k] is None for k in (*c.PARENT_WRITE_FIELDS,*c.PARENT_MODE_FIELDS)))
+        for edit in ({'configParentMode':'/secret'},{'configParentMode':True},{'configParentMode':4096},{'configParentMode':-1},{'configGrandparentWorldWritable':1},{'parentGuardChecked':True},{'configParentMode':448}):
+            with self.assertRaises(ValueError):c.validate({**c.result(),**edit})
+
     def test_unsafe_file_blocks_before_read(self):
         self.env.chmod(0o640)
         with patch.object(c.os,'read') as read,self.assertRaises(ValueError):self.inspect()

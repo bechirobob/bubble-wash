@@ -21,6 +21,10 @@ LOCK_FIELDS = ('lockCanonical', 'lockDirectoryOpened', 'lockDirectoryOwnerSafe',
     'lockDirectoryModeSafe', 'lockFileOpened', 'lockFileRegular', 'lockFileSingleLink',
     'lockFileOwnerSafe', 'lockFileModeSafe', 'lockAcquired', 'lockBindingStable')
 
+PARENT_WRITE_FIELDS = ('configParentGroupWritable','configParentWorldWritable',
+    'configGrandparentGroupWritable','configGrandparentWorldWritable')
+PARENT_MODE_FIELDS = ('configParentMode','configGrandparentMode')
+
 def parse_environment(raw):
     require(len(raw) <= 65536 and b'\x00' not in raw)
     entries = {}
@@ -40,12 +44,18 @@ def parse_environment(raw):
 
 
 def result():
-    return {**dict.fromkeys(FIELDS, False), **dict.fromkeys(LOCK_FIELDS), 'lockFailure':None, 'dedicatedKeyPresent':None, 'emailFlagDisabled':None}
+    return {**dict.fromkeys(FIELDS, False), **dict.fromkeys((*LOCK_FIELDS,*PARENT_WRITE_FIELDS,*PARENT_MODE_FIELDS)), 'lockFailure':None, 'dedicatedKeyPresent':None, 'emailFlagDisabled':None}
 
 def validate(value):
-    if type(value) is not dict or set(value) != {*FIELDS,*LOCK_FIELDS,'lockFailure','dedicatedKeyPresent','emailFlagDisabled'}:
+    if type(value) is not dict or set(value) != {*FIELDS,*LOCK_FIELDS,*PARENT_WRITE_FIELDS,*PARENT_MODE_FIELDS,'lockFailure','dedicatedKeyPresent','emailFlagDisabled'}:
         raise ValueError('invalid state')
-    if not all(value[k] is None or type(value[k]) is bool for k in LOCK_FIELDS): raise ValueError('invalid state')
+    if not all(value[k] is None or type(value[k]) is int and 0 <= value[k] <= 0o7777 for k in PARENT_MODE_FIELDS): raise ValueError('invalid state')
+    if not all(value[k] is None or type(value[k]) is bool for k in (*LOCK_FIELDS,*PARENT_WRITE_FIELDS)): raise ValueError('invalid state')
+    for prefix in ('configParent','configGrandparent'):
+        mode=value[prefix+'Mode'];group=value[prefix+'GroupWritable'];world=value[prefix+'WorldWritable']
+        if value['parentGuardChecked']:
+            if mode is None or group is not bool(mode & 0o020) or world is not bool(mode & 0o002): raise ValueError('invalid state')
+        elif mode is not None or group is not None or world is not None: raise ValueError('invalid state')
     if value['lockFailure'] not in (None,'permission-denied','missing','symlink','busy','metadata-guard','other'): raise ValueError('invalid state')
     if value['deploymentLockReady'] and not all(value[k] is True for k in LOCK_FIELDS): raise ValueError('invalid state')
     if value['bindingStable'] and value['lockBindingStable'] is not True: raise ValueError('invalid state')
@@ -59,6 +69,10 @@ def inspect_file(i, uid, unchanged, state):
     path=i.ENV;parent=path.parent
     i.require(parent.resolve(strict=True)==parent)
     parents=[p.stat() for p in (parent,parent.parent)]
+    for prefix,info in zip(('configParent','configGrandparent'),parents):
+        state[prefix+'Mode']=stat.S_IMODE(info.st_mode)
+        state[prefix+'GroupWritable']=bool(info.st_mode & 0o020)
+        state[prefix+'WorldWritable']=bool(info.st_mode & 0o002)
     state['parentGuardChecked']=True
     state['parentGuardEligible']=all(p.st_uid in (0,uid) and not p.st_mode&0o022 for p in parents)
     # Reading never grants write eligibility. Reject foreign-owned parents even for a snapshot.
