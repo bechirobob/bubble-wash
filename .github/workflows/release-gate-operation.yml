@@ -1,0 +1,78 @@
+name: Reviewed Release Gate Operation
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Exact approved main commit containing this separate gate operation'
+        required: true
+        type: string
+      package_sha256:
+        description: 'Exact approved transport-manifest.json SHA-256'
+        required: true
+        type: string
+      evidence_sha256:
+        description: 'Approved canonical SHA-256 of fresh private bounded host facts; never paste facts'
+        required: true
+        type: string
+      installation_evidence_sha256:
+        description: 'Reverse only: approved canonical hash of original pre-install evidence'
+        required: false
+        default: ''
+        type: string
+      mode:
+        description: 'Separate gate operation, never migration. Mutation requires action-time approval.'
+        required: true
+        default: inspect
+        type: choice
+        options: [inspect, install, reverse-before-migration]
+      action_confirmation:
+        description: 'Approved mutation only: mode:package-hash:current-evidence-hash[:original-evidence-hash]. Empty for inspect.'
+        required: false
+        default: ''
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  gate:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      PACKAGE_SHA256: ${{ inputs.package_sha256 }}
+      EVIDENCE_SHA256: ${{ inputs.evidence_sha256 }}
+      INSTALLATION_EVIDENCE_SHA256: ${{ inputs.installation_evidence_sha256 }}
+      GATE_MODE: ${{ inputs.mode }}
+      ACTION_CONFIRMATION: ${{ inputs.action_confirmation }}
+    steps:
+      - name: Require exact reviewed main source
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Test and validate exact gate operation before host access
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          python3 -B -m unittest discover -s ops/release-gate -p 'test_*.py' -v
+          python3 -B ops/release-gate/stream_gate.py --mode "$GATE_MODE" --package-sha256 "$PACKAGE_SHA256" --evidence-sha256 "$EVIDENCE_SHA256" --installation-evidence-sha256 "$INSTALLATION_EVIDENCE_SHA256" --action-confirmation "$ACTION_CONFIRMATION" > /dev/null
+      - name: Reuse existing approved production tailnet, create no credentials
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Run only the separately approved gate operation in memory
+        run: |
+          set -euo pipefail
+          python3 -B ops/release-gate/stream_gate.py --mode "$GATE_MODE" --package-sha256 "$PACKAGE_SHA256" --evidence-sha256 "$EVIDENCE_SHA256" --installation-evidence-sha256 "$INSTALLATION_EVIDENCE_SHA256" --action-confirmation "$ACTION_CONFIRMATION" |
+            tailscale ssh root@hermes 'python3 -I -B -'

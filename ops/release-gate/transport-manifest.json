@@ -1,0 +1,14 @@
+{
+  "evidenceFiles": {
+    "ops/release-gate/readonly/contracts.py": "4764ff26516e74dbd477623d1535b46394fe57dedcf6a2136790e41bc70a7b6a",
+    "ops/release-gate/readonly/deploy-preserving.py": "29006085ee39680daa30fc34d05c3761b410f0f860835943eab8a60168da076a",
+    "ops/release-gate/readonly/host_adapter.py": "2db4885d7ae029b0107662af0bd6c5cee2b709f4d897610e94fb7abde3b74382"
+  },
+  "gateFiles": {
+    "app.conf": "f41b345b8ab44f9673668a79d545d335f18bee21833f29d3aaf0a3078d7667ef",
+    "install_hold_gate.py": "caab6084f2bd858d03b980e6f1f2c3038b84d5b0621deccda87d207c674e7fad",
+    "maintenance.conf": "c9f710fa7facbbcc088df492f38c62632a1c1b8e9dd3aef8ea21468bbaf631ee",
+    "stream_gate.py": "8d4cb37cf367b0197c2518f8ff6ae7a04c31a521b7e4042ef9612049674d418d"
+  },
+  "schema": "bubblewash-gate-transport/v1"
+}
