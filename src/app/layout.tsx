@@ -11,11 +11,7 @@ export const metadata: Metadata = {
   manifest: "/site.webmanifest",
   appleWebApp: { capable: true, title: "Bubble Wash", statusBarStyle: "default" },
   icons: {
-    icon: [
-      { url: "/favicon.png", type: "image/png", sizes: "32x32" },
-      { url: "/bubble-wash-icon.jpg", type: "image/jpeg", sizes: "1170x1170" },
-    ],
-    shortcut: "/favicon.png",
+    // Next serves the versioned browser icon from app/favicon.ico.
     apple: "/apple-icon.png",
   },
   openGraph: {
