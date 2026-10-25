@@ -138,7 +138,7 @@ test('historical detail preserves field keys instead of assigning present-day wo
 });
 
 
-test('results scope neutral edges and bounded scrolling without depending on broader workspace CSS', () => {
+test('results share staff identity while preserving bounded scrolling and owner-only navigation', () => {
   const css = readFileSync(new URL('../src/components/research/results.module.css', import.meta.url), 'utf8');
   assert.match(css, /\.page\{--line:#dedede;--line-strong:#858585;--line-active:#333333;--focus-ring:#222222;/);
   assert.match(css, /\.page :global\(\.boundedListViewport\)\{[^}]*max-block-size:min\(60dvh,36rem\);overflow:auto/);
