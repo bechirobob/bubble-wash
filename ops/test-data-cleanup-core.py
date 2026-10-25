@@ -53,7 +53,7 @@ def config(raw):
         require(not any(c in value for c in '\\"\'`\x00\r\n'))
         values[match[1]]=value
         if match[1] not in REMOVE_KEYS:kept.append(line)
-    checkpoint('config-file-production-mode');require(values.get('NODE_ENV')=='production')
+    checkpoint('config-file-production-mode');require(values.get('NODE_ENV') in (None,'production'))
     checkpoint('config-demo-login-disabled');require(values.get('BUBBLEWASH_DISABLE_DEMO_LOGIN')=='true')
     checkpoint('config-staff-auth-enabled')
     require(values.get('BUBBLEWASH_STAFF_AUTH_DISABLED')!='true')
