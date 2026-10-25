@@ -109,18 +109,23 @@ test('support dossier preserves case draft and failed writes never claim success
   await page.route('**/api/submit', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic save unavailable' } }));
   await page.goto('/support');
   await expect(page.locator('.staffCaseDeskDossier')).toContainText('CASE-018');
-  await page.locator('.staffCaseDeskDossier').getByLabel('Case note', { exact: true }).fill('Draft to retain');
-  await expect(page.locator('.staffCaseDeskDossier').getByLabel('Case note', { exact: true })).toHaveValue('Draft to retain');
+  // Controlled textarea text becomes a descendant of its implicit label.
+  // Use its stable computed accessible name, not the label's full textContent.
+  const caseNote = page.locator('.staffCaseDeskDossier').getByRole('textbox', { name: 'Case note', exact: true });
+  await expect(caseNote).toHaveAccessibleName('Case note');
+  await caseNote.fill('Draft to retain');
+  await expect(caseNote).toHaveAccessibleName('Case note');
+  await expect(page.locator('.staffCaseDeskDossier').getByRole('textbox', { name: 'Case note', exact: true })).toHaveValue('Draft to retain');
   await page.locator('.staffCaseDeskIndex').getByRole('link').filter({ hasText: 'CASE-021' }).click();
   await expect(page.locator('.staffCaseDeskDossier')).toContainText('CASE-021');
   await page.locator('.staffCaseDeskIndex').getByRole('link').filter({ hasText: 'CASE-018' }).click();
   await expect(page).toHaveURL(/case=CASE-018/);
   await expect(page.locator('.supportDeskSection')).toHaveAttribute('aria-busy', 'false');
   await expect(page.locator('.staffCaseDeskDossier .staffCaseDeskReference')).toContainText('CASE-018');
-  await expect(page.locator('.staffCaseDeskDossier').getByLabel('Case note', { exact: true })).toHaveValue('Draft to retain');
+  await expect(page.locator('.staffCaseDeskDossier').getByRole('textbox', { name: 'Case note', exact: true })).toHaveValue('Draft to retain');
   await page.locator('.staffCaseDeskDossier').getByRole('button', { name: 'Save case action', exact: true }).click();
   await expect(page.locator('.staffCaseDeskDossier')).toContainText('Synthetic save unavailable');
-  await expect(page.locator('.staffCaseDeskDossier').getByLabel('Case note', { exact: true })).toHaveValue('Draft to retain');
+  await expect(page.locator('.staffCaseDeskDossier').getByRole('textbox', { name: 'Case note', exact: true })).toHaveValue('Draft to retain');
   await page.screenshot({ path: testInfo.outputPath('support-save-failure.png'), fullPage: true });
   } catch (error) {
     console.log(JSON.stringify({ fixture: 'support-draft-diagnostic', project: testInfo.project.name, path: (() => { const url = new URL(page.url()); return `${url.pathname}${url.search}`.slice(0, 300); })(), caseReads, failedCaseReads, pageErrors, visibleText: (await page.locator('main').innerText().catch(() => 'No main element')).slice(0, 6000) }));
