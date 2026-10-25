@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getCurrentStaffUser, staffSessionDestination } from "@/lib/auth";
 import { ArrowRight, Bike, Headphones, ShieldCheck, WashingMachine } from "lucide-react";
 import { BrandLink } from "@/components/BrandLink";
 import { headers } from "next/headers";
@@ -30,6 +32,8 @@ const staffPaths = [
 ];
 
 export default async function StaffAccessPage() {
+  const user = await getCurrentStaffUser();
+  if (user) redirect(staffSessionDestination(user));
   const staffApp = isStaffAppHost((await headers()).get("host"));
   return (
     <main className="loginPage staffAccessPage">

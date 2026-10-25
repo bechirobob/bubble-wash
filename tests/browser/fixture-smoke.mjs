@@ -62,6 +62,20 @@ try {
       assert.ok(/;\s*Path=\/(?:;|$)/i.test(header), 'Path retained');
     }
     const cookie = setCookies.map(value => value.split(';')[0]).join('; ');
+    // Reuse the same cookie across repeated fresh document requests, never renew it.
+    for (const origin of [base, 'http://localhost:3102']) {
+      for (const entry of ['/staff', '/staff', '/login?next=/admin', '/login?next=/drivers', '/login?next=https://example.invalid', '/login?next=/admin&next=/drivers']) {
+        const reopened = await fetch(`${origin}${entry}`, { headers: { cookie }, redirect: 'manual' });
+        assert.equal(reopened.headers.has('set-cookie'), false, 'Reopen must not renew session');
+        if (reopened.status === 307) {
+          assert.equal(new URL(reopened.headers.get('location'), origin).pathname, path, `${role} role-safe reopen`);
+        } else {
+          assert.equal(reopened.status, 200);
+          const html = await reopened.text();
+          assert.ok(html.includes(`content="0;url=${path}"`) || html.includes(`content="1;url=${path}"`), `${role} streamed reopen redirect`);
+        }
+      }
+    }
     const workspace = await fetch(`${base}${path}`, { headers: { cookie }, redirect: 'manual' });
     assert.equal(workspace.status, 200, `${role} cookie-backed workspace`);
     assert.equal(workspace.headers.get('x-fixture-staff-cookie-received'), 'true', 'Edge observes workspace cookie');
@@ -80,7 +94,7 @@ try {
     const denied = await fetch(`${base}/api/login`, { method: 'POST', headers: { origin: 'https://example.invalid', 'content-type': 'application/json' }, body });
     assert.equal(denied.status, 403, 'Production cross-origin protection stays active');
   }
-  console.log(JSON.stringify({ ok: true, roles: 4, scripts: scripts.length, checks: 'native-origin login, cookie-backed workspace and redirect, script assets, cross-origin rejection through synthetic edge' }));
+  console.log(JSON.stringify({ ok: true, roles: 4, scripts: scripts.length, checks: 'repeated role-safe session reopen on both hosts without renewal, native-origin login, cookie-backed workspace and redirect, script assets, cross-origin rejection through synthetic edge' }));
 } catch (error) {
   // Server startup output does not contain request bodies or credentials.
   console.error(output.slice(-1500));

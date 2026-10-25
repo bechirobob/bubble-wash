@@ -1,7 +1,14 @@
+import { redirect } from "next/navigation";
 import { LoginPageClient } from "@/components/LoginPage";
+import { getCurrentStaffUser, staffSessionDestination } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-export default function LoginPage() {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string | string[] }> }) {
+  const user = await getCurrentStaffUser();
+  if (user) {
+    const { next } = await searchParams;
+    redirect(staffSessionDestination(user, typeof next === "string" ? next : undefined));
+  }
   return <LoginPageClient />;
 }
