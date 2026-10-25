@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """One pinned additive Caddy host; no application, database or auth changes."""
 import copy
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -11,6 +12,7 @@ import tempfile
 import urllib.request
 
 CONFIG=Path('/etc/caddy/Caddyfile')
+JSON_CONFIG_DIR=Path('/run')
 EXPECTED='c65a43156bbb47c376e99cad1b29ac34a75ce406a26f64e49ea963042197875f'
 BLOCK=b'\n\n# Separate Bubble Wash staff home-screen app\nstaff.bubblewash.co {\n\treverse_proxy 127.0.0.1:3000\n}\n'
 HOST='staff.bubblewash.co'
@@ -25,8 +27,32 @@ def run(args,raw=None):
     require(result.returncode==0 and len(result.stdout)<=LIMIT)
     return result.stdout
 
+@contextmanager
+def temporary_config(raw,parent,suffix):
+    protected(parent,True)
+    fd,name=tempfile.mkstemp(prefix='.bubblewash-staff-',suffix=suffix,dir=parent)
+    path=Path(name)
+    try:
+        with os.fdopen(fd,'wb') as stream:
+            os.fchmod(stream.fileno(),0o600)
+            stream.write(raw);stream.flush();os.fsync(stream.fileno())
+        protected(path)
+        yield path
+    finally:
+        path.unlink()
+
 def adapt(raw):
-    return json.loads(run(['adapt','--config','-','--adapter','caddyfile'],raw))
+    # Older Caddy adapt treats '-' as a filename. Keep a real sibling file so
+    # relative imports retain their base. Any self-import/glob collision fails
+    # adaptation or baseline equality; never rewrite or filter existing imports.
+    with temporary_config(raw,CONFIG.parent,'.tmp') as path:
+        return json.loads(run(['adapt','--config',str(path),'--adapter','caddyfile']))
+
+def run_json(command,raw):
+    # Exact JSON lives outside the import directory. A .json name prevents
+    # implicit Caddyfile adaptation in older validate/reload implementations.
+    with temporary_config(raw,JSON_CONFIG_DIR,'.json') as path:
+        return run([command,'--config',str(path)])
 
 def active():
     with urllib.request.urlopen('http://127.0.0.1:2019/config/',timeout=5) as response:raw=response.read(LIMIT+1)
@@ -85,13 +111,13 @@ def main():
     original,info=read_original()
     STAGE="baseline-adaptation"
     before=adapt(original)
-    # stdin adaptation must equal the real persistent file, including imports.
+    # Sibling-file adaptation must equal the persistent file and active state.
     require(json.loads(run(['adapt','--config',str(CONFIG),'--adapter','caddyfile']))==before==active())
     STAGE="exact-additive-delta"
     candidate=original+BLOCK;after=adapt(candidate);verify_delta(before,after)
     encoded=json.dumps(after,separators=(',',':')).encode()
     STAGE='candidate-validation'
-    run(['validate','--config','-'],encoded)
+    run_json('validate',encoded)
     require(read_original()[0]==original and adapt(original)==before==active())
     STAGE='recovery-copy'
     protected(Path('/var/backups'),True)
@@ -109,7 +135,7 @@ def main():
     try:
         require(adapt(candidate)==after and json.loads(run(['adapt','--config',str(CONFIG),'--adapter','caddyfile']))==after and active()==before)
         STAGE='reload'
-        try:run(['reload','--config','-'],encoded)
+        try:run_json('reload',encoded)
         except Exception:
             # An acknowledgement failure is not permission to blindly retry.
             if active()!=after:raise
