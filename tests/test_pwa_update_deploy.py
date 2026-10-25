@@ -117,6 +117,35 @@ class Holds(unittest.TestCase):
         source=(ROOT/'ops/deploy-pwa-update.py').read_text()
         self.assertNotIn('os.unlink',source);self.assertNotIn('core.main(',source)
         self.assertNotIn('sqlite3.connect',source);self.assertNotIn('caddy',source.lower())
+class ReleaseBaselineBinding(unittest.TestCase):
+    def test_next_code_release_binds_old_journal_and_new_current_independently(self):
+        original={'journalTarget':str(pwa.STATE/'releases'/pwa.JOURNAL_TARGET_SHA)}
+        before=dict(original)
+        self.assertNotEqual(pwa.BASE_SHA,pwa.JOURNAL_TARGET_SHA)
+        pwa.bind_release_state(original,pwa.STATE/'releases'/pwa.BASE_SHA)
+        self.assertEqual(original,before)
+    def test_current_must_not_be_historical_journal_target(self):
+        original={'journalTarget':str(pwa.STATE/'releases'/pwa.JOURNAL_TARGET_SHA)}
+        with self.assertRaises(ValueError):
+            pwa.bind_release_state(original,pwa.STATE/'releases'/pwa.JOURNAL_TARGET_SHA)
+    def test_rewritten_journal_matching_current_is_not_accepted(self):
+        current=pwa.STATE/'releases'/pwa.BASE_SHA
+        with self.assertRaises(ValueError):
+            pwa.bind_release_state({'journalTarget':str(current)},current)
+    def test_unrecognized_current_or_journal_refused(self):
+        current=pwa.STATE/'releases'/pwa.BASE_SHA
+        historical=str(pwa.STATE/'releases'/pwa.JOURNAL_TARGET_SHA)
+        for wrong in (str(pwa.STATE/'releases'/('f'*40)), '/synthetic/current', historical+'/..'):
+            with self.assertRaises(ValueError):
+                pwa.bind_release_state({'journalTarget':wrong},current)
+            with self.assertRaises(ValueError):
+                pwa.bind_release_state({'journalTarget':historical},Path(wrong))
+    def test_lock_binds_both_before_yield_and_preserves_original_state_checks(self):
+        import inspect
+        source=inspect.getsource(pwa.configure)
+        self.assertLess(source.index('bind_release_state(original, core.CURRENT.resolve(strict=True))'),source.index('yield unchanged'))
+        self.assertIn('release_state_unchanged(original)',source)
+
 class ImmutableFreeze(unittest.TestCase):
     def test_actual_frozen_archive_stager_retains_source_and_confines_links(self):
         import types
