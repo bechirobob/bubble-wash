@@ -10,6 +10,8 @@ export function StaffAccountPanel() {
   const [status, setStatus] = useState("");
   const [link, setLink] = useState("");
   const [pending, setPending] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<Account | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   async function load() { const response = await fetch("/api/staff/accounts"); if (!response.ok) throw new Error("Unable to load staff access."); setAccounts((await response.json()).accounts); }
   useEffect(() => { let active = true; fetch("/api/staff/accounts").then(async (response) => { if (!response.ok) throw new Error("Unable to load staff access."); const data = await response.json(); if (active) setAccounts(data.accounts); }).catch((e) => { if (active) setStatus(e.message); }); return () => { active = false; }; }, []);
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -18,7 +20,46 @@ export function StaffAccountPanel() {
     catch (e) { setStatus(e instanceof Error ? e.message : "Unable to save access."); } finally { setPending(false); }
   }
   async function suspend(email: string) { setPending(true); try { await postJSON("/api/staff/accounts", { action: "suspend", email }); await load(); setStatus("Account suspended. Existing sessions have been revoked."); } catch (e) { setStatus(e instanceof Error ? e.message : "Unable to suspend access."); } finally { setPending(false); } }
-  return <section className="staffAccountPanel"><h2>Individual staff access</h2><p>The staff list shows people and available capacity. These accounts control sign-in. Each vendor or rider needs their own account linked to their approved staff record.</p><BoundedList label="Staff sign-in accounts" noun="accounts" className="staffCaseList">{accounts.map((account) => <div key={account.email} className="staffCaseRow"><strong>{account.name}</strong><span>{account.email} · {account.role}</span><span>{account.status}</span><button className="button secondary" disabled={pending || account.status === "suspended"} onClick={() => suspend(account.email)}>Suspend</button></div>)}</BoundedList><details><summary>Create or reset individual access</summary><form onSubmit={submit}><div className="formGrid two"><label>Name<input name="name" required maxLength={100} /></label><label>Work email<input name="email" type="email" required /></label><label>Role<select name="role"><option value="support">Support</option><option value="vendor">Vendor</option><option value="driver">Driver</option></select></label><label>Staff record ID<input name="entityId" placeholder="Required for vendors and riders" /></label></div><p>To reset an account, enter its current role and staff record ID. Resetting immediately signs the person out on every device.</p><button className="button primary" disabled={pending}>{pending ? "Saving…" : "Create activation link"}</button></form></details>{link ? <p><code>{link}</code></p> : null}<p role="status">{status}</p></section>;
+  async function archive(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!archiveTarget) return;
+    const confirmedEmail = new FormData(event.currentTarget).get("confirmedEmail");
+    setPending(true); setLink("");
+    try {
+      await postJSON("/api/staff/accounts", { action: "archive", email: archiveTarget.email, confirmedEmail });
+      setArchiveTarget(null); await load();
+      setStatus("Sign-in account archived and sessions revoked. Staff roster and history are unchanged.");
+    } catch (e) { setStatus(e instanceof Error ? e.message : "Unable to archive access."); }
+    finally { setPending(false); }
+  }
+  return <section className="staffAccountPanel">
+    <h2>Individual staff access</h2>
+    <p>The staff list shows people and available capacity. These accounts control sign-in. Each vendor or rider needs their own account linked to their approved staff record.</p>
+    {accounts.some((account) => account.status === "archived") ? <label className="staffAccountToggle"><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} /> Show archived accounts</label> : null}
+    <BoundedList label="Staff sign-in accounts" noun="accounts" className="staffCaseList">
+      {accounts.filter((account) => showArchived || account.status !== "archived").map((account) => <div key={account.email} className="staffCaseRow">
+        <div className="staffAccountIdentity"><strong>{account.name}</strong><span>{account.email} · {account.role}</span></div><span>{account.status}</span>
+        {account.role !== "admin" && account.status !== "archived" ? <div className="staffAccountActions">
+          <button className="button secondary" disabled={pending || account.status === "suspended"} onClick={() => suspend(account.email)}>Suspend</button>
+          <button className="button secondary" disabled={pending} onClick={() => { setArchiveTarget(account); setStatus(""); }}>Archive staff</button>
+        </div> : null}
+      </div>)}
+    </BoundedList>
+    {archiveTarget ? <form onSubmit={archive} aria-label="Confirm account archive">
+      <h3>Archive {archiveTarget.name}?</h3>
+      <p>Sign-in and activation links stop immediately. Roster, capacity and history stay unchanged. Restore later with a new activation link.</p>
+      <label>Type {archiveTarget.email} to confirm<input key={archiveTarget.email} name="confirmedEmail" type="email" required autoComplete="off" /></label>
+      <div className="staffAccountActions"><button className="button secondary" type="button" disabled={pending} onClick={() => setArchiveTarget(null)}>Cancel</button>
+      <button className="button primary" disabled={pending}>{pending ? "Archiving…" : "Confirm archive"}</button></div>
+    </form> : null}
+    <details><summary>Create or reset individual access</summary><form onSubmit={submit}>
+      <div className="formGrid two"><label>Name<input name="name" required maxLength={100} /></label><label>Work email<input name="email" type="email" required /></label><label>Role<select name="role"><option value="support">Support</option><option value="vendor">Vendor</option><option value="driver">Driver</option></select></label><label>Staff record ID<input name="entityId" placeholder="Required for vendors and riders" /></label></div>
+      <p>To reset an account, enter its current role and staff record ID. Resetting immediately signs the person out on every device.</p>
+      {accounts.some((account) => account.status === "archived") ? <label className="staffAccountToggle"><input type="checkbox" name="restoreArchived" /> Restore this account if archived, with a new activation link.</label> : null}
+      <button className="button primary" disabled={pending}>{pending ? "Saving…" : "Create activation link"}</button>
+    </form></details>
+    {link ? <p><code>{link}</code></p> : null}<p role="status">{status}</p>
+  </section>;
 }
 type Invoice = { bookingReference?: string | null; invoiceId: string; totalMinor: number; balanceMinor: number; status: string; lines: { label: string; amountMinor: number }[]; entries: { id: string; kind: string; reference: string; amountMinor: number }[] };
 export function StaffInvoicePanel({ orderId, admin }: { orderId: string; admin: boolean }) {

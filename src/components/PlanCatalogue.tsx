@@ -29,10 +29,11 @@ export function PlanCatalogue({ selected, onSelect, disabled = false }: { select
             <p className="focusedPlanFee">Monthly service fee</p>
             <ul className="focusedPlanSchedule">
               <li><CalendarDays aria-hidden="true" /><span>{plan.pickups}</span></li>
-              <li><CalendarDays aria-hidden="true" /><span>{plan.monthlyPickups} pickups a month</span></li>
+              <li><CalendarDays aria-hidden="true" /><span>{plan.monthlyPickups} included pickups per calendar month</span></li>
             </ul>
+            <p className="focusedPlanNote">Weekly rhythm, capped at {plan.monthlyPickups} collections per calendar month. Additional dates are quoted separately.</p>
           </article>
-          <p className="srOnly" role="status" aria-live="polite" aria-atomic="true">{plan.name} selected. {formatMoney(plan.subscription)} monthly service fee, plus laundry charged by weight. {plan.monthlyPickups} pickups a month.</p>
+          <p className="srOnly" role="status" aria-live="polite" aria-atomic="true">{plan.name} selected. {formatMoney(plan.subscription)} monthly service fee, plus laundry charged by weight. {plan.monthlyPickups} included pickups per calendar month.</p>
         </div>
         <div className="focusedPlanInformation">
           <details className="focusedPlanDisclosure">

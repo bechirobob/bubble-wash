@@ -1,4 +1,6 @@
 "use client";
+import "./staff-desk.css";
+import { ClipboardList, Check, MapPin, ScanLine } from "lucide-react";
 import { bookingLabel } from "@/lib/booking-label";
 import { staffActivitySubject as activitySubject } from "@/lib/staff-activity-projection";
 import { StaffAccountPanel, StaffInvoicePanel, CustomerDecisionPanel } from "./StaffAdminControls";
@@ -8,9 +10,8 @@ import { useRouter } from "next/navigation";
 import { BoundedList } from "./BoundedList";
 import { VendorCapacityForm } from "./VendorCapacityForm";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity as ActivityIcon, ClipboardList, Gauge, HeartPulse, History, LayoutDashboard, Map as MapIcon, MessagesSquare, Route as RouteIcon, Users } from "lucide-react";
 import type { StaffRole } from "@/lib/auth";
-import { automationActionsForOrder, paymentReadyForCloseout } from "@/lib/order-workflow";
+import { automationActionsForOrder } from "@/lib/order-workflow";
 import { stageCountdown } from "@/lib/stage-countdown";
 import { validLocationGeneration, LIVE_LOCATION_MAX_FUTURE_SKEW_MS, LIVE_LOCATION_MAX_CAPTURE_AGE_MS } from "@/lib/dispatch-location";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
@@ -26,23 +27,9 @@ type PortalShellProps = {
   pageRole?: StaffRole;
   userName: string;
   currentView: string;
-  navigation: Array<{ href: string; label: string; view: string }>;
+  navigation: Array<{ href: string; label: string; view: string; secondary?: boolean }>;
   children: ReactNode;
 };
-
-const workspaceIcons = {
-  overview: LayoutDashboard,
-  dispatch: MapIcon,
-  orders: ClipboardList,
-  people: Users,
-  cases: MessagesSquare,
-  operations: HeartPulse,
-  activity: History,
-  jobs: ClipboardList,
-  capacity: Gauge,
-  route: RouteIcon,
-} as const;
-
 
 type SubmissionRecord = {
   id: string;
@@ -115,6 +102,15 @@ type DispatchLiveLocation = {
   live: boolean;
 };
 
+function workTiming(order: OrderSummary) {
+  const { targetMinutes, elapsedMinutes } = order.stageTimer;
+  if (!Number.isFinite(targetMinutes) || !Number.isFinite(elapsedMinutes) || targetMinutes <= 0) return order.stageTimer.tone === "paused" ? "No active deadline" : "Timing unavailable";
+  const remaining = Math.round(targetMinutes - elapsedMinutes);
+  const minutes = Math.abs(remaining);
+  const duration = minutes >= 60 ? `${Math.floor(minutes / 60)} hr${minutes >= 120 ? "s" : ""}${minutes % 60 ? ` ${minutes % 60} min` : ""}` : `${minutes} min`;
+  return remaining < 0 ? `Overdue by ${duration}` : remaining === 0 ? "Due now" : `Due in ${duration}`;
+}
+
 type SubmitHandler = (event: FormEvent<HTMLFormElement>, type: string) => Promise<void>;
 
 type VendorAvailabilityRow = { vendorId: string; vendorName: string; serviceZones: string[]; serviceTypes: string[]; capacityRemaining: number; availabilityStatus: string; updatedAt: string; notes?: string };
@@ -147,6 +143,11 @@ type SupportCase = {
   escalationLevel: string;
 };
 
+function LaundryFlowIcon({ stage }: { stage: "collection" | "washing" | "return" }) {
+  const paths = { collection: "M9 4h12l2 5H7zM7 9v17h16V9M11 4V2h8v2M11 15h8", washing: "M6 2h18v26H6zM6 8h18M10 5h1M15 5h5M15 12a6 6 0 1 0 0 12 6 6 0 0 0 0-12M10 18c3-3 7 3 10 0", return: "M3 7h15v15H3zM18 12h6l4 5v5H18M6 22a3 3 0 1 0 6 0M20 22a3 3 0 1 0 6 0" };
+  return <svg className="staffFlowIcon" viewBox="0 0 30 30" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[stage]} /></svg>;
+}
+
 function noticeClass(message: string) {
   if (/(unable|failed|invalid|missing|required|not allowed|not available|too many|error)/i.test(message)) return "status error";
   if (/(waiting|pending|delayed|attention|warning|overdue)/i.test(message)) return "status warning";
@@ -158,20 +159,21 @@ function noticeClass(message: string) {
 function rolePromise(role: StaffRole, view: string) {
   const copy: Record<StaffRole, Record<string, { eyebrow: string; title: string; subtitle: string }>> = {
     admin: {
-      overview: { eyebrow: "Operations", title: "Today at Bubble Wash", subtitle: "A read-only view of orders, partners, routes, support, and payment follow-up." },
+      overview: { eyebrow: "Operations", title: "Service board", subtitle: "A read-only view of orders, partners, routes, support, and payment follow-up." },
       dispatch: { eyebrow: "Dispatch", title: "Rider routes and ETAs", subtitle: "Check assigned routes, locations shared with the page open, pickup windows, and estimated drive times." },
       orders: { eyebrow: "Orders", title: "Order operations", subtitle: "Review one queue, then open an order for its next verified action and full history." },
       people: { eyebrow: "People & onboarding", title: "Partners and staff", subtitle: "Manage vendor capacity, rider coverage, and the operating roster in one clear place." },
       cases: { eyebrow: "Support oversight", title: "Customer cases", subtitle: "Review open cases and follow-up without entering the support team workspace." },
-      activity: { eyebrow: "Audit trail", title: "Operational activity", subtitle: "Inspect saved changes across the pilot and export the current view when needed." },
+      activity: { eyebrow: "History", title: "Recent changes", subtitle: "Saved updates, not a task list. This view covers the latest 80 available records." },
+      operations: { eyebrow: "Administration", title: "Privacy requests", subtitle: "Review requests and record their status. Message review and system details are available below." },
     },
     vendor: {
-      jobs: { eyebrow: "Vendor workspace", title: "Laundry jobs", subtitle: "Open one assigned job at a time to accept, receive, wash, or mark it ready." },
+      jobs: { eyebrow: "Vendor workspace", title: "Wash floor", subtitle: "Open one assigned job at a time to accept, receive, wash, or mark it ready." },
       capacity: { eyebrow: "Vendor capacity", title: "Today’s availability", subtitle: "Keep capacity and service coverage accurate for assignment." },
       activity: { eyebrow: "Vendor history", title: "Saved updates", subtitle: "Review the production updates recorded by this workspace." },
     },
     driver: {
-      route: { eyebrow: "Driver workspace", title: "Today’s assigned stops", subtitle: "Open the next stop for directions, optional live sharing, handoff evidence, delivery, or a delay report." },
+      route: { eyebrow: "Driver workspace", title: "Your next stop", subtitle: "Open the next stop for directions, optional live sharing, handoff evidence, delivery, or a delay report." },
       activity: { eyebrow: "Route history", title: "Saved route updates", subtitle: "Review handoffs and route evidence already recorded." },
     },
     support: {
@@ -285,8 +287,8 @@ function formatActivityTime(value: string) {
 }
 
 type ActivityCategory = "all" | "orders" | "support" | "onboarding" | "payments" | "ops";
-type ActivityScope = "active" | "archived" | "all";
-type ActivityWindow = "20" | "50" | "today";
+type ActivityScope = "last24" | "older24" | "today" | "all";
+type ActivityWindow = "20" | "50" | "80";
 type ActivitySortKey = "saved" | "type" | "subject";
 type ActivitySortDirection = "asc" | "desc";
 
@@ -318,18 +320,11 @@ function activityCategory(record: SubmissionRecord): ActivityCategory {
 
 function activityScopeMatches(record: SubmissionRecord, scope: ActivityScope) {
   if (scope === "all") return true;
-  const ageMs = Date.now() - new Date(record.createdAt).getTime();
-  const isActive = ageMs <= 24 * 60 * 60 * 1000;
-  return scope === "active" ? isActive : !isActive;
-}
-
-function activityWindowMatches(record: SubmissionRecord, window: ActivityWindow) {
-  if (window === "today") {
-    const created = new Date(record.createdAt);
-    const now = new Date();
-    return created.getFullYear() === now.getFullYear() && created.getMonth() === now.getMonth() && created.getDate() === now.getDate();
-  }
-  return true;
+  const created = new Date(record.createdAt);
+  const now = new Date();
+  if (scope === "today") return created.toDateString() === now.toDateString();
+  const withinLastDay = now.getTime() - created.getTime() <= 24 * 60 * 60 * 1000;
+  return scope === "last24" ? withinLastDay : !withinLastDay;
 }
 
 function activityChangeSummary(record: SubmissionRecord, previous?: SubmissionRecord) {
@@ -566,13 +561,14 @@ function RecentActivity({ filter, selectedId = "", basePath }: { filter?: string
   const [status, setStatus] = useState("Loading recent activity…");
   const [hasLoaded, setHasLoaded] = useState(false);
   const [category, setCategory] = useState<ActivityCategory>("all");
-  const [scope, setScope] = useState<ActivityScope>("active");
+  const [scope, setScope] = useState<ActivityScope>("all");
   const [windowMode, setWindowMode] = useState<ActivityWindow>("20");
   const [sortKey, setSortKey] = useState<ActivitySortKey>("saved");
   const [sortDirection, setSortDirection] = useState<ActivitySortDirection>("desc");
   const [freshIds, setFreshIds] = useState<string[]>([]);
   const [lastUpdatedAt, setLastUpdatedAt] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
+  const [toolsOpen, setToolsOpen] = useState(false);
   const recordsRef = useRef<SubmissionRecord[]>([]);
 
   async function loadRecords(showLoading = true) {
@@ -689,8 +685,7 @@ function RecentActivity({ filter, selectedId = "", basePath }: { filter?: string
   const visibleRecords = useMemo(() => {
     const filtered = records
       .filter((record) => category === "all" || activityCategory(record) === category)
-      .filter((record) => activityScopeMatches(record, scope))
-      .filter((record) => activityWindowMatches(record, windowMode));
+      .filter((record) => activityScopeMatches(record, scope));
 
     const sorted = [...filtered].sort((left, right) => {
       const direction = sortDirection === "asc" ? 1 : -1;
@@ -706,15 +701,6 @@ function RecentActivity({ filter, selectedId = "", basePath }: { filter?: string
 
   const selectedRecord = records.find((record) => record.id === selectedId) ?? null;
   const selectedSections = useMemo(() => selectedRecord ? activitySectionedEntries(selectedRecord) : [], [selectedRecord]);
-
-  function toggleSort(nextKey: ActivitySortKey) {
-    if (sortKey === nextKey) {
-      setSortDirection((current) => current === "asc" ? "desc" : "asc");
-      return;
-    }
-    setSortKey(nextKey);
-    setSortDirection(nextKey === "saved" ? "desc" : "asc");
-  }
 
   function exportVisibleCsv() {
     const csv = activityCsv(visibleRecords, changeSummaries);
@@ -746,7 +732,7 @@ function RecentActivity({ filter, selectedId = "", basePath }: { filter?: string
   return (
     <section className="staffContentSection activitySection" aria-busy={!hasLoaded}>
       {selectedRecord ? <div className="staffDetailView" aria-live="polite">
-        <Link className="staffBackLink" href={basePath}>← Back to activity</Link>
+        <Link className="staffBackLink" href={basePath}>← Back to recent changes</Link>
         <div className="staffDetailHeader">
           <div><span className="staffFieldLabel">{activityTypeLabel(activityType(selectedRecord))}</span><h2>{activitySubject(selectedRecord)}</h2><p>{changeSummaries.get(selectedRecord.id)}</p></div>
           <div className="staffDetailReference"><span>Saved</span><time>{formatActivityTime(selectedRecord.createdAt)}</time></div>
@@ -762,18 +748,24 @@ function RecentActivity({ filter, selectedId = "", basePath }: { filter?: string
         <div className="staffDetailSections">
           {selectedSections.map((section) => <details className="staffDetailDisclosure" key={section.title}><summary><span><strong>{section.title}</strong><small>{section.entries.length} saved fields</small></span></summary><div className="staffDisclosureBody"><dl className="staffDefinitionList">{section.entries.map(([key, value]) => <div key={`${section.title}-${key}`}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></div></details>)}
         </div>
-      </div> : selectedId && hasLoaded ? <div className="staffEmptyState"><h2>Activity not found</h2><p>This update is unavailable to this staff role or outside the retained activity window.</p><Link href={basePath}>Back to activity</Link></div> : <>
+      </div> : selectedId && hasLoaded ? <div className="staffEmptyState"><h2>Update not found</h2><p>This update is unavailable to this staff role or outside the latest 80 loaded records.</p><Link href={basePath}>Back to recent changes</Link></div> : <>
         <div className="staffSectionHeader">
-          <div><h2>Latest saved updates</h2><p>{!hasLoaded ? "Loading saved updates…" : visibleRecords.length ? `${visibleRecords.length} updates in this view` : "No saved updates yet"}</p></div>
-          <div className="staffHeaderActions"><button className="button secondary" type="button" onClick={exportVisibleCsv}>Export CSV</button><button className="button secondary" type="button" onClick={() => void loadRecords()}>Refresh</button></div>
+          <div><h2>Saved updates</h2><p>{!hasLoaded ? "Loading saved updates…" : `${visibleRecords.length} shown · ${scope === "all" ? "All loaded dates" : scope === "last24" ? "Last 24 hours" : scope === "older24" ? "Earlier than 24 hours" : "Today"}${category !== "all" ? ` · ${category === "ops" ? "Operations" : category.charAt(0).toUpperCase() + category.slice(1)}` : ""}`}</p></div>
         </div>
-        <div className="staffFilterBar">
-          <div className="staffTextFilters" aria-label="Activity type">
-            {([ ["all", "All"], ["orders", "Orders"], ["support", "Support"], ["onboarding", "Onboarding"], ["payments", "Payments"], ["ops", "Operations"] ] as Array<[ActivityCategory, string]>).map(([key, label]) => <button aria-pressed={category === key} className={category === key ? "active" : ""} key={key} onClick={() => setCategory(key)} type="button">{label} <span>{categoryCounts[key]}</span></button>)}
+        <details className="staffDetailDisclosure activityTools" open={toolsOpen} onToggle={(event) => setToolsOpen(event.currentTarget.open)}>
+          <summary>Filters and export</summary>
+          <div className="staffDisclosureBody">
+            <div className="staffSelectFilters">
+              <label>Type<select value={category} onChange={(event) => setCategory(event.target.value as ActivityCategory)}>{([ ["all", "All types"], ["orders", "Orders"], ["support", "Support"], ["onboarding", "Onboarding"], ["payments", "Payments"], ["ops", "Operations"] ] as Array<[ActivityCategory, string]>).map(([key, label]) => <option key={key} value={key}>{label} ({categoryCounts[key]})</option>)}</select></label>
+              <label>Date<select value={scope} onChange={(event) => setScope(event.target.value as ActivityScope)}><option value="all">All loaded dates</option><option value="last24">Last 24 hours</option><option value="older24">Earlier than 24 hours</option><option value="today">Today</option></select></label>
+              <label>Show<select value={windowMode} onChange={(event) => setWindowMode(event.target.value as ActivityWindow)}><option value="20">20 updates</option><option value="50">50 updates</option><option value="80">Up to 80 updates</option></select></label>
+              <label>Date order<select value={sortDirection} onChange={(event) => { setSortKey("saved"); setSortDirection(event.target.value as ActivitySortDirection); }}><option value="desc">Newest first</option><option value="asc">Oldest first</option></select></label>
+            </div>
+            <div className="staffHeaderActions"><button className="button secondary" type="button" onClick={exportVisibleCsv} disabled={!visibleRecords.length}>Export shown updates</button><button className="button secondary" type="button" onClick={() => void loadRecords()}>Refresh</button></div>
+            <p className="staffSyncLine">Latest 80 available records only. Updates refresh every 30 seconds{lastUpdatedAt ? ` · Updated ${formatMetricTime(lastUpdatedAt)}` : ""}.</p>
           </div>
-          <div className="staffSelectFilters"><label>Show<select value={scope} onChange={(event) => setScope(event.target.value as ActivityScope)}><option value="active">Active</option><option value="archived">Archived</option><option value="all">All</option></select></label><label>When<select value={windowMode} onChange={(event) => setWindowMode(event.target.value as ActivityWindow)}><option value="20">Last 20</option><option value="50">Last 50</option><option value="today">Today</option></select></label></div>
-        </div>
-        <BoundedList label="Recent activity" noun="updates" className="staffActivityList" resetKey={`${category}:${scope}:${windowMode}:${sortKey}:${sortDirection}`} loading={!hasLoaded} emptyState={<p className="staffEmptyState">No activity matches these filters.</p>}>
+        </details>
+        <BoundedList label="Recent changes" noun="updates" className="staffActivityList" resetKey={`${category}:${scope}:${windowMode}:${sortKey}:${sortDirection}`} loading={!hasLoaded} emptyState={<p className="staffEmptyState">No activity matches these filters.</p>}>
           {visibleRecords.map((record) => <article key={record.id} role="listitem"><Link className={`staffActivityRow ${freshIds.includes(record.id) ? "is-new" : ""}`} href={`${basePath}${basePath.includes("?") ? "&" : "?"}activity=${encodeURIComponent(record.id)}`}>
             <span><strong>{activitySubject(record)}</strong></span>
             <span><strong>{activityTypeLabel(activityType(record))}</strong><small>{changeSummaries.get(record.id)}</small></span>
@@ -781,14 +773,13 @@ function RecentActivity({ filter, selectedId = "", basePath }: { filter?: string
             <b>View details</b>
           </Link></article>)}
         </BoundedList>
-        <p className="staffSyncLine">Auto-refreshes every 30 seconds{lastUpdatedAt ? ` · Last updated ${formatMetricTime(lastUpdatedAt)}` : ""}. <button type="button" onClick={() => toggleSort("saved")}>Toggle date order</button></p>
       </>}
       <p className={noticeClass(status)} role="status" aria-live="polite">{status}</p>
     </section>
   );
 }
 
-function AutomatedOrderActions({ order, role, userName, allStaffAccess = false, onSaved }: { allStaffAccess?: boolean; order: OrderSummary; role: StaffRole; userName: string; onSaved: () => Promise<void> }) {
+function AutomatedOrderActions({ order, role, userName, allStaffAccess = false, onSaved, unavailable = false }: { unavailable?: boolean; allStaffAccess?: boolean; order: OrderSummary; role: StaffRole; userName: string; onSaved: () => Promise<void> }) {
   const [status, setStatus] = useState("");
   const [pendingLabel, setPendingLabel] = useState("");
   const [failed, setFailed] = useState(false);
@@ -798,6 +789,7 @@ function AutomatedOrderActions({ order, role, userName, allStaffAccess = false, 
   const actions = automationActionsForOrder(order, role, userName, allStaffAccess);
 
   async function run(action: AutomationAction, overrides: Record<string, string> = {}) {
+    if (unavailable) return;
     if (action.key === "admin-close-order") {
       const confirmed = window.confirm(`${action.label} for ${bookingLabel(order)}? This will be written to the permanent order timeline.`);
       if (!confirmed) return;
@@ -830,13 +822,13 @@ function AutomatedOrderActions({ order, role, userName, allStaffAccess = false, 
   }
 
   return (
-    <div className="automationPanel">
+    <fieldset className="automationPanel" disabled={unavailable}>
       <div className="automationSummary">
         <b>{actions.length ? "Available actions" : order.workflowStage.key === "closed" ? "Order closed" : order.workflowStage.key === "cancelled" ? "Order cancelled" : "No action available"}</b>
         <span>{actions.length ? `${actions.length} available` : isClosedOrder(order) ? "No further action required." : "No action is currently available for this role."}</span>
       </div>
       {actions.length ? <div className="automationActions">
-        {actions.map((action, index) => <button className={`button ${index === 0 ? "primary" : "secondary"}`} disabled={Boolean(pendingLabel)} key={action.label} onClick={() => action.key === "vendor-decline-job" ? setDeclineOpen(true) : ["admin-schedule-pickup", "support-log-customer-contact", "admin-confirm-bank-transfer", "admin-approve-invoice", "vendor-log-intake", "vendor-mark-ready", "driver-mark-picked-up", "driver-drop-at-vendor", "driver-mark-delivered", "driver-update-eta", "driver-report-delay"].includes(action.key) ? setStructuredAction(action.key) : void run(action)} type="button">{pendingLabel === action.label ? "Working…" : action.label}</button>)}
+        {actions.map((action, index) => <button className={`button ${index === 0 ? "primary" : "secondary"}`} disabled={Boolean(pendingLabel)} key={action.label} onClick={() => action.key === "vendor-decline-job" ? setDeclineOpen(true) : ["admin-schedule-pickup", "support-log-customer-contact", "admin-confirm-bank-transfer", "admin-approve-invoice", "vendor-log-intake", "vendor-mark-ready", "driver-mark-picked-up", "driver-drop-at-vendor", "driver-mark-delivered", "driver-update-eta", "driver-report-delay"].includes(action.key) ? setStructuredAction(action.key) : void run(action)} type="button">{["vendor-mark-ready", "driver-mark-picked-up", "driver-mark-delivered"].includes(action.key) ? <Check size={18} aria-hidden="true" /> : null}{pendingLabel === action.label ? "Working…" : action.label}</button>)}
       </div> : null}
       {declineOpen ? <form className="declineReasonForm" onSubmit={(event) => { event.preventDefault(); const decline = actions.find((action) => action.key === "vendor-decline-job"); if (decline && declineReason.trim()) void run(decline, { reason: declineReason.trim() }); }}><label>Reason for admin reassignment<textarea value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} maxLength={300} placeholder="Capacity, machine issue, service mismatch, or timing conflict" required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={!declineReason.trim() || Boolean(pendingLabel)}>Confirm decline</button><button className="button secondary" type="button" onClick={() => { setDeclineOpen(false); setDeclineReason(""); }}>Cancel</button></div></form> : null}
       {structuredAction === "admin-schedule-pickup" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><label>Confirmed pickup date<input type="date" name="confirmedPickupDate" required /></label><label>Confirmed pickup window<select name="confirmedPickupWindow" required>{["8:00–10:00", "10:00–12:00", "12:00–14:00", "14:00–16:00", "16:00–18:00"].map((window) => <option key={window}>{window}</option>)}</select></label><label>Scheduling note<textarea name="operatorNote" placeholder="Who confirmed the window and any access or collection instructions" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save pickup window</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
@@ -850,7 +842,7 @@ function AutomatedOrderActions({ order, role, userName, allStaffAccess = false, 
       {structuredAction === "driver-update-eta" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Estimated arrival time<input name="driverEtaAt" type="time" required /></label><label>Current checkpoint<input name="routeCheckpoint" placeholder="Street, junction, or visible landmark" maxLength={240} required /></label></div><label>Route note (optional)<textarea name="operatorNote" placeholder="Traffic or access detail that dispatch should know" maxLength={240} /></label><p className="formHint">This saves a manual ETA and checkpoint. Use the separate live location control while travelling.</p><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Update ETA &amp; checkpoint</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {structuredAction === "driver-report-delay" ? <form className="structuredActionForm" onSubmit={(event) => submitStructured(event, structuredAction)}><div className="two"><label>Revised ETA<input name="revisedEta" placeholder="25 minutes or 15:20" maxLength={80} required /></label><label>Current checkpoint<input name="routeCheckpoint" placeholder="Street, junction, or vendor" maxLength={240} required /></label></div><label>Delay reason<textarea name="operatorNote" placeholder="Traffic, customer unavailable, vehicle issue, or handoff delay" maxLength={600} required /></label><div className="tableActionRow"><button className="button primary" type="submit" disabled={Boolean(pendingLabel)}>Save delay report</button><button className="button secondary" type="button" onClick={() => setStructuredAction("")}>Cancel</button></div></form> : null}
       {status && <p className={`status ${failed ? "error" : "success"}`} role="status" aria-live="polite">{status}</p>}
-    </div>
+    </fieldset>
   );
 }
 
@@ -865,7 +857,7 @@ function CustomerContactActions({ order, role }: { order: OrderSummary; role: St
 function OrderQueueRow({ order, href }: { order: OrderSummary; href: string }) {
   return <article className={`staffOrderRow timer-${order.stageTimer.tone}`} role="listitem">
     <div><strong>{bookingLabel(order)}{order.vendorCode ? ` · ${order.vendorCode}` : ""}</strong><span>{order.customer}</span></div>
-    <div><strong>{order.workflowStage.label}</strong><span>{order.stageTimer.label}</span></div>
+    <div><strong>{order.workflowStage.label}</strong><span>{workTiming(order)}</span></div>
     <div><strong>{order.area}</strong><span>{order.routeWindow}</span></div>
     <div><strong>{order.vendor !== "Unassigned" ? order.vendor : "Vendor pending"}</strong><span>{order.driver !== "Unassigned" ? order.driver : "Rider pending"}</span></div>
     <Link href={href}>View order</Link>
@@ -1274,7 +1266,22 @@ function AdminDispatchWorkspace() {
   return <DispatchBoard orders={orders} role="admin" basePath="/admin?view=orders" hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={loadError} liveLocations={liveLocations} locationError={locationError} />;
 }
 
-function SharedOrderBoard({ role, userName, allStaffAccess = false, selectedOrderId = "", basePath }: { allStaffAccess?: boolean; role: StaffRole; userName: string; selectedOrderId?: string; basePath: string }) {
+function RecordedIntakeCount({ orderId }: { orderId: string }) {
+  const [value, setValue] = useState("Loading…");
+  useEffect(() => { let active = true; fetch("/api/submissions").then(async (response) => { const data = await response.json(); if (!response.ok || !data.ok) throw new Error(); const records = (data.records as SubmissionRecord[]).filter((record) => record.data.orderId === orderId && record.data.intakeBagCount).sort((a,b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)); const count = Number(records[0]?.data.intakeBagCount); if (active) setValue(Number.isSafeInteger(count) && count > 0 ? `${count} bags/items` : "Not recorded"); }).catch(() => { if (active) setValue("Unavailable"); }); return () => { active = false; }; }, [orderId]);
+  return <>{value}</>;
+}
+
+function VendorCapacitySummary({ canManage }: { canManage: boolean }) {
+  const [capacity, setCapacity] = useState<number | null>(null);
+  const [message, setMessage] = useState("Loading capacity…");
+  useEffect(() => { let active = true; fetch("/api/availability").then(async (response) => { const data = await response.json(); if (!response.ok || !data.ok) throw new Error(); if (!active) return; if (canManage && data.vendors?.length === 1) { setCapacity(data.vendors[0].capacityRemaining); setMessage(data.vendors[0].availabilityStatus); } else setMessage(canManage ? "Capacity is not recorded" : "Select a vendor to manage capacity"); }).catch(() => { if (active) setMessage("Capacity unavailable — open Capacity to retry"); }); return () => { active = false; }; }, [canManage]);
+  return <div className="staffCapacityStrip"><span>{capacity !== null ? <><b>{capacity}</b> slots recorded · {message}</> : message}</span><Link href="/vendors?view=capacity">Update capacity</Link></div>;
+}
+
+function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAccess = false, selectedOrderId = "", basePath }: { presentationRole?: StaffRole; allStaffAccess?: boolean; role: StaffRole; userName: string; selectedOrderId?: string; basePath: string }) {
+  const [featuredSnapshot, setFeaturedSnapshot] = useState<OrderSummary | null>(null);
+  const [ordersUnavailable, setOrdersUnavailable] = useState(false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [liveLocations, setLiveLocations] = useState<DispatchLiveLocation[]>([]);
   const [locationError, setLocationError] = useState("");
@@ -1293,16 +1300,20 @@ function SharedOrderBoard({ role, userName, allStaffAccess = false, selectedOrde
       const response = await fetch(`/api/orders?${new URLSearchParams({ offset: String(offset), q: selectedOrderId || query })}`);
       const data = await response.json();
       if (!response.ok || !data.ok) {
+        setOrdersUnavailable(true);
         setStatus(data.error ?? "Unable to load shared orders.");
         setHasLoaded(true);
         return;
       }
+      setOrdersUnavailable(false);
       setOrders((current) => offset ? [...current, ...data.orders.filter((order: OrderSummary) => !current.some((existing) => existing.orderId === order.orderId))] : data.orders);
+      setFeaturedSnapshot((current) => current ? data.orders.find((order: OrderSummary) => order.orderId === current.orderId) ?? current : data.orders.find((order: OrderSummary) => !isClosedOrder(order) && orderMatchesRoleFocus(order, role, userName, allStaffAccess)) ?? null);
       setNextOffset(data.nextOffset);
       setHasLoaded(true);
       setLastSyncedAt(new Date().toISOString());
       setStatus(data.orders.length ? "Updated." : "No shared orders yet.");
     } catch {
+      setOrdersUnavailable(true);
       setStatus("Unable to load shared orders.");
       setHasLoaded(true);
     }
@@ -1318,18 +1329,22 @@ function SharedOrderBoard({ role, userName, allStaffAccess = false, selectedOrde
         const data = await response.json();
         if (!active) return;
         if (!response.ok || !data.ok) {
-          setStatus(data.error ?? "Unable to load shared orders.");
+          setOrdersUnavailable(true);
+        setStatus(data.error ?? "Unable to load shared orders.");
           setHasLoaded(true);
           return;
         }
-        setOrders(data.orders);
-        setNextOffset(data.nextOffset);
+        setOrdersUnavailable(false);
+      setOrders(data.orders);
+        setFeaturedSnapshot((current) => current ? data.orders.find((order: OrderSummary) => order.orderId === current.orderId) ?? current : data.orders.find((order: OrderSummary) => !isClosedOrder(order) && orderMatchesRoleFocus(order, role, userName, allStaffAccess)) ?? null);
+      setNextOffset(data.nextOffset);
         setHasLoaded(true);
         setLastSyncedAt(new Date().toISOString());
         setStatus(data.orders.length ? "Updated." : "No shared orders yet.");
       } catch {
         if (active) {
-          setStatus("Unable to load shared orders.");
+          setOrdersUnavailable(true);
+      setStatus("Unable to load shared orders.");
           setHasLoaded(true);
         }
       }
@@ -1340,7 +1355,7 @@ function SharedOrderBoard({ role, userName, allStaffAccess = false, selectedOrde
       active = false;
       window.clearInterval(interval);
     };
-  }, [selectedOrderId, query]);
+  }, [selectedOrderId, query, role, userName, allStaffAccess]);
 
   useEffect(() => {
     if (role !== "admin" || !selectedOrderId) return;
@@ -1369,10 +1384,10 @@ function SharedOrderBoard({ role, userName, allStaffAccess = false, selectedOrde
   const focusOrders = activeOrders.filter((order) => orderMatchesRoleFocus(order, role, userName, allStaffAccess));
   const sourceOrders = queueView === "action" ? focusOrders : queueView === "active" ? activeOrders : orders;
   const normalizedQuery = query.trim().toLowerCase();
-  const matchingOrders = normalizedQuery ? sourceOrders.filter((order) => [order.orderId, order.customer, order.phone, order.email, order.area, order.vendor, order.driver, order.status, order.payment].join(" ").toLowerCase().includes(normalizedQuery)) : sourceOrders;
+  const matchingOrders = normalizedQuery ? sourceOrders.filter((order) => [bookingLabel(order), order.bookingReference, order.vendorCode, order.orderId, order.customer, order.phone, order.email, order.area, order.vendor, order.driver, order.status, order.payment].join(" ").toLowerCase().includes(normalizedQuery)) : sourceOrders;
   const visibleOrders = matchingOrders;
   const stats = queueStats(activeOrders, role, userName, 0, allStaffAccess);
-  const queueHeading = !hasLoaded ? "Loading order queue…" : queueView === "action" ? (stats.focusCount ? `${stats.focusCount} ${stats.focusLabel}` : "No work needs this role right now") : queueView === "active" ? `${activeOrders.length} active orders` : `${orders.length} total orders`;
+  const queueHeading = !hasLoaded ? "Loading order queue…" : queueView === "action" ? (stats.focusCount ? `${stats.focusCount} ${stats.focusLabel} in loaded orders` : "No work for this role in loaded orders") : queueView === "active" ? `${activeOrders.length} active orders loaded` : `${orders.length} orders loaded`;
   const selectedOrder = selectedOrderId ? orders.find((order) => order.orderId.toLowerCase() === selectedOrderId.toLowerCase()) : null;
   const selectedLiveLocation = role === "admin" && selectedOrder ? liveLocationForOrder(selectedOrder, liveLocations) : undefined;
   const selectedDispatchEta = selectedOrder && dispatchStages.has(selectedOrder.workflowStage.key) ? dispatchEtaForLeg(selectedOrder) : null;
@@ -1381,9 +1396,11 @@ function SharedOrderBoard({ role, userName, allStaffAccess = false, selectedOrde
   const detailHref = (orderId: string) => `${basePath}${basePath.includes("?") ? "&" : "?"}order=${encodeURIComponent(orderId)}`;
   const queueOrders = role === "driver" ? [...visibleOrders].sort((a, b) => ["Customer pickups", "Vendor handoffs", "Return deliveries", "Other assigned work"].indexOf(driverStopGroup(a)) - ["Customer pickups", "Vendor handoffs", "Return deliveries", "Other assigned work"].indexOf(driverStopGroup(b))) : visibleOrders;
 
+  const featuredOrder = !selectedOrderId && !query && queueView === "action" && (presentationRole === "vendor" || presentationRole === "driver") ? featuredSnapshot : undefined;
+  const featuredUnavailable = ordersUnavailable || Boolean(featuredSnapshot && !orders.some((order) => order.orderId === featuredSnapshot.orderId));
   return (
-    <section className="staffContentSection sharedBoardSection" aria-busy={!hasLoaded}>
-      {role === "driver" && !selectedOrderId ? <details className="staffRouteDisclosure"><summary>Route map and stops</summary><DispatchBoard orders={orders} role="driver" basePath={basePath} hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={/unable/i.test(status) ? status : ""} embedded /></details> : null}
+    <section className={`staffContentSection sharedBoardSection ${featuredOrder ? "staffRoleWorkboard" : ""}`} aria-busy={!hasLoaded}>
+      {presentationRole === "driver" && !selectedOrderId && !featuredOrder ? <details className="staffRouteDisclosure"><summary>Route map and stops</summary><DispatchBoard orders={orders} role="driver" basePath={basePath} hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={/unable/i.test(status) ? status : ""} embedded /></details> : null}
       {selectedOrderId ? selectedOrder ? <article className="staffDetailView orderDetail">
         <Link className="staffBackLink" href={basePath}>← Back to order list</Link>
         <header className="staffDetailHeader">
@@ -1391,7 +1408,7 @@ function SharedOrderBoard({ role, userName, allStaffAccess = false, selectedOrde
           <StageCountdown order={selectedOrder} />
         </header>
 
-        <section className="staffPrimaryAction" aria-labelledby="order-next-action"><div><span className="staffFieldLabel">Next verified action</span><h3 id="order-next-action">{selectedOrder.nextStep}</h3></div><AutomatedOrderActions allStaffAccess={allStaffAccess} order={selectedOrder} role={role} userName={userName} onSaved={() => loadOrders(false)} /></section>
+        <section className="staffPrimaryAction" aria-labelledby="order-next-action"><div><span className="staffFieldLabel">Next verified action</span><h3 id="order-next-action">{selectedOrder.nextStep}</h3></div><AutomatedOrderActions unavailable={ordersUnavailable} allStaffAccess={allStaffAccess} order={selectedOrder} role={role} userName={userName} onSaved={() => loadOrders(false)} /></section>
 
         <div className="staffDetailSections">
           <details className="staffDetailDisclosure"><summary><span><strong>Customer and collection</strong><small>{selectedOrder.area} · {selectedOrder.routeWindow}</small></span></summary><div className="staffDisclosureBody"><dl className="staffDefinitionList">
@@ -1418,15 +1435,24 @@ function SharedOrderBoard({ role, userName, allStaffAccess = false, selectedOrde
           <details className="staffDetailDisclosure"><summary><span><strong>Order history</strong><small>{compactTimelineLabel(selectedOrder.eventCount)}</small></span></summary><div className="staffDisclosureBody"><BoundedList label="Order history" noun="updates" className="staffTimeline">{selectedOrder.timeline.map((event) => <div key={`${selectedOrder.orderId}-${event.id}-${event.createdAt}`}><time>{formatShortTime(event.createdAt)}</time><div><strong>{event.status}</strong><span>{event.type} · {event.actor}</span><p>{event.note}</p></div></div>)}</BoundedList></div></details>
         </div>
       </article> : hasLoaded ? <div className="staffEmptyState"><h2>Order not found</h2><p>This order is not available to this staff role.</p><Link href={basePath}>Back to the order list</Link></div> : <LoadingSkeleton label="Loading order details" rows={4} variant="detail" /> : <>
-        <div className="staffSectionHeader"><div><h2>{queueHeading}</h2><p>{stats.riskCount} at risk · {stats.automationCount} verified actions available</p></div><button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh</button></div>
-        <div className="staffFilterBar">
+        <div className={featuredOrder ? "staffRoleGrid" : "staffQueueOnly"}>
+        {presentationRole === "vendor" ? <VendorCapacitySummary canManage={role !== "admin"} /> : null}
+        {featuredOrder ? <div className="staffRoleFeatured"><article className={`staffWorkTicket ${presentationRole === "driver" ? "staffRoutePass" : ""}`}>
+          <header className="staffTicketHeader"><div><span className="staffJobReference">{presentationRole === "vendor" ? "Current job" : driverStopGroup(featuredOrder)}</span><h2>{presentationRole === "vendor" ? bookingLabel(featuredOrder) : ["picked-up", "ready"].includes(featuredOrder.workflowStage.key) ? featuredOrder.vendor : featuredOrder.area || "Assigned stop"}</h2></div><span className="staffOrderState">{featuredOrder.workflowStage.label}</span></header>
+          {presentationRole === "vendor" ? <><div className="staffJobFlow">{([ ["collection", "Received", ["at-vendor"]], ["washing", "Washing", ["washing"]], ["return", "Ready", ["ready", "out-for-delivery", "delivered"]] ] as const).map(([key, label, stages]) => <span key={key} className={(stages as readonly string[]).includes(featuredOrder.workflowStage.key) ? "current" : ""}><LaundryFlowIcon stage={key} />{label}</span>)}</div><dl className="staffTicketFacts"><div><dt>Service</dt><dd>{featuredOrder.serviceType || "Not recorded"}</dd></div><div><dt>Intake</dt><dd><RecordedIntakeCount key={`${featuredOrder.orderId}:${featuredOrder.activityUpdatedAt}`} orderId={featuredOrder.orderId} /></dd></div><div><dt>Due</dt><dd>{workTiming(featuredOrder)}</dd></div></dl></> : <><p className="staffStopAddress">{["picked-up", "ready"].includes(featuredOrder.workflowStage.key) ? `${featuredOrder.workflowStage.key === "ready" ? "Vendor collection" : "Vendor handoff"} — confirm the assigned destination in order details.` : featuredOrder.pickupAddress || "Street address not recorded"}{!["picked-up", "ready"].includes(featuredOrder.workflowStage.key) && featuredOrder.landmark ? <small>{featuredOrder.landmark}</small> : null}</p><div className="staffRouteFacts"><strong>{bookingLabel(featuredOrder)}</strong><span>{featuredOrder.dispatch?.scheduledWindow || featuredOrder.routeWindow || "Window not recorded"}</span><span>{dispatchEtaForLeg(featuredOrder).label}: {dispatchEtaForLeg(featuredOrder).text}{dispatchEtaForLeg(featuredOrder).updatedAt ? ` · ${dispatchFreshness(dispatchEtaForLeg(featuredOrder).updatedAt)}` : ""}</span></div><div className="staffTicketNavigation">{featuredOrder.workflowStage.key !== "picked-up" && hasCustomerRoutePreview(featuredOrder) && featuredOrder.route.googleMapsUrl ? <a className="button primary" href={hasHubToCustomerDirections(featuredOrder) && featuredOrder.route.directionsUrl ? featuredOrder.route.directionsUrl : featuredOrder.route.googleMapsUrl} target="_blank" rel="noopener noreferrer"><MapPin size={18} aria-hidden="true" />Directions</a> : <Link className="button secondary" href={detailHref(featuredOrder.orderId)}>Review destination</Link>}<Link className="button secondary" href="/scan"><ScanLine size={18} aria-hidden="true" />Scan bag</Link></div><CustomerContactActions order={featuredOrder} role={role} /></>}
+          <p className="staffSyncLine">{featuredUnavailable ? "Current job availability could not be verified. Last saved details and drafts remain visible; actions are paused. Refresh to check again." : presentationRole === "driver" ? "" : "Current saved job"}</p><AutomatedOrderActions unavailable={featuredUnavailable} key={featuredOrder.orderId} allStaffAccess={allStaffAccess} order={featuredOrder} role={role} userName={userName} onSaved={() => loadOrders(false)} />
+          {queueOrders.some((order) => order.orderId !== featuredOrder.orderId) ? <button className="staffQuietAction" type="button" onClick={() => { if (window.confirm("Switch to the next assigned job? Any unsaved action fields on this job will be discarded.")) setFeaturedSnapshot(queueOrders.find((order) => order.orderId !== featuredOrder.orderId) ?? null); }}>Next assigned job</button> : null}
+          <Link className="staffTicketDetails" href={detailHref(featuredOrder.orderId)}>{presentationRole === "vendor" ? "Job details & production exception" : "Stop details, live sharing & exceptions"} →</Link>
+        </article></div> : null}
+        <section className="staffRoleLedger"><div className="staffSectionHeader"><div><h2>{featuredOrder ? presentationRole === "vendor" ? "Job queue" : "Assigned stops" : queueHeading}</h2><p>{stats.riskCount} at risk · {stats.automationCount} verified actions in loaded orders</p></div><button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh</button></div>
+        <details className="staffQueueTools"><summary>Find and filter orders</summary><div className="staffFilterBar">
           <div className="staffTextFilters" aria-label="Order queue view">{([ ["action", "Needs action"], ["active", "All active"], ["all", "History"] ] as Array<[QueueView, string]>).map(([key, label]) => <button aria-pressed={queueView === key} className={queueView === key ? "active" : ""} key={key} type="button" onClick={() => setQueueView(key)}>{label}</button>)}</div>
           <label className="staffSearch"><span>Find an order</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value);  }} placeholder="Reference or customer name…" /></label>
-        </div>
-        <BoundedList label="Order queue" noun="orders" className="staffOrderList" resetKey={`${queueView}:${query}`} loading={!hasLoaded} emptyState={<p className="staffEmptyState">{normalizedQuery ? "No orders match this search." : queueView === "action" ? "No orders currently need action from this role." : "No orders in this view yet."}</p>} header={<div className="staffOrderListHeader" aria-hidden="true"><span>Order</span><span>Stage</span><span>Collection</span><span>Assignment</span><span></span></div>}>
-          {queueOrders.map((order) => <div key={order.orderId}>{role === "driver" ? <h3 className="staffOrderGroupTitle">{driverStopGroup(order)}</h3> : null}<OrderQueueRow href={detailHref(order.orderId)} order={order} /></div>)}
+        </div></details>
+        <BoundedList label="Order queue" noun="orders" className="staffOrderList" resetKey={`${queueView}:${query}`} loading={!hasLoaded} emptyState={<p className="staffEmptyState">{normalizedQuery ? "No orders match this search." : queueView === "action" ? "No orders in this loaded page currently need action from this role." : "No orders in this view yet."}</p>} header={featuredOrder ? undefined : <div className="staffOrderListHeader" aria-hidden="true"><span>Order</span><span>Stage</span><span>Collection</span><span>Assignment</span><span></span></div>}>
+          {queueOrders.map((order, index) => <div key={order.orderId}>{featuredOrder ? <Link className={`staffRoleQueueRow ${presentationRole === "driver" ? "staffRouteLeg" : ""}`} href={detailHref(order.orderId)}>{presentationRole === "driver" ? <span className="staffLegNumber">{index + 1}</span> : <LaundryFlowIcon stage="washing" />}<span><strong>{presentationRole === "driver" ? driverStopGroup(order) : bookingLabel(order)}</strong><small>{presentationRole === "driver" ? `${["picked-up", "ready"].includes(order.workflowStage.key) ? order.vendor : order.area} · ${bookingLabel(order)}` : order.workflowStage.label}</small><small>{workTiming(order)}</small></span><span aria-hidden="true">→</span></Link> : <OrderQueueRow href={detailHref(order.orderId)} order={order} />}</div>)}
         </BoundedList>
-        <div className="tableActionRow">{nextOffset !== null ? <button className="button secondary" onClick={() => loadOrders(false, nextOffset)}>Load older orders</button> : null}</div>
+        <div className="tableActionRow">{nextOffset !== null ? <button className="button secondary" onClick={() => loadOrders(false, nextOffset)}>Load older orders</button> : null}</div></section></div>
       </>}
       <p className={noticeClass(status)} role="status" aria-live="polite">{status}{lastSyncedAt ? ` Last updated ${formatMetricTime(lastSyncedAt)}.` : ""}</p>
     </section>
@@ -1451,23 +1477,25 @@ export function PortalShell({ heading, title, allStaffAccess = false, role, page
     }
   }
 
+  const mainNavigation = navigation.filter((item) => (!item.secondary || (pageRole !== "admin" && item.view === "activity")) && !["worklist", "operations", "cases"].includes(item.view) || item.view === currentView || (pageRole === "support" && item.view === "cases"));
+  const moreNavigation = navigation.filter((item) => !mainNavigation.includes(item));
+  const primaryView = (pageRole === "admin" && currentView === "overview") || (pageRole === "vendor" && currentView === "jobs") || (pageRole === "driver" && currentView === "route") || (pageRole === "support" && currentView === "cases");
   return (
-    <main className="portalPage">
+    <main className="portalPage staffDesk">
       <header className="staffTopbar">
-        <BrandLink />
-        <div className="staffAccount">{role === "admin" && allStaffAccess ? <nav aria-label="Staff workspaces"><Link href="/vendors">Vendors</Link>{" · "}<Link href="/drivers">Drivers</Link>{" · "}<Link href="/support">Support</Link>{" · "}<Link href="/admin/surveys">Survey results</Link></nav> : null}{role === "admin" && pageRole !== "admin" ? <Link className="staffAdminHome" href="/admin">Admin home</Link> : null}<span><strong>{userName}</strong><small>{title}</small></span><button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button></div>
+        <BrandLink label="Staff" />
+        <details key={`${pageRole}:${currentView}`} className="staffAccountMenu" onKeyDown={(event) => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
+          <summary>{pageRole === "admin" ? "Operations" : pageRole === "driver" ? "Rider" : pageRole === "vendor" ? "Vendor" : "Support"}<span aria-hidden="true">⌄</span></summary>
+          <div className="staffAccountMenuBody"><strong>{userName}</strong><small>{title}</small>
+            <nav aria-label="More workspace sections">{moreNavigation.map((item) => <Link key={item.view} href={item.href} aria-current={item.view === currentView ? "page" : undefined}>{item.label}</Link>)}</nav>
+            {role === "admin" && allStaffAccess ? <nav aria-label="Staff workspaces"><Link href="/admin">Operations</Link><Link href="/vendors">Vendor workspace</Link><Link href="/drivers">Rider workspace</Link><Link href="/support">Support workspace</Link><Link href="/admin/surveys">Survey results</Link></nav> : null}
+            {role === "admin" && pageRole !== "admin" && !allStaffAccess ? <Link href="/admin">Admin home</Link> : null}
+            <button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button>
+          </div>
+        </details>
       </header>
-      <nav className="staffSectionNav" aria-label={`${pageRole} workspace sections`}>
-        {navigation.map((item) => {
-          const Icon = workspaceIcons[item.view as keyof typeof workspaceIcons] ?? ActivityIcon;
-          return <Link key={item.view} href={item.href} aria-current={item.view === currentView ? "page" : undefined}><Icon aria-hidden="true" /><span>{item.label}</span></Link>;
-        })}
-      </nav>
-      <section className="staffViewHeader">
-        <p className="eyebrow">{promise.eyebrow}</p>
-        <h1>{promise.title}</h1>
-        <p>{promise.subtitle}</p>
-      </section>
+      <nav className="staffSectionNav" aria-label={`${pageRole} workspace sections`}>{mainNavigation.map((item) => <Link key={item.view} href={item.href} aria-current={item.view === currentView ? "page" : undefined}>{item.label === "People & onboarding" ? "People" : item.label}</Link>)}</nav>
+      <section className="staffViewHeader"><div><p className="eyebrow">{promise.eyebrow}</p><h1>{promise.title}</h1>{!primaryView ? <p>{promise.subtitle}</p> : null}</div>{pageRole === "vendor" && currentView === "jobs" ? <LaundryFlowIcon stage="washing" /> : pageRole === "driver" && currentView === "route" ? <LaundryFlowIcon stage="return" /> : null}</section>
       <div className="staffView">{children}</div>
     </main>
   );
@@ -1532,7 +1560,7 @@ function StaffAccessRoster({ refreshToken = 0 }: { refreshToken?: number }) {
   }, [refreshToken]);
 
   return <section className="staffContentSection" aria-busy={!hasLoaded}>
-    <div className="staffSectionHeader"><div><h2>Bubble Wash staff access</h2><p>Staff status and whether sign-in is ready.</p></div><button className="button secondary" type="button" onClick={() => void loadRoster()}>Refresh</button></div>
+    <details className="staffDetailDisclosure staffAccessDisclosure"><summary><span><strong>Bubble Wash staff access</strong><small>Staff status and sign-in readiness</small></span></summary><div className="staffDisclosureBody"><button className="button secondary" type="button" onClick={() => void loadRoster()}>Refresh</button>
     <BoundedList label="Staff roster" noun="people" className="staffRosterList" loading={!hasLoaded} emptyState={<p className="staffEmptyState">No staff members to show yet.</p>}>
       {members.map((member) => <article className="staffRosterRow staffAccessRow" key={member.id}>
         <div><strong>{member.name}</strong><span>{member.email}</span></div>
@@ -1543,7 +1571,7 @@ function StaffAccessRoster({ refreshToken = 0 }: { refreshToken?: number }) {
       </article>)}
     </BoundedList>
     <p className={noticeClass(status)} role="status" aria-live="polite">{status}</p>
-  </section>;
+  </div></details></section>;
 }
 
 function AdminOnboardingCenter({ onSubmit, status, pendingType = "" }: { onSubmit: SubmitHandler; status: Record<string, string>; pendingType?: string }) {
@@ -1588,6 +1616,8 @@ function AdminOnboardingCenter({ onSubmit, status, pendingType = "" }: { onSubmi
 }
 
 function AdminOverview({ userName }: { userName: string }) {
+  const [selectedStage, setSelectedStage] = useState("collection");
+  const [hasMoreOrders, setHasMoreOrders] = useState(false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [vendors, setVendors] = useState<VendorAvailabilityRow[]>([]);
   const [drivers, setDrivers] = useState<DriverAvailabilityRow[]>([]);
@@ -1606,6 +1636,7 @@ function AdminOverview({ userName }: { userName: string }) {
       if (!availabilityResponse.ok || !availabilityData.ok) throw new Error(availabilityData.error ?? "Unable to load capacity.");
       if (!submissionResponse.ok || !submissionData.ok) throw new Error(submissionData.error ?? "Unable to load support activity.");
       setOrders(orderData.orders ?? []);
+      setHasMoreOrders(orderData.nextOffset !== null && orderData.nextOffset !== undefined);
       setVendors(availabilityData.vendors ?? []);
       setDrivers(availabilityData.drivers ?? []);
       setRecords(submissionData.records ?? []);
@@ -1630,6 +1661,7 @@ function AdminOverview({ userName }: { userName: string }) {
         if (!availabilityResponse.ok || !availabilityData.ok) throw new Error(availabilityData.error ?? "Unable to load capacity.");
         if (!submissionResponse.ok || !submissionData.ok) throw new Error(submissionData.error ?? "Unable to load support activity.");
         setOrders(orderData.orders ?? []);
+      setHasMoreOrders(orderData.nextOffset !== null && orderData.nextOffset !== undefined);
         setVendors(availabilityData.vendors ?? []);
         setDrivers(availabilityData.drivers ?? []);
         setRecords(submissionData.records ?? []);
@@ -1642,47 +1674,43 @@ function AdminOverview({ userName }: { userName: string }) {
   }, []);
 
   const activeOrders = orders.filter((order) => !isClosedOrder(order));
-  const riskOrders = activeOrders.filter(isRiskOrder);
-  const unassignedOrders = activeOrders.filter((order) => order.vendor === "Unassigned" || order.driver === "Unassigned");
-  const deliveredOrders = activeOrders.filter((order) => order.workflowStage.key === "delivered");
-  const awaitingPayment = deliveredOrders.filter((order) => !paymentReadyForCloseout(order.payment));
-  const readyForCloseout = deliveredOrders.filter((order) => paymentReadyForCloseout(order.payment));
-  const activeVendors = vendors.filter((vendor) => !/paused|inactive|suspended|tomorrow/i.test(vendor.availabilityStatus));
   const activeDrivers = drivers.filter((driver) => !/paused|inactive|suspended|training|tomorrow/i.test(driver.availabilityStatus));
   const cases = supportCases(records.filter((record) => String(record.data.submissionType ?? "").includes("support-ticket")));
   const openCases = cases.filter((supportCase) => !/resolved|closed/i.test(supportCase.status));
-  const urgentCases = openCases.filter((supportCase) => /urgent|high/i.test(supportCase.priority));
-  const waitingCases = openCases.filter((supportCase) => /waiting/i.test(supportCase.status));
-  const overviewRows = [
-    { area: "Orders", state: `${activeOrders.length} active · ${unassignedOrders.length} unassigned`, attention: `${riskOrders.length} need attention`, href: "/admin?view=orders", link: "Review orders" },
-    { area: "Vendors", state: `${activeVendors.length} taking work · ${activeVendors.reduce((sum, item) => sum + item.capacityRemaining, 0)} slots`, attention: `${vendors.length - activeVendors.length} paused or unavailable`, href: "/admin?view=people", link: "View partners" },
-    { area: "Routes", state: `${activeDrivers.length} active riders · ${activeDrivers.reduce((sum, item) => sum + item.capacityRemaining, 0)} route slots`, attention: `${unassignedOrders.filter((order) => order.driver === "Unassigned").length} awaiting rider`, href: "/admin?view=dispatch", link: "Open dispatch" },
-    { area: "Support", state: `${openCases.length} open · ${waitingCases.length} waiting`, attention: `${urgentCases.length} high priority`, href: "/admin?view=cases", link: "Review cases" },
-    { area: "Payments", state: `${awaitingPayment.length} delivered awaiting evidence`, attention: `${readyForCloseout.length} ready for closeout`, href: "/admin?view=orders", link: "Review payments" },
+  const stages = [
+    { key: "collection" as const, label: "Collection", orders: activeOrders.filter((order) => ["received", "pickup-scheduled", "vendor-assigned", "vendor-accepted", "driver-en-route", "picked-up"].includes(order.workflowStage.key)) },
+    { key: "washing" as const, label: "Washing", orders: activeOrders.filter((order) => ["at-vendor", "washing"].includes(order.workflowStage.key)) },
+    { key: "return" as const, label: "Return", orders: activeOrders.filter((order) => ["ready", "out-for-delivery", "delivered"].includes(order.workflowStage.key)) },
   ];
   const priorityOrders = activeOrders.filter((order) => isRiskOrder(order) || order.vendor === "Unassigned" || order.driver === "Unassigned" || automationActionsForOrder(order, "admin", userName).length > 0).sort((left, right) => Number(isRiskOrder(right)) - Number(isRiskOrder(left)) || Number(right.vendor === "Unassigned" || right.driver === "Unassigned") - Number(left.vendor === "Unassigned" || left.driver === "Unassigned") || new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime()).slice(0, 5);
 
   if (!hasLoaded) return <section className="staffContentSection" aria-busy="true"><LoadingSkeleton label="Loading today’s operations overview" rows={4} variant="metrics" /></section>;
   if (loadError) return <section className="staffContentSection"><div className="staffEmptyState" role="alert"><h2>Operations overview unavailable</h2><p>{loadError} No totals are shown until all overview sources load successfully.</p><button className="button secondary" type="button" onClick={() => void loadOverview()}>Try again</button></div></section>;
 
-  return <>
-    <section className="staffContentSection adminOverview" aria-labelledby="operations-by-area"><div className="staffSectionHeader"><div><h2 id="operations-by-area">Operations by area</h2><p>A read-only view across the pilot. Open a section to take action.</p></div><button className="button secondary" type="button" onClick={() => void loadOverview()}>Refresh</button></div>
-      <div className="overviewLedger">{overviewRows.map((row) => <article className="overviewRow" key={row.area}><h3>{row.area}</h3><p>{row.state}</p><p className="overviewAttention">{row.attention}</p><Link href={row.href}>{row.link}</Link></article>)}</div><p className="status" role="status" aria-live="polite">{status}</p>
+  return <div className="staffServiceBoard">
+    <div className="staffBoardMeta"><span>{activeOrders.length} active orders{hasMoreOrders ? " in loaded page" : ""}</span></div>
+    <section className="staffDecisionSheet" aria-labelledby="staff-decisions"><div className="staffSectionHeader"><h2 id="staff-decisions">Needs a decision <span>{priorityOrders.length}{priorityOrders.length === 5 ? "+" : ""}</span></h2><Link href="/admin?view=orders">All orders →</Link></div>
+      {priorityOrders.length ? priorityOrders.map((order) => <article className="staffDecisionRow" key={order.orderId}><span className={isRiskOrder(order) ? "staffDecisionMark" : "staffDecisionMark neutral"} aria-hidden="true">{isRiskOrder(order) ? "!" : "→"}</span><div className="staffDecisionReason"><span className="staffJobReference">{bookingLabel(order)} · {order.area}</span><h3>{isRiskOrder(order) ? order.workflowStage.key === "exception" ? "Order needs attention" : "Stage needs review" : order.vendor === "Unassigned" ? "Vendor assignment needed" : order.driver === "Unassigned" ? "Rider assignment needed" : order.workflowStage.label}</h3><p>{order.nextStep}</p></div><span className="staffDueText">{workTiming(order)}</span><Link className={`button ${isRiskOrder(order) ? "primary" : "secondary"}`} href={`/admin?view=orders&order=${encodeURIComponent(order.orderId)}`}>{isRiskOrder(order) ? "Review issue" : "Review order"}</Link></article>) : <p className="staffEmptyState">No active orders need a decision.</p>}
     </section>
-    <section className="staffContentSection"><div className="staffSectionHeader"><div><h2>Needs attention</h2><p>The highest-risk active orders, limited to five.</p></div><Link href="/admin?view=orders">View full order queue</Link></div>
-      <div className="staffPriorityList">{priorityOrders.length ? priorityOrders.map((order) => <article className={`staffPriorityRow timer-${order.stageTimer.tone}`} key={order.orderId}><div><strong>{bookingLabel(order)}{order.vendorCode ? ` · ${order.vendorCode}` : ""}</strong><span>{order.customer}</span></div><div><strong>{order.workflowStage.label}</strong><span>{order.nextStep}</span></div><div><strong>{order.stageTimer.label}</strong><span>{order.vendor === "Unassigned" || order.driver === "Unassigned" ? "Assignment incomplete" : order.priority}</span></div><Link href={`/admin?view=orders&order=${encodeURIComponent(order.orderId)}`}>Review order</Link></article>) : <p className="staffEmptyState">No active orders need attention.</p>}</div>
-    </section>
-    <section className="staffContentSection"><div className="staffSectionHeader"><div><h2>Latest operational changes</h2><p>The five most recent saved records.</p></div><Link href="/admin?view=activity">Open activity</Link></div><div className="staffSimpleList">{records.slice(0, 5).map((record) => <div className="staffSimpleRow" key={record.id}><strong>{activityTypeLabel(activityType(record))}</strong><span>{activitySubject(record)}</span><p>{activityChangeSummary(record)}</p><time>{formatActivityTime(record.createdAt)}</time></div>)}</div></section>
-  </>;
+    <section className="staffStageBoard" aria-labelledby="staff-stage-heading"><div className="staffSectionHeader"><h2 id="staff-stage-heading">On the floor &amp; on the road</h2><small>{hasMoreOrders ? "Loaded order stages" : "Saved order stages"}</small></div><div className="staffStageLanes">{stages.map((stage) => <section className={`staffStageLane ${selectedStage === stage.key ? "selected" : ""}`} key={stage.key}><button className="staffStageSelector" type="button" aria-pressed={selectedStage === stage.key} onClick={() => setSelectedStage(stage.key)}><LaundryFlowIcon stage={stage.key} /><span>{stage.label}</span><b>{stage.orders.length}</b></button><div className="staffStageContent">{stage.orders.length ? stage.orders.slice(0, 3).map((order) => <Link className="staffOrderTag" key={order.orderId} href={`/admin?view=orders&order=${encodeURIComponent(order.orderId)}`}><span className="staffJobReference">{bookingLabel(order)}</span><strong>{order.workflowStage.label}</strong><small>{workTiming(order)}</small></Link>) : <p className="staffStageEmpty">No orders at this stage.</p>}<Link className="staffLaneLink" href="/admin?view=orders">View orders →</Link></div></section>)}</div></section>
+    <nav className="staffDeskFoot" aria-label="Operations follow-up"><Link href="/admin?view=dispatch">{activeDrivers.length} available riders</Link><Link href="/admin?view=cases">{openCases.length} open cases in recent records</Link><Link href="/admin?view=people">{vendors.length} vendors</Link><Link href="/admin?view=activity">Recent changes</Link></nav>
+    <button type="button" className="staffQuietAction" onClick={() => void loadOverview()}>Refresh service board</button><p className="status" role="status">{status}{hasMoreOrders ? " More orders are available in the order queue; counts here cover the loaded page." : ""}</p>
+  </div>;
 }
 
 function SupportTicketDesk({ userName, selectedCaseId = "", basePath, refreshToken = 0 }: { userName: string; selectedCaseId?: string; basePath: string; refreshToken?: number }) {
+  const [indexRecords, setIndexRecords] = useState<SubmissionRecord[]>([]);
+  const [indexStatus, setIndexStatus] = useState("");
+  const [indexLoaded, setIndexLoaded] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, Record<string, string>>>({});
+  const [loadError, setLoadError] = useState("");
+  const indexVersion = useRef(0);
   const [records, setRecords] = useState<SubmissionRecord[]>([]);
   const [status, setStatus] = useState("Loading support tickets…");
   const [hasLoaded, setHasLoaded] = useState(false);
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const pendingActions = useRef(new Set<string>());
-  const [pendingCaseId, setPendingCaseId] = useState("");
+  const [pendingCaseIds, setPendingCaseIds] = useState<string[]>([]);
   const activeCase = useRef(selectedCaseId);
   const loadVersion = useRef(0);
 
@@ -1690,31 +1718,52 @@ function SupportTicketDesk({ userName, selectedCaseId = "", basePath, refreshTok
     if (activeCase.current !== selectedCaseId) return;
     const version = ++loadVersion.current;
     if (showLoading) setStatus("Loading support tickets…");
+    setLoadError("");
     try {
       const response = await fetch(selectedCaseId ? `/api/staff/automation/case?caseId=${encodeURIComponent(selectedCaseId)}` : "/api/submissions");
       const data = await response.json();
       if (version !== loadVersion.current || activeCase.current !== selectedCaseId) return;
       if (!response.ok || !data.ok) {
+        setLoadError(data.error ?? "Unable to load support tickets.");
         setStatus(data.error ?? "Unable to load support tickets.");
         setHasLoaded(true);
         return;
       }
       const tickets = data.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes("support-ticket"));
       setRecords(selectedCaseId ? tickets : tickets.slice(0, 200));
+      if (!selectedCaseId) { setIndexRecords(tickets.slice(0, 200)); setIndexLoaded(true); setIndexStatus(""); }
       setStatus(tickets.length ? "Support ticket desk loaded." : "No support tickets yet.");
       setHasLoaded(true);
     } catch {
       if (version !== loadVersion.current || activeCase.current !== selectedCaseId) return;
+      setLoadError("Unable to load support tickets.");
       setStatus("Unable to load support tickets.");
       setHasLoaded(true);
     }
   }, [selectedCaseId]);
 
+  const loadIndex = useCallback(async () => {
+    const version = ++indexVersion.current;
+    try {
+      const response = await fetch("/api/submissions");
+      const data = await response.json();
+      if (version !== indexVersion.current) return;
+      if (!response.ok || !data.ok) throw new Error(data.error ?? "Unable to load the case index.");
+      setIndexRecords(data.records.filter((record: SubmissionRecord) => String(record.data.submissionType ?? "").includes("support-ticket")).slice(0, 200));
+      setIndexStatus("");
+      setIndexLoaded(true);
+    } catch (error) {
+      if (version === indexVersion.current) setIndexStatus(error instanceof Error ? error.message : "Unable to load the case index.");
+    }
+  }, []);
+
+  useEffect(() => { void loadIndex(); return () => { indexVersion.current += 1; }; }, [loadIndex, refreshToken]);
+
   async function action(event: FormEvent<HTMLFormElement>, supportCase: SupportCase) {
     event.preventDefault();
     if (pendingActions.current.has(supportCase.ticketId)) return;
     pendingActions.current.add(supportCase.ticketId);
-    setPendingCaseId(supportCase.ticketId);
+    setPendingCaseIds((current) => [...current, supportCase.ticketId]);
     const form = event.currentTarget;
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.submissionType = "support-ticket-action";
@@ -1726,49 +1775,64 @@ function SupportTicketDesk({ userName, selectedCaseId = "", basePath, refreshTok
     try {
       const data = await postJSON<{ ok: boolean; message: string; id: string }>("/api/submit", payload);
       setFormStatus((current) => ({ ...current, [supportCase.ticketId]: data.message }));
+      setDrafts((current) => { const next = { ...current }; delete next[supportCase.ticketId]; return next; });
       form.reset();
-      await loadTickets(false);
+      await Promise.all([loadTickets(false), loadIndex()]);
     } catch (error) {
       setFormStatus((current) => ({ ...current, [supportCase.ticketId]: error instanceof Error ? error.message : "Unable to save ticket action." }));
     } finally {
       pendingActions.current.delete(supportCase.ticketId);
-      setPendingCaseId((current) => current === supportCase.ticketId ? "" : current);
+      setPendingCaseIds((current) => current.filter((id) => id !== supportCase.ticketId));
     }
   }
 
-  useEffect(() => { activeCase.current = selectedCaseId; loadTickets(); return () => { loadVersion.current += 1; }; }, [refreshToken, selectedCaseId, loadTickets]);
+  useEffect(() => { activeCase.current = selectedCaseId; setHasLoaded(false); loadTickets(); return () => { loadVersion.current += 1; }; }, [refreshToken, selectedCaseId, loadTickets]);
 
   const cases = supportCases(records);
-  const selectedCase = selectedCaseId ? cases.find((supportCase) => (supportCase.ticketId.toLowerCase() === selectedCaseId.toLowerCase() || supportCase.root.id.toLowerCase() === selectedCaseId.toLowerCase())) : null;
+  const indexCases = supportCases(indexRecords);
+  const selectedCase = selectedCaseId ? cases.find((supportCase) => (supportCase.ticketId.toLowerCase() === selectedCaseId.toLowerCase() || supportCase.root.id.toLowerCase() === selectedCaseId.toLowerCase())) : cases[0];
   const caseHref = (ticketId: string) => `${basePath}${basePath.includes("?") ? "&" : "?"}case=${encodeURIComponent(ticketId)}`;
+  const orderPath = basePath.startsWith("/admin") ? "/admin?view=orders" : "/support?view=orders";
+  const draft = selectedCase ? drafts[selectedCase.ticketId] ?? {} : {};
+  function updateDraft(ticketId: string, field: string, value: string) {
+    setDrafts((current) => ({ ...current, [ticketId]: { ...current[ticketId], [field]: value } }));
+  }
+  const caseOptions = [
+    { name: "ticketStatus", label: "Case status", value: selectedCase?.status ?? "Open", options: ["Open", "In Review", "Assigned", "Waiting on Customer", "Waiting on Vendor", "Waiting on Driver", "Escalated", "Resolved", "Closed", "Reopened"] },
+    { name: "priority", label: "Priority", value: selectedCase?.priority ?? "Normal", options: ["Normal", "High", "Urgent"] },
+    { name: "assignedRole", label: "Assigned desk", value: selectedCase?.assignedRole ?? "Support", options: ["Support", "Admin", "Vendor", "Driver"] },
+    { name: "escalationLevel", label: "Escalation level", value: selectedCase?.escalationLevel ?? "Level 0", options: ["Level 0", "Level 1", "Level 2", "Level 3"] },
+  ];
 
-  return (
-    <section className="staffContentSection supportDeskSection" aria-busy={!hasLoaded}>
-      {selectedCaseId ? selectedCase ? <article className="staffDetailView caseDetail">
-        <Link className="staffBackLink" href={basePath}>← Back to case list</Link>
-        <header className="staffDetailHeader"><div><span className="staffFieldLabel">{selectedCase.ticketId}</span><h2>{String(selectedCase.root.data.issueType || "Support ticket")}</h2><p>{selectedCase.orderId || "Not linked to an order"}</p></div><div className="staffDetailReference"><span>Status</span><strong>{selectedCase.status}</strong><small>{selectedCase.priority} priority</small></div></header>
-        <div className="staffDetailSections">
-          <details className="staffDetailDisclosure"><summary><span><strong>Case context</strong><small>{selectedCase.orderId || "Unlinked case"}</small></span></summary><div className="staffDisclosureBody"><dl className="staffDefinitionList"><div><dt>Order</dt><dd>{selectedCase.orderId || "Unlinked case"}</dd></div><div><dt>Raised by</dt><dd>{String(selectedCase.root.data.name || "Team member")}</dd></div><div><dt>Customer/team</dt><dd>{String(selectedCase.root.data.company || "Bubble Wash")}</dd></div><div><dt>Last updated</dt><dd>{formatActivityTime(selectedCase.latest.createdAt)}</dd></div></dl></div></details>
-          <details className="staffDetailDisclosure"><summary><span><strong>Case history</strong><small>{selectedCase.events.length} updates</small></span></summary><div className="staffDisclosureBody"><BoundedList label="Case history" noun="updates" className="staffTimeline">{[...selectedCase.events].reverse().map((event) => <div key={event.id}><time>{formatActivityTime(event.createdAt)}</time><div><strong>{String(event.data.ticketStatus || event.data.issueType || "Open")}</strong><span>{String(event.data.name || "Staff")}</span><p>{String(event.data.message || "No note supplied.")}</p></div></div>)}</BoundedList></div></details>
-          {selectedCase.root.data.customerAction ? <CustomerDecisionPanel ticketId={selectedCase.ticketId} action={String(selectedCase.root.data.customerAction)} onSaved={() => loadTickets(false)} /> : null}
-          <details className="staffDetailDisclosure staffControlDisclosure"><summary><span><strong>Record next case action</strong><small>{selectedCase.status} · {selectedCase.priority} priority</small></span></summary><div className="staffDisclosureBody"><form className="staffForm" onSubmit={(event) => action(event, selectedCase)}>
-            <div className="two"><label>Case status<select name="ticketStatus" defaultValue={selectedCase.status}><option>Open</option><option>In Review</option><option>Assigned</option><option>Waiting on Customer</option><option>Waiting on Vendor</option><option>Waiting on Driver</option><option>Escalated</option><option>Resolved</option><option>Closed</option><option>Reopened</option></select></label><label>Priority<select name="priority" defaultValue={selectedCase.priority}><option>Normal</option><option>High</option><option>Urgent</option></select></label></div>
-            <div className="two"><label>Assigned desk<select name="assignedRole" defaultValue={selectedCase.assignedRole}><option>Support</option><option>Admin</option><option>Vendor</option><option>Driver</option></select></label><label>Escalation level<select name="escalationLevel" defaultValue={selectedCase.escalationLevel}><option>Level 0</option><option>Level 1</option><option>Level 2</option><option>Level 3</option></select></label></div>
-            <label>Case note<textarea name="message" placeholder="Action, escalation reason, customer impact, or resolution summary" required /></label>
-            <button className="button primary" type="submit" disabled={pendingCaseId === selectedCase.ticketId}>{pendingCaseId === selectedCase.ticketId ? "Saving action…" : "Save case action"}</button>
-            {formStatus[selectedCase.ticketId] ? <p className={noticeClass(formStatus[selectedCase.ticketId])} role="status">{formStatus[selectedCase.ticketId]}</p> : null}
-          </form></div></details>
-        </div>
-      </article> : hasLoaded ? <div className="staffEmptyState"><h2>Case not found</h2><p>This case is unavailable to this staff role.</p><Link href={basePath}>Back to cases</Link></div> : <LoadingSkeleton label="Loading support case details" rows={4} variant="detail" /> : <>
-        <div className="staffSectionHeader"><div><h2>Customer cases</h2><p>Each case appears once. Open it to see history and record an action.</p></div><button className="button secondary" type="button" onClick={() => loadTickets()}>Refresh</button></div>
-        <BoundedList label="Support cases" noun="cases" className="staffCaseList" loading={!hasLoaded} emptyState={<p className="staffEmptyState">No customer cases yet.</p>} header={<div className="staffCaseListHeader" aria-hidden="true"><span>Case</span><span>Status</span><span>Priority</span><span>Updated</span><span></span></div>}>
-          {cases.map((supportCase) => <article className="staffCaseRow" key={supportCase.ticketId} role="listitem"><div><strong>{String(supportCase.root.data.issueType || "Support ticket")}</strong><span>{supportCase.ticketId}</span><small>{supportCase.orderId || "Unlinked case"}</small></div><div><strong>{supportCase.status}</strong><span>{String(supportCase.latest.data.message || supportCase.root.data.message || "No note supplied.")}</span></div><strong>{supportCase.priority}</strong><time>{formatActivityTime(supportCase.latest.createdAt)}</time><Link href={caseHref(supportCase.ticketId)}>View case</Link></article>)}
+  return <section className="staffContentSection supportDeskSection staffCaseDesk" aria-busy={!hasLoaded}>
+    <div className="staffCaseDeskToolbar"><span>{indexLoaded ? `${indexCases.filter((item) => !/closed|resolved/i.test(item.status)).length} open in the loaded cases` : indexStatus ? "Case index unavailable" : "Loading case index…"}</span><button className="staffQuietAction" type="button" onClick={() => { void loadTickets(); void loadIndex(); }}>Refresh</button></div>
+    <div className="staffCaseDeskGrid">
+      <aside className="staffCaseDeskIndex" aria-label="Case index">
+        {indexStatus ? <p className="status error" role="status">{indexStatus}</p> : null}
+        <BoundedList label="Support cases" noun="cases" className="staffCaseDeskIndexItems" pageSize={10} loading={!hasLoaded} emptyState={<p className="staffEmptyState">No customer cases loaded.</p>}>
+          {indexCases.map((item) => <article key={item.ticketId}><Link href={caseHref(item.ticketId)} aria-current={item.ticketId === selectedCase?.ticketId ? "page" : undefined} scroll={false}><span className="staffCaseDeskReference">{item.ticketId} · {item.priority}</span><strong>{String(item.root.data.issueType || "Support ticket")}</strong><small>{item.status} · {formatActivityTime(item.latest.createdAt)}</small></Link></article>)}
         </BoundedList>
-      </>}
-      <p className={noticeClass(status)} role="status" aria-live="polite">{status}</p>
-    </section>
-  );
+      </aside>
+      {!hasLoaded ? <LoadingSkeleton label="Loading support case details" rows={4} variant="detail" /> : loadError ? <div className="staffEmptyState"><h2>Case desk unavailable</h2><p>{loadError}</p><button className="button secondary" type="button" onClick={() => void loadTickets()}>Try again</button></div> : selectedCase ? <article className="staffCaseDeskDossier caseDetail">
+        {selectedCaseId ? <Link className="staffBackLink" href={basePath}>← Back to case list</Link> : null}
+        <header className="staffCaseDeskHeader staffDetailHeader"><div><span className="staffCaseDeskReference">{selectedCase.ticketId} <span>{selectedCase.priority} priority</span></span><h2>{String(selectedCase.root.data.issueType || "Support ticket")}</h2><p>{String(selectedCase.root.data.company || selectedCase.root.data.name || "Bubble Wash")}</p><div className="staffCaseDeskState"><span>{selectedCase.status}</span><span>Assigned to {selectedCase.assignedRole}</span>{selectedCase.escalationLevel !== "Level 0" ? <span>Escalated · {selectedCase.escalationLevel}</span> : null}</div></div></header>
+        {selectedCase.orderId ? <div className="staffCaseDeskOrder"><ClipboardList aria-hidden="true" /><span><strong>{bookingLabel({ bookingReference: selectedCase.root.data.bookingReference })}</strong><small>Linked order</small></span><Link href={`${orderPath}&order=${encodeURIComponent(selectedCase.orderId)}`}>Order →</Link></div> : <p className="staffCaseDeskUnlinked">Not linked to an order</p>}
+
+        <div className="staffCaseDeskHistory"><h3>Recorded updates</h3><BoundedList label="Case history" noun="updates" className="staffCaseDeskTimeline" resetKey={selectedCase.ticketId}>{[...selectedCase.events].reverse().map((event) => <article key={event.id}><time>{formatActivityTime(event.createdAt)}</time><div><strong>{String(event.data.ticketStatus || event.data.issueType || "Open")}</strong><span>{String(event.data.name || "Staff")}</span><p>{String(event.data.message || "No note supplied.")}</p></div></article>)}</BoundedList></div>
+        {selectedCase.root.data.customerAction ? <CustomerDecisionPanel ticketId={selectedCase.ticketId} action={String(selectedCase.root.data.customerAction)} onSaved={() => loadTickets(false)} /> : null}
+        <details className="staffCaseDeskAction staffControlDisclosure" open key={selectedCase.ticketId}><summary>Record next action</summary><form className="staffForm" onSubmit={(event) => action(event, selectedCase)}>
+          <label>Case note<textarea disabled={pendingCaseIds.includes(selectedCase.ticketId)} name="message" placeholder="Add the action taken and next step…" required value={draft.message ?? ""} onChange={(event) => updateDraft(selectedCase.ticketId, "message", event.target.value)} /></label>
+          <div className="staffCaseDeskFields">{caseOptions.map((field) => <label key={field.name}>{field.label}<select disabled={pendingCaseIds.includes(selectedCase.ticketId)} name={field.name} value={draft[field.name] ?? field.value} onChange={(event) => updateDraft(selectedCase.ticketId, field.name, event.target.value)}>{!field.options.includes(draft[field.name] ?? field.value) ? <option>{draft[field.name] ?? field.value}</option> : null}{field.options.map((option) => <option key={option}>{option}</option>)}</select></label>)}</div>
+          <button className="button primary" type="submit" disabled={pendingCaseIds.includes(selectedCase.ticketId)}>{pendingCaseIds.includes(selectedCase.ticketId) ? "Saving action…" : "Save case action"}</button>
+          {formStatus[selectedCase.ticketId] ? <p className={noticeClass(formStatus[selectedCase.ticketId])} role="status">{formStatus[selectedCase.ticketId]}</p> : null}
+        </form></details>
+        <details className="staffDetailDisclosure staffCaseDeskContext"><summary><span><strong>Case context</strong><small>Contact and request details</small></span></summary><div className="staffDisclosureBody"><dl className="staffDefinitionList"><div><dt>Raised by</dt><dd>{String(selectedCase.root.data.name || "Team member")}</dd></div><div><dt>Customer/team</dt><dd>{String(selectedCase.root.data.company || "Bubble Wash")}</dd></div><div><dt>Last updated</dt><dd>{formatActivityTime(selectedCase.latest.createdAt)}</dd></div></dl></div></details>
+      </article> : <div className="staffEmptyState"><h2>{selectedCaseId ? "Case not found" : "No customer cases yet"}</h2><p>{selectedCaseId ? "This case is unavailable to this staff role." : "New cases will appear here when recorded."}</p>{selectedCaseId ? <Link href={basePath}>Back to cases</Link> : null}</div>}
+    </div>
+    <p className={noticeClass(status)} role="status" aria-live="polite">{status}</p>
+  </section>;
 }
+
 
 export function AdminWorkspace({ userName, role, allStaffAccess = false, initialView = "overview", selectedOrderId, selectedCaseId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
@@ -1803,13 +1867,13 @@ export function AdminWorkspace({ userName, role, allStaffAccess = false, initial
 
   const navigation = [
     { href: "/staff/worklist", label: "Worklist", view: "worklist" },
-    { href: "/admin", label: "Overview", view: "overview" },
+    { href: "/admin", label: "Service board", view: "overview" },
     { href: "/admin?view=dispatch", label: "Dispatch", view: "dispatch" },
     { href: "/admin?view=orders", label: "Orders", view: "orders" },
     { href: "/admin?view=people", label: "People & onboarding", view: "people" },
     { href: "/admin?view=cases", label: "Cases", view: "cases" },
-    { href: "/admin?view=operations", label: "Operations health", view: "operations" },
-    { href: "/admin?view=activity", label: "Activity", view: "activity" },
+    { href: "/admin?view=operations", label: "Privacy requests", view: "operations" },
+    { href: "/admin?view=activity", label: "Recent changes", view: "activity", secondary: true },
   ];
 
   return (
@@ -1839,19 +1903,20 @@ type PrivacyOperationsRequest = {
 function AdminOperationsHealth() {
   const [metrics, setMetrics] = useState<OperationsMetrics | null>(null);
   const [privacyRequests, setPrivacyRequests] = useState<PrivacyOperationsRequest[]>([]);
-  const [status, setStatus] = useState("Loading operational controls…");
+  const [status, setStatus] = useState("Loading privacy requests…");
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [showClosed, setShowClosed] = useState(false);
 
   async function load() {
     try {
       const response = await fetch("/api/admin/operations", { cache: "no-store" });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Unable to load operations health.");
+      if (!response.ok) throw new Error(data.error ?? "Unable to load privacy requests.");
       setMetrics(data.metrics);
       setPrivacyRequests(data.privacyRequests);
-      setStatus("Operational data loaded.");
+      setStatus("Privacy requests updated.");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Unable to load operations health.");
+      setStatus(error instanceof Error ? error.message : "Unable to load privacy requests.");
     } finally {
       setHasLoaded(true);
     }
@@ -1872,7 +1937,45 @@ function AdminOperationsHealth() {
     }
   }
 
-  return <section className="staffContentSection" aria-busy={!hasLoaded}><div className="staffSectionHeader"><div><h2>System status and privacy requests</h2><p>The system handles message retries and scheduled data cleanup. Review each privacy request and record its status.</p></div><button className="button secondary" type="button" onClick={() => void load()}>Refresh</button></div>{!hasLoaded ? <LoadingSkeleton label="Loading operations health metrics" rows={4} variant="metrics" /> : metrics ? <div className="overviewGrid"><article><span className="staffFieldLabel">Order records</span><strong>{metrics.submissions}</strong><small>Saved order updates</small></article><article><span className="staffFieldLabel">Early access</span><strong>{metrics.earlyAccess.active}</strong><small>{metrics.earlyAccess.total} total consent records</small></article><article><span className="staffFieldLabel">Privacy queue</span><strong>{metrics.privacyRequests.open}</strong><small>{metrics.privacyRequests.total} total requests</small></article><article><span className="staffFieldLabel">Messages to check</span><strong>{metrics.notifications.queued + metrics.notifications.retrying + metrics.notifications.processing + metrics.notifications.manualReview + metrics.notifications.skipped + metrics.notifications.exhausted}</strong><small>{metrics.notifications.queued} queued · {metrics.notifications.retrying} retrying · {metrics.notifications.processing} processing · {metrics.notifications.exhausted} stopped retrying · {metrics.notifications.manualReview} need review · {metrics.notifications.skipped} skipped · {metrics.notifications.accepted} accepted by delivery service (delivery not confirmed) · {metrics.notifications.delivered} delivery confirmed</small></article></div> : null}<p className={noticeClass(status)} role="status">{status}</p><div className="staffSectionHeader"><div><h3>Privacy and data-rights requests</h3><p>Verify identity before disclosure, correction, or deletion. Mark completion only after the requested work is recorded.</p></div></div><BoundedList label="Privacy requests" noun="requests" className="staffSimpleList" loading={!hasLoaded} emptyState={<p className="staffEmptyState">No privacy requests are waiting.</p>}>{privacyRequests.map((request) => <article className="privacyOpsRow" key={request.id}><div><strong>{request.id}</strong><span>{request.requestType.replaceAll("_", " ")}</span></div><div><strong>{request.name}</strong><span>{request.contact}</span><small>{request.orderId || "No order supplied"}</small></div><div><strong>{request.status.replaceAll("_", " ")}</strong><time>{formatActivityTime(request.createdAt)}</time></div><div className="tableActionRow"><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "identity_review")}>Identity review</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "completed")}>Complete</button><button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "declined")}>Decline</button></div></article>)}</BoundedList></section>;
+  const visibleRequests = privacyRequests.filter((request) => showClosed || !["completed", "declined"].includes(request.status));
+
+  return <>
+    <section className="staffContentSection" aria-busy={!hasLoaded}>
+      <div className="staffSectionHeader">
+        <div><h2>Privacy requests</h2><p>Verify identity before sharing, correcting or deleting data. These controls record status only; they do not carry out the requested work.</p></div>
+        <button className="button secondary" type="button" onClick={() => void load()}>Refresh</button>
+      </div>
+      <label className="staffAccountToggle"><input type="checkbox" checked={showClosed} onChange={(event) => setShowClosed(event.target.checked)} />Show completed and declined</label>
+      <p className={noticeClass(status)} role="status">{status}</p>
+      {!hasLoaded || metrics ? <BoundedList label="Privacy requests" noun="requests" className="staffSimpleList" resetKey={String(showClosed)} loading={!hasLoaded} emptyState={<p className="staffEmptyState">{showClosed ? "No privacy requests in the loaded records." : "No open privacy requests in the loaded records."}</p>}>
+        {visibleRequests.map((request) => <article className="privacyOpsRow" key={request.id}>
+          <div><strong>{request.id}</strong><span>{request.requestType.replaceAll("_", " ")}</span></div>
+          <div><strong>{request.name}</strong><span>{request.contact}</span><small>{request.orderId || "No order supplied"}</small></div>
+          <div><strong>{request.status.replaceAll("_", " ")}</strong><time>{formatActivityTime(request.createdAt)}</time></div>
+          <div className="tableActionRow">
+            <button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "identity_review")}>Identity review</button>
+            <button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "completed")}>Mark completed</button>
+            <button className="button secondary" type="button" onClick={() => void changePrivacyStatus(request.id, "declined")}>Mark declined</button>
+          </div>
+        </article>)}
+      </BoundedList> : null}
+      {metrics ? <p className="staffSyncLine">Showing the loaded requests (up to 100). Mark completed only after the work is done and recorded.</p> : null}
+    </section>
+    <section className="staffContentSection">
+      <div className="staffSectionHeader"><div><h2>Message review</h2><p>Check delivery problems in the existing worklist.</p></div><Link href="/staff/worklist?view=notifications">Review messages</Link></div>
+      <details className="staffDetailDisclosure">
+        <summary><span><strong>System status</strong><small>Saved records and message delivery totals</small></span></summary>
+        <div className="staffDisclosureBody">
+          {!hasLoaded ? <LoadingSkeleton label="Loading system status" rows={4} variant="metrics" /> : metrics ? <div className="overviewGrid">
+            <article><span className="staffFieldLabel">Saved records</span><strong>{metrics.submissions}</strong><small>All submission types, not just orders</small></article>
+            <article><span className="staffFieldLabel">Early access</span><strong>{metrics.earlyAccess.active}</strong><small>{metrics.earlyAccess.total} total consent records</small></article>
+            <article><span className="staffFieldLabel">Privacy requests</span><strong>{metrics.privacyRequests.open}</strong><small>Open · {metrics.privacyRequests.total} total requests</small></article>
+            <article><span className="staffFieldLabel">Message delivery</span><small>{metrics.notifications.queued} queued · {metrics.notifications.retrying} retrying · {metrics.notifications.processing} processing · {metrics.notifications.exhausted} stopped retrying · {metrics.notifications.manualReview} need review · {metrics.notifications.skipped} skipped · {metrics.notifications.accepted} accepted by delivery service (delivery not confirmed) · {metrics.notifications.delivered} delivery confirmed</small></article>
+          </div> : <p>System status is unavailable. Try Refresh above.</p>}
+        </div>
+      </details>
+    </section>
+  </>;
 }
 
 export function VendorWorkspace({ userName, role, allStaffAccess = false, initialView = "jobs", selectedOrderId, selectedActivityId }: WorkspaceProps) {
@@ -1906,12 +2009,12 @@ export function VendorWorkspace({ userName, role, allStaffAccess = false, initia
     { href: "/staff/worklist", label: "Worklist", view: "worklist" },
     { href: "/vendors", label: "Jobs", view: "jobs" },
     { href: "/vendors?view=capacity", label: "Capacity", view: "capacity" },
-    { href: "/vendors?view=activity", label: "Activity", view: "activity" },
+    { href: "/vendors?view=activity", label: "Recent changes", view: "activity", secondary: true },
   ];
 
   return (
     <PortalShell role={role} allStaffAccess={allStaffAccess} pageRole="vendor" userName={userName} title="Vendor workspace" currentView={initialView} navigation={navigation}>
-      {initialView === "jobs" ? <><SharedOrderBoard allStaffAccess={allStaffAccess} role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/vendors?view=jobs" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a production exception</strong><small>Open a case when the verified job actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="vendor" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
+      {initialView === "jobs" ? <><SharedOrderBoard allStaffAccess={allStaffAccess} presentationRole="vendor" role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/vendors?view=jobs" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a production exception</strong><small>Open a case when the verified job actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="vendor" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
       {initialView === "capacity" && role === "admin" ? <section className="staffContentSection"><p>Manage an explicitly selected vendor from <Link href="/admin?view=people">People &amp; onboarding</Link>. Owner actions retain your identity.</p></section> : null}
       {initialView === "capacity" && role !== "admin" ? <><AvailabilityBoard role={role} mode="vendors" refreshToken={availabilityVersion} /><VendorCapacityForm onSaved={() => setAvailabilityVersion((current) => current + 1)} /></> : null}
       {initialView === "activity" ? <RecentActivity filter="vendor" selectedId={selectedActivityId} basePath="/vendors?view=activity" /> : null}
@@ -1947,12 +2050,12 @@ export function DriverWorkspace({ userName, role, allStaffAccess = false, initia
   const navigation = [
     { href: "/staff/worklist", label: "Worklist", view: "worklist" },
     { href: "/drivers", label: "Today’s route", view: "route" },
-    { href: "/drivers?view=activity", label: "Activity", view: "activity" },
+    { href: "/drivers?view=activity", label: "Recent changes", view: "activity", secondary: true },
   ];
 
   return (
     <PortalShell role={role} allStaffAccess={allStaffAccess} pageRole="driver" userName={userName} title="Driver route board" currentView={initialView} navigation={navigation}>
-      {initialView === "route" ? <><SharedOrderBoard allStaffAccess={allStaffAccess} role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/drivers?view=route" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a route exception</strong><small>Use when the delay or handoff actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="driver" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
+      {initialView === "route" ? <><SharedOrderBoard allStaffAccess={allStaffAccess} presentationRole="driver" role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/drivers?view=route" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a route exception</strong><small>Use when the delay or handoff actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="driver" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
       {initialView === "activity" ? <RecentActivity filter="driver-route-log" selectedId={selectedActivityId} basePath="/drivers?view=activity" /> : null}
     </PortalShell>
   );
@@ -1989,12 +2092,12 @@ export function SupportWorkspace({ userName, role, allStaffAccess = false, initi
     { href: "/staff/worklist", label: "Worklist", view: "worklist" },
     { href: "/support", label: "Cases", view: "cases" },
     { href: "/support?view=orders", label: "Orders", view: "orders" },
-    { href: "/support?view=activity", label: "Activity", view: "activity" },
+    { href: "/support?view=activity", label: "Recent changes", view: "activity", secondary: true },
   ];
 
   return (
     <PortalShell role={role} allStaffAccess={allStaffAccess} pageRole="support" userName={userName} title="Support workspace" currentView={initialView} navigation={navigation}>
-      {initialView === "cases" ? <><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Open a new case</strong><small>Use when an existing case does not cover the issue</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="support" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section><SupportTicketDesk userName={userName} selectedCaseId={selectedCaseId} basePath="/support?view=cases" refreshToken={casesVersion} /></> : null}
+      {initialView === "cases" ? <><SupportTicketDesk userName={userName} selectedCaseId={selectedCaseId} basePath="/support?view=cases" refreshToken={casesVersion} /><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Open a new case</strong><small>Use when an existing case does not cover the issue</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="support" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section></> : null}
       {initialView === "orders" ? <SharedOrderBoard allStaffAccess={allStaffAccess} role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/support?view=orders" /> : null}
       {initialView === "activity" ? <RecentActivity filter="support" selectedId={selectedActivityId} basePath="/support?view=activity" /> : null}
     </PortalShell>

@@ -49,6 +49,11 @@ try {
           else assert.match(html, /Request a pickup/);
           checks++;
         }
+        if (path === '/services') {
+          if (paused) assert.match(html, /New pickups are paused/);
+          else assert.doesNotMatch(html, /New pickups are paused/);
+          checks++;
+        }
         if (path === '/book') {
           if (paused) {
             assert.match(html, /A short pause on new pickups\./);

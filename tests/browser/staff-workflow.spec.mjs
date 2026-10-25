@@ -331,18 +331,14 @@ async function runStaffWorkflow(browser, testInfo, gpsOnly = false) {
     expect(paymentEvent.id).not.toBe(booking.bookingReference);
     await beforeHardNavigation(admin, 'admin activity summary');
     await admin.goto('/admin?view=overview');
-    const recent = admin.locator('section').filter({ has: admin.getByRole('heading', { name: 'Latest operational changes', exact: true }) });
-    const paymentSummary = recent.locator('.staffSimpleRow').filter({ has: admin.getByText('Payment Update', { exact: true }) }).filter({ has: admin.getByText(booking.bookingReference, { exact: true }) });
-    await expect(paymentSummary).toBeVisible();
-    await expect(paymentSummary).not.toContainText(booking.id);
-    await expect(paymentSummary).not.toContainText(paymentEvent.id);
-    await evidence(admin, testInfo, 'admin-activity-reference');
-    await beforeHardNavigation(admin, 'admin activity list');
-    await admin.goto('/admin?view=activity');
+    // History is secondary; the overview link opens the preserved activity route.
+    await admin.locator('.staffDeskFoot').getByRole('link', { name: 'Recent changes', exact: true }).click();
     const activitySection = admin.locator('.activitySection');
     await expect(activitySection).toHaveAttribute('aria-busy', 'false');
-    await activitySection.getByRole('combobox', { name: 'Show', exact: true }).selectOption('all');
-    await activitySection.getByRole('combobox', { name: 'When', exact: true }).selectOption('50');
+    await expect(activitySection.locator('.activityTools')).not.toHaveAttribute('open', '');
+    await activitySection.locator('.activityTools > summary').click();
+    await activitySection.getByRole('combobox', { name: 'Date', exact: true }).selectOption('all');
+    await activitySection.getByRole('combobox', { name: 'Show', exact: true }).selectOption('50');
     const activityLink = admin.locator('.staffActivityRow').filter({ has: admin.getByText(booking.bookingReference, { exact: true }) }).filter({ has: admin.getByText('Payment Update', { exact: true }) });
     await expect(activityLink).toHaveAttribute('href', `/admin?view=activity&activity=${encodeURIComponent(paymentEvent.id)}`);
     await expect(activityLink).not.toContainText(booking.id);
@@ -361,21 +357,21 @@ async function runStaffWorkflow(browser, testInfo, gpsOnly = false) {
     // List choices survive because the activity workspace does not remount.
     const expectActivityList = async () => {
       await expect(admin).toHaveURL(new URL('/admin?view=activity', admin.url()).href);
-      await expect(activitySection.getByRole('heading', { name: 'Latest saved updates', exact: true })).toBeVisible();
-      await expect(activitySection.getByRole('combobox', { name: 'Show', exact: true })).toHaveValue('all');
-      await expect(activitySection.getByRole('combobox', { name: 'When', exact: true })).toHaveValue('50');
+      await expect(activitySection.getByRole('heading', { name: 'Saved updates', exact: true })).toBeVisible();
+      await expect(activitySection.getByRole('combobox', { name: 'Date', exact: true })).toHaveValue('all');
+      await expect(activitySection.getByRole('combobox', { name: 'Show', exact: true })).toHaveValue('50');
     };
     await admin.goBack();
     await expectActivityList();
     await admin.goForward();
     await expect(admin.locator('.activitySection .staffDetailHeader h2')).toHaveText(booking.bookingReference);
-    await activitySection.getByRole('link', { name: '← Back to activity', exact: true }).click();
+    await activitySection.getByRole('link', { name: '← Back to recent changes', exact: true }).click();
     await expectActivityList();
     await activityLink.click();
     await expect(admin.locator('.activitySection .staffDetailHeader h2')).toHaveText(booking.bookingReference);
     await activitySection.getByRole('button', { name: 'Show similar', exact: true }).click();
     await expectActivityList();
-    await expect(activitySection.getByRole('button', { name: /^Payments \d+$/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(activitySection.getByRole('combobox', { name: 'Type', exact: true })).toHaveValue('payments');
     const tracking = await customer.request.get(`/api/track?id=${booking.id}`, { timeout: 15_000 });
     expect(tracking.ok(), `Tracking: HTTP ${tracking.status()}`).toBeTruthy();
     expect((await tracking.json()).tracking.status).toBe('Closed');

@@ -85,7 +85,7 @@ test("staff workspaces keep primary actions visible and collapse secondary detai
   assert.match(source, /<details className="staffDetailDisclosure"><summary><span><strong>Customer and collection/);
   assert.match(source, /<details className="staffDetailDisclosure"><summary><span><strong>Assignment and route/);
   assert.match(source, /<details className="staffDetailDisclosure"><summary><span><strong>Order history/);
-  assert.match(source, /staffDetailDisclosure staffControlDisclosure/);
+  assert.match(source, /staffCaseDeskAction staffControlDisclosure" open/);
   assert.match(source, /staffRosterEditor staffStandaloneEditor/);
   assert.match(css, /\.staffDetailDisclosure > summary/);
   assert.match(css, /\.staffDetailDisclosure\[open\] > summary::after/);
