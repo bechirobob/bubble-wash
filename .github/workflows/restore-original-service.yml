@@ -1,0 +1,83 @@
+name: Restore unchanged original service
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed main commit
+        required: true
+        type: string
+      operator_review_reference:
+        description: Private coordinated recovery review SHA256
+        required: true
+        type: string
+      action:
+        description: Explicit restore-original action
+        required: true
+        type: choice
+        options:
+          - restore-original
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  restore:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      RECOVERY_ACTION: ${{ inputs.action }}
+      OPERATOR_REVIEW_REFERENCE: ${{ inputs.operator_review_reference }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Require exact reviewed recovery and first attempt
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          [[ "$OPERATOR_REVIEW_REFERENCE" =~ ^[a-f0-9]{64}$ && "$RECOVERY_ACTION" == restore-original ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Test bounded original-service recovery
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+          python3 -B -m unittest discover -s tests -p 'test_original_service_recovery.py' -v
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+      - name: Prepare exact bounded recovery input
+        run: |
+          set -euo pipefail
+          python3 -B - <<'PY'
+          import json, os
+          request = {
+              'action': os.environ['RECOVERY_ACTION'],
+              'runId': os.environ['GITHUB_RUN_ID'],
+              'operatorReviewReference': os.environ['OPERATOR_REVIEW_REFERENCE'],
+              'riskApprovalSha256': '8a8b469b24089b456792cb699eeb2e5d7b40abec98e5965d2fbb6b90c4b9ff19',
+              'backup': {
+                  'receiptRun': '40168180719',
+                  'storeSha': '2fe787ae243bb8eb82827e224be87ed00796fccc',
+                  'storeId': 1403152795,
+                  'archiveSha256': '498d4ca330db048fed33a640324eaaf58e6c56d6d58cd892c39d865b67cd7433',
+              },
+          }
+          with open(os.environ['RUNNER_TEMP']+'/original-recovery-request.json', 'x') as stream:
+              json.dump(request, stream, sort_keys=True)
+          PY
+          python3 -B ops/restore-original-service.py --emit --action restore-original --request-json "$RUNNER_TEMP/original-recovery-request.json" --preparation-source ops/inactive-staging/prepare_pair.py > "$RUNNER_TEMP/original-recovery.py"
+      - name: Connect through existing approved production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Restore only the unchanged original service
+        run: |
+          set -euo pipefail
+          tailscale ssh root@hermes 'python3 -I -B -' < "$RUNNER_TEMP/original-recovery.py"
