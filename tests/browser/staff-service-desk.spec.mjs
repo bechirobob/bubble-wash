@@ -97,19 +97,34 @@ test('rider vendor collection does not display customer destination or unrelated
 });
 
 test('support dossier preserves case draft and failed writes never claim success', async ({ page }, testInfo) => {
+  const caseReads = [];
+  const pageErrors = [];
+  const failedCaseReads = [];
+  page.on('requestfailed', request => { const url = new URL(request.url()); if (url.pathname === '/api/staff/automation/case' && failedCaseReads.length < 20) failedCaseReads.push({ caseId: (url.searchParams.get('caseId') || '').slice(0, 80), failure: (request.failure()?.errorText || '').slice(0, 200) }); });
+  page.on('pageerror', error => { if (pageErrors.length < 10) pageErrors.push(error.message.slice(0, 300)); });
+  try {
   await signIn(page, 'support');
   await page.route('**/api/submissions', route => route.fulfill({ json: { ok: true, records } }));
-  await page.route('**/api/staff/automation/case?*', route => { const id = new URL(route.request().url()).searchParams.get('caseId'); return route.fulfill({ json: { ok: true, records: records.filter(row => row.data.ticketId === id) } }); });
+  await page.route('**/api/staff/automation/case?*', route => { const id = new URL(route.request().url()).searchParams.get('caseId'); const projected = records.filter(row => row.data.ticketId === id); if (caseReads.length < 20) caseReads.push({ id: (id || '').slice(0, 80), recordIds: projected.slice(0, 10).map(row => row.id.slice(0, 80)) }); return route.fulfill({ json: { ok: true, records: projected } }); });
   await page.route('**/api/submit', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic save unavailable' } }));
   await page.goto('/support');
   await expect(page.locator('.staffCaseDeskDossier')).toContainText('CASE-018');
   await page.locator('.staffCaseDeskDossier').getByLabel('Case note', { exact: true }).fill('Draft to retain');
+  await expect(page.locator('.staffCaseDeskDossier').getByLabel('Case note', { exact: true })).toHaveValue('Draft to retain');
   await page.locator('.staffCaseDeskIndex').getByRole('link').filter({ hasText: 'CASE-021' }).click();
   await expect(page.locator('.staffCaseDeskDossier')).toContainText('CASE-021');
   await page.locator('.staffCaseDeskIndex').getByRole('link').filter({ hasText: 'CASE-018' }).click();
+  await expect(page).toHaveURL(/case=CASE-018/);
+  await expect(page.locator('.supportDeskSection')).toHaveAttribute('aria-busy', 'false');
+  await expect(page.locator('.staffCaseDeskDossier .staffCaseDeskReference')).toContainText('CASE-018');
   await expect(page.locator('.staffCaseDeskDossier').getByLabel('Case note', { exact: true })).toHaveValue('Draft to retain');
   await page.locator('.staffCaseDeskDossier').getByRole('button', { name: 'Save case action', exact: true }).click();
   await expect(page.locator('.staffCaseDeskDossier')).toContainText('Synthetic save unavailable');
   await expect(page.locator('.staffCaseDeskDossier').getByLabel('Case note', { exact: true })).toHaveValue('Draft to retain');
   await page.screenshot({ path: testInfo.outputPath('support-save-failure.png'), fullPage: true });
+  } catch (error) {
+    console.log(JSON.stringify({ fixture: 'support-draft-diagnostic', project: testInfo.project.name, path: (() => { const url = new URL(page.url()); return `${url.pathname}${url.search}`.slice(0, 300); })(), caseReads, failedCaseReads, pageErrors, visibleText: (await page.locator('main').innerText().catch(() => 'No main element')).slice(0, 6000) }));
+    await page.screenshot({ path: testInfo.outputPath('support-draft-failure.png'), fullPage: true }).catch(() => {});
+    throw error;
+  }
 });
