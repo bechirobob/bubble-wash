@@ -1907,3 +1907,14 @@ html:not([data-input-modality="pointer"]) .focusedPlanSegment:has(input:focus-vi
 
 
 .staffAppInstall { display: inline-flex; align-items: center; min-height: 44px; text-underline-offset: 3px; }
+
+/* Keep customer-supplied names and addresses inside the existing order layout. */
+.customerOrderSummary { min-width: 0; }
+.customerOrderSummary .sectionHeading > div { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.customerOrderSummary .sectionHeading > button { flex: none; max-width: 100%; }
+.customerOrderSummary .recordList { overflow-wrap: anywhere; }
+/* Standalone navigation/actions retain the same appearance and usable targets. */
+.redesignTextNav a, .serviceConditions > .inlineIconLink { min-height: 44px; }
+@media (max-width: 600px) {
+  .customerOrderSummary .sectionHeading { flex-direction: column; align-items: flex-start; gap: 12px; }
+}

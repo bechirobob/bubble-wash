@@ -83,4 +83,38 @@
 .portalPage.staffDesk :is(.staffSectionNav a, .staffAccountMenuBody a, a.button, a.brand, .staffSectionHeader > a, a.staffLaneLink, .staffDeskFoot a, .staffCapacityStrip > a, a.staffBackLink, a.staffTicketDetails, .staffCaseDeskOrder > a, .customerContactActions > a) { text-decoration: none; }
 .portalPage.staffDesk .staffDeskFoot a { flex: 0 0 auto; white-space: nowrap; }
 
-.portalPage.staffDesk .staffWorkspaceSwitcherIcon { width:18px; height:18px; flex:none; }
+.portalPage.staffDesk .staffWorkspaceSwitcherIcon { width:20px; height:20px; flex:none; }
+/* Contact actions keep the same touch target as adjacent route controls. */
+.portalPage.staffDesk .customerContactActions > a { display:inline-flex; align-items:center; min-height:44px; }
+
+/* Approved stage spacing: keep each count inside its own service-stage control. */
+.portalPage.staffDesk .staffStageSelector {
+  display:grid;
+  grid-template-columns:30px minmax(0,1fr) minmax(0,max-content);
+  gap:10px;
+  min-width:0;
+}
+.portalPage.staffDesk .staffStageSelector span { min-width:0; overflow-wrap:anywhere; }
+.portalPage.staffDesk .staffStageSelector b { margin-left:0; min-width:0; max-width:100%; overflow-wrap:anywhere; text-align:right; }
+@media(max-width:700px) {
+  .portalPage.staffDesk .staffStageLanes { column-gap:8px; }
+  .portalPage.staffDesk .staffStageSelector {
+    grid-template-columns:24px minmax(0,1fr);
+    padding:10px 6px;
+    gap:7px 6px;
+  }
+  .portalPage.staffDesk .staffStageSelector .staffFlowIcon { width:24px; height:24px; }
+  .portalPage.staffDesk .staffStageSelector b {
+    justify-self:start;
+    text-align:left;
+    max-width:100%;
+    overflow-wrap:anywhere;
+    line-height:1.2;
+  }
+}
+
+/* Keep long saved names inside their job sheet and queue cells. */
+.portalPage.staffDesk .staffTicketHeader > div { min-width:0; }
+.portalPage.staffDesk .staffTicketHeader h2,
+.portalPage.staffDesk .staffRoleQueueRow :is(strong, small) { overflow-wrap:anywhere; }
+.portalPage.staffDesk .staffTicketHeader > .staffOrderState { flex-shrink:0; }

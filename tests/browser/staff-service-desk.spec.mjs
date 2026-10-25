@@ -12,7 +12,7 @@ test.use({ serviceWorkers: 'block' });
 async function signIn(page, role) {
   // The loopback fixture explicitly trusts these TEST-NET clients. Keep the real
   // 10/minute login limiter intact; each role/device is a distinct test client.
-  // Early acceptance plus the full suite uses at most two logins per identity.
+  // Early acceptance plus the full suite stays below ten logins per role/device identity.
   const projectIndex = ['portrait-320', 'portrait-390', 'webkit-portrait-390', 'desktop-1440'].indexOf(test.info().project.name);
   const roleIndex = ['admin', 'vendor', 'driver', 'support'].indexOf(role);
   expect(projectIndex).toBeGreaterThanOrEqual(0);
@@ -37,7 +37,8 @@ async function fixtureOrders(page, readRows) {
 
 async function expectWorkspaceSwitcher(page) {
   const trigger = page.locator('.staffAccountMenu > summary');
-  await expect(trigger.locator('svg[aria-hidden="true"] rect')).toHaveCount(4);
+  await expect(trigger.locator('svg[aria-hidden="true"] path')).toHaveAttribute('d', 'M-8 -4H8M-8 4H3');
+  await expect(trigger.locator('svg rect')).toHaveCount(0);
   await expect(trigger).not.toContainText('⌄');
   await expect(trigger).toHaveCSS('min-height', '44px');
 }
@@ -86,6 +87,7 @@ test('approved service board stays compact and history tools are secondary', asy
   }
   await page.locator('.staffAccountMenu > summary').click();
   await expectStaffControlLinks(page);
+  await page.screenshot({ path:testInfo.outputPath('workspace-menu-open.png'), fullPage:false });
   await page.locator('.staffAccountMenu > summary').click();
   await expect(page.locator('.staffAccountMenu')).not.toHaveAttribute('open', '');
   await page.screenshot({ path: testInfo.outputPath('service-board.png'), fullPage: true });
@@ -199,4 +201,83 @@ test('staff link treatment leaves customer inline policy links underlined', asyn
   const proseLink = page.getByRole('link', { name: 'cancellation and refund policy', exact: true });
   await expect(proseLink).toBeVisible();
   await expect(proseLink).toHaveCSS('text-decoration-line', 'underline');
+});
+
+test('staff customer contact actions retain aligned touch targets and exact destinations', async ({ page }, testInfo) => {
+  await signIn(page, 'admin');
+  const order = { ...orders[0], phone: '0200000000', email: 'customer@example.invalid' };
+  const assertOrdersRead = await fixtureOrders(page, [order]);
+  await page.goto(`/admin?view=orders&order=${encodeURIComponent(order.orderId)}`);
+  await assertOrdersRead();
+  await page.locator('.staffDetailDisclosure > summary').filter({ hasText: 'Customer and collection' }).click();
+  const actions = page.locator('.customerContactActions');
+  const call = actions.getByRole('link', { name: 'Call customer', exact: true });
+  const email = actions.getByRole('link', { name: 'Email customer', exact: true });
+  await expect(call).toBeVisible();
+  await expect(call).toHaveAttribute('href', 'tel:0200000000');
+  await expect(email).toHaveAttribute('href', `mailto:customer@example.invalid?subject=${encodeURIComponent(`Bubble Wash order ${order.bookingReference}`)}`);
+  for (const link of [call, email]) {
+    await expect(link).toHaveCSS('min-height', '44px');
+    await expect(link).toHaveCSS('align-items', 'center');
+    const bounds = await link.boundingBox();
+    expect(bounds.height).toBeGreaterThanOrEqual(44);
+  }
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await actions.scrollIntoViewIfNeeded();
+  await page.screenshot({ path:testInfo.outputPath('contact-action-targets.png'), fullPage:false });
+});
+
+// Synthetic stress projections exercise geometry, never production order counts.
+test('service stage counts stay paired with their own icons at three digit volumes', async ({ page }, testInfo) => {
+  await signIn(page, 'admin');
+  const rows = [[orders[1], 3], [orders[2], 24], [orders[0], 128]].flatMap(([base, count], group) =>
+    Array.from({ length: count }, (_, index) => ({ ...base, orderId: `alignment-${group}-${index}`, bookingReference: `BW-${group}-${index}` })));
+  const read = await fixtureOrders(page, rows);
+  await page.goto('/admin');
+  await read();
+  const selectors = page.locator('.staffStageSelector');
+  await expect(selectors.locator('b')).toHaveText(['3', '24', '128']);
+  await expect(selectors.locator('span')).toHaveText(['Collection', 'Washing', 'Return']);
+  const bounds = await selectors.evaluateAll(buttons => buttons.map(button => {
+    const rect = element => { const b = element.getBoundingClientRect(); return { x:b.x, right:b.right, y:b.y, bottom:b.bottom, width:b.width, height:b.height }; };
+    return { button:rect(button), icon:rect(button.querySelector('svg')), count:rect(button.querySelector('b')), label:rect(button.querySelector('span')) };
+  }));
+  for (const {button, icon, count, label} of bounds) {
+    expect(button.height).toBeGreaterThanOrEqual(44);
+    for (const content of [icon, count, label]) {
+      expect(content.x).toBeGreaterThanOrEqual(button.x - 1);
+      expect(content.right).toBeLessThanOrEqual(button.right + 1);
+      expect(content.bottom).toBeLessThanOrEqual(button.bottom + 1);
+    }
+    if (testInfo.project.use.viewport.width <= 700) {
+      expect(icon.width).toBe(24);
+      expect(count.x - icon.right).toBeCloseTo(6, 0);
+    }
+  }
+  for (let i=1;i<bounds.length;i++) expect(bounds[i].button.x - bounds[i-1].button.right).toBeGreaterThanOrEqual(7.5);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.locator('.staffStageBoard').scrollIntoViewIfNeeded();
+  await page.screenshot({ path:testInfo.outputPath('stage-counts-3-24-128.png'), fullPage:false });
+});
+
+test('long rider destination names stay inside ticket and assigned stop rows', async ({ page }, testInfo) => {
+  await signIn(page, 'driver');
+  const vendor = 'SyntheticLaundryPartnerWithAnUnbrokenReferenceForContainmentVerification';
+  const ready = { ...orders[2], driver:'Synthetic driver', vendor, status:'Ready', workflowStage:{ ...orders[2].workflowStage, key:'ready', label:'Ready' } };
+  const read = await fixtureOrders(page, [ready]);
+  await page.goto('/drivers');
+  await read();
+  await expect(page.locator('.staffTicketHeader h2')).toHaveText(vendor);
+  const ticket = page.locator('.staffTicketHeader');
+  const heading = await ticket.locator('h2').boundingBox();
+  const state = await ticket.locator('.staffOrderState').boundingBox();
+  const parent = await ticket.boundingBox();
+  expect(heading.x + heading.width).toBeLessThanOrEqual(state.x + 1);
+  expect(state.x + state.width).toBeLessThanOrEqual(parent.x + parent.width + 1);
+  await expect(page.locator('.staffRoleQueueRow')).toHaveCount(1);
+  await expect(page.locator('.staffRoleQueueRow')).toContainText(vendor);
+  const overflowing = await page.locator('.staffRoleQueueRow').evaluateAll(rows => rows.filter(row => row.scrollWidth > row.clientWidth).length);
+  expect(overflowing).toBe(0);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path:testInfo.outputPath('rider-long-destination.png'), fullPage:true });
 });
