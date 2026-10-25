@@ -10,8 +10,8 @@ import subprocess
 STATE=Path('/var/lib/bubblewash-release')
 RUNTIME=Path('/home/ubuntu/bubblewash-runtime')
 CURRENT=Path('/home/ubuntu/bubblewash-pilot')
-PLAN_ID='1f28e00f3ba8fd417d5d309718fd23337efad44e0fab604e1d287c246cf8a965'
-PLAN_SHA='eb9ef6e246eac1db04c75c6ea3f4f02905cf6129c90f6c930575f703ca232e66'
+PLAN_ID='6a060a0b9950f874e2fb46db0739521b4b8be847903598928d03ff0094f81d7c'
+PLAN_SHA='9c745a619732c53f3fe61a55de59cd4c10a24c714c4f1595d09642db099cb60b'
 PHASES={'HELD','STOPPED','BACKED_UP','MIGRATING','MIGRATED','TARGET_SELECTED','FALLBACK_SELECTED','STARTED','ACCEPTED','FALLBACK_ACCEPTED','CANDIDATE_READY','FALLBACK_READY'}
 
 def require(value):
@@ -124,7 +124,8 @@ def inspect():
         value=json_unique(read(path));require(value.get('schema')==1 and value.get('phase') in PHASES)
         require(re.fullmatch('[a-f0-9]{64}',value.get('planHash','')))
         role=next((key for key in ('old','candidate','fallback') if plan and value.get('target')==plan.get(key)),None)
-        return {'exists':True,'phase':value['phase'],'planHash':value['planHash'],'selectedRole':role,'matchesReviewedPlan':bool(plan and value['planHash']==durable_hash(plan))}
+        expected=durable_hash(plan) if plan else None
+        return {'exists':True,'phase':value['phase'],'planHash':value['planHash'],'derivedPlanHash':expected,'selectedRole':role,'matchesReviewedPlan':bool(expected and value['planHash']==expected)}
     observe('journal',journal)
     def pointer():
         require(CURRENT.is_symlink());target=str(CURRENT.resolve(strict=True))

@@ -83,6 +83,12 @@ class Holds(unittest.TestCase):
         before={p.name:p.read_bytes() for p in self.root.iterdir()}
         self.assertEqual(self.snapshot(),self.snapshot())
         self.assertEqual(before,{p.name:p.read_bytes() for p in self.root.iterdir()})
+    def test_materialized_plan_file_hash_is_not_the_durable_journal_hash(self):
+        plan_file_sha='9c745a619732c53f3fe61a55de59cd4c10a24c714c4f1595d09642db099cb60b'
+        self.assertNotEqual(pwa.JOURNAL_PLAN,plan_file_sha)
+        file=self.root/'transition.json';value=json.loads(file.read_text())
+        file.write_text(json.dumps({**value,'planHash':plan_file_sha}))
+        with self.assertRaises(ValueError):self.snapshot()
     def test_app_hold_refused(self):
         (self.root/'app-hold').write_bytes(b'held\n')
         with self.assertRaises(ValueError):self.snapshot()

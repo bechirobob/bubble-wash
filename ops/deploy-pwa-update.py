@@ -16,7 +16,8 @@ import types
 import zlib
 
 STATE = Path('/var/lib/bubblewash-release')
-JOURNAL_PLAN = '9c745a619732c53f3fe61a55de59cd4c10a24c714c4f1595d09642db099cb60b'
+# Durable controller projection identity, not the materialized plan-file digest.
+JOURNAL_PLAN = 'fa82c3eac9f920f86a04f45a64ec3a9259b567585fdd74ac30b06b7d7062dd65'
 BASE_SHA = '5f256800d65dbe3b69f54e95afa0e8ab30b5e881'
 DEPENDENCIES = ('deploy-preserving.py', 'deploy-survey-only.py', 'deploy-survey-update.py', 'survey-only-source-pins.json',
                 'inactive-staging/prepare_pair.py', 'inactive-staging/stage_artifact.py')

@@ -1,3 +1,6 @@
+import ast
+import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -49,4 +52,26 @@ class Tests(unittest.TestCase):
    result=m.inspect()
   self.assertFalse(result['planVerified']);self.assertEqual(result['journal'],{'exists':False});self.assertFalse(result['holds']['app-hold']['exists'])
   self.assertNotIn('PRIVATE_TOKEN',json.dumps(result));self.assertFalse(result['databaseOpened'])
+ def test_durable_hash_matches_exact_adapter_and_controller_not_plan_file(self):
+  root=Path(__file__).resolve().parents[1]
+  source=ast.parse((root/'ops/integration-release/host_adapter.py').read_text())
+  function=next(n for n in source.body if isinstance(n,ast.FunctionDef) and n.name=='durable_plan')
+  package=m.STATE/'packages'/m.PLAN_ID
+  files={'contracts.py':'a'*64,'vendor/bubblewash-durable-controller/controller.py':'b'*64,'vendor/bubblewash-migration-transition/transition.py':'c'*64}
+  control=types.SimpleNamespace(__file__=str(package/'vendor/bubblewash-durable-controller/controller.py'),core=types.SimpleNamespace(__file__=str(package/'vendor/bubblewash-migration-transition/transition.py')))
+  residual='Deployment coordinates the three known Bubble Wash units under the exclusive deployment lock and persistent holds. Privileged root, ubuntu and other operators or unknown invokers are not technically excluded; they must not write the database or launch Bubble Wash during the approved window.'
+  namespace={'copy':copy,'Path':Path,'HERE':package,'digest':lambda p:files[Path(p).relative_to(package).as_posix()], 'COORDINATED_UNITS':('system/bubblewash-maintenance.timer','system/bubblewash-maintenance.service','user/bubblewash-local.service'),'RESIDUAL_ASSUMPTION_SHA256':hashlib.sha256(residual.encode()).hexdigest()}
+  exec(compile(ast.Module(body=[function],type_ignores=[]),'actual-durable-projection','exec'),namespace)
+  names=('schema','oldSha','old','candidate','fallback','current','marker','state','database','databaseIdentity','snapshot','releaseShas','manifests','dependencies','gitBindings','sourceContractSha256','adapterFiles','ownerContract','ownerEvidenceSha256','ownerEvidencePath','node','units')
+  plan={name:{'synthetic':name} for name in names};plan.update(adapterFiles=files,guards={'envSha256':'d'*64,'database':{'inode':17}},hostAcceptance={'launcherAliases':['synthetic'],'knownInvokersSha256':'e'*64,'riskApprovalSha256':'f'*64},volatileReceipt={'run':123})
+  projected=namespace['durable_plan'](plan,control)
+  controller_source=ast.parse((root/'ops/integration-release/vendor/bubblewash-durable-controller/controller.py').read_text())
+  cls=next(n for n in controller_source.body if isinstance(n,ast.ClassDef) and n.name=='Controller')
+  init=next(n for n in cls.body if isinstance(n,ast.FunctionDef) and n.name=='__init__')
+  namespace={'hashlib':hashlib,'json':json};exec(compile(ast.Module(body=[init],type_ignores=[]),'actual-controller-identity','exec'),namespace)
+  instance=types.SimpleNamespace();namespace['__init__'](instance,projected,*([None]*8))
+  self.assertEqual(m.durable_hash(plan),instance.plan_hash)
+  self.assertNotEqual(m.durable_hash(plan),hashlib.sha256(json.dumps(plan,sort_keys=True).encode()).hexdigest())
+  self.assertNotEqual(m.durable_hash(plan),hashlib.sha256(json.dumps(projected,sort_keys=True,separators=(',',':')).encode()).hexdigest())
+  plan['volatileReceipt']['run']=456;self.assertEqual(m.durable_hash(plan),instance.plan_hash)
 if __name__=='__main__':unittest.main()
