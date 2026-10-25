@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Read only Caddy's local active HTTP routes. Never print configuration bodies."""
+from contextlib import contextmanager
+import tempfile
 import hashlib
 import copy
 import json
@@ -87,27 +89,123 @@ def exact_staff_delta(before, after):
     return count==1 and reduced==before
 
 
+CONFIG=Path('/etc/caddy/Caddyfile')
+
+@contextmanager
+def source_file(raw):
+    # Same protected directory preserves import context; collisions fail closed.
+    parent=CONFIG.parent
+    if parent.resolve(strict=True)!=parent:raise ValueError('noncanonical')
+    for item in (*parent.parents,parent):
+        info=item.lstat()
+        if info.st_uid!=0 or info.st_mode & 0o022:raise ValueError('mutable parent')
+    fd,name=tempfile.mkstemp(prefix='.bubblewash-staff-',suffix='.tmp',dir=parent)
+    path=Path(name)
+    try:
+        with os.fdopen(fd,'wb') as stream:
+            os.fchmod(stream.fileno(),0o600)
+            stream.write(raw);stream.flush();os.fsync(stream.fileno())
+        yield path
+    finally:path.unlink()
+
+# Only schema tokens, never dynamic keys (server names, headers, logger names).
+SCHEMA=set('apps http tls servers routes match host handle handler subroute reverse_proxy upstreams dial terminal group listen automatic_https automation policies subjects issuers module on_demand protocols logs errors headers request response set add delete admin logging storage'.split())
+PUBLIC_VALUES={'staff.bubblewash.co','127.0.0.1:3000','subroute','reverse_proxy'}
+
+def safe_shape(value,depth=0):
+    if depth>12:return 'DEPTH_LIMIT'
+    if isinstance(value,dict):
+        result={k:safe_shape(v,depth+1) for k,v in value.items() if k in SCHEMA}
+        result['otherKeyCount']=sum(k not in SCHEMA for k in value)
+        return result
+    if isinstance(value,list):return [safe_shape(v,depth+1) for v in value[:20]]+(['TRUNCATED'] if len(value)>20 else [])
+    if isinstance(value,bool) or value is None:return value
+    return value if isinstance(value,str) and value in PUBLIC_VALUES else 'REDACTED'
+
+def difference_details(before,after):
+    details=[];missing=object()
+    def description(value):
+        if value is missing:return {'type':'missing'}
+        if isinstance(value,dict):return {'type':'object','count':len(value)}
+        if isinstance(value,list):return {'type':'array','count':len(value)}
+        if value is None:return {'type':'null'}
+        if isinstance(value,bool):return {'type':'boolean'}
+        if isinstance(value,str):return {'type':'string'}
+        if isinstance(value,(int,float)):return {'type':'number'}
+        return {'type':'unknown'}
+    def emit(a,b,path):
+        if len(details)<80:details.append({'path':'/'.join(path),'before':description(a),'after':description(b)})
+    def visit(a,b,path):
+        if a==b or len(details)>=80:return
+        if len(path)>14:emit(a,b,path+['DEPTH_LIMIT']);return
+        if isinstance(a,dict) and isinstance(b,dict):
+            for key in sorted(set(a)|set(b)):
+                safe=key if key in SCHEMA else 'OTHER'
+                if key not in a or key not in b:emit(a.get(key,missing),b.get(key,missing),path+[safe,'PRESENCE'])
+                else:visit(a[key],b[key],path+[safe])
+                if len(details)>=80:break
+        elif isinstance(a,list) and isinstance(b,list):
+            if len(a)!=len(b):emit(a,b,path+['LENGTH'])
+            for i,(left,right) in enumerate(zip(a,b)):
+                visit(left,right,path+[str(i)])
+                if len(details)>=80:break
+        else:emit(a,b,path+['VALUE_OR_TYPE'])
+    visit(before,after,[])
+    return details
+
+def difference_paths(before,after):
+    return sorted({item['path'] for item in difference_details(before,after)})
+
+def candidate_diagnostic(before,after):
+    reduced=copy.deepcopy(after);shapes=[]
+    for server in reduced.get('apps',{}).get('http',{}).get('servers',{}).values():
+        routes=server.get('routes',[]);kept=[]
+        for route in routes:
+            if route.get('match')==[{'host':['staff.bubblewash.co']}]:shapes.append(safe_shape(route))
+            else:kept.append(route)
+        if len(routes)!=len(kept):server['routes']=kept
+    # Comparison-only sorting identifies ordering drift; never authorizes it.
+    ordered_before=copy.deepcopy(before);ordered_reduced=copy.deepcopy(reduced)
+    for config in (ordered_before,ordered_reduced):
+        for server in config.get('apps',{}).get('http',{}).get('servers',{}).values():
+            if 'routes' in server:server['routes'].sort(key=lambda route:json.dumps(route,sort_keys=True))
+    # Values of other hosts, settings, credentials and arbitrary keys stay local.
+    return {'staffOnlyTopLevelRouteCount':len(shapes),'staffOnlyRouteShapes':shapes[:4],
+            'afterRemovingStaffOnlyRoutesEqualsBaseline':reduced==before,
+            'remainingDifferenceIsOnlyTopLevelRouteOrder':reduced!=before and ordered_before==ordered_reduced,
+            'remainingDifferencePaths':difference_paths(before,reduced),
+            'remainingDifferenceDetails':difference_details(before,reduced),
+            'candidateDifferencePaths':difference_paths(before,after),
+            'candidateDifferenceDetails':difference_details(before,after),
+            'tlsUnchanged':before.get('apps',{}).get('tls')==after.get('apps',{}).get('tls')}
+
 def baseline_comparison(raw):
-    """Read/adapt only; stdout, stderr and private config never leave this host."""
-    values={}; report={}
-    for name, args, stdin in (
-        ('stdin', ['adapt','--config','-','--adapter','caddyfile'], raw),
-        ('file', ['adapt','--config','/etc/caddy/Caddyfile','--adapter','caddyfile'], None),
-        ('candidate', ['adapt','--config','-','--adapter','caddyfile'], raw+STAFF_BLOCK),
-    ):
+    """Adapt only; no validate, provision, reload or config replacement."""
+    values={};report={}
+    try:
+        version=subprocess.run(['/usr/bin/caddy','version'],capture_output=True,timeout=5)
+        match=re.match(rb'v?(\d+\.\d+\.\d+)(?:\s|[-+]|$)',version.stdout[:128])
+        report['caddyVersion']=match.group(1).decode() if version.returncode==0 and match else 'unavailable'
+    except Exception:report['caddyVersion']='unavailable'
+    def collect(name,path):
         try:
-            result=subprocess.run(['/usr/bin/caddy',*args],input=stdin,capture_output=True,
-                                  cwd='/etc/caddy',timeout=30)
+            result=subprocess.run(['/usr/bin/caddy','adapt','--config',str(path),'--adapter','caddyfile'],
+                                  capture_output=True,cwd=CONFIG.parent,timeout=30)
             if result.returncode!=0:
-                report[name]={'status':'adapt-command-failed'};continue
+                report[name]={'status':'adapt-command-failed'};return
             if len(result.stdout)>LIMIT:
-                report[name]={'status':'adapt-output-too-large'};continue
+                report[name]={'status':'adapt-output-too-large'};return
             value=json.loads(result.stdout)
             if not isinstance(value,dict):raise ValueError('non-object')
             values[name]=value;report[name]={'status':'ok'}
         except subprocess.TimeoutExpired:report[name]={'status':'adapt-timeout'}
         except json.JSONDecodeError:report[name]={'status':'adapt-non-json'}
         except Exception:report[name]={'status':'adapt-unavailable'}
+    collect('file',CONFIG)
+    for name,body in (('sibling',raw),('candidate',raw+STAFF_BLOCK)):
+        try:
+            with source_file(body) as path:collect(name,path)
+        except Exception:report[name]={'status':'temporary-adapt-unavailable'}
     try:
         with urllib.request.urlopen('http://127.0.0.1:2019/config/',timeout=5) as response:
             body=response.read(LIMIT+1)
@@ -116,7 +214,7 @@ def baseline_comparison(raw):
         if not isinstance(value,dict):raise ValueError('non-object')
         values['active']=value;report['active']={'status':'ok'}
     except Exception:report['active']={'status':'active-unavailable'}
-    for left,right,label in (('stdin','file','stdinEqualsFile'),('file','active','fileEqualsActive'),('stdin','active','stdinEqualsActive')):
+    for left,right,label in (('sibling','file','siblingEqualsFile'),('file','active','fileEqualsActive'),('sibling','active','siblingEqualsActive')):
         if left in values and right in values:report[label]=values[left]==values[right]
     # Fixed schema categories only. No routes, hostnames, paths, values, stderr,
     # arbitrary object keys or configuration bodies are emitted.
@@ -127,9 +225,14 @@ def baseline_comparison(raw):
         aa,bb=a.get('apps',{}),b.get('apps',{})
         report['httpDifference']=aa.get('http')!=bb.get('http') if isinstance(aa,dict) and isinstance(bb,dict) else True
         report['tlsDifference']=aa.get('tls')!=bb.get('tls') if isinstance(aa,dict) and isinstance(bb,dict) else True
-    if 'stdin' in values and 'candidate' in values:
-        try:report['candidateExactAdditiveDelta']=exact_staff_delta(values['stdin'],values['candidate'])
+    if 'sibling' in values and 'candidate' in values:
+        try:report['candidateExactAdditiveDelta']=exact_staff_delta(values['sibling'],values['candidate'])
         except Exception:report['candidateExactAdditiveDelta']=False
+        try:report['candidateDiagnostic']=candidate_diagnostic(values['sibling'],values['candidate'])
+        except Exception:report['candidateDiagnostic']={'status':'shape-unavailable'}
+    report['baselineGuardPassed']=report.get('siblingEqualsFile') is True and report.get('fileEqualsActive') is True
+    report['candidateValidationPerformed']=False
+    report['reloadPerformed']=False
     placeholders=re.findall(rb'\{\$([A-Za-z_][A-Za-z0-9_]*)(?::([^}]*))?\}',raw)
     report['environmentPlaceholderCount']=len(placeholders)
     report['environmentPlaceholderUnsetCount']=sum(name.decode() not in os.environ for name,_ in placeholders)
