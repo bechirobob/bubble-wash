@@ -40,6 +40,12 @@ def checkpoint(label):
 def require(ok):
     if not ok:raise ValueError('exact cleanup refused')
 
+def backup_store_id(value):
+    # Pins/CI use text; the frozen verifier deliberately requires numeric receipt identity.
+    # Accept only this reviewed canonical private repository ID, not coercible aliases.
+    require(type(value) is str and value=='1403152795')
+    return int(value)
+
 def sha(raw):return hashlib.sha256(raw).hexdigest()
 
 def fsync_dir(path):
@@ -184,7 +190,7 @@ class Host:
         status=Path(values['BUBBLEWASH_BACKUP_STATUS_PATH']);archive=Path(values['BUBBLEWASH_BACKUP_OFFSITE_DIR'])/receipt['filename']
         self.guards.safe_path(status,self.owner);self.guards.safe_path(archive,self.owner)
         checkpoint('backup-verification-and-freshness')
-        self.core.verify_receipt(receipt,json.loads(status.read_bytes()),time.time(),self.pins['receiptRun'],self.pins['storeSha'],self.pins['storeId'])
+        self.core.verify_receipt(receipt,json.loads(status.read_bytes()),time.time(),self.pins['receiptRun'],self.pins['storeSha'],backup_store_id(self.pins['storeId']))
         checkpoint('backup-archive-bytes')
         require(archive.stat().st_size==receipt['size'] and self.core.digest(archive)==self.pins['backupSha256'])
 

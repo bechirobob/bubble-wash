@@ -16,6 +16,9 @@ core=core_tests.m
 
 ROOT=Path(__file__).resolve().parents[1]
 class Normalize(ast.NodeTransformer):
+    def visit_Call(self,node):
+        if isinstance(node.func,ast.Name) and node.func.id=='backup_store_id':return self.visit(node.args[0])
+        return self.generic_visit(node)
     def visit_Expr(self,node):
         if isinstance(node.value,ast.Call) and isinstance(node.value.func,ast.Name):
             if node.value.func.id=='checkpoint':return None

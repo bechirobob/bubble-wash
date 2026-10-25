@@ -1,0 +1,19 @@
+{
+  "schema": "becore-encrypted-backup-release/v2",
+  "repository": "bechirobob/bubble-wash",
+  "storageRepository": "bechirobob/becore-backups",
+  "storage": "private-github-release",
+  "storageSha": "2fe787ae243bb8eb82827e224be87ed00796fccc",
+  "storageRepositoryId": 1403152795,
+  "runId": "40202547347",
+  "encrypted": true,
+  "restoreTested": true,
+  "downloadVerified": true,
+  "automaticExpiry": false,
+  "retentionDays": null,
+  "filename": "bubblewash-2026-10-25T14-30-39.335Z.sqlite.enc",
+  "sha256": "17edac00add76517191376475106ca7f12e2d47497437f586d6d6bd9b88862b2",
+  "sourceSha": "1ddf328332836aeefe41d4a4e6f05ed79d4589a3",
+  "size": 446501,
+  "verifiedAt": "2026-10-25T14:30:47Z"
+}
