@@ -98,7 +98,18 @@ export async function featureSchemaModel(root) {
       location.exec("ALTER TABLE driver_location_stops ADD COLUMN order_id TEXT NOT NULL DEFAULT ''");
       upgradedLocationSchema = canonical(snapshot(location, 'driver_location_stops'));
     } finally { location.close(); }
-    return { Database, expected, required, preExpected, preRequired, featureDdl, oldSchema, upgradedSchema,
+    // The public offline reset script creates this same table with different
+    // SQL indentation. Admit only its exact observed historical schema, never
+    // normalize arbitrary SQL or execute the reset script itself.
+    const roster = new Database(':memory:');
+    let rosterResetSchema;
+    try {
+      roster.exec(template(source.read('scripts/reset-production-roster.mjs'), 'database.exec(`'));
+      rosterResetSchema = canonical(snapshot(roster, 'production_roster_resets'));
+      requireThat(groupSchemas(roster).size === 1 && digest(rosterResetSchema) ===
+        '7b9dec121f2e38b692feca0f247ebde6e50904225a945902d0513fdfb53d1f54');
+    } finally { roster.close(); }
+    return { Database, expected, required, preExpected, preRequired, featureDdl, oldSchema, upgradedSchema, rosterResetSchema,
       oldLocationSchema, upgradedLocationSchema, unchanged: source.unchanged };
   } finally { model.close(); }
 }
@@ -109,7 +120,7 @@ export function inspectFeatureSchema(db, model, complete = false) {
   requireThat(objects.every(row => ['table','index'].includes(row.type) && model.expected.has(row.tbl_name)));
   const actual = groupSchemas(db);
   requireThat([...model.required].every(name => actual.has(name)));
-  for (const [name, schema] of actual) requireThat(schema === model.expected.get(name) || name === 'operational_work_ownership' && (schema === model.upgradedSchema || !complete && schema === model.oldSchema) || name === 'driver_location_stops' && (schema === model.upgradedLocationSchema || !complete && schema === model.oldLocationSchema));
+  for (const [name, schema] of actual) requireThat(schema === model.expected.get(name) || name === 'production_roster_resets' && schema === model.rosterResetSchema || name === 'operational_work_ownership' && (schema === model.upgradedSchema || !complete && schema === model.oldSchema) || name === 'driver_location_stops' && (schema === model.upgradedLocationSchema || !complete && schema === model.oldLocationSchema));
   if (complete) requireThat(FIVE.every(name=>actual.has(name)));
   return actual;
 }

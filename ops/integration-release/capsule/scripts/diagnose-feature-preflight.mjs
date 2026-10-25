@@ -45,12 +45,12 @@ export async function diagnoseFeaturePreflight(root, database) {
     counts.unexpectedTypes = objects.filter(row => !['table', 'index'].includes(row.type)).length;
     counts.unknownObjects = objects.filter(row => !expected.has(row.tbl_name)).length;
     counts.missingRequiredTables = [...model.preRequired].filter(name => !actual.has(name)).length;
-    counts.mismatchedTables = [...actual].filter(([name, schema]) => !(schema === expected.get(name) ||
+    counts.mismatchedTables = [...actual].filter(([name, schema]) => !(schema === expected.get(name) || name === 'production_roster_resets' && schema === model.rosterResetSchema ||
       name === 'operational_work_ownership' && [model.upgradedSchema, model.oldSchema].includes(schema) ||
       name === 'driver_location_stops' && [model.upgradedLocationSchema, model.oldLocationSchema].includes(schema))).length;
     for (const [name, schema] of expected) {
       const found = actual.get(name);
-      const admitted = found === schema || name === 'operational_work_ownership' && [model.upgradedSchema, model.oldSchema].includes(found) ||
+      const admitted = found === schema || name === 'production_roster_resets' && found === model.rosterResetSchema || name === 'operational_work_ownership' && [model.upgradedSchema, model.oldSchema].includes(found) ||
         name === 'driver_location_stops' && [model.upgradedLocationSchema, model.oldLocationSchema].includes(found);
       if (found === undefined ? model.preRequired.has(name) : !admitted) {
         if (knownDiscrepancies.length >= 64) { stage = 'OBJECT_LIMIT'; error = 'OBJECT_LIMIT_EXCEEDED'; return result(); }

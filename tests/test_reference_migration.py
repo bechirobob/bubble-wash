@@ -2,6 +2,7 @@
 import json
 import multiprocessing
 import os
+import re
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -196,6 +197,21 @@ db.close();
             return output
         self.host.node = crashing
         self.fixture.make_controller().execute()
+
+    def test_exact_historical_roster_schema_and_rows_survive_full_migration(self):
+        text=(self.candidate/'scripts/reset-production-roster.mjs').read_text()
+        ddl=re.search(r'CREATE TABLE IF NOT EXISTS production_roster_resets \([\s\S]*?\);',text)[0]
+        with sqlite3.connect(self.fixture.db) as db:
+            db.executescript(ddl)
+            db.execute("INSERT INTO production_roster_resets VALUES ('synthetic-reset','time','backup','hash','{}','{}','{}')")
+            before=db.execute("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE tbl_name='production_roster_resets' ORDER BY type,name").fetchall()
+            records=db.execute('SELECT rowid,* FROM production_roster_resets').fetchall()
+        self.original_tables=None; self.before=self.protected_rows()
+        self.assertEqual(self.control.execute(),'candidate-ready')
+        self.assertEqual(self.protected_rows(),self.before)
+        with sqlite3.connect(self.fixture.db) as db:
+            self.assertEqual(db.execute("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE tbl_name='production_roster_resets' ORDER BY type,name").fetchall(),before)
+            self.assertEqual(db.execute('SELECT rowid,* FROM production_roster_resets').fetchall(),records)
 
     def test_abrupt_between_commit_crash_and_recover_remain_held_without_retry(self):
         worker = multiprocessing.get_context('fork').Process(target=self.crash_after_labels)
