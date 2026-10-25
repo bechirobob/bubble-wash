@@ -57,22 +57,71 @@ class Transition(Delta):
             return b''
         self.runner=self.stack.enter_context(mock.patch.object(m,'run',side_effect=run))
     def test_verified_success_persists_source_and_recovery_copy(self):
-        m.main();self.assertEqual(self.config.read_bytes(),self.original+m.BLOCK)
+        m.main(check_only=False);self.assertEqual(self.config.read_bytes(),self.original+m.BLOCK)
         self.assertEqual((self.backup/'Caddyfile.before').read_bytes(),self.original)
         self.assertEqual(self.state,self.after)
     def test_known_baseline_reload_failure_restores_only_pending_file(self):
         self.failure='before'
-        with self.assertRaises(ValueError):m.main()
+        with self.assertRaises(ValueError):m.main(check_only=False)
         self.assertEqual(self.config.read_bytes(),self.original);self.assertEqual(self.state,self.before)
     def test_lost_ack_confirmed_applied_is_not_retried(self):
-        self.failure='after';m.main()
+        self.failure='after';m.main(check_only=False)
         self.assertEqual(sum(c.args[0][0]=='reload' for c in self.runner.call_args_list),1)
     def test_unknown_active_state_is_not_overwritten_or_retried(self):
         self.failure='unknown'
-        with self.assertRaises(ValueError):m.main()
+        with self.assertRaises(ValueError):m.main(check_only=False)
         self.assertEqual(self.state,{'unknown':'state'})
         self.assertEqual(sum(c.args[0][0]=='reload' for c in self.runner.call_args_list),1)
         self.assertEqual(self.config.read_bytes(),self.original+m.BLOCK)
+
+class GroupProof(Delta):
+    def setUp(self):
+        super().setUp()
+        self.before['apps']['http']['servers']['srv0']['routes'][0]['handle']=[{'handler':'subroute','routes':[{'group':'group0','handle':[{'handler':'a'}]},{'group':'group0','handle':[{'handler':'b'}]},{'group':'group1'}]}]
+        self.after=copy.deepcopy(self.before);self.after['apps']['http']['servers']['srv0']['routes'].insert(0,self.route)
+    def groups(self,config,after=True):return config['apps']['http']['servers']['srv0']['routes'][1 if after else 0]['handle'][0]['routes']
+    def reject(self,after):
+        with self.assertRaises(ValueError):m.verify_delta(self.before,after)
+    def test_bijective_rename_preserves_occurrences_and_input(self):
+        for route in self.groups(self.after):route['group']={'group0':'group2','group1':'group3'}[route['group']]
+        saved=copy.deepcopy(self.after);self.assertEqual(m.verify_delta(self.before,self.after),2);self.assertEqual(self.after,saved)
+    def test_bijective_swap_accepted(self):
+        for route in self.groups(self.after):route['group']={'group0':'group1','group1':'group0'}[route['group']]
+        self.assertEqual(m.verify_delta(self.before,self.after),2)
+    def test_unrecognized_handler_routes_group_remains_exact(self):
+        self.before['opaque']={'handler':'unknown','routes':[{'group':'group0'}]}
+        self.after['opaque']={'handler':'unknown','routes':[{'group':'group2'}]}
+        self.reject(self.after)
+    def test_group_split_merge_and_unchanged_collision_refused(self):
+        for names in [('group2','group3','group1'),('group2','group2','group2'),('group1','group1','group1')]:
+            a=copy.deepcopy(self.after)
+            for route,name in zip(self.groups(a),names):route['group']=name
+            self.reject(a)
+    def test_group_added_removed_custom_or_empty_refused(self):
+        for value in ('custom','',None):
+            a=copy.deepcopy(self.after);self.groups(a)[0]['group']=value;self.reject(a)
+        a=copy.deepcopy(self.after);del self.groups(a)[0]['group'];self.reject(a)
+        a=copy.deepcopy(self.after);a['apps']['http']['servers']['srv0']['routes'][1]['group']='group9';self.reject(a)
+    def test_order_change_and_other_scalar_refused(self):
+        a=copy.deepcopy(self.after);self.groups(a).reverse();self.reject(a)
+        a=copy.deepcopy(self.after);self.groups(a)[0]['handle'][0]['handler']='different';self.reject(a)
+    def test_opaque_reference_and_lookalike_group_refused(self):
+        for opaque in ({'header':'group0'},{'group0':'value'},{'routes':[{'group':'group0'}]}):
+            before=copy.deepcopy(self.before);before['opaque']=opaque;a=copy.deepcopy(before);a['apps']['http']['servers']['srv0']['routes'].insert(0,self.route)
+            for route in self.groups(a)[:2]:route['group']='group2'
+            with self.assertRaises(ValueError):m.verify_delta(before,a)
+        a=copy.deepcopy(self.after);self.groups(a)[0]['handle'][0]['routes']=[{'group':'group2'}];self.reject(a)
+    def test_same_generated_groups_in_another_server_register_collision(self):
+        self.before['apps']['http']['servers']['srv1']={'routes':[{'group':'group2'}]};self.after['apps']['http']['servers']['srv1']={'routes':[{'group':'group2'}]}
+        for route in self.groups(self.after)[:2]:route['group']='group2'
+        self.reject(self.after)
+
+class CheckOnly(Transition):
+    def test_default_check_only_no_validation_backup_replace_reload(self):
+        with mock.patch.object(m,'run_json') as run_json,mock.patch.object(m,'replace') as replace,mock.patch.object(m.tempfile,'mkdtemp') as backup:
+            m.main()
+        run_json.assert_not_called();replace.assert_not_called();backup.assert_not_called()
+        self.assertEqual(self.config.read_bytes(),self.original);self.assertEqual(self.state,self.before)
 
 class FileCompatibility(unittest.TestCase):
     def setUp(self):

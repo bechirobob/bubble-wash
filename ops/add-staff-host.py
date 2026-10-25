@@ -5,8 +5,10 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import stat
+import sys
 import subprocess
 import tempfile
 import urllib.request
@@ -59,6 +61,54 @@ def active():
     require(len(raw)<=LIMIT)
     return json.loads(raw)
 
+def route_group_slots(config):
+    """Recognize Route.group only in built-in HTTP route/subroute containers."""
+    slots={}
+    def routes(items,path):
+        for index,route in enumerate(items):
+            here=path+(index,)
+            if 'group' in route:slots[here+('group',)]=route['group']
+            for i,handler in enumerate(route.get('handle',[])):
+                if handler.get('handler')=='subroute':
+                    base=here+('handle',i)
+                    routes(handler.get('routes',[]),base+('routes',))
+                    routes(handler.get('errors',{}).get('routes',[]),base+('errors','routes'))
+    for name,server in config.get('apps',{}).get('http',{}).get('servers',{}).items():
+        base=('apps','http','servers',name)
+        routes(server.get('routes',[]),base+('routes',))
+        routes(server.get('errors',{}).get('routes',[]),base+('errors','routes'))
+    return slots
+
+def equal_except_generated_group_names(before,after):
+    """Comparison-only alpha-renaming: never modify the candidate to be loaded."""
+    left=route_group_slots(before);right=route_group_slots(after)
+    require(left.keys()==right.keys())
+    forward={};reverse={}
+    for path,a in left.items():
+        b=right[path]
+        require(isinstance(a,str) and isinstance(b,str) and
+                re.fullmatch(r'group[0-9]+',a) and re.fullmatch(r'group[0-9]+',b))
+        require(forward.setdefault(a,b)==b and reverse.setdefault(b,a)==a)
+    # A renamed symbol may not have opaque references outside recognized slots.
+    changed_left={a for a,b in forward.items() if a!=b}
+    changed_right={b for a,b in forward.items() if a!=b}
+    def no_external_references(value,path,slots,symbols):
+        if isinstance(value,dict):
+            for key,item in value.items():
+                require(key not in symbols)
+                no_external_references(item,path+(key,),slots,symbols)
+        elif isinstance(value,list):
+            for index,item in enumerate(value):no_external_references(item,path+(index,),slots,symbols)
+        elif isinstance(value,str) and value in symbols:require(path in slots)
+    no_external_references(before,(),left,changed_left)
+    no_external_references(after,(),right,changed_right)
+    comparison=copy.deepcopy(after)
+    for path,a in left.items():
+        item=comparison
+        for key in path[:-1]:item=item[key]
+        item[path[-1]]=a
+    return comparison==before
+
 def verify_delta(before,after):
     """No wildcard, header, upstream, listener, TLS policy or other route changes."""
     expected={'match':[{'host':[HOST]}],
@@ -72,7 +122,9 @@ def verify_delta(before,after):
             if route==expected:count+=1
             else:kept.append(route)
         if len(kept)!=len(routes):server['routes']=kept
-    require(count==1 and reduced==before)
+    require(count==1 and equal_except_generated_group_names(before,reduced))
+    left=route_group_slots(before);right=route_group_slots(reduced)
+    return len({name for path,name in left.items() if name!=right[path]})
 
 def protected(path,directory=False):
     require(path.resolve(strict=True)==path)
@@ -103,7 +155,7 @@ def replace(raw,info):
     finally:
         if os.path.exists(name):os.unlink(name)
 
-def main():
+def main(check_only=True):
     global STAGE
     STAGE="binding"
     require(os.geteuid()==0)
@@ -114,7 +166,11 @@ def main():
     # Sibling-file adaptation must equal the persistent file and active state.
     require(json.loads(run(['adapt','--config',str(CONFIG),'--adapter','caddyfile']))==before==active())
     STAGE="exact-additive-delta"
-    candidate=original+BLOCK;after=adapt(candidate);verify_delta(before,after)
+    candidate=original+BLOCK;after=adapt(candidate);renames=verify_delta(before,after)
+    if check_only:
+        require(read_original()[0]==original and active()==before)
+        print(json.dumps({'ok':True,'checkOnly':True,'exactStaffRoute':True,'otherRoutesEquivalent':True,'groupRenamesCount':renames,'configurationChanged':False,'validationPerformed':False,'reloadPerformed':False}))
+        return
     encoded=json.dumps(after,separators=(',',':')).encode()
     STAGE='candidate-validation'
     run_json('validate',encoded)
@@ -147,10 +203,12 @@ def main():
         if active()==before and CONFIG.read_bytes()==candidate:replace(original,info)
         raise
     print(json.dumps({'ok':True,'host':HOST,'upstream':'127.0.0.1:3000','configurationSha256':hashlib.sha256(candidate).hexdigest(),
-                      'backup':str(backup),'otherRoutesUnchanged':True,'automaticHttps':True,'applicationChanged':False}))
+                      'backup':str(backup),'otherRoutesEquivalent':True,'groupRenamesCount':renames,'automaticHttps':True,'applicationChanged':False}))
 
 if __name__=='__main__':
-    try:main()
+    try:
+        require(sys.argv[1:] in ([],['--check-only'],['--activate']))
+        main(check_only=sys.argv[1:]!=['--activate'])
     except Exception:
         print(json.dumps({'ok':False,'status':'staff-route-refused-or-unverified','stage':STAGE,'automaticRetry':False}))
         raise SystemExit(1)
