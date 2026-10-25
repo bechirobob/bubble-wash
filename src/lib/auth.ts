@@ -58,6 +58,12 @@ export function sanitizeNextPath(value?: string) {
   return allowedNextPaths.has(value) ? value : "/admin";
 }
 
+// Only use with a server-validated session; workspace authorization stays in place.
+export function staffSessionDestination(user: Pick<StaffUser, "role" | "allStaffAccess">, next?: string) {
+  if (user.role === "admin") return user.allStaffAccess ? sanitizeNextPath(next) : "/admin";
+  return { vendor: "/vendors", driver: "/drivers", support: "/support" }[user.role];
+}
+
 export function findStaffUser(identifier: string, password: string) {
   return currentStaffUsers().find((user) => user.email.toLowerCase() === identifier.trim().toLowerCase() && verifyPasswordHash(password, user.passwordHash)) ?? null;
 }
