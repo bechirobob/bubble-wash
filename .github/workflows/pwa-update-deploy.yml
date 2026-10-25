@@ -85,4 +85,4 @@ jobs:
       - name: Build, rehearse unchanged copies, and switch code with unchanged current configuration and holds
         run: |
           set -euo pipefail
-          tailscale ssh root@hermes "python3 -I -B - --candidate '$RELEASE_DIR' --sha '$RUNTIME_SHA' --expected-live '1ddf328332836aeefe41d4a4e6f05ed79d4589a3' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < "$RUNNER_TEMP/pwa-update.py"
+          tailscale ssh root@hermes "python3 -I -B - --candidate '$RELEASE_DIR' --sha '$RUNTIME_SHA' --expected-live '2af475865afe881bceac21bf641af76afda588ba' --backup-sha256 '$BACKUP_SHA' --receipt-run '$RECEIPT_RUN' --store-sha '$BACKUP_STORE_SHA' --store-id '$BACKUP_STORE_ID'" < "$RUNNER_TEMP/pwa-update.py"
