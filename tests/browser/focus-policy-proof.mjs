@@ -78,6 +78,27 @@ export async function verifyFocusPolicy({ browser, fixture, origin, output }) {
         // Owner Results reproduces both reported bugs with the actual scroll region/dialog.
         await context.addCookies([{ name: 'bubblewash_staff_session', value: fixture.sessions.owner, domain: 'localhost', path: '/', httpOnly: true, sameSite: 'Lax', secure: false }]);
         await page.goto(origin + '/admin/surveys');
+        await page.getByRole('heading', {name:'Survey results',exact:true}).waitFor();
+        const questionnaire = page.getByRole('combobox', { name:'Questionnaire', exact:true });
+        await questionnaire.waitFor();
+        const restingBorder = await questionnaire.evaluate(element => getComputedStyle(element).borderColor);
+        await press(questionnaire);
+        assert.equal(await page.locator('html').getAttribute('data-input-modality'), 'pointer');
+        await ring(questionnaire, false, 'survey select touch has no additional ring');
+        assert.equal(await questionnaire.evaluate(element => getComputedStyle(element).borderColor), restingBorder, 'touch does not change resting select border');
+        await page.screenshot({path:output+`survey-${name}-select-pointer.png`,fullPage:true});
+        await page.keyboard.press('Escape');
+        await tabTo(page, questionnaire); await ring(questionnaire, true, 'survey select reachable with visible keyboard focus');
+        await page.screenshot({path:output+`survey-${name}-select-keyboard.png`,fullPage:true});
+        if (!mobile) {
+          await page.emulateMedia({forcedColors:'active'});
+          await press(questionnaire); await ring(questionnaire, true, 'forced-colors select focus remains visible');
+          await page.keyboard.press('Escape'); await page.emulateMedia({forcedColors:'none'});
+        }
+        await press(questionnaire); await ring(questionnaire, false, 'survey select returns to unchanged touch appearance');
+        await page.keyboard.press('Escape');
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+        checks.push(`${name}: native survey select pointer border unchanged, keyboard focus and forced-colors policy verified`);
         await press(page.getByRole('tab', { name: 'Responses', exact: true }));
         const list = page.getByRole('region', { name: 'Survey responses', exact: true });
         await list.waitFor();

@@ -20,6 +20,7 @@ import { BrandLink } from "@/components/BrandLink";
 const supportTypes = ["Pickup delay", "Payment issue", "Missing item", "Quality complaint", "Vendor escalation", "General question"];
 
 type PortalShellProps = {
+  headingAction?: ReactNode;
   heading?: { eyebrow: string; title: string; subtitle: string };
   allStaffAccess?: boolean;
   title: string;
@@ -1466,7 +1467,7 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
   return data;
 }
 
-export function PortalShell({ heading, title, allStaffAccess = false, role, pageRole = role, userName, currentView, navigation, children }: PortalShellProps) {
+export function PortalShell({ headingAction, heading, title, allStaffAccess = false, role, pageRole = role, userName, currentView, navigation, children }: PortalShellProps) {
   const promise = heading ?? (currentView === "reconciliation" ? { eyebrow: "Read-only review", title: "Payments to check", subtitle: "Check invoices and related cases. This list cannot move money or change payments." } : currentView === "notifications" ? { eyebrow: "Message review", title: "Notification follow-up", subtitle: "Check unsent messages and unclear delivery results. This page cannot resend messages or turn on delivery services." } : currentView === "worklist" ? { eyebrow: "Staff operations", title: "Worklist", subtitle: "Tasks, availability checks, and follow-ups. Open the record before taking action." } : rolePromise(pageRole, currentView));
 
   async function logoutStaff() {
@@ -1494,8 +1495,8 @@ export function PortalShell({ heading, title, allStaffAccess = false, role, page
           </div>
         </details>
       </header>
-      <nav className="staffSectionNav" aria-label={`${pageRole} workspace sections`}>{mainNavigation.map((item) => <Link key={item.view} href={item.href} aria-current={item.view === currentView ? "page" : undefined}>{item.label === "People & onboarding" ? "People" : item.label}</Link>)}</nav>
-      <section className="staffViewHeader"><div><p className="eyebrow">{promise.eyebrow}</p><h1>{promise.title}</h1>{!primaryView ? <p>{promise.subtitle}</p> : null}</div>{pageRole === "vendor" && currentView === "jobs" ? <LaundryFlowIcon stage="washing" /> : pageRole === "driver" && currentView === "route" ? <LaundryFlowIcon stage="return" /> : null}</section>
+      {mainNavigation.length ? <nav className="staffSectionNav" aria-label={`${pageRole} workspace sections`}>{mainNavigation.map((item) => <Link key={item.view} href={item.href} aria-current={item.view === currentView ? "page" : undefined}>{item.label === "People & onboarding" ? "People" : item.label}</Link>)}</nav> : <div className="staffSectionNav" aria-hidden="true" />}
+      <section className="staffViewHeader"><div><p className="eyebrow">{promise.eyebrow}</p><h1>{promise.title}</h1>{!primaryView && promise.subtitle ? <p>{promise.subtitle}</p> : null}</div>{headingAction ?? (pageRole === "vendor" && currentView === "jobs" ? <LaundryFlowIcon stage="washing" /> : pageRole === "driver" && currentView === "route" ? <LaundryFlowIcon stage="return" /> : null)}</section>
       <div className="staffView">{children}</div>
     </main>
   );

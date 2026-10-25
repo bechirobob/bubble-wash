@@ -32,6 +32,8 @@ try {
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);
   const coloredBorders = await page.locator('main').evaluate(root => [...root.querySelectorAll('*')].filter(element => { const style = getComputedStyle(element); return ['Top','Right','Bottom','Left'].some(side => { const color = style['border'+side+'Color'].match(/\d+/g)?.map(Number); return parseFloat(style['border'+side+'Width']) > 0 && style['border'+side+'Style'] !== 'none' && color && (color[0] !== color[1] || color[1] !== color[2]); }); }).map(element => element.tagName + '.' + element.className));
   assert.deepEqual(coloredBorders, []); tests.push('rendered decorative borders are neutral');
+  const shadows = await page.locator('main').evaluate(root => [...root.querySelectorAll('*')].filter(element => getComputedStyle(element).boxShadow !== 'none').map(element => element.tagName + '.' + element.className));
+  assert.deepEqual(shadows, []); tests.push('approved staff research surface has no decorative shadows');
   const identity = await page.locator('main').evaluate(root => {
     const css = element => getComputedStyle(element);
     const title = root.querySelector('h1');
@@ -41,12 +43,14 @@ try {
       work: css(root.querySelector('#patterns-panel section')).backgroundColor,
       chart: css(root.querySelector('[role="tabpanel"] [style*="width"]')).backgroundColor };
   });
-  assert.equal(identity.font, identity.bodyFont);
-  assert.equal(identity.header, 'rgb(237, 245, 252)');
-  assert.equal(identity.summary, 'rgb(242, 246, 240)');
-  assert.equal(identity.work, 'rgb(255, 255, 255)');
-  assert.equal(identity.chart, 'rgb(8, 101, 132)');
-  tests.push('results use the public system font and blue, white and sage identity');
+  assert.match(identity.font, /-apple-system/);
+  assert.equal(await page.locator('main.portalPage.staffDesk').count(), 1);
+  assert.equal(await page.locator('.staffWorkspaceSwitcherIcon path').getAttribute('d'), 'M-8 -4H8M-8 4H3');
+  assert.equal(identity.header, 'rgba(0, 0, 0, 0)');
+  assert.equal(identity.summary, 'rgb(251, 252, 252)');
+  assert.equal(identity.work, 'rgb(251, 252, 252)');
+  assert.equal(identity.chart, 'rgb(8, 117, 142)');
+  tests.push('results use the approved shared staff shell, restrained surfaces and chart blue');
   await page.screenshot({path:output+'desktop-patterns.png',fullPage:true});
   await page.getByRole('combobox',{name:'Choose a question',exact:true}).selectOption('C1');await page.getByText(/Multiple answers allowed/).waitFor();assert.equal(await page.getByText(/^100%/).count()>0,true);
   tests.push('multi-select renders respondent denominator and multiple-selection explanation');
@@ -66,6 +70,13 @@ try {
   await page.getByRole('button',{name:'Next',exact:true}).click();await page.getByText('Page 2 of 7',{exact:true}).waitFor();tests.push('response pagination works');
   await page.getByRole('tab',{name:'Patterns',exact:true}).click();await page.getByText('73 answered',{exact:true}).waitFor();await page.setViewportSize({width:390,height:844});await page.screenshot({path:output+'mobile-patterns.png',fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);
   await page.setViewportSize({width:320,height:740});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false);await page.screenshot({path:output+'mobile-320-patterns.png',fullPage:true});tests.push('390px and 320px layouts have no horizontal overflow');
+  const comparison = page.locator('details').filter({has:page.locator('summary').filter({hasText:'A closer comparison'})});
+  if (!(await comparison.evaluate(element => element.open))) await comparison.locator('summary').click();
+  const comparisonLoaded = page.waitForResponse(response => response.url().includes('/api/admin/research/results?') && new URL(response.url()).searchParams.get('compare') === 'area');
+  await page.getByRole('combobox',{name:'Compare by',exact:true}).selectOption('area'); await comparisonLoaded;
+  await page.getByText('73 answered',{exact:true}).waitFor();
+  assert.equal(await comparison.evaluate(element => element.open), true, 'comparison stays expanded across its own filter reload');
+  tests.push('mobile comparison disclosure retains expansion while changing its filter');
   await page.getByRole('tab',{name:'Responses',exact:true}).click(); await page.getByRole('button',{name:/Open response from/}).first().waitFor(); assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false); await page.screenshot({path:output+'mobile-320-responses.png',fullPage:true}); tests.push('320px response list, pagination and bounded scrolling are rendered');
   await page.getByRole('tab',{name:'Patterns',exact:true}).click();
   await page.getByRole('combobox',{name:'Audience',exact:true}).selectOption('none');await page.getByRole('combobox',{name:'Area',exact:true}).selectOption('Airport');await page.waitForTimeout(300);

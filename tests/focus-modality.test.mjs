@@ -61,7 +61,7 @@ test('one shared policy retains editing cues and all focusable keyboard targets'
   assert.match(css, /html:not\(\[data-input-modality="pointer"\]\) \.planChoice:has\(input:focus-visible\)/);
   assert.equal((css.match(/outline: none/g) || []).length, 1);
   assert.match(css, /@media \(forced-colors: none\) \{\s*html\[data-input-modality="pointer"\]/);
-  for (const file of ['research/research.module.css','research/results.module.css','BubbleWashOpening.module.css','WebAppInstall.module.css']) {
+  for (const file of ['research/research.module.css','BubbleWashOpening.module.css','WebAppInstall.module.css']) {
     const moduleCss = readFileSync(new URL('../src/components/' + file, import.meta.url), 'utf8');
     assert.doesNotMatch(moduleCss, /:focus(?:-visible)?[^{}]*\{[^}]*outline:/, file);
   }
@@ -128,4 +128,11 @@ test('blur and cleanup discard a pending label-forwarding target and timer', () 
   assert.equal(f.mode(), undefined);
   assert.equal(f.listeners.size, 0);
   assert.equal(f.windowListeners.size, 0);
+});
+
+test('owner research selects keep normal pointer appearance without removing keyboard or forced-color focus', () => {
+  const css = readFileSync(new URL('../src/components/research/results.module.css', import.meta.url), 'utf8');
+  assert.ok(css.includes('@media(forced-colors:none){.page select:focus{outline:2px solid var(--focus-ring);outline-offset:2px}'));
+  assert.ok(css.includes(':global(html[data-input-modality="pointer"]) .page select:focus{outline:none;border-color:var(--line)}'));
+  assert.doesNotMatch(css, /\.page\s+:focus\s*\{[^}]*outline:none/);
 });
