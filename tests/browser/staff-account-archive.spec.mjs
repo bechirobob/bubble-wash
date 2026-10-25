@@ -21,12 +21,12 @@ test('archive requires confirmation, cancels safely and stays recoverable', asyn
   await row.getByRole('button', { name: 'Archive staff', exact: true }).click();
   await confirmation.getByRole('textbox').fill('wrong@example.invalid');
   await confirmation.getByRole('button', { name: 'Confirm archive', exact: true }).click();
-  await expect(panel.getByRole('status')).toContainText('Confirm the account email');
+  await expect(panel.locator(':scope > p[role="status"]')).toContainText('Confirm the account email');
   await expect(row).toBeVisible();
   await confirmation.getByRole('textbox').fill(email);
   await panel.screenshot({ path: testInfo.outputPath('staff-archive-confirmation.png') });
   await confirmation.getByRole('button', { name: 'Confirm archive', exact: true }).click();
-  await expect(panel.getByRole('status')).toContainText('Sign-in account archived');
+  await expect(panel.locator(':scope > p[role="status"]')).toContainText('Sign-in account archived');
   await expect(row).toHaveCount(0);
   await panel.getByLabel('Show archived accounts').check();
   await expect(row).toContainText('archived');
@@ -38,7 +38,7 @@ test('archive requires confirmation, cancels safely and stays recoverable', asyn
   await restore.getByLabel('Name', { exact: true }).fill('Archive test');
   await restore.getByLabel('Work email', { exact: true }).fill(email);
   await restore.getByRole('button', { name: 'Create activation link', exact: true }).click();
-  await expect(panel.getByRole('status')).toContainText('Confirm restoration');
+  await expect(panel.locator(':scope > p[role="status"]')).toContainText('Confirm restoration');
   await restore.getByLabel('Restore this account if archived').check();
   await restore.getByRole('button', { name: 'Create activation link', exact: true }).click();
   await expect(panel.locator('code')).toBeVisible();
