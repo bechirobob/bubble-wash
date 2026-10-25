@@ -22,6 +22,20 @@ class Tests(unittest.TestCase):
         self.assertFalse(m.summarise({})['staffRoutePresent'])
     def test_reader_has_no_write_route_or_shell(self):
         source=Path(m.__file__).read_text()
-        self.assertNotIn('subprocess',source);self.assertNotIn('POST',source)
+        self.assertNotIn('shell=True',source);self.assertNotIn('POST',source)
+        self.assertIn("['systemctl','show','caddy.service'",source)
         self.assertIn('http://127.0.0.1:2019/config/apps/http/servers',source)
+    def test_persistent_simple_block_without_other_config_disclosure(self):
+        props='ExecStart={ argv[]=/usr/bin/caddy run --config /etc/caddy/Caddyfile ; }\nExecReload={ argv[]=/usr/bin/caddy reload --config /etc/caddy/Caddyfile ; }'
+        raw=b'private.example {\n basic_auth SECRET\n}\nbubblewash.co {\n reverse_proxy 127.0.0.1:3000\n}\n'
+        result=m.persistent_summary(props,raw)
+        self.assertEqual(result['status'],'simple-exact-block')
+        self.assertEqual(result['upstream'],'127.0.0.1:3000');self.assertTrue(result['reloadUsesSamePath'])
+        self.assertNotIn('SECRET',json.dumps(result));self.assertNotIn('private.example',json.dumps(result))
+    def test_persistent_rejects_ambiguous_or_complex_block_without_disclosure(self):
+        props='ExecStart=caddy run --config /etc/caddy/Caddyfile ;'
+        for raw in (b'bubblewash.co {\n basic_auth SECRET\n}\n',b'bubblewash.co { reverse_proxy localhost:3000 }',b'bubblewash.co {\n reverse_proxy localhost:3000\n}\nbubblewash.co {\n reverse_proxy localhost:3000\n}'):
+            result=m.persistent_summary(props,raw)
+            self.assertEqual(result['status'],'non-simple-block-needs-review');self.assertNotIn('SECRET',json.dumps(result))
+        self.assertEqual(m.persistent_summary('ExecStart=caddy --config /private/SECRET')['status'],'unsupported-config-source')
 if __name__=='__main__':unittest.main()
