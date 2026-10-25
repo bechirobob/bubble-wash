@@ -60,6 +60,7 @@ jobs:
           python3 -B -m unittest discover -s tests -p 'test_exact_cleanup_host.py' -v
           python3 -B -m unittest discover -s tests -p 'test_exact_cleanup_sqlite.py' -v
           python3 -B -m unittest discover -s tests -p 'test_exact_cleanup_emitter.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_cleanup_diagnostics.py' -v
           python3 -B ops/emit-exact-cleanup.py --check
           python3 -c 'import json,os; p=json.load(open("ops/exact-cleanup-source-pins.json")); assert os.environ["BACKUP_STORE_SHA"] == p["storeSha"] and os.environ["BACKUP_STORE_ID"] == str(p["storeId"])'
           python3 -B ops/emit-exact-cleanup.py --emit > "$RUNNER_TEMP/exact-cleanup.py"
