@@ -1,0 +1,115 @@
+{
+  "adapterSha256": "4f91590856b51f973b80d57a7ea815e7486f288860f8dfe5f0c5ed7b8eb4e271",
+  "backupSha256": "17edac00add76517191376475106ca7f12e2d47497437f586d6d6bd9b88862b2",
+  "dependencies": {
+    "cleanup": "8bbb5ddcdd0aebe143c90e3282904f931591211fe5e5d20f680050d2db6755b4",
+    "guards": "bb435e7a32baa516b8d89e65e64f2b2db0779657f6c25039130c9520f5d5e509",
+    "preserving": "29006085ee39680daa30fc34d05c3761b410f0f860835943eab8a60168da076a",
+    "update": "8de4ce5d5f543bc52a4d81590490058681df4450dbe44702f426c97cf0fd4e0a",
+    "wrapper": "01593ea3cc688d43d489e929b7f391671f2abb381eb884d946996c8d8b3354c7"
+  },
+  "receiptRun": "40202547347",
+  "runtimePins": {
+    "allowedChanges": [
+      ".github/workflows/add-staff-host.yml",
+      ".github/workflows/inspect-staff-host.yml",
+      ".github/workflows/pwa-update-deploy.yml",
+      "ops/add-staff-host.py",
+      "ops/deploy-pwa-update.py",
+      "ops/inspect-retained-release-state.py",
+      "ops/inspect-staff-host.py",
+      "ops/integration-release/source-contracts.json",
+      "ops/pwa-update-source-pins.json",
+      "src/app/login/page.tsx",
+      "src/app/staff/page.tsx",
+      "src/lib/auth.ts",
+      "tests/browser/fixture-smoke.mjs",
+      "tests/browser/staff-session-reopen.spec.mjs",
+      "tests/staff-app-auth.integration.mjs",
+      "tests/test_add_staff_host.py",
+      "tests/test_pwa_update_deploy.py",
+      "tests/test_retained_release_state.py",
+      "tests/test_staff_host_diagnostic.py"
+    ],
+    "baseSha": "ff78cfb5288a4855651b2712d0aa16bd799965d3",
+    "baseTree": "e9c81268b1bf1530a8f3ac04da5c0e405cfec217",
+    "baselineContent": {
+      "directories": 111,
+      "files": 519,
+      "sha256": "3576b909656533f1c37fd2dacc5af845947a908437b2a40f7036b013e42a8eba"
+    },
+    "baselineSource": {
+      "next.config.mjs": "99485a62a52b87f6b17c2732d43bd7eb090984b3fbf74dfcf0637db17831fc02",
+      "package-lock.json": "5ee351083ccf449022dfcd3f466cea7e541423294a4854458feb719a3350d966",
+      "package.json": "4246a3860209f586cbc0e85d5e2969523070b899bfc8894558a6abb1e6dc7b98",
+      "src": "cfb4efcebddead6e268b1db5c95b614a740b1dd80d7538258e41bbe7b9b5bbde",
+      "tsconfig.json": "2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c"
+    },
+    "candidateSource": {
+      "next.config.mjs": "99485a62a52b87f6b17c2732d43bd7eb090984b3fbf74dfcf0637db17831fc02",
+      "package-lock.json": "5ee351083ccf449022dfcd3f466cea7e541423294a4854458feb719a3350d966",
+      "package.json": "4246a3860209f586cbc0e85d5e2969523070b899bfc8894558a6abb1e6dc7b98",
+      "src": "020a4f704db635193b7a2a9e8c01ccaf0746db54ad2b2a490abaa899f60816be",
+      "tsconfig.json": "2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c"
+    },
+    "criticalFiles": [
+      "src/lib/data-store.ts",
+      "src/lib/operational-store.ts",
+      "src/lib/availability-store.ts",
+      "src/lib/staff-accounts.ts",
+      "src/app/api/health/route.ts",
+      "src/lib/research/provider.ts",
+      "src/lib/research/store.ts",
+      "db/proposed/research-v1.sql"
+    ],
+    "dependencies": {
+      "deploy-preserving.py": "29006085ee39680daa30fc34d05c3761b410f0f860835943eab8a60168da076a",
+      "deploy-survey-only.py": "bb435e7a32baa516b8d89e65e64f2b2db0779657f6c25039130c9520f5d5e509",
+      "deploy-survey-update.py": "8de4ce5d5f543bc52a4d81590490058681df4450dbe44702f426c97cf0fd4e0a",
+      "inactive-staging/prepare_pair.py": "c9d8329ec106562ad900b0326774a2ea8c7e7808013d087421fb8b3e8694f7e7",
+      "inactive-staging/stage_artifact.py": "31079a9443057bb79ff3d92eeea3dbf7ded5d052b24aca3b755e3f03dc8b630f",
+      "survey-only-source-pins.json": "3bf997b7dd856d6c3679c6afa514cd605b19ef1061bd8769f4229f76cb022697"
+    },
+    "runtimeContent": {
+      "directories": 111,
+      "files": 528,
+      "sha256": "68dbcacdec0e74a3cf16b0cdad3e5e1ccc8fdcd7ee04f407d3d88225ab3bd0e9"
+    },
+    "runtimeSha": "1ddf328332836aeefe41d4a4e6f05ed79d4589a3",
+    "runtimeTree": "209ef0fde22dfc9aafeee718b7bc456625a8278b",
+    "schema": "bubblewash-pwa-update/v1",
+    "sourceScope": {
+      "directories": [
+        ".github",
+        "db",
+        "docs",
+        "ops",
+        "public",
+        "scripts",
+        "src",
+        "tests",
+        "tooling"
+      ],
+      "excludedSubtrees": [
+        "tooling/next-eslint-glob/node_modules"
+      ],
+      "rootFiles": [
+        ".env.production.example",
+        ".gitignore",
+        "DESIGN.md",
+        "README.md",
+        "eslint.config.mjs",
+        "next.config.mjs",
+        "package-lock.json",
+        "package.json",
+        "playwright.config.mjs",
+        "playwright.worklists.config.mjs",
+        "tsconfig.json"
+      ]
+    }
+  },
+  "runtimeSha": "1ddf328332836aeefe41d4a4e6f05ed79d4589a3",
+  "schema": "bubblewash-cleanup-recovery/v1",
+  "storeId": "1403152795",
+  "storeSha": "2fe787ae243bb8eb82827e224be87ed00796fccc"
+}

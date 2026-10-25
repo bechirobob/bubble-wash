@@ -4,8 +4,8 @@
     "ops/inactive-staging/prepare_pair.py": "c9d8329ec106562ad900b0326774a2ea8c7e7808013d087421fb8b3e8694f7e7"
   },
   "controlRunner": {
-    "contentSha256": "45d4e33bc538f10deddcd937596fc134a2304d33762f97bca72872ec00544cd4",
-    "files": 543,
+    "contentSha256": "e46200f82b180992fdf030f32325f30acdc896612b04f7f2d1b504d9c25a7538",
+    "files": 549,
     "schema": "bubblewash-control-runner/v1"
   },
   "ownerFiles": {
