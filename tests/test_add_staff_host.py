@@ -40,6 +40,8 @@ class Transition(Delta):
         self.backup=root/'backup';self.backup.mkdir()
         self.state=copy.deepcopy(self.before);self.failure=None
         self.stack.enter_context(mock.patch.object(m,'CONFIG',self.config))
+        self.jsondir=root/'json';self.jsondir.mkdir()
+        self.stack.enter_context(mock.patch.object(m,'JSON_CONFIG_DIR',self.jsondir))
         self.stack.enter_context(mock.patch.object(m,'EXPECTED',hashlib.sha256(self.original).hexdigest()))
         self.stack.enter_context(mock.patch.object(m.os,'geteuid',return_value=0))
         self.stack.enter_context(mock.patch.object(m,'protected',side_effect=lambda p,*args:self.config.stat()))
@@ -71,4 +73,54 @@ class Transition(Delta):
         self.assertEqual(self.state,{'unknown':'state'})
         self.assertEqual(sum(c.args[0][0]=='reload' for c in self.runner.call_args_list),1)
         self.assertEqual(self.config.read_bytes(),self.original+m.BLOCK)
+
+class FileCompatibility(unittest.TestCase):
+    def setUp(self):
+        self.stack=contextlib.ExitStack();self.addCleanup(self.stack.close)
+        self.root=Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
+        self.configdir=self.root/'caddy';self.configdir.mkdir()
+        self.jsondir=self.root/'json';self.jsondir.mkdir()
+        self.config=self.configdir/'Caddyfile';self.config.write_bytes(b'original')
+        self.stack.enter_context(mock.patch.object(m,'CONFIG',self.config))
+        self.stack.enter_context(mock.patch.object(m,'JSON_CONFIG_DIR',self.jsondir))
+        self.stack.enter_context(mock.patch.object(m,'protected',side_effect=lambda p,*args:p.stat()))
+        self.calls=[]
+    def old_cli(self,args,**kwargs):
+        self.assertNotIn('-',args);self.assertIsNone(kwargs.get('input'))
+        path=Path(args[args.index('--config')+1]);self.assertTrue(path.is_file())
+        self.assertEqual(path.stat().st_mode & 0o777,0o600)
+        raw=path.read_bytes();self.calls.append((args,path,raw))
+        if args[1]=='adapt':
+            self.assertEqual(path.parent,self.configdir)
+            self.assertEqual(kwargs['cwd'],self.configdir)
+            self.assertEqual(args[-2:],['--adapter','caddyfile'])
+            output=b'{"adapted":true}'
+        else:
+            self.assertEqual(path.parent,self.jsondir);self.assertEqual(path.suffix,'.json')
+            self.assertNotIn('--adapter',args);json.loads(raw);output=b'OK'
+        return mock.Mock(returncode=0,stdout=output)
+    def test_file_only_cli_all_three_commands_and_cleanup(self):
+        with mock.patch.object(m.subprocess,'run',side_effect=self.old_cli):
+            self.assertEqual(m.adapt(b'new input'),{'adapted':True})
+            m.run_json('validate',b'{"apps":{}}');m.run_json('reload',b'{"apps":{}}')
+        self.assertEqual([a[0][1] for a in self.calls],['adapt','validate','reload'])
+        self.assertTrue(all(not path.exists() for _,path,_ in self.calls))
+        self.assertEqual(list(self.configdir.iterdir()),[self.config]);self.assertEqual(list(self.jsondir.iterdir()),[])
+        self.assertEqual(self.config.read_bytes(),b'original')
+    def test_glob_self_import_refuses_and_cleans_up(self):
+        self.config.write_bytes(b'import *\n')
+        def self_import(args,**kwargs):
+            path=Path(args[args.index('--config')+1]);self.assertIn(path,list(self.configdir.glob('*')))
+            return mock.Mock(returncode=1,stdout=b'',stderr=b'private import-cycle detail')
+        with mock.patch.object(m.subprocess,'run',side_effect=self_import):
+            with self.assertRaises(ValueError):m.adapt(self.config.read_bytes())
+        self.assertEqual(self.config.read_bytes(),b'import *\n');self.assertEqual(list(self.configdir.iterdir()),[self.config])
+    def test_timeout_cleans_up_exact_json_file(self):
+        with mock.patch.object(m.subprocess,'run',side_effect=m.subprocess.TimeoutExpired('caddy',30)):
+            with self.assertRaises(m.subprocess.TimeoutExpired):m.run_json('reload',b'{}')
+        self.assertEqual(list(self.jsondir.iterdir()),[])
+    def test_no_stdin_config_callsite(self):
+        source=(ROOT/'ops/add-staff-host.py').read_text()
+        self.assertNotIn("'--config','-'",source)
+
 if __name__=='__main__':unittest.main()
