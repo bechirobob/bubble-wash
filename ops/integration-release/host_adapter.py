@@ -561,8 +561,11 @@ class Host:
         # cgroups instead of fabricating a path for an already inactive service.
         for manager, unit in self.c.core.UNITS:
             props = self.c.core.parse_properties(self.show(manager, unit))
-            require(props.get('LoadState') == 'loaded' and props.get('ActiveState') == 'inactive'
-                    and props.get('SubState') == 'dead' and props.get('Job') == '', 'known unit not fully stopped')
+            terminal = (props.get('ActiveState'), props.get('SubState'))
+            stopped = terminal == ('inactive', 'dead') or (
+                manager == 'user' and unit == self.c.core.APP and terminal == ('failed', 'failed'))
+            require(props.get('LoadState') == 'loaded' and stopped
+                    and props.get('Job') == '', 'known unit not fully stopped')
             if unit != self.c.core.TIMER:
                 require(props.get('MainPID') == '0' and props.get('ControlPID') == '0', 'known writer remains')
                 if (manager, unit) in getattr(self, 'empty_groups', set()):
