@@ -6,6 +6,11 @@ on:
         description: Exact reviewed main commit for exact additive staff HTTPS route
         required: true
         type: string
+      check_only:
+        description: Prove the exact route delta without activation
+        required: true
+        type: boolean
+        default: true
 permissions:
   contents: read
 concurrency:
@@ -19,6 +24,7 @@ jobs:
     timeout-minutes: 10
     env:
       SOURCE_SHA: ${{ inputs.source_sha }}
+      CHECK_ONLY: ${{ inputs.check_only }}
     steps:
       - name: Require exact reviewed source
         run: |
@@ -36,5 +42,11 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Add only the approved exact staff hostname
-        run: tailscale ssh root@hermes 'python3 -I -B -' < ops/add-staff-host.py
+      - name: Check or activate only the approved exact staff hostname
+        run: |
+          set -euo pipefail
+          case "$CHECK_ONLY" in
+            true) tailscale ssh root@hermes 'python3 -I -B - --check-only' < ops/add-staff-host.py ;;
+            false) tailscale ssh root@hermes 'python3 -I -B - --activate' < ops/add-staff-host.py ;;
+            *) exit 1 ;;
+          esac
