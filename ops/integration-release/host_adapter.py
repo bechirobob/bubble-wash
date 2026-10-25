@@ -350,6 +350,38 @@ def configuration_inventory(paths, allow_links=False):
     return result
 
 
+PREFLIGHT_JS_STAGES = frozenset(('CAPSULE_IMPORT','SOURCE_ROOT','NATIVE_MODULE','SCHEMA_IMPORT','MODEL_BUILD','SOURCE_BEFORE',
+    'DATABASE_OPEN','INTEGRITY','FOREIGN_KEYS','OBJECT_LIMIT','OBJECT_TYPES','UNKNOWN_OBJECTS',
+    'REQUIRED_TABLES','TABLE_SCHEMAS','ORIGINAL_PREFLIGHT','SOURCE_AFTER','COMPLETE'))
+PREFLIGHT_JS_ERRORS = frozenset(('NONE','CAPSULE_REFUSED','SOURCE_REFUSED','DEPENDENCY_REFUSED','MODEL_REFUSED','DATABASE_REFUSED',
+    'INTEGRITY_FAILED','FOREIGN_KEY_FAILED','OBJECT_LIMIT_EXCEEDED','UNEXPECTED_OBJECT_TYPE','UNKNOWN_OBJECTS',
+    'MISSING_REQUIRED_TABLES','SCHEMA_MISMATCH','ORIGINAL_PREFLIGHT_REFUSED','SOURCE_CHANGED'))
+PREFLIGHT_COUNTS = ('objects','unexpectedTypes','unknownObjects','missingRequiredTables','mismatchedTables')
+PREFLIGHT_HOST_STAGES = frozenset(('CAPSULE_FILE','CAPSULE_PROTECTION','CAPSULE_READ','DIAGNOSTIC_FILE','NODE_PROTECTION','NODE_HASH',
+    'LAUNCHER_PROTECTION','PROCESS','OUTPUT','ORIGINAL_ACK'))
+PREFLIGHT_HOST_ERRORS = frozenset(('BOUNDARY_REFUSED','SPAWN_IO','TIMEOUT','EXIT_NONZERO','SIGNALLED','OUTPUT_INVALID','ACK_INVALID','MODULE_NOT_FOUND','MODULE_ACCESS_DENIED','MODULE_FORMAT_REFUSED','NATIVE_BINDING_FAILED'))
+
+
+def validate_preflight_diagnostic(value):
+    require(type(value) is dict and set(value) == {'ok','stage','error','counts','knownDiscrepancies','processReturnCode'}, 'diagnostic shape refused')
+    require(type(value['ok']) is bool and type(value['stage']) is str and type(value['error']) is str, 'diagnostic types refused')
+    require(value['stage'] in PREFLIGHT_JS_STAGES|PREFLIGHT_HOST_STAGES and
+            value['error'] in PREFLIGHT_JS_ERRORS|PREFLIGHT_HOST_ERRORS, 'diagnostic category refused')
+    require(value['ok'] == (value['stage']=='COMPLETE' and value['error']=='NONE'), 'diagnostic result refused')
+    require(type(value['counts']) is dict and set(value['counts']) == set(PREFLIGHT_COUNTS) and
+            all(v is None or type(v) is int and 0 <= v <= 10001 for v in value['counts'].values()), 'diagnostic counts refused')
+    known=value['knownDiscrepancies']
+    require(type(known) is list and len(known)<=64,'diagnostic discrepancies refused')
+    for row in known:
+        require(type(row) is dict and set(row)=={'objectIdSha256','expectedSha256','actualSha256'} and
+                all(type(row[key]) is str and re.fullmatch('[a-f0-9]{64}',row[key]) for key in ('objectIdSha256','expectedSha256')) and
+                (row['actualSha256'] is None or type(row['actualSha256']) is str and re.fullmatch('[a-f0-9]{64}',row['actualSha256'])),
+                'diagnostic discrepancy refused')
+    code=value['processReturnCode']
+    require(code is None or type(code) is int and -255 <= code <= 255, 'diagnostic exit refused')
+    return value
+
+
 class Host:
     def __init__(self, plan, control, run=None, proc=Path('/proc'), cgroup=Path('/sys/fs/cgroup')):
         self.plan = plan
@@ -578,6 +610,58 @@ class Host:
         regular(capsule)
         args = [str(capsule)] + ([mode] if mode else []) + ['--database', str(database), '--source', self.plan['candidate']]
         return self.node(Path(self.plan['candidate']), args, database)
+
+    def feature_preflight_diagnostic(self, database):
+        """Copy-only caller. Never expose child output, errors, paths or records."""
+        result={'ok':False,'stage':'CAPSULE_FILE','error':'BOUNDARY_REFUSED',
+                'counts':dict.fromkeys(PREFLIGHT_COUNTS), 'knownDiscrepancies':[], 'processReturnCode':None}
+        try:
+            capsule=HERE/'capsule/scripts/migrate-integration-features.mjs'
+            regular(capsule)
+            result['stage']='CAPSULE_PROTECTION';protected(capsule,parents=True)
+            result['stage']='CAPSULE_READ'
+            with capsule.open('rb') as stream:require(bool(stream.read(1)),'empty capsule')
+            result['stage']='DIAGNOSTIC_FILE'
+            diagnostic=HERE/'capsule/scripts/diagnose-feature-preflight.mjs'
+            regular(diagnostic);protected(diagnostic,parents=True)
+            result['stage']='NODE_PROTECTION'
+            node=self.plan['node']['path'];protected(node,parents=True)
+            result['stage']='NODE_HASH'
+            require(digest(node)==self.plan['node']['sha256'],'node runtime changed')
+            result['stage']='LAUNCHER_PROTECTION'
+            protected('/usr/sbin/runuser',parents=True)
+            result['stage']='PROCESS'
+            environment={'PATH':str(Path(node).parent)+':/usr/bin:/bin','HOME':'/home/ubuntu',
+                         'NODE_ENV':'production','NEXT_TELEMETRY_DISABLED':'1',
+                         'BUBBLEWASH_DATABASE_PATH':str(database),'BUBBLEWASH_DISABLE_DEMO_LOGIN':'true'}
+            child=subprocess.run(['/usr/sbin/runuser','-u','ubuntu','--',node,'--conditions=react-server',
+                '--experimental-strip-types',str(diagnostic),'--database',str(database),'--source',self.plan['candidate']],
+                cwd=self.plan['candidate'],env=environment,timeout=90,capture_output=True,check=False)
+            result['processReturnCode']=child.returncode if type(child.returncode) is int and -255<=child.returncode<=255 else None
+            if child.returncode != 0:
+                result['error']='SIGNALLED' if child.returncode < 0 else 'EXIT_NONZERO'
+                if child.returncode > 0 and len(child.stderr)<=8192:
+                    for code, category in (('ERR_MODULE_NOT_FOUND','MODULE_NOT_FOUND'),('MODULE_NOT_FOUND','MODULE_NOT_FOUND'),
+                                           ('EACCES','MODULE_ACCESS_DENIED'),('ERR_UNKNOWN_FILE_EXTENSION','MODULE_FORMAT_REFUSED'),
+                                           ('ERR_DLOPEN_FAILED','NATIVE_BINDING_FAILED')):
+                        if re.search(rb'(?<![A-Z_])'+code.encode()+rb'(?![A-Z_])',child.stderr):
+                            result['error']=category;break
+                return validate_preflight_diagnostic(result)
+            result['stage']='OUTPUT';result['error']='OUTPUT_INVALID'
+            require(len(child.stdout)<=32768 and len(child.stderr)<=8192,'diagnostic output bound')
+            def unique(pairs):
+                value=dict(pairs);require(len(value)==len(pairs),'duplicate diagnostic key');return value
+            value=json.loads(child.stdout.decode('utf8'),object_pairs_hook=unique)
+            require(type(value) is dict and set(value)=={'ok','stage','error','counts','knownDiscrepancies'} and
+                    value['stage'] in PREFLIGHT_JS_STAGES and value['error'] in PREFLIGHT_JS_ERRORS,'diagnostic child shape')
+            return validate_preflight_diagnostic({**value,'processReturnCode':0})
+        except subprocess.TimeoutExpired:
+            result['error']='TIMEOUT'
+        except OSError:
+            result['error']='SPAWN_IO' if result['stage']=='PROCESS' else 'BOUNDARY_REFUSED'
+        except (ValueError,TypeError,KeyError,UnicodeError):
+            pass
+        return validate_preflight_diagnostic(result)
 
     def migrate(self, database, resume=False, set_stage=lambda _: None):
         # Initial execution requires the original exact schema. Explicit held
