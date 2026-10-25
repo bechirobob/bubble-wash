@@ -27,6 +27,19 @@ async function fixtureOrders(page, readRows) {
   return () => expect.poll(() => fulfilled, { message: 'Workspace fetched the intended synthetic order projection' }).toBeGreaterThan(0);
 }
 
+async function expectStaffControlLinks(page) {
+  const controls = page.locator('.portalPage.staffDesk :is(.staffSectionNav a, .staffAccountMenuBody a, a.button, a.brand, .staffSectionHeader > a, a.staffLaneLink, .staffDeskFoot a, .staffCapacityStrip > a, a.staffBackLink, a.staffTicketDetails, .staffCaseDeskOrder > a, .customerContactActions > a)');
+  expect(await controls.count()).toBeGreaterThan(0);
+  const underlined = await controls.evaluateAll(links => links.filter(link => link.getClientRects().length && getComputedStyle(link).textDecorationLine !== 'none').map(link => link.textContent?.trim()));
+  expect(underlined, 'Staff navigation and action links do not inherit browser underlines').toEqual([]);
+  const navigation = page.locator('.staffSectionNav a');
+  await navigation.first().focus();
+  await page.keyboard.press('Tab');
+  await expect(navigation.nth(1)).toBeFocused();
+  await expect(navigation.nth(1)).toHaveCSS('outline-style', 'solid');
+  await expect(navigation.nth(1)).toHaveCSS('outline-width', '2px');
+}
+
 test('approved service board stays compact and history tools are secondary', async ({ page }, testInfo) => {
   await signIn(page, 'admin');
   const assertOrdersRead = await fixtureOrders(page, orders);
@@ -41,7 +54,27 @@ test('approved service board stays compact and history tools are secondary', asy
   await expect(washing).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.staffStageLane.selected')).toContainText('BW-1036');
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expectStaffControlLinks(page);
+  const followUp = page.getByRole('navigation', { name: 'Operations follow-up', exact: true });
+  await expect(followUp).toHaveCSS('display', 'flex');
+  await expect(followUp).toHaveCSS('flex-wrap', 'wrap');
+  await expect(followUp.getByRole('link')).toHaveText([/^\d+ available riders$/, /^\d+ open cases in recent records$/, /^\d+ vendors$/, 'Recent changes']);
+  expect(await followUp.getByRole('link').evaluateAll(links => links.map(link => link.getAttribute('href')))).toEqual(['/admin?view=dispatch', '/admin?view=cases', '/admin?view=people', '/admin?view=activity']);
+  const targets = await followUp.getByRole('link').evaluateAll(links => links.map(link => { const box = link.getBoundingClientRect(); return { x: box.x, right: box.right, y: box.y, bottom: box.bottom, height: box.height }; }));
+  expect(targets).toHaveLength(4);
+  for (const target of targets) expect(target.height).toBeGreaterThanOrEqual(44);
+  for (let i = 0; i < targets.length; i++) for (let j = i + 1; j < targets.length; j++) {
+    const a = targets[i], b = targets[j];
+    if (Math.abs(a.y - b.y) < 1) expect(b.x - a.right, 'Separate follow-up actions have a horizontal gap').toBeGreaterThanOrEqual(16);
+    else expect(b.y - a.bottom, 'Wrapped follow-up actions have a vertical gap').toBeGreaterThanOrEqual(6);
+  }
+  await page.locator('.staffAccountMenu > summary').click();
+  await expectStaffControlLinks(page);
+  await page.locator('.staffAccountMenu > summary').click();
+  await expect(page.locator('.staffAccountMenu')).not.toHaveAttribute('open', '');
   await page.screenshot({ path: testInfo.outputPath('service-board.png'), fullPage: true });
+  await followUp.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('service-board-follow-up.png'), fullPage: false });
   await page.goto('/admin?view=activity');
   await expect(page.locator('.activitySection')).toHaveAttribute('aria-busy', 'false');
   const tools = page.locator('.activityTools');
@@ -78,6 +111,7 @@ test('vendor current job retains intake draft across refresh reordering', async 
   await expect(page.getByLabel('Bag/item count', { exact: true })).toHaveValue('3');
   await expect(page.getByLabel('Bag/item count', { exact: true })).toBeDisabled();
   await expect(page.locator('.staffWorkTicket')).toContainText('actions are paused');
+  await expectStaffControlLinks(page);
   await page.screenshot({ path: testInfo.outputPath('vendor-intake.png'), fullPage: true });
 });
 
@@ -93,6 +127,7 @@ test('rider vendor collection does not display customer destination or unrelated
   await expect(page.locator('.staffRouteFacts')).toContainText('Vendor destination needed');
   await expect(page.locator('.staffTicketNavigation').getByRole('link', { name: 'Directions', exact: true })).toHaveCount(0);
   await expect(page.locator('.staffTicketNavigation').getByRole('link', { name: 'Scan bag', exact: true })).toHaveAttribute('href', '/scan');
+  await expectStaffControlLinks(page);
   await page.screenshot({ path: testInfo.outputPath('rider-vendor-collection.png'), fullPage: true });
 });
 
@@ -126,10 +161,20 @@ test('support dossier preserves case draft and failed writes never claim success
   await page.locator('.staffCaseDeskDossier').getByRole('button', { name: 'Save case action', exact: true }).click();
   await expect(page.locator('.staffCaseDeskDossier')).toContainText('Synthetic save unavailable');
   await expect(page.locator('.staffCaseDeskDossier').getByRole('textbox', { name: 'Case note', exact: true })).toHaveValue('Draft to retain');
+  await expectStaffControlLinks(page);
   await page.screenshot({ path: testInfo.outputPath('support-save-failure.png'), fullPage: true });
   } catch (error) {
     console.log(JSON.stringify({ fixture: 'support-draft-diagnostic', project: testInfo.project.name, path: (() => { const url = new URL(page.url()); return `${url.pathname}${url.search}`.slice(0, 300); })(), caseReads, failedCaseReads, pageErrors, visibleText: (await page.locator('main').innerText().catch(() => 'No main element')).slice(0, 6000) }));
     await page.screenshot({ path: testInfo.outputPath('support-draft-failure.png'), fullPage: true }).catch(() => {});
     throw error;
   }
+});
+
+// Customer prose remains conventionally identifiable; this is not a global a reset.
+test('staff link treatment leaves customer inline policy links underlined', async ({ page }) => {
+  await page.route('**/*', route => new URL(route.request().url()).origin === 'http://localhost:3100' ? route.continue() : route.abort());
+  await page.goto('/terms');
+  const proseLink = page.getByRole('link', { name: 'cancellation and refund policy', exact: true });
+  await expect(proseLink).toBeVisible();
+  await expect(proseLink).toHaveCSS('text-decoration-line', 'underline');
 });

@@ -108,9 +108,9 @@ jobs:
           node tests/browser/research-results-proof.mjs
       - name: Verify synthetic edge, logins, cookies, redirects and script assets
         run: node tests/browser/fixture-smoke.mjs
-      - name: Diagnose support dossier draft lifecycle across all projects
+      - name: Verify staff controls and footer across all projects
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode != 'gps' }}
-        run: npx playwright test tests/browser/staff-service-desk.spec.mjs --grep 'support dossier'
+        run: npx playwright test tests/browser/staff-service-desk.spec.mjs
       - name: Run four-role journeys at mobile and desktop sizes
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode != 'gps' }}
         run: npx playwright test
