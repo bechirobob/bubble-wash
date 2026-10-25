@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body) || (body.idempotencyKey !== undefined && (typeof body.idempotencyKey !== "string" || !/^[a-zA-Z0-9_-]{16,100}$/.test(body.idempotencyKey)))) return NextResponse.json({ ok: false, error: "Invalid request details." }, { status: 400 });
-    const result = createCustomerRequest(session.orderId, body, body.idempotencyKey);
+    const result = createCustomerRequest(session.orderId, body, body.idempotencyKey, "submission");
     return NextResponse.json(result.body, { status: result.status });
   } catch {
     return NextResponse.json({ ok: false, error: "Unable to save this request right now." }, { status: 500 });

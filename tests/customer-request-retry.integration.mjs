@@ -37,19 +37,33 @@ try{
  const invalid=await POST(request({...payload,idempotencyKey:'short'}));assert.equal(invalid.status,400);
  const other='BW-SYNTHETIC-OTHER';
  appendSubmissionRecord({id:other,createdAt:new Date().toISOString(),source:'synthetic-test',data:{submissionType:'pickup-booking',name:'Other Synthetic',email:'other@example.invalid'}});
- const otherReceipt=createCustomerRequest(other,payload,payload.idempotencyKey);assert.equal(otherReceipt.status,200);assert.notEqual(otherReceipt.body.ticketId,receipt.ticketId);
+ const otherReceipt=createCustomerRequest(other,payload,payload.idempotencyKey,"submission");assert.equal(otherReceipt.status,200);assert.notEqual(otherReceipt.body.ticketId,receipt.ticketId);
  const unkeyed={action:'care',note:'Legacy unkeyed request'};
  const noKey1=createCustomerRequest(id,unkeyed);const noKey2=createCustomerRequest(id,unkeyed);
  assert.equal(noKey1.status,200);assert.equal(noKey2.status,200);assert.notEqual(noKey1.body.ticketId,noKey2.body.ticketId);
  assert.deepEqual(schema(),schemaBefore,'keyed requests must not create tables/indexes or alter schema');
- // Explicit legacy compatibility fixture; this table already existed for old callers.
- db.exec('CREATE TABLE mobile_customer_requests (order_id TEXT NOT NULL,request_key TEXT NOT NULL,payload_hash TEXT NOT NULL,receipt TEXT NOT NULL,PRIMARY KEY(order_id,request_key))');
+ // Default legacy-key callers must still execute the real schema/receipt path.
+ assert.equal(db.prepare("SELECT 1 FROM sqlite_master WHERE name='mobile_customer_requests'").get(),undefined);
+ const freshLegacyPayload={action:'care',note:'New legacy caller request'};
+ const legacyBefore=readSubmissionRecordsForOrder(id).length;
+ const freshLegacy=createCustomerRequest(id,freshLegacyPayload,'new-legacy-key');
+ assert.equal(freshLegacy.status,200);assert.equal(freshLegacy.body.replayed,undefined);
+ const persistedLegacy=db.prepare('SELECT receipt FROM mobile_customer_requests WHERE order_id=? AND request_key=?').get(id,'new-legacy-key');
+ assert.deepEqual(JSON.parse(persistedLegacy.receipt),freshLegacy.body);
+ const freshLegacyReplay=createCustomerRequest(id,freshLegacyPayload,'new-legacy-key');
+ assert.equal(freshLegacyReplay.status,200);assert.deepEqual(freshLegacyReplay.body,{...freshLegacy.body,replayed:true});
+ assert.equal(readSubmissionRecordsForOrder(id).length,legacyBefore+1);
+ assert.equal(createCustomerRequest(id,{...freshLegacyPayload,note:'Changed'},'new-legacy-key').status,409);
+ // A web-storage lookup also respects an already persisted legacy receipt.
+ assert.deepEqual(createCustomerRequest(id,freshLegacyPayload,'new-legacy-key','submission').body,freshLegacyReplay.body);
+ // Explicit historical receipt retains its original response shape.
+
  const legacyPayload={action:'care',note:'Legacy committed request'};
  const legacyReceipt={ok:true,ticketId:'BWC-LEGACY-RECEIPT',message:'Legacy receipt'};
  const legacyHash=createHash('sha256').update(JSON.stringify(['care','','',legacyPayload.note])).digest('hex');
  db.prepare('INSERT INTO mobile_customer_requests VALUES (?,?,?,?)').run(id,'old-key',legacyHash,JSON.stringify(legacyReceipt));
  const legacy=createCustomerRequest(id,legacyPayload,'old-key');assert.equal(legacy.status,200);assert.deepEqual(legacy.body,{...legacyReceipt,replayed:true});
  assert.equal(createCustomerRequest(id,{...legacyPayload,note:'Changed'},'old-key').status,409);
- assert.equal(db.prepare('SELECT COUNT(*) AS n FROM mobile_customer_requests').get().n,1);
- console.log('PASS: replay, conflict, per-order isolation, browser key validation, no-key compatibility, no schema changes, legacy receipts');
+ assert.equal(db.prepare('SELECT COUNT(*) AS n FROM mobile_customer_requests').get().n,2);
+ console.log('PASS: replay, conflict, per-order isolation, browser key validation, no-key compatibility, web schema unchanged, genuine default legacy table create/replay, historical receipts');
 }finally{globalThis.fetch=originalFetch;process.chdir(cwd);rmSync(directory,{recursive:true,force:true});}

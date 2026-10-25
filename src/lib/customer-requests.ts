@@ -12,7 +12,7 @@ const actions = new Map([
 const text = (value: unknown, max = 600) => typeof value === "string" ? value.trim().slice(0, max) : "";
 const requestReceipt = (ticketId: string) => ({ ok: true, ticketId, message: "Your request is on the operations queue. The current order status remains in place until Bubble Wash confirms the change." });
 type Result = { status: number; body: Record<string, unknown> };
-export function createCustomerRequest(orderId: string, body: Record<string, unknown>, idempotencyKey?: string): Result {
+export function createCustomerRequest(orderId: string, body: Record<string, unknown>, idempotencyKey?: string, keyStorage: "legacy-table" | "submission" = "legacy-table"): Result {
   const action = text(body.action, 30);
   const issueType = actions.get(action);
   const requestedDate = text(body.requestedDate, 20);
@@ -24,6 +24,11 @@ export function createCustomerRequest(orderId: string, body: Record<string, unkn
   const seed = findSubmissionRecordById(orderId);
   if (!seed) return { status: 404, body: { ok: false, error: "This booking is no longer available." } };
   const db = operationalDatabase();
+  // Keep the legacy keyed-client schema contract; web requests explicitly use existing records.
+  if (idempotencyKey && keyStorage === "legacy-table") db.exec(`CREATE TABLE IF NOT EXISTS mobile_customer_requests (
+    order_id TEXT NOT NULL, request_key TEXT NOT NULL, payload_hash TEXT NOT NULL,
+    receipt TEXT NOT NULL, PRIMARY KEY(order_id, request_key)
+  )`);
   const requestKeyHash = idempotencyKey ? createHash("sha256").update(idempotencyKey).digest("hex") : undefined;
   const payloadHash = createHash("sha256").update(JSON.stringify([action, requestedDate, requestedWindow, note])).digest("hex");
   return db.transaction((): Result => {
@@ -46,10 +51,11 @@ export function createCustomerRequest(orderId: string, body: Record<string, unkn
       name: text(seed.data.name, 100) || "Customer", email: text(seed.data.email, 160), phone: text(seed.data.phone, 80),
       company: "Bubble Wash customer", issueType, ticketStatus: "Open — customer request", priority: action === "cancel" ? "High" : "Normal",
       customerAction: action, requestedDate, requestedWindow, message: note, submittedByRole: "customer",
-      ...(requestKeyHash ? { customerRequestKeyHash: requestKeyHash, customerRequestPayloadHash: payloadHash } : {}),
+      ...(requestKeyHash && keyStorage === "submission" ? { customerRequestKeyHash: requestKeyHash, customerRequestPayloadHash: payloadHash } : {}),
     } });
     if (["quality", "damage", "refund"].includes(action)) db.prepare("INSERT INTO order_holds VALUES (?, ?, ?) ON CONFLICT(order_id) DO UPDATE SET reason = excluded.reason, updated_at = excluded.updated_at").run(orderId, issueType, createdAt);
     const receipt = requestReceipt(ticketId);
+    if (idempotencyKey && keyStorage === "legacy-table") db.prepare("INSERT INTO mobile_customer_requests VALUES (?, ?, ?, ?)").run(orderId, idempotencyKey, payloadHash, JSON.stringify(receipt));
     return { status: 200, body: receipt };
   }).immediate();
 }

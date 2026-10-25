@@ -12,12 +12,21 @@ export async function POST(request: NextRequest) {
   if (!session) return NextResponse.json({ ok: false, error: "Verify your booking details first." }, { status: 401 });
   if (!session.verifiedContact) return NextResponse.json({ ok: false, error: "Use email recovery to verify ownership before replacing your handoff code." }, { status: 403 });
   if (isRateLimited(`delivery-reissue:${session.orderId}`, 3, 3600000)) return NextResponse.json({ ok: false, error: "Too many code requests. Try again in an hour." }, { status: 429 });
-  const code = String(randomInt(0, 1000000)).padStart(6, "0");
-  const changed = getDatabase().transaction(() => {
-    const result = getDatabase().prepare("UPDATE delivery_proofs SET code_hash = ?, created_at = ? WHERE order_id = ? COLLATE NOCASE AND used_at IS NULL").run(deliveryCodeHash(session.orderId, code), new Date().toISOString(), session.orderId);
-    if (!result.changes) return false;
-    appendSubmissionRecord({ id: `BW-${randomUUID()}`, createdAt: new Date().toISOString(), source: "customer-code-recovery", data: { submissionType: "customer-security-update", orderId: session.orderId, message: "Customer replaced their unused delivery handoff code.", submittedByRole: "customer" } });
-    return true;
+  const replacement = getDatabase().transaction(() => {
+    const previous = getDatabase().prepare("SELECT code_hash FROM delivery_proofs WHERE order_id = ? COLLATE NOCASE AND used_at IS NULL").get(session.orderId) as { code_hash: string } | undefined;
+    if (!previous) return { status: 409 as const };
+    // A replacement must invalidate the current code, even if randomness repeats.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const code = String(randomInt(0, 1000000)).padStart(6, "0");
+      const hash = deliveryCodeHash(session.orderId, code);
+      if (hash === previous.code_hash) continue;
+      const result = getDatabase().prepare("UPDATE delivery_proofs SET code_hash = ?, created_at = ? WHERE order_id = ? COLLATE NOCASE AND used_at IS NULL").run(hash, new Date().toISOString(), session.orderId);
+      if (!result.changes) return { status: 409 as const };
+      appendSubmissionRecord({ id: `BW-${randomUUID()}`, createdAt: new Date().toISOString(), source: "customer-code-recovery", data: { submissionType: "customer-security-update", orderId: session.orderId, message: "Customer replaced their unused delivery handoff code.", submittedByRole: "customer" } });
+      return { status: 200 as const, code };
+    }
+    return { status: 503 as const };
   }).immediate();
-  return changed ? NextResponse.json({ ok: true, deliveryCode: code }, { headers: { "Cache-Control": "no-store" } }) : NextResponse.json({ ok: false, error: "This order has no unused handoff code." }, { status: 409 });
+  if (replacement.status === 200) return NextResponse.json({ ok: true, deliveryCode: replacement.code }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ok: false, error: replacement.status === 503 ? "Unable to generate a different handoff code. Please try again." : "This order has no unused handoff code." }, { status: replacement.status });
 }
