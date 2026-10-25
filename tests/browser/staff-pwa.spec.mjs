@@ -28,7 +28,9 @@ test('staff launch and all role entries keep separate installation identity',asy
   await expect(page.getByText('Open staff.bubblewash.co in Safari.',{exact:true})).toBeVisible();
   await expect(page.getByText(/phone is locked/)).toBeVisible();
   await expect(page.getByRole('link',{name:'Back to staff sign-in',exact:true})).toHaveAttribute('href','/staff');
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  // Route arrival translates the full-width scene for 220ms. Assert settled layout,
+  // not one synchronous frame during that existing animation. Persistent overflow fails.
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test('staff installation remains deliberate, repeat-safe and correctly named',async({page},info)=>{
