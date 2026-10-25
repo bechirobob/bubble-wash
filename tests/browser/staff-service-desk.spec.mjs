@@ -35,7 +35,15 @@ async function fixtureOrders(page, readRows) {
   return () => expect.poll(() => fulfilled, { message: 'Workspace fetched the intended synthetic order projection' }).toBeGreaterThan(0);
 }
 
+async function expectWorkspaceSwitcher(page) {
+  const trigger = page.locator('.staffAccountMenu > summary');
+  await expect(trigger.locator('svg[aria-hidden="true"] rect')).toHaveCount(4);
+  await expect(trigger).not.toContainText('⌄');
+  await expect(trigger).toHaveCSS('min-height', '44px');
+}
+
 async function expectStaffControlLinks(page) {
+  await expectWorkspaceSwitcher(page);
   const controls = page.locator('.portalPage.staffDesk :is(.staffSectionNav a, .staffAccountMenuBody a, a.button, a.brand, .staffSectionHeader > a, a.staffLaneLink, .staffDeskFoot a, .staffCapacityStrip > a, a.staffBackLink, a.staffTicketDetails, .staffCaseDeskOrder > a, .customerContactActions > a)');
   expect(await controls.count()).toBeGreaterThan(0);
   const underlined = await controls.evaluateAll(links => links.filter(link => link.getClientRects().length && getComputedStyle(link).textDecorationLine !== 'none').map(link => link.textContent?.trim()));
@@ -98,6 +106,12 @@ test('approved service board stays compact and history tools are secondary', asy
   await page.goto('/admin?view=people');
   await expect(page.locator('.staffAccessDisclosure')).not.toHaveAttribute('open', '');
   await expect(page.locator('.staffAccountPanel')).toBeVisible();
+  await page.goto('/staff/worklist');
+  await expectWorkspaceSwitcher(page);
+  await page.locator('.staffAccountMenu > summary').click();
+  await expect(page.locator('.staffAccountMenu')).toHaveAttribute('open', '');
+  await page.locator('.staffAccountMenu > summary').click();
+  await expect(page.locator('.staffAccountMenu')).not.toHaveAttribute('open', '');
 });
 
 test('vendor current job retains intake draft across refresh reordering', async ({ page }, testInfo) => {

@@ -1485,7 +1485,7 @@ export function PortalShell({ heading, title, allStaffAccess = false, role, page
       <header className="staffTopbar">
         <BrandLink label="Staff" />
         <details key={`${pageRole}:${currentView}`} className="staffAccountMenu" onKeyDown={(event) => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
-          <summary>{pageRole === "admin" ? "Operations" : pageRole === "driver" ? "Rider" : pageRole === "vendor" ? "Vendor" : "Support"}<span aria-hidden="true">⌄</span></summary>
+          <summary>{pageRole === "admin" ? "Operations" : pageRole === "driver" ? "Rider" : pageRole === "vendor" ? "Vendor" : "Support"}<svg className="staffWorkspaceSwitcherIcon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" focusable="false"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg></summary>
           <div className="staffAccountMenuBody"><strong>{userName}</strong><small>{title}</small>
             <nav aria-label="More workspace sections">{moreNavigation.map((item) => <Link key={item.view} href={item.href} aria-current={item.view === currentView ? "page" : undefined}>{item.label}</Link>)}</nav>
             {role === "admin" && allStaffAccess ? <nav aria-label="Staff workspaces"><Link href="/admin">Operations</Link><Link href="/vendors">Vendor workspace</Link><Link href="/drivers">Rider workspace</Link><Link href="/support">Support workspace</Link><Link href="/admin/surveys">Survey results</Link></nav> : null}

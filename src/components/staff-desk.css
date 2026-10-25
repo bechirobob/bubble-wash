@@ -82,3 +82,5 @@
 /* Navigational controls are not inline prose links. Keep prose underlines intact. */
 .portalPage.staffDesk :is(.staffSectionNav a, .staffAccountMenuBody a, a.button, a.brand, .staffSectionHeader > a, a.staffLaneLink, .staffDeskFoot a, .staffCapacityStrip > a, a.staffBackLink, a.staffTicketDetails, .staffCaseDeskOrder > a, .customerContactActions > a) { text-decoration: none; }
 .portalPage.staffDesk .staffDeskFoot a { flex: 0 0 auto; white-space: nowrap; }
+
+.portalPage.staffDesk .staffWorkspaceSwitcherIcon { width:18px; height:18px; flex:none; }
