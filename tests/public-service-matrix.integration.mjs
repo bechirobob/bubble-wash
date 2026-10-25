@@ -1,0 +1,112 @@
+// Synthetic actual-handler coverage; no provider requests or production fixtures.
+import assert from 'node:assert/strict';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
+const cryptoBuiltin=createRequire(import.meta.url)('node:crypto');
+const originalRandomInt=cryptoBuiltin.randomInt;
+globalThis.AsyncLocalStorage = AsyncLocalStorage;
+const root = process.cwd(), dir = mkdtempSync(join(tmpdir(), 'bw-public-services-'));
+for (const key of Object.keys(process.env)) if (/^(BUBBLEWASH_|NEXT_PUBLIC_BUBBLEWASH_|RESEND_|WHATSAPP_|PAYSTACK_)/.test(key)) delete process.env[key];
+Object.assign(process.env, { NODE_ENV:'production', BUBBLEWASH_DATABASE_PATH:join(dir,'synthetic.sqlite'), BUBBLEWASH_SESSION_SECRET:'synthetic-public-services-session-secret-32-plus', BUBBLEWASH_DISABLE_DEMO_LOGIN:'true', BUBBLEWASH_STAFF_AUTH_DISABLED:'false', BUBBLEWASH_ADMIN_MFA_REQUIRED:'false', NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED:'false', NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED:'false' });
+let forbiddenCalls = 0, checks = 0, db;
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async () => { forbiddenCalls++; throw Error('Provider/network prohibited in public-service matrix'); };
+const load = relative => import(pathToFileURL(join(root,relative)).href);
+const equal = (actual,expected,message) => { assert.deepEqual(actual,expected,message); checks++; };
+try {
+  const { createPasswordHash } = await load('src/lib/passwords.ts');
+  for (const role of ['ADMIN','SUPPORT','VENDOR','DRIVER']) { process.env[`BUBBLEWASH_${role}_EMAIL`] = `${role.toLowerCase()}@example.invalid`; process.env[`BUBBLEWASH_${role}_PASSWORD_HASH`] = createPasswordHash('SyntheticOnlyPassword!321'); }
+  process.env.BUBBLEWASH_VENDOR_ENTITY_ID='synthetic-vendor'; process.env.BUBBLEWASH_DRIVER_ENTITY_ID='synthetic-driver';
+  const { NextRequest } = await load('node_modules/next/server.js');
+  process.chdir(dir);
+  const store = await load('src/lib/data-store.ts'); db=store.getDatabase();
+  const early = await load('src/app/api/early-access/route.ts');
+  const privacy = await load('src/app/api/privacy/requests/route.ts');
+  const operations = await load('src/app/api/admin/operations/route.ts');
+  const recovery = await load('src/app/api/customer/recover/route.ts');
+  const delivery = await load('src/app/api/customer/delivery-code/route.ts');
+  const order = await load('src/app/api/customer/order/route.ts');
+  const auth = await load('src/lib/auth.ts');
+  const sessions = await load('src/lib/customer-session.ts');
+  const {saveBookingOnce} = await load('src/lib/operational-store.ts');
+  const {deliveryCodeHash} = await load('src/lib/chain-of-custody.ts');
+  const {workAsyncStorage} = await load('node_modules/next/dist/server/app-render/work-async-storage.external.js');
+  const {workUnitAsyncStorage} = await load('node_modules/next/dist/server/app-render/work-unit-async-storage.external.js');
+  const request = (path,body,cookie='',origin='https://bubblewash.co') => { db.prepare('DELETE FROM rate_limits').run(); return new NextRequest('https://bubblewash.co'+path,{method:'POST',headers:{host:'bubblewash.co',origin,'content-type':'application/json',cookie},body:JSON.stringify(body)}); };
+  const call = async (route,path,body,status=200,cookie='',origin) => { const response=await route.POST(request(path,body,cookie,origin)); equal(response.status,status,path); return response; };
+  const withRole = (role,fn) => { const user=role?auth.currentStaffUsers().find(u=>u.role===role):null; if(role)assert.ok(user,'synthetic role exists'); const value=user?auth.encodeSession(user):''; return workAsyncStorage.run({route:'/api/admin/operations'},()=>workUnitAsyncStorage.run({type:'request',phase:'render',cookies:{get:name=>name===auth.sessionCookieName&&value?{name,value}:undefined}},fn)); };
+  const signup={firstName:'Synthetic',phone:'0200000001',email:'public@example.invalid',area:'Osu',frequency:'Weekly',consent:true};
+  for(const change of [{consent:false},{phone:'invalid'},{area:'not-covered'},{frequency:'daily'},{email:'invalid'}]) await call(early,'/api/early-access',{...signup,...change},400);
+  await call(early,'/api/early-access',signup,403,'','https://other.invalid');
+  equal(db.prepare('SELECT COUNT(*) AS n FROM early_access_signups').get().n,0,'rejected signups do not persist');
+  await call(early,'/api/early-access',{...signup,website:'honeypot'});
+  equal(db.prepare('SELECT COUNT(*) AS n FROM early_access_signups').get().n,0,'honeypot does not persist');
+  const first=await (await call(early,'/api/early-access',signup)).json();equal(first.updated,false);
+  const queued=db.prepare('SELECT COUNT(*) AS n FROM notification_outbox').get().n;
+  const second=await (await call(early,'/api/early-access',{...signup,phone:'+233200000001',area:'Labone'})).json();equal(second.updated,true);
+  equal(db.prepare('SELECT COUNT(*) AS n FROM early_access_signups').get().n,1,'normalized phone deduplicates signup');
+  equal(db.prepare('SELECT area FROM early_access_signups').get().area,'Labone');
+  equal(db.prepare('SELECT COUNT(*) AS n FROM notification_outbox').get().n,queued,'same signup confirmation is deduplicated');
+  const input={name:'Synthetic',contact:signup.email,requestType:'marketing_opt_out'};
+  await call(privacy,'/api/privacy/requests',{...input,requestType:'unknown'},400);
+  const saved=await (await call(privacy,'/api/privacy/requests',input)).json();
+  equal(db.prepare('SELECT marketing_status FROM early_access_signups').get().marketing_status,'opted_out');
+  for(const role of [null,'support','vendor','driver']) {
+    equal((await withRole(role,()=>operations.GET())).status,403);
+    equal((await withRole(role,()=>operations.POST(request('/api/admin/operations',{id:saved.id,status:'completed'})))).status,403);
+  }
+  const queue=await (await withRole('admin',()=>operations.GET())).json();
+  equal(queue.privacyRequests.some(r=>r.id===saved.id&&r.status==='received'),true);
+  equal((await withRole('admin',()=>operations.POST(request('/api/admin/operations',{id:saved.id,status:'identity_review'})))).status,200);
+  equal(store.listPrivacyRequests().find(r=>r.id===saved.id).status,'identity_review');
+  equal((await withRole('admin',()=>operations.POST(request('/api/admin/operations',{id:saved.id,status:'completed'},'','https://other.invalid')))).status,403);
+  equal(store.listPrivacyRequests().find(r=>r.id===saved.id).status,'identity_review','origin denial preserves status');
+  equal((await withRole('admin',()=>operations.POST(request('/api/admin/operations',{id:saved.id,status:'completed'})))).status,200);
+  equal(store.listPrivacyRequests().find(r=>r.id===saved.id).status,'completed');
+  const id='BW-R1234567890ABCDEF',email='recovery@example.invalid';
+  const booking=saveBookingOnce({id,createdAt:new Date().toISOString(),source:'synthetic-public-services',data:{submissionType:'pickup-booking',name:'Synthetic',email,phone:'0200000002',company:'Synthetic',plan:'Weekly',area:'Osu',pickupAddress:'Synthetic only',pickupWindow:'8:00–10:00',service:'Wash + fold'}},'synthetic-public-services-booking',()=>{});
+  await call(recovery,'/api/customer/recover',{email},503);
+  process.env.RESEND_API_KEY='synthetic-no-network-key';
+  const before=db.prepare('SELECT COUNT(*) AS n FROM notification_outbox').get().n;
+  const unknown=await (await call(recovery,'/api/customer/recover',{email:'unknown@example.invalid'})).json();
+  equal(db.prepare('SELECT COUNT(*) AS n FROM notification_outbox').get().n,before,'unknown address does not queue recovery');
+  const known=await (await call(recovery,'/api/customer/recover',{email})).json();equal(known,unknown,'recovery response does not enumerate accounts');
+  const row=db.prepare("SELECT payload FROM notification_outbox WHERE dedupe_key LIKE 'customer-recovery:%'").get();
+  const token=JSON.parse(row.payload).text.match(/#recovery=([A-Za-z0-9_-]{43})/)[1];
+  const redeemed=await call(recovery,'/api/customer/recover',{token});
+  const cookie=redeemed.headers.getSetCookie()[0].split(';')[0];
+  const session=sessions.decodeCustomerSession(decodeURIComponent(cookie.split('=').slice(1).join('=')));equal(session.verifiedContact,true);
+  equal((await order.GET(new NextRequest('https://bubblewash.co/api/customer/order',{headers:{cookie}}))).status,200);
+  await call(recovery,'/api/customer/recover',{token},400);
+  let rotationDraws=0;
+  if(process.argv.includes('--collision-exhaustion')) {
+    const beforeProof=store.deliveryCodeRecord(id);
+    const beforeAudit=db.prepare('SELECT COUNT(*) AS n FROM submissions').get().n;
+    cryptoBuiltin.randomInt=()=>{rotationDraws++;return Number(booking.deliveryCode);}; syncBuiltinESMExports();
+    await call(delivery,'/api/customer/delivery-code',{},503,cookie);
+    equal(rotationDraws,8,'collision retry is bounded');
+    equal(JSON.stringify(store.deliveryCodeRecord(id))===JSON.stringify(beforeProof),true,'exhaustion preserves previous unused code');
+    equal(db.prepare('SELECT COUNT(*) AS n FROM submissions').get().n,beforeAudit,'exhaustion does not record a successful replacement');
+    cryptoBuiltin.randomInt=originalRandomInt; syncBuiltinESMExports(); rotationDraws=0;
+  }
+  if(process.argv.includes('--collision-retry')) { cryptoBuiltin.randomInt=()=>{rotationDraws++;return rotationDraws===1?Number(booking.deliveryCode):(Number(booking.deliveryCode)+1)%1000000;}; syncBuiltinESMExports(); }
+  const rotated=await (await call(delivery,'/api/customer/delivery-code',{},200,cookie)).json();
+  if(process.argv.includes('--collision-retry')) equal(rotationDraws,2,'one collision retries then succeeds');
+  cryptoBuiltin.randomInt=originalRandomInt; syncBuiltinESMExports();
+  equal(rotated.deliveryCode===booking.deliveryCode,false,'rotation must invalidate the previous handoff code');
+  equal(store.deliveryCodeRecord(id).codeHash,deliveryCodeHash(id,rotated.deliveryCode));
+  // Compare hashes rather than log or expose either private handoff code.
+  equal(store.consumeDeliveryCode(id,deliveryCodeHash(id,booking.deliveryCode),'synthetic-driver','Synthetic'),false);
+  equal(store.consumeDeliveryCode(id,deliveryCodeHash(id,rotated.deliveryCode),'synthetic-driver','Synthetic'),true);
+  equal(store.consumeDeliveryCode(id,deliveryCodeHash(id,rotated.deliveryCode),'synthetic-driver','Synthetic'),false);
+  let usedCodeDraws=0; cryptoBuiltin.randomInt=()=>{usedCodeDraws++;return 1;}; syncBuiltinESMExports();
+  await call(delivery,'/api/customer/delivery-code',{},409,cookie);
+  equal(usedCodeDraws,0,'used code refuses replacement without randomness');
+  cryptoBuiltin.randomInt=originalRandomInt; syncBuiltinESMExports();
+  equal(forbiddenCalls,0,'no provider/network attempt');
+  console.log(JSON.stringify({ok:true,checks,providerCalls:forbiddenCalls,scope:'actual public-service handlers; disposable synthetic records only'}));
+} finally { cryptoBuiltin.randomInt=originalRandomInt; syncBuiltinESMExports(); globalThis.fetch=originalFetch; process.chdir(root); if(db)db.close(); rmSync(dir,{recursive:true,force:true}); }

@@ -3,7 +3,7 @@
 import { bookingLabel } from "@/lib/booking-label";
 import Link from "next/link";
 import { BoundedList } from "./BoundedList";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 type CustomerOrder = {
   orderId: string; bookingReference?: string | null; customer: string; createdAt: string; updatedAt: string; status: string; nextStep: string;
@@ -16,6 +16,8 @@ export function CustomerOrderManager() {
   const [order, setOrder] = useState<CustomerOrder | null>(null);
   const [status, setStatus] = useState("Use the same email or phone entered when the booking was made.");
   const [pending, setPending] = useState(false);
+  const requestAttempt = useRef<{ payload: string; key: string } | null>(null);
+  const requestInFlight = useRef(false);
 
   const [references, setReferences] = useState<Array<{ orderId: string; bookingReference?: string | null; createdAt: string }>>([]);
   const [deliveryCode, setDeliveryCode] = useState("");
@@ -45,8 +47,18 @@ export function CustomerOrderManager() {
   }
   async function submitRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (requestInFlight.current) return;
     const form = event.currentTarget;
-    await perform("/api/customer/request", Object.fromEntries(new FormData(form)), (body) => { setStatus(String(body.message)); form.reset(); });
+    const payload = Object.fromEntries(new FormData(form));
+    const serialized = JSON.stringify(payload);
+    if (requestAttempt.current?.payload !== serialized) requestAttempt.current = { payload: serialized, key: crypto.randomUUID() };
+    requestInFlight.current = true;
+    try {
+      await perform("/api/customer/request", { ...payload, idempotencyKey: requestAttempt.current.key }, (body) => {
+        requestAttempt.current = null;
+        setStatus(String(body.message)); form.reset();
+      });
+    } finally { requestInFlight.current = false; }
   }
   async function close() {
     await perform("/api/customer/logout", {}, () => { setOrder(null); setDeliveryCode(""); setStatus("Your order session is closed on this device."); });
