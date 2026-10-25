@@ -117,6 +117,7 @@ jobs:
           python3 ops/integration-release/select_source.py --release ../runtime-candidate --profile integration-candidate-v1 --commit "$CANDIDATE_SHA"
           python3 -m unittest discover -s tests -p 'test_owner_deploy.py' -v
           python3 -m unittest discover -s tests -p 'test_integration_release_adapter.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_quiet_boundary.py' -v
           TARGET_SHA="$CANDIDATE_SHA" python3 ops/check-release-ci.py
           python3 ops/integration-release/contracts.py --verify-fallback-ci "$FALLBACK_SHA"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
