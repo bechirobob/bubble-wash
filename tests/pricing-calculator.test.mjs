@@ -6,7 +6,7 @@ import ts from 'typescript';
 import { plans, zones, addons, calculateQuote } from '../src/lib/pricing.ts';
 
 // Exercise the component's edit and submit handlers without a browser dependency.
-function calculator({ deferred = false, hydrated = true } = {}) {
+function calculator({ deferred = false, hydrated = true, available = true } = {}) {
   const slots = [];
   const requests = [];
   const responses = [];
@@ -54,7 +54,7 @@ function calculator({ deferred = false, hydrated = true } = {}) {
   }
   modules['@/components/PlanCatalogue'] = loadComponent('PlanCatalogue');
   const { PricingCalculator } = loadComponent('PricingCalculator');
-  const render = () => { cursor = 0; return PricingCalculator({ initialPlan: 'Weekly', showCatalogue: true }); };
+  const render = () => { cursor = 0; return PricingCalculator({ initialPlan: 'Weekly', showCatalogue: true, available }); };
   const find = (node, match) => {
     if (!node || typeof node !== 'object') return;
     if (match(node)) return node;
@@ -67,6 +67,8 @@ function calculator({ deferred = false, hydrated = true } = {}) {
   return {
     requests,
     responses,
+    render,
+    find,
     hydrate: () => { hydrated = true; },
     form: () => find(render(), n => n.type === "form"),
     zone: () => find(render(), n => n.type === "select" && n.props.value === "core"),
@@ -75,6 +77,7 @@ function calculator({ deferred = false, hydrated = true } = {}) {
     compare: name => find(render(), n => n.type === 'button' && n.props.className === 'focusedPlanCompareChoice' && n.props['aria-label'].startsWith(`Choose ${name},`)),
     plan: () => find(render(), n => n.type === 'select' && plans.some(p => p.name === n.props.value)),
     extra: () => find(render(), n => n.type === 'input' && n.props.type === 'checkbox'),
+    addon: label => find(render(), n => n.type === 'label' && n.props.className === 'checkOption' && JSON.stringify(n.props.children).includes(label)).props.children[0],
     total: () => find(render(), n => n.props?.className === 'quotePeriod').props.children,
     weight: () => find(render(), n => n.type === 'input' && n.props.type === 'number'),
     submit: () => find(render(), n => n.type === 'form').props.onSubmit({ preventDefault() {} }),
@@ -184,4 +187,46 @@ test('server-rendered pricing controls remain disabled until handlers are ready'
   assert.equal(view.extra().props.checked, true);
   await view.submit();
   assert.deepEqual(JSON.parse(JSON.stringify(view.requests[0].payload)), { plan: 'Twice weekly', kg: 60.5, addons: ['ironing'], zone: 'core', discount: 'none' });
+});
+
+
+test('custom route estimate never presents the zero placeholder as free delivery', async () => {
+  const view = calculator({ available: false });
+  view.zone().props.onChange({ target: { value: 'custom' } });
+  await view.submit();
+  assert.equal(view.total(), 'monthly estimate excluding custom delivery');
+  const tree = JSON.stringify(view.render());
+  assert.match(tree, /To be confirmed/);
+  assert.match(tree, /Custom delivery is not included/);
+  assert.match(tree, /Check pickup availability/);
+  assert.doesNotMatch(tree, /Continue to booking/);
+});
+
+
+test('occasional selections remain requested but are clearly excluded from monthly totals', async () => {
+  const view = calculator();
+  view.addon('Weekend pickup / delivery').props.onChange();
+  view.addon('Extra unscheduled pickup').props.onChange();
+  await view.submit();
+  assert.deepEqual(Array.from(view.requests[0].payload.addons), ['weekend', 'extraPickup']);
+  const tree = JSON.stringify(view.render());
+  assert.match(tree, /Quoted separately, not included above/);
+  assert.match(tree, /GHS 75/);
+  assert.match(tree, /GHS 90/);
+  assert.match(tree, /actual load, route/);
+  view.addon('Premium wash + iron + fold').props.onChange();
+  view.addon('Ironing').props.onChange();
+  assert.equal(view.addon('Premium wash + iron + fold').props.checked, false);
+  view.addon('Premium wash + iron + fold').props.onChange();
+  assert.equal(view.addon('Ironing').props.checked, false);
+});
+
+
+test('minimum adjustment displays the rounded domain value, never floating-point negative zero', async () => {
+  const view = calculator();
+  view.weight().props.onChange({ target: { value: '100.03' } });
+  view.extra().props.onChange();
+  await view.submit();
+  const row = view.find(view.render(), n => n.type === 'div' && Array.isArray(n.props.children) && n.props.children[0]?.props?.children === 'Minimum adjustment per pickup');
+  assert.equal(row.props.children[1].props.children, 'GHS 0');
 });

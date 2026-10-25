@@ -116,21 +116,28 @@ export function calculateQuote(
   selectedAddons = [...new Set(selectedAddons)];
   const zone = zones[zoneKey] ?? zones.core;
   const discount = discounts[discountKey] ?? discounts.none;
-  const processingPerPickup = kg * band.rate;
-  const addonLines = selectedAddons.map((key) => {
+  const processingMinor = Math.round(kg * band.rate * 100);
+  const processingPerPickup = processingMinor / 100;
+  // Occasional services are quoted for the actual affected pickup, not repeated
+  // across the monthly allowance or assumed to be another load of this weight.
+  const occasionalLines = selectedAddons.filter((key) => "fixed" in addons[key]).map((key) => ({
+    key, label: addons[key].label, fee: (addons[key] as { fixed: number }).fixed,
+  }));
+  const addonLines = selectedAddons.filter((key) => !("fixed" in addons[key])).map((key) => {
     const addon = addons[key];
-    let amount = 0;
-    if ("perKg" in addon) amount = kg * addon.perKg;
-    if ("percent" in addon) amount = processingPerPickup * addon.percent;
-    if ("fixed" in addon) amount = addon.fixed;
-    return { key, label: addon.label, amount: Math.round(amount * 100) / 100 };
+    let amountMinor = 0;
+    if ("perKg" in addon) amountMinor = Math.round(kg * addon.perKg * 100);
+    if ("percent" in addon) amountMinor = Math.round(processingMinor * addon.percent);
+    if ("fixed" in addon) amountMinor = addon.fixed * 100;
+    return { key, label: addon.label, amount: amountMinor / 100 };
   });
-  const addonsPerPickup = addonLines.reduce((sum, item) => sum + item.amount, 0);
-  const rawPickupTotal = processingPerPickup + addonsPerPickup + zone.fee;
+  const addonsMinor = addonLines.reduce((sum, item) => sum + Math.round(item.amount * 100), 0);
+  const addonsPerPickup = addonsMinor / 100;
+  const rawPickupTotal = (processingMinor + addonsMinor + Math.round(zone.fee * 100)) / 100;
   const perPickupBeforeMinimum = rawPickupTotal;
   const perPickupTotal = Math.max(perPickupBeforeMinimum, 450);
-  const grossMonthlyTotal = plan.subscription + perPickupTotal * plan.monthlyPickups;
-  const discountAmount = grossMonthlyTotal * discount.percent;
+  const grossMonthlyTotal = (Math.round(plan.subscription * 100) + Math.round(perPickupTotal * 100) * plan.monthlyPickups) / 100;
+  const discountAmount = Math.round(grossMonthlyTotal * 100 * discount.percent) / 100;
   const estimatedMonthlyTotal = grossMonthlyTotal - discountAmount;
 
   return {
@@ -139,6 +146,7 @@ export function calculateQuote(
     kg,
     zone: zone.label,
     zoneFee: zone.fee,
+    routeFeePending: zoneKey === "custom",
     discount: discount.label,
     discountPercent: discount.percent,
     discountAmount: Math.round(discountAmount * 100) / 100,
@@ -148,6 +156,7 @@ export function calculateQuote(
     processingPerPickup: Math.round(processingPerPickup * 100) / 100,
     addonsPerPickup: Math.round(addonsPerPickup * 100) / 100,
     addonLines,
+    occasionalLines,
     minimumAdjustment: Math.round((perPickupTotal - perPickupBeforeMinimum) * 100) / 100,
     minimumApplied: perPickupBeforeMinimum < 450,
     perPickupTotal: Math.round(perPickupTotal * 100) / 100,

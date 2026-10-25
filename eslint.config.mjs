@@ -11,6 +11,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "tests/visual-fixture/dist/**", // Generated actual-component visual evidence, not source.
     "next-env.d.ts",
   ]),
 ]);

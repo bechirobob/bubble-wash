@@ -51,3 +51,6 @@ next-env.d.ts
 /.hermes/
 
 /tooling/**/node_modules/
+
+# generated actual-component visual evidence
+/tests/visual-fixture/dist/

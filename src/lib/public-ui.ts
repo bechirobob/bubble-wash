@@ -4,6 +4,7 @@ export type Quote = {
   kg: number;
   zone: string;
   zoneFee: number;
+  routeFeePending: boolean;
   discount: string;
   discountAmount: number;
   ratePerKg: number;
@@ -12,10 +13,12 @@ export type Quote = {
   processingPerPickup: number;
   addonsPerPickup: number;
   addonLines: Array<{ key: string; label: string; amount: number }>;
+  occasionalLines: Array<{ key: string; label: string; fee: number }>;
   perPickupTotal: number;
   grossMonthlyTotal: number;
   estimatedMonthlyTotal: number;
   minimumApplied: boolean;
+  minimumAdjustment: number;
 };
 
 export function formatMoney(value: number) {

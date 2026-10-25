@@ -163,22 +163,36 @@ async function runStaffWorkflow(browser, testInfo, gpsOnly = false) {
     await form(support, 'Log customer contact', { nextFollowUpAt: `${date}T09:00`, operatorNote: 'Synthetic contact log, no actual call or email.' }, 'Save contact log', testInfo, 'support-contact');
     await beforeHardNavigation(vendor, 'vendor populated queue');
     await vendor.goto(paths.vendor);
-    const assignedRow = vendor.locator('.staffOrderRow').filter({ hasText: booking.bookingReference });
+    // The approved Vendor workspace is a job sheet beside a compact queue, not
+    // the retired five-column order table. Keep identity, stage, timing and
+    // responsive layout coverage, and exercise the actual queue destination.
+    const assignedRow = vendor.locator('.staffRoleLedger .staffRoleQueueRow').filter({ has: vendor.getByText(booking.bookingReference, { exact: true }) });
     await expect(assignedRow).toBeVisible();
-    await expect(assignedRow).toContainText(`Synthetic account ${fixture}`);
-    const queueHeader = vendor.locator('.staffOrderListHeader');
+    await expect(assignedRow).toHaveAttribute('href', `${paths.vendor}&order=${encodeURIComponent(booking.id)}`);
+    await expect(assignedRow.getByText('Vendor Assigned', { exact: true })).toBeVisible();
+    await expect(assignedRow.locator('small').last()).toHaveText(/^(Due in |Due now$|Overdue by )/);
+    const jobSheet = vendor.locator('.staffRoleFeatured');
+    const jobQueue = vendor.locator('.staffRoleLedger');
+    await expect(jobSheet).toBeVisible();
+    await expect(jobQueue).toBeVisible();
+    const sheetBounds = await jobSheet.boundingBox();
+    const queueBounds = await jobQueue.boundingBox();
+    expect(sheetBounds).not.toBeNull();
+    expect(queueBounds).not.toBeNull();
     if (width === 1440) {
-      await expect(queueHeader).toBeVisible();
-      const headerColumns = await queueHeader.locator(':scope > span').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().left));
-      const rowColumns = await assignedRow.locator(':scope > *').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().left));
-      expect(headerColumns).toHaveLength(5);
-      expect(rowColumns).toHaveLength(5);
-      for (let column = 0; column < 5; column++) expect(Math.abs(headerColumns[column] - rowColumns[column]), `Vendor queue column ${column + 1} aligns with its header`).toBeLessThanOrEqual(1);
+      expect(queueBounds.x, 'Desktop queue follows the job sheet without overlap').toBeGreaterThanOrEqual(sheetBounds.x + sheetBounds.width - 1);
+      expect(Math.abs(queueBounds.y - sheetBounds.y), 'Desktop job sheet and queue align at the top').toBeLessThanOrEqual(1);
     } else {
-      await expect(queueHeader).toBeHidden();
+      expect(queueBounds.y, 'Mobile queue follows the full-width job sheet').toBeGreaterThanOrEqual(sheetBounds.y + sheetBounds.height - 1);
+      expect(Math.abs(queueBounds.x - sheetBounds.x), 'Mobile sheet and queue share the left edge').toBeLessThanOrEqual(1);
+      expect(Math.abs(queueBounds.width - sheetBounds.width), 'Mobile sheet and queue share the available width').toBeLessThanOrEqual(1);
     }
     await evidence(vendor, testInfo, 'vendor-populated-queue');
-    await detail('vendor'); await evidence(vendor, testInfo, 'vendor-assignment');
+    await assignedRow.click();
+    await expect(vendor).toHaveURL(new URL(`${paths.vendor}&order=${encodeURIComponent(booking.id)}`, vendor.url()).href);
+    await expect(vendor.locator('.orderDetail').getByRole('heading', { name: `Synthetic account ${fixture}`, exact: true })).toBeVisible();
+    await expect(vendor.locator('.orderDetail .staffDetailHeader')).toContainText(booking.bookingReference);
+    await evidence(vendor, testInfo, 'vendor-assignment');
     await save(vendor, 'Accept assigned job');
     await detail('driver'); await save(driver, 'Start pickup route');
     if (gpsOnly) {
@@ -331,18 +345,23 @@ async function runStaffWorkflow(browser, testInfo, gpsOnly = false) {
     expect(paymentEvent.id).not.toBe(booking.bookingReference);
     await beforeHardNavigation(admin, 'admin activity summary');
     await admin.goto('/admin?view=overview');
-    const recent = admin.locator('section').filter({ has: admin.getByRole('heading', { name: 'Latest operational changes', exact: true }) });
-    const paymentSummary = recent.locator('.staffSimpleRow').filter({ has: admin.getByText('Payment Update', { exact: true }) }).filter({ has: admin.getByText(booking.bookingReference, { exact: true }) });
-    await expect(paymentSummary).toBeVisible();
-    await expect(paymentSummary).not.toContainText(booking.id);
-    await expect(paymentSummary).not.toContainText(paymentEvent.id);
-    await evidence(admin, testInfo, 'admin-activity-reference');
-    await beforeHardNavigation(admin, 'admin activity list');
-    await admin.goto('/admin?view=activity');
+    // History is secondary; the overview link opens the preserved activity route.
+    await admin.locator('.staffDeskFoot').getByRole('link', { name: 'Recent changes', exact: true }).click();
     const activitySection = admin.locator('.activitySection');
     await expect(activitySection).toHaveAttribute('aria-busy', 'false');
-    await activitySection.getByRole('combobox', { name: 'Show', exact: true }).selectOption('all');
-    await activitySection.getByRole('combobox', { name: 'When', exact: true }).selectOption('50');
+    await expect(activitySection.locator('.activityTools')).not.toHaveAttribute('open', '');
+    await activitySection.locator('.activityTools > summary').click();
+    // Native wrapping labels can include their option text in the computed
+    // name. Identify the preserved control by its option contract, then still
+    // verify the accessible label rather than relying on a positional select.
+    const activityDate = activitySection.getByRole('combobox').filter({ has: admin.locator('option[value="last24"]') });
+    const activityWindow = activitySection.getByRole('combobox').filter({ has: admin.locator('option[value="50"]') });
+    const activityType = activitySection.getByRole('combobox').filter({ has: admin.locator('option[value="payments"]') });
+    await expect(activityDate).toHaveAccessibleName(/^Date(?:\s|$)/);
+    await expect(activityWindow).toHaveAccessibleName(/^Show(?:\s|$)/);
+    await expect(activityType).toHaveAccessibleName(/^Type(?:\s|$)/);
+    await activityDate.selectOption('all');
+    await activityWindow.selectOption('50');
     const activityLink = admin.locator('.staffActivityRow').filter({ has: admin.getByText(booking.bookingReference, { exact: true }) }).filter({ has: admin.getByText('Payment Update', { exact: true }) });
     await expect(activityLink).toHaveAttribute('href', `/admin?view=activity&activity=${encodeURIComponent(paymentEvent.id)}`);
     await expect(activityLink).not.toContainText(booking.id);
@@ -361,21 +380,21 @@ async function runStaffWorkflow(browser, testInfo, gpsOnly = false) {
     // List choices survive because the activity workspace does not remount.
     const expectActivityList = async () => {
       await expect(admin).toHaveURL(new URL('/admin?view=activity', admin.url()).href);
-      await expect(activitySection.getByRole('heading', { name: 'Latest saved updates', exact: true })).toBeVisible();
-      await expect(activitySection.getByRole('combobox', { name: 'Show', exact: true })).toHaveValue('all');
-      await expect(activitySection.getByRole('combobox', { name: 'When', exact: true })).toHaveValue('50');
+      await expect(activitySection.getByRole('heading', { name: 'Saved updates', exact: true })).toBeVisible();
+      await expect(activityDate).toHaveValue('all');
+      await expect(activityWindow).toHaveValue('50');
     };
     await admin.goBack();
     await expectActivityList();
     await admin.goForward();
     await expect(admin.locator('.activitySection .staffDetailHeader h2')).toHaveText(booking.bookingReference);
-    await activitySection.getByRole('link', { name: '← Back to activity', exact: true }).click();
+    await activitySection.getByRole('link', { name: '← Back to recent changes', exact: true }).click();
     await expectActivityList();
     await activityLink.click();
     await expect(admin.locator('.activitySection .staffDetailHeader h2')).toHaveText(booking.bookingReference);
     await activitySection.getByRole('button', { name: 'Show similar', exact: true }).click();
     await expectActivityList();
-    await expect(activitySection.getByRole('button', { name: /^Payments \d+$/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(activityType).toHaveValue('payments');
     const tracking = await customer.request.get(`/api/track?id=${booking.id}`, { timeout: 15_000 });
     expect(tracking.ok(), `Tracking: HTTP ${tracking.status()}`).toBeTruthy();
     expect((await tracking.json()).tracking.status).toBe('Closed');

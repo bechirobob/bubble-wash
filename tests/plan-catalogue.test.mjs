@@ -65,7 +65,7 @@ test('all four selections show one accurate plan card, fee, schedule, benefits a
     assert.equal(text(all(cards[0], node => node.type === 'h3')[0]), plan.name);
     assert.ok(text(cards[0]).includes(formatMoney(plan.subscription)));
     assert.ok(text(cards[0]).includes(plan.pickups));
-    assert.ok(text(cards[0]).includes(`${plan.monthlyPickups} pickups a month`));
+    assert.ok(text(cards[0]).includes(`${plan.monthlyPickups} included pickups per calendar month`));
     for (const feature of plan.features) assert.ok(text(byClass(tree, 'focusedPlanBenefits')[0]).includes(feature));
     const rates = byClass(tree, 'focusedPlanRates')[0];
     assert.equal(all(rates, node => node.type === 'dd').length, plan.bands.length);
