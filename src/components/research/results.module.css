@@ -11,7 +11,7 @@
 @media(max-width:600px){.page :global(.boundedListViewport){max-block-size:min(60dvh,28rem)}}
 
 /* Approved owner research surface, within the shared staff shell. */
-.page{--line:#dedede;--line-strong:#858585;--line-active:#08758e;--focus-ring:#222;--ink:#15313e;--muted:#61727a;--brand:#08758e;--surface:#fbfcfc;--surface-soft:#edf2f3;--brand-soft:#e2edef;min-height:0;background:transparent;font-family:inherit}
+.page{--line:#dedede;--line-strong:#858585;--line-active:#333333;--focus-ring:#222222;--ink:#15313e;--muted:#61727a;--brand:#08758e;--surface:#ffffff;--surface-soft:#edf2f3;--brand-soft:#e2edef;min-height:0;background:transparent;font-family:inherit}
 .content{max-width:none;margin:0;padding:0}
 .refresh{min-height:44px;border:0;background:transparent;color:#08758e;font-size:13px!important;padding:10px 8px;flex-shrink:0}
 .filters{grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:20px}

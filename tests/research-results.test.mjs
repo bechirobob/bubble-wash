@@ -140,7 +140,7 @@ test('historical detail preserves field keys instead of assigning present-day wo
 
 test('results share staff identity while preserving bounded scrolling and owner-only navigation', () => {
   const css = readFileSync(new URL('../src/components/research/results.module.css', import.meta.url), 'utf8');
-  assert.match(css, /\.page\{--line:#dedede;--line-strong:#858585;--line-active:#08758e;--focus-ring:#222;/);
+  assert.match(css, /\.page\{--line:#dedede;--line-strong:#858585;--line-active:#333333;--focus-ring:#222222;/);
   assert.match(css, /\.page :global\(\.boundedListViewport\)\{[^}]*max-block-size:min\(60dvh,36rem\);overflow:auto/);
   assert.match(css, /@media\(max-width:600px\)\{\.page :global\(\.boundedListViewport\)\{max-block-size:min\(60dvh,28rem\)/);
   const workspace = readFileSync(new URL('../src/components/StaffWorkspaces.tsx', import.meta.url), 'utf8');
