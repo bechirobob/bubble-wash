@@ -1,0 +1,81 @@
+name: Exact approved test data cleanup
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed main controls commit
+        required: true
+        type: string
+      operation:
+        description: Read-only preflight or exact previously approved apply
+        required: true
+        default: preflight
+        type: choice
+        options:
+          - preflight
+          - apply
+      plan_fingerprint:
+        description: Exact successful preflight fingerprint, required for apply
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      OPERATION: ${{ inputs.operation }}
+      PLAN_FINGERPRINT: ${{ inputs.plan_fingerprint }}
+      BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+      BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Require exact reviewed source, operation and first attempt
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          [[ "$OPERATION" == preflight || "$OPERATION" == apply ]]
+          if [[ "$OPERATION" == apply ]]; then
+            [[ "$PLAN_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
+          else
+            [[ -z "$PLAN_FINGERPRINT" ]]
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Test and bind the exact surgical cleanup source
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+          python3 -B -m unittest discover -s tests -p 'test_test_data_cleanup_core.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_exact_cleanup_host.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_exact_cleanup_sqlite.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_exact_cleanup_emitter.py' -v
+          python3 -B ops/emit-exact-cleanup.py --check
+          python3 -c 'import json,os; p=json.load(open("ops/exact-cleanup-source-pins.json")); assert os.environ["BACKUP_STORE_SHA"] == p["storeSha"] and os.environ["BACKUP_STORE_ID"] == str(p["storeId"])'
+          python3 -B ops/emit-exact-cleanup.py --emit > "$RUNNER_TEMP/exact-cleanup.py"
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+      - name: Verify existing private backup destination without creating access
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+        run: python3 .github/backup/check_store.py
+      - name: Connect through existing approved production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Run only the pinned preflight or approved exact cleanup
+        run: |
+          set -euo pipefail
+          tailscale ssh root@hermes "python3 -I -B - --operation '$OPERATION' --plan-fingerprint '$PLAN_FINGERPRINT'" < "$RUNNER_TEMP/exact-cleanup.py"
