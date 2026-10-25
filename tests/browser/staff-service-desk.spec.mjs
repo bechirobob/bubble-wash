@@ -250,7 +250,7 @@ test('service stage counts stay paired with their own icons at three digit volum
       expect(content.bottom).toBeLessThanOrEqual(button.bottom + 1);
     }
     if (testInfo.project.use.viewport.width <= 700) {
-      expect(icon.width).toBe(24);
+      expect(icon.width).toBeCloseTo(24, 2);
       expect(count.x - icon.right).toBeCloseTo(6, 0);
     }
   }

@@ -1,17 +1,38 @@
 'use client';
-import {useRef,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import Link from 'next/link';
 import {BrandLink} from '@/components/BrandLink';
 import {findForm,eligibilityQuestions,interviewProbes,displayPrompt,serviceDescription,pricingDescription,visible,answerError,type InstrumentId,type Answers,type Question} from '@/lib/research/model';
 import {schemaVersion,launchApproved,retentionReviewApproved,submissionBudget,researchNotice} from '@/lib/research/policy';
 import styles from './research.module.css';
 const emptyIdentity={name:'',organisation:'',email:'',phone:''};
+// Announce a changed question only while navigation still owns focus. A delayed
+// frame must never pull focus away from a respondent already entering an answer.
+function scheduleHeadingFocus(getHeading:()=>HTMLHeadingElement|null){
+ const previousFocus=document.activeElement;
+ let pending=true,frame=0;
+ const cancel=()=>{
+  pending=false;cancelAnimationFrame(frame);
+  for(const event of ['focusin','pointerdown','keydown'])document.removeEventListener(event,cancel,true);
+ };
+ for(const event of ['focusin','pointerdown','keydown'])document.addEventListener(event,cancel,true);
+ frame=requestAnimationFrame(()=>{
+  if(!pending)return;
+  const navigationOwnsFocus=document.activeElement===previousFocus||document.activeElement===document.body;
+  cancel();
+  if(navigationOwnsFocus)getHeading()?.focus();
+ });
+ return cancel;
+}
+
 export function ResearchForm({instrumentId,preview=false}:{instrumentId:InstrumentId;preview?:boolean}){
  const form=findForm(instrumentId)!;
  const [adult,setAdult]=useState(false),[excluded,setExcluded]=useState(false),[ended,setEnded]=useState(false),[saved,setSaved]=useState(false);
  const [identity,setIdentity]=useState(emptyIdentity),[answers,setAnswers]=useState<Answers>({}),[consent,setConsent]=useState('');
  const [step,setStep]=useState(0),[error,setError]=useState(''),[sending,setSending]=useState(false);
  const key=useRef(''),locked=useRef(false),heading=useRef<HTMLHeadingElement>(null);
+ const pendingHeadingFocus=useRef<(()=>void)|null>(null);
+ useEffect(()=>()=>pendingHeadingFocus.current?.(),[]);
  const consumer=instrumentId==='consumer',business=['business-interview','vendor-interview'].includes(instrumentId);
  const groups:{title:string;questions:Question[]}[]=[];
  for(const q of form.questions.filter(q=>visible(q,answers,instrumentId))){
@@ -38,7 +59,7 @@ export function ResearchForm({instrumentId,preview=false}:{instrumentId:Instrume
   if(id==='A1'&&value==='Under 18'){exclude();return;}
   setAnswers(old=>{const next={...old,[id]:value};for(const q of [...form.questions,...eligibilityQuestions,...(instrumentId==='consumer-interview'?interviewProbes:[])])if(!visible(q,next,instrumentId))delete next[q.id];if(next.A3!=='Other (specify)')delete next['A3-other'];if(next.A4!=='Other')delete next['A4-other'];if(next.F1a!=='Other university or college (please specify)')delete next['F1a-other'];return next;});
  }
- function move(next:number){setError('');setStep(next);requestAnimationFrame(()=>heading.current?.focus());}
+ function move(next:number){pendingHeadingFocus.current?.();setError('');setStep(next);pendingHeadingFocus.current=scheduleHeadingFocus(()=>heading.current);}
  async function submit(){
   if(preview||!adult||excluded||answers.A1==='Under 18'||locked.current)return;
   if(!budget.withinLimit){setError('Your response is over the total size limit. Please shorten some answers before submitting.');return;}
