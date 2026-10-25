@@ -1,0 +1,75 @@
+name: Recover existing app after verified cleanup
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed main controls commit
+        required: true
+        type: string
+      operation:
+        description: Read-only recovery check or recovery-only app start
+        required: true
+        default: recovery-check
+        type: choice
+        options:
+          - recovery-check
+          - recover
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      OPERATION: ${{ inputs.operation }}
+      BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+      BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Require exact reviewed source, operation and first attempt
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          [[ "$OPERATION" == recovery-check || "$OPERATION" == recover ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Test and bind the exact surgical cleanup source
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+          python3 -B -m unittest discover -s tests -p 'test_test_data_cleanup_core.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_exact_cleanup_host.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_exact_cleanup_sqlite.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_exact_cleanup_emitter.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_cleanup_diagnostics.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_cleanup_backup_identity.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_cleanup_production_mode.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_cleanup_recovery*.py' -v
+          python3 -B ops/emit-cleanup-recovery.py --check
+          python3 -c 'import json,os; p=json.load(open("ops/cleanup-recovery-source-pins.json")); assert os.environ["BACKUP_STORE_SHA"] == p["storeSha"] and os.environ["BACKUP_STORE_ID"] == str(p["storeId"])'
+          python3 -B ops/emit-cleanup-recovery.py --emit > "$RUNNER_TEMP/cleanup-recovery.py"
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+      - name: Verify existing private backup destination without creating access
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+        run: python3 .github/backup/check_store.py
+      - name: Connect through existing approved production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Run only the pinned recovery check or approved app recovery
+        run: |
+          set -euo pipefail
+          tailscale ssh root@hermes "python3 -I -B - --operation '$OPERATION'" < "$RUNNER_TEMP/cleanup-recovery.py"
