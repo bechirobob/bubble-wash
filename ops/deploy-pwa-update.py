@@ -18,7 +18,9 @@ import zlib
 STATE = Path('/var/lib/bubblewash-release')
 # Durable controller projection identity, not the materialized plan-file digest.
 JOURNAL_PLAN = 'fa82c3eac9f920f86a04f45a64ec3a9259b567585fdd74ac30b06b7d7062dd65'
-BASE_SHA = '5f256800d65dbe3b69f54e95afa0e8ab30b5e881'
+# The completed migration journal is historical evidence, not the live code pointer.
+JOURNAL_TARGET_SHA = '5f256800d65dbe3b69f54e95afa0e8ab30b5e881'
+BASE_SHA = 'ff78cfb5288a4855651b2712d0aa16bd799965d3'
 DEPENDENCIES = ('deploy-preserving.py', 'deploy-survey-only.py', 'deploy-survey-update.py', 'survey-only-source-pins.json',
                 'inactive-staging/prepare_pair.py', 'inactive-staging/stage_artifact.py')
 
@@ -55,6 +57,12 @@ def release_state_snapshot(state=None, owner_uid=0):
             result['journalTarget'] = journal['target']
         result[name] = (identity(info), hashlib.sha256(raw).hexdigest())
     return result
+
+
+def bind_release_state(original, current):
+    """Independently bind immutable migration evidence and this release baseline."""
+    require(original['journalTarget'] == str(STATE / 'releases' / JOURNAL_TARGET_SHA))
+    require(current == STATE / 'releases' / BASE_SHA)
 
 
 def release_state_unchanged(original):
@@ -249,7 +257,7 @@ def configure(pins, sources):
     def locked(runtime, uid):
         with original_lock(runtime, uid) as verify_lock:
             original = release_state_snapshot()
-            require(original['journalTarget'] == str(core.CURRENT.resolve(strict=True)))
+            bind_release_state(original, core.CURRENT.resolve(strict=True))
             def unchanged():
                 verify_lock()
                 release_state_unchanged(original)
