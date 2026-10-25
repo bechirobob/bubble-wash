@@ -1,38 +1,37 @@
 {
   "allowedChanges": [
-    ".github/workflows/browser-regression.yml",
     ".github/workflows/pwa-update-deploy.yml",
     "ops/deploy-pwa-update.py",
     "ops/integration-release/source-contracts.json",
     "ops/pwa-update-source-pins.json",
-    "src/app/globals.css",
     "src/components/StaffWorkspaces.tsx",
-    "src/components/research/ResearchForm.tsx",
-    "src/components/staff-desk.css",
-    "tests/browser/customer-alignment.spec.mjs",
-    "tests/browser/opening-intro.spec.mjs",
-    "tests/browser/staff-service-desk.spec.mjs",
-    "tests/research-heading-focus.test.mjs"
+    "src/components/research/ResearchResults.tsx",
+    "src/components/research/results.module.css",
+    "tests/browser/focus-policy-proof.mjs",
+    "tests/browser/research-results-proof.mjs",
+    "tests/focus-modality.test.mjs",
+    "tests/research-results.test.mjs",
+    "tests/research-visual-consistency.test.mjs"
   ],
-  "baseSha": "2af475865afe881bceac21bf641af76afda588ba",
-  "baseTree": "c4c2bebdbab95d048b49bfdb662f389f1a9adace",
+  "baseSha": "a0000bd9f44852e19c05f979e8eda6612ffe6222",
+  "baseTree": "9f08869d3d606286cad995e00f5625bfad7cb5e9",
   "baselineContent": {
     "directories": 113,
-    "files": 565,
-    "sha256": "a8c96b29ab7fe86f4bf47c2b1dbc7c5d8309a56eec702584ce0d6adbaf0d2d51"
+    "files": 567,
+    "sha256": "d88c100264b3c25ba2e8c0fa4da18864cae20c059d3f8a7476fb9887f6a0d640"
   },
   "baselineSource": {
     "next.config.mjs": "99485a62a52b87f6b17c2732d43bd7eb090984b3fbf74dfcf0637db17831fc02",
     "package-lock.json": "5ee351083ccf449022dfcd3f466cea7e541423294a4854458feb719a3350d966",
     "package.json": "30b85cc2c3316f0e30376cec7d90beacd98c7c10e18e82464eb7503749554ece",
-    "src": "3e03280f3971a44346e09c65af0af85839d8bcd78eeb044ff5c20f3a65fb2265",
+    "src": "2e21a680f19ddcfe1cfdf5e196fcbc125cc2933ec4831520f1dad499760e6b0f",
     "tsconfig.json": "2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c"
   },
   "candidateSource": {
     "next.config.mjs": "99485a62a52b87f6b17c2732d43bd7eb090984b3fbf74dfcf0637db17831fc02",
     "package-lock.json": "5ee351083ccf449022dfcd3f466cea7e541423294a4854458feb719a3350d966",
     "package.json": "30b85cc2c3316f0e30376cec7d90beacd98c7c10e18e82464eb7503749554ece",
-    "src": "2e21a680f19ddcfe1cfdf5e196fcbc125cc2933ec4831520f1dad499760e6b0f",
+    "src": "d4bfefcdd6262e7c15e625c66605481d30ba7a26b4afe1699973ebbb237df58a",
     "tsconfig.json": "2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c"
   },
   "criticalFiles": [
@@ -56,10 +55,10 @@
   "runtimeContent": {
     "directories": 113,
     "files": 567,
-    "sha256": "d88c100264b3c25ba2e8c0fa4da18864cae20c059d3f8a7476fb9887f6a0d640"
+    "sha256": "fe4aeafb899b49f85c757e24259b518a36391f5427c860ca265c59bb73ba79a1"
   },
-  "runtimeSha": "a0000bd9f44852e19c05f979e8eda6612ffe6222",
-  "runtimeTree": "9f08869d3d606286cad995e00f5625bfad7cb5e9",
+  "runtimeSha": "2d44805d6731116be81412aa0cf39770583c33cf",
+  "runtimeTree": "8d9517b962408490c00c1aeb8016c15232df3391",
   "schema": "bubblewash-pwa-update/v1",
   "sourceScope": {
     "directories": [
