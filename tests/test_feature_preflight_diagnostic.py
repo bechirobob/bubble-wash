@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sqlite3
@@ -87,6 +88,46 @@ db.exec(readFileSync('db/proposed/research-v1.sql','utf8'));db.close();
         (source/'node_modules').symlink_to(self.source/'node_modules',target_is_directory=True)
         for name in ('booking-reference-schema.ts','notification-outbox-schema.ts'):(source/'src/lib'/name).write_text('export {};')
         self.assertEqual(self.diagnose(source)['stage'],'MODEL_BUILD')
+    def roster_ddl(self):
+        text=(self.source/'scripts/reset-production-roster.mjs').read_text()
+        return re.search(r'CREATE TABLE IF NOT EXISTS production_roster_resets \([\s\S]*?\);',text)[0]
+    def test_exact_historical_roster_schema_is_admitted_without_changes(self):
+        with sqlite3.connect(self.db) as db:
+            db.executescript(self.roster_ddl())
+            db.execute("INSERT INTO production_roster_resets VALUES ('synthetic-reset','time','backup','hash','{}','{}','{}')")
+            db.row_factory=sqlite3.Row
+            rows=[dict(row) for row in db.execute("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE tbl_name='production_roster_resets' ORDER BY type,name")]
+            self.assertEqual(hashlib.sha256(json.dumps(rows,separators=(',',':')).encode()).hexdigest(),'7b9dec121f2e38b692feca0f247ebde6e50904225a945902d0513fdfb53d1f54')
+        report=self.diagnose()
+        self.assertTrue(report['ok']);self.assertEqual(report['stage'],'COMPLETE')
+        self.assertEqual(report['knownDiscrepancies'],[])
+        with sqlite3.connect(self.db) as db:self.assertEqual(db.execute('SELECT * FROM production_roster_resets').fetchall(),[('synthetic-reset','time','backup','hash','{}','{}','{}')])
+    def test_reset_source_remains_pinned_after_model_creation(self):
+        source=self.root/'source-copy'
+        shutil.copytree(self.source,source,ignore=shutil.ignore_patterns('node_modules','.git','.next','__pycache__'))
+        (source/'node_modules').symlink_to(self.source/'node_modules',target_is_directory=True)
+        code=r"""
+import {appendFileSync} from 'node:fs';
+const {featureSchemaModel}=await import(process.argv[1]);
+const model=await featureSchemaModel(process.argv[2]);model.unchanged();
+appendFileSync(process.argv[2]+'/scripts/reset-production-roster.mjs','\n// synthetic drift\n');
+try {model.unchanged();process.exitCode=1;}catch {console.log('source-drift-refused');}
+"""
+        result=subprocess.run([self.node,'--conditions=react-server','--experimental-strip-types','--input-type=module','-e',code,(SCRIPT.parent/'migrate-integration-features.mjs').as_uri(),str(source)],capture_output=True,text=True,timeout=20)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.strip(),'source-drift-refused')
+    def test_roster_constraint_and_other_sql_drift_remain_refused(self):
+        original=self.roster_ddl()
+        variants=[original.replace(' CHECK (json_valid(before_counts))',''),
+            original.replace('CHECK (json_valid(after_counts))','CHECK (json_valid(after_counts) OR 1)'),
+            original.replace('backup_sha256 TEXT NOT NULL','backup_sha256 TEXT'),
+            original.replace('reset_id TEXT PRIMARY KEY','reset_id TEXT'),
+            original.replace('    reset_id','   reset_id')]
+        for ddl in variants:
+            with self.subTest(ddl=ddl),sqlite3.connect(self.db) as db:
+                db.execute('DROP TABLE IF EXISTS production_roster_resets');db.executescript(ddl)
+            report=self.diagnose()
+            self.assertFalse(report['ok']);self.assertEqual(report['stage'],'TABLE_SCHEMAS')
     def test_unknown_table_is_distinct_and_not_identified(self):
         with sqlite3.connect(self.db) as db:db.execute('CREATE TABLE secret_unknown(id TEXT)')
         report=self.diagnose()
