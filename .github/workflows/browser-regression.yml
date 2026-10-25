@@ -108,9 +108,9 @@ jobs:
           node tests/browser/research-results-proof.mjs
       - name: Verify synthetic edge, logins, cookies, redirects and script assets
         run: node tests/browser/fixture-smoke.mjs
-      - name: Verify staff and customer alignment across all projects
+      - name: Verify staff alignment and customer request retries across all projects
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode != 'gps' }}
-        run: npx playwright test tests/browser/staff-service-desk.spec.mjs tests/browser/customer-alignment.spec.mjs
+        run: npx playwright test tests/browser/staff-service-desk.spec.mjs tests/browser/customer-alignment.spec.mjs tests/browser/customer-request-retry.spec.mjs
       - name: Run four-role journeys at mobile and desktop sizes
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode != 'gps' }}
         run: npx playwright test
