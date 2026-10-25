@@ -137,6 +137,34 @@ test.describe('interim survey open-fixture acceptance',()=>{
       if(await group.isVisible())await group.getByRole('radio',{name:yes.includes(id)?'Yes':'No',exact:true}).check();
     }
   }
+  for(const interrupted of [false,true])test('delayed question heading focus '+(interrupted?'does not steal rapid answer input':'still announces uninterrupted navigation'),async({page})=>{
+    await enter(page,'consumer-interview');
+    await page.getByRole('radio',{name:'Yes, I agree',exact:true}).check();
+    // Hold only the frame scheduled synchronously by the real form transition.
+    // All later frames retain their native behavior; no sleeps or settle gates.
+    await page.evaluate(()=>{
+      const nativeFrame=window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame=callback=>{
+        window.requestAnimationFrame=nativeFrame;
+        window.__releaseQuestionHeadingFrame=()=>callback(performance.now());
+        return nativeFrame(()=>{});
+      };
+      document.querySelector('main form').requestSubmit();
+    });
+    await expect(page.getByRole('progressbar',{name:'Questionnaire progress'})).toHaveAttribute('value','1');
+    expect(await page.evaluate(()=>typeof window.__releaseQuestionHeadingFrame)).toBe('function');
+    if(interrupted){
+      const answer=page.locator('textarea').first();
+      await answer.fill('Rapid synthetic answer');
+      await page.evaluate(()=>window.__releaseQuestionHeadingFrame());
+      await expect(answer).toBeFocused();
+      await answer.press('End');await page.keyboard.type(' retained');
+      await expect(answer).toHaveValue('Rapid synthetic answer retained');
+    }else{
+      await page.evaluate(()=>window.__releaseQuestionHeadingFrame());
+      await expect(page.locator('main h1')).toBeFocused();
+    }
+  });
   test('adult gate and consent refusal never submit identity',async({page},testInfo)=>{
     let requests=0;page.on('request',r=>{if(r.url().includes('/api/research/responses'))requests++;});
     await page.emulateMedia({reducedMotion:'reduce'});await page.goto('/survey/consumer');
