@@ -6,7 +6,7 @@ import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { getDatabase, appendSubmissionRecord, readStaffCredentialOverride, databaseReadiness } from "./data-store.ts";
 import { createPasswordHash } from "./passwords.ts";
 import type { StaffUser, StaffRole } from "./auth.ts";
-export type StaffAccount = StaffUser & { status: "invited" | "active" | "suspended"; updatedAt: string };
+export type StaffAccount = StaffUser & { status: "invited" | "active" | "suspended" | "archived"; updatedAt: string };
 function db() {
   const database = getDatabase();
   initializeStaffAccountsSchema(database);
@@ -23,13 +23,14 @@ export function listStaffAccounts(database = db()) {
 function audit(email: string, action: string, actor: string) {
   appendSubmissionRecord({ id: `BW-${randomUUID()}`, createdAt: new Date().toISOString(), source: "staff-account-administration", data: { submissionType: "staff-account-action", staffEmail: email, actionType: action, submittedByEmail: actor } });
 }
-export function inviteStaffAccount(input: { email: string; name: string; role: StaffRole; entityId: string }, actor: string) {
+export function inviteStaffAccount(input: { email: string; name: string; role: StaffRole; entityId: string }, actor: string, restoreArchived = false) {
   const token = randomBytes(32).toString("base64url");
   db().transaction(() => {
     const existing = listStaffAccounts().find((a) => a.email.toLowerCase() === input.email.toLowerCase());
+    if (existing?.status === "archived" && !restoreArchived) throw new Error("Confirm restoration before resetting an archived account.");
     if (existing && (existing.role !== input.role || (existing.entityId || "") !== input.entityId)) throw new Error("Reset must preserve the existing role and roster binding.");
     db().prepare(`INSERT INTO staff_accounts VALUES (@email, @name, @role, @entityId, '', @version, 'invited', @tokenHash, @expires, @now) ON CONFLICT(email) DO UPDATE SET name = excluded.name, credential_version = excluded.credential_version, password_hash = '', status = 'invited', token_hash = excluded.token_hash, token_expires_at = excluded.token_expires_at, updated_at = excluded.updated_at`).run({ ...input, version: randomUUID(), tokenHash: createHash("sha256").update(token).digest("hex"), expires: new Date(Date.now() + 86400000).toISOString(), now: new Date().toISOString() });
-    audit(input.email, existing ? "Reset access and revoke sessions" : "Invite staff account", actor);
+    audit(input.email, existing?.status === "archived" ? "Restore archived access with new activation" : existing ? "Reset access and revoke sessions" : "Invite staff account", actor);
   }).immediate();
   return token;
 }
@@ -89,9 +90,26 @@ export function inviteOwnerAccount(input: { email: string; name: string }, actor
   }
 }
 
+// Keep the managed row: physical deletion would resurrect legacy environment logins.
+// Admin/owner accounts remain protected even when another administrator exists.
+export function archiveStaffAccount(email: string, actor: Pick<StaffUser, "email" | "role">, confirmedEmail: string) {
+  const target = email.trim().toLowerCase();
+  if (actor.role !== "admin") throw new Error("Administrator access is required.");
+  if (!target || confirmedEmail.trim().toLowerCase() !== target) throw new Error("Confirm the account email before archiving.");
+  return db().transaction(() => {
+    const account = listStaffAccounts().find((item) => item.email.toLowerCase() === target);
+    if (!account) throw new Error("Individual staff account not found.");
+    const protectedEmails = [actor.email, process.env.BUBBLEWASH_ADMIN_EMAIL, readStaffCredentialOverride("admin")?.login];
+    if (account.role === "admin" || account.allStaffAccess || protectedEmails.some((value) => value?.trim().toLowerCase() === target)) throw new Error("Administrator, owner and your own accounts cannot be archived.");
+    if (account.status === "archived") return;
+    db().prepare("UPDATE staff_accounts SET status = 'archived', password_hash = '', credential_version = ?, token_hash = '', token_expires_at = '', updated_at = ? WHERE email = ?").run(randomUUID(), new Date().toISOString(), target);
+    audit(target, "Archive sign-in account and revoke sessions; retain history", actor.email);
+  }).immediate();
+}
+
 export function suspendStaffAccount(email: string, actor: string) {
   return db().transaction(() => {
-    const changed = db().prepare("UPDATE staff_accounts SET status = 'suspended', credential_version = ?, token_hash = '', updated_at = ? WHERE email = ?").run(randomUUID(), new Date().toISOString(), email).changes;
+    const changed = db().prepare("UPDATE staff_accounts SET status = 'suspended', credential_version = ?, token_hash = '', updated_at = ? WHERE email = ? AND status != 'archived'").run(randomUUID(), new Date().toISOString(), email).changes;
     if (!changed) throw new Error("Create an individual account before managing its access.");
     audit(email, "Suspend access and revoke sessions", actor);
   }).immediate();

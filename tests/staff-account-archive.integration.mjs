@@ -1,0 +1,86 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+globalThis.AsyncLocalStorage = AsyncLocalStorage;
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { createPasswordHash } from '../src/lib/passwords.ts';
+const dir = mkdtempSync(join(tmpdir(), 'bw-archive-'));
+const password = 'synthetic-archive-password-123';
+Object.assign(process.env, { NODE_ENV: 'production', BUBBLEWASH_DATABASE_PATH: join(dir, 'synthetic.sqlite'), BUBBLEWASH_SESSION_SECRET: 'synthetic-session-key-for-archive-testing', BUBBLEWASH_DISABLE_DEMO_LOGIN: 'true', BUBBLEWASH_STAFF_AUTH_DISABLED: 'false', BUBBLEWASH_ADMIN_EMAIL: 'admin@example.invalid', BUBBLEWASH_ADMIN_PASSWORD_HASH: createPasswordHash(password), BUBBLEWASH_SUPPORT_EMAIL: 'target@example.invalid', BUBBLEWASH_SUPPORT_PASSWORD_HASH: createPasswordHash(password) });
+const accounts = await import('../src/lib/staff-accounts.ts');
+const auth = await import('../src/lib/auth.ts');
+const { getDatabase } = await import('../src/lib/data-store.ts');
+const { POST, GET } = await import('../src/app/api/staff/accounts/route.ts');
+const { workAsyncStorage } = await import('next/dist/server/app-render/work-async-storage.external.js');
+const { workUnitAsyncStorage } = await import('next/dist/server/app-render/work-unit-async-storage.external.js');
+const admin = { role: 'admin', email: 'admin@example.invalid' };
+const input = { email: 'target@example.invalid', name: 'Synthetic Staff', role: 'support', entityId: '' };
+const db = getDatabase();
+const withUser = (user, fn) => {
+  const value = user ? auth.encodeSession(user) : '';
+  return workAsyncStorage.run({ route: '/api/staff/accounts' }, () => workUnitAsyncStorage.run({ type: 'request', phase: 'render', cookies: { get: name => name === auth.sessionCookieName && value ? { name, value } : undefined } }, fn));
+};
+const request = (body, origin = 'https://staff.bubblewash.co') => new Request('https://staff.bubblewash.co/api/staff/accounts', { method: 'POST', headers: { origin, host: 'staff.bubblewash.co', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const post = (user, body, origin) => withUser(user, () => POST(request(body, origin)));
+try {
+  db.prepare("INSERT INTO submissions VALUES (?, ?, ?, ?)").run('synthetic-history', new Date().toISOString(), 'test', JSON.stringify({submissionType: 'staff-onboarding', email: input.email, note: 'Synthetic roster and history retained'}));
+  const history = db.prepare("SELECT * FROM submissions WHERE id = 'synthetic-history'").get();
+  const token = accounts.inviteStaffAccount(input, admin.email);
+  assert.equal(accounts.activateStaffAccount(token, password), true);
+  const target = auth.currentStaffUsers().find(a => a.email === input.email);
+  const administrator = auth.currentStaffUsers().find(a => a.role === 'admin');
+  const session = auth.encodeSession(target);
+  const body = { action: 'archive', email: input.email, confirmedEmail: input.email };
+  const otherStaff = ['vendor', 'driver'].map(role => {
+    const value = accounts.inviteStaffAccount({ ...input, email: `${role}@example.invalid`, role, entityId: `synthetic-${role}` }, admin.email);
+    accounts.activateStaffAccount(value, password);
+    return auth.currentStaffUsers().find(a => a.role === role);
+  });
+  const unchanged = JSON.stringify(accounts.listStaffAccounts());
+  for (const user of [null, target, ...otherStaff]) assert.equal((await post(user, body)).status, 403);
+  assert.equal((await post(administrator, body, 'https://evil.invalid')).status, 403);
+  assert.equal((await post(administrator, { ...body, confirmedEmail: '' })).status, 400);
+  assert.equal((await post(administrator, { ...body, action: 'unknown' })).status, 400);
+  assert.equal(JSON.stringify(accounts.listStaffAccounts()), unchanged, 'denied/cancelled confirmation cannot mutate');
+  assert.throws(() => accounts.archiveStaffAccount(input.email, { ...admin, role: 'support' }, input.email), /Administrator access/);
+  assert.throws(() => accounts.archiveStaffAccount(input.email, { ...admin, email: input.email }, input.email), /own accounts/);
+  assert.throws(() => accounts.archiveStaffAccount('missing@example.invalid', admin, 'missing@example.invalid'), /not found/);
+  assert.equal((await post(administrator, body)).status, 200);
+  assert.deepEqual(db.prepare("SELECT * FROM submissions WHERE id = 'synthetic-history'").get(), history);
+  assert.equal(auth.decodeSession(session), null);
+  assert.equal(auth.findStaffUser(input.email, password), null, 'legacy fallback must stay shadowed');
+  const archived = accounts.listStaffAccounts().find(a => a.email === input.email);
+  assert.equal(archived.status, 'archived'); assert.equal(archived.passwordHash, ''); assert.notEqual(archived.credentialVersion, target.credentialVersion);
+  assert.equal((await withUser(administrator, GET)).status, 200);
+  assert.throws(() => accounts.suspendStaffAccount(input.email, admin.email));
+  assert.throws(() => accounts.inviteStaffAccount(input, admin.email), /Confirm restoration/);
+  assert.equal((await post(administrator, body)).status, 200, 'repeat archive is idempotent');
+  assert.equal((await post(administrator, { ...input, action: 'invite' })).status, 400);
+  const restoreResponse = await post(administrator, { ...input, action: 'invite', restoreArchived: 'on' });
+  assert.equal(restoreResponse.status, 200);
+  const restored = (await restoreResponse.json()).activationPath.split('#')[1];
+  assert.equal(auth.findStaffUser(input.email, password), null);
+  assert.equal(accounts.activateStaffAccount(restored, password), true);
+  assert.equal(auth.decodeSession(session), null, 'restoration never revives old sessions');
+  const pending = accounts.inviteStaffAccount(input, admin.email);
+  accounts.archiveStaffAccount(input.email, admin, input.email);
+  assert.equal(accounts.activateStaffAccount(pending, password), false, 'archive cancels pending activation');
+  // Protect a sole managed admin, multiple admins, and an owner capability independently.
+  for (const email of ['only-admin@example.invalid', 'second-admin@example.invalid']) {
+    accounts.inviteStaffAccount({ ...input, email, role: 'admin' }, admin.email);
+    assert.throws(() => accounts.archiveStaffAccount(email, admin, email), /Administrator, owner/);
+  }
+  const reserved = 'reserved-admin@example.invalid';
+  accounts.inviteStaffAccount({ ...input, email: reserved }, admin.email);
+  process.env.BUBBLEWASH_ADMIN_EMAIL = reserved;
+  assert.throws(() => accounts.archiveStaffAccount(reserved, admin, reserved), /Administrator, owner/);
+  process.env.BUBBLEWASH_ADMIN_EMAIL = admin.email;
+  db.prepare("INSERT INTO staff_credential_overrides VALUES ('admin', ?, ?, ?, ?)").run(reserved, createPasswordHash(password), 'synthetic-version', new Date().toISOString());
+  assert.throws(() => accounts.archiveStaffAccount(reserved, admin, reserved), /Administrator, owner/);
+  db.exec('CREATE TABLE staff_owner_capabilities (email TEXT PRIMARY KEY COLLATE NOCASE, all_staff_access INTEGER NOT NULL)');
+  db.prepare('INSERT INTO staff_owner_capabilities VALUES (?, 1)').run(input.email);
+  assert.throws(() => accounts.archiveStaffAccount(input.email, admin, input.email), /Administrator, owner/);
+  assert.ok(db.prepare("SELECT 1 FROM submissions WHERE json_extract(data, '$.actionType') LIKE 'Archive sign-in%'").get());
+  console.log(JSON.stringify({ ok: true, archive: true, legacyShadowing: true, sessionRevocation: true, confirmation: true, permissions: true, administratorOwnerProtection: true, restoreRequiresConfirmation: true, syntheticOnly: true }));
+} finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
