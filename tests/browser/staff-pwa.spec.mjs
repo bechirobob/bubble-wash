@@ -1,14 +1,14 @@
 import { test, expect } from '@playwright/test';
-import { fixtureEdgeResponseHeaders } from './fixture-edge.mjs';
 
-// Presentation-only fixture: expose a staff Host to the loopback runtime for GETs.
-// No writes, login, changed Origin, real DNS or third-party traffic are allowed.
+// A real, GET-only loopback edge preserves native redirect handling in both engines.
+// The edge sends staff Host to the synthetic runtime; writes and Origin rewrites are forbidden.
+test.use({ baseURL: 'http://localhost:3102' });
 test.beforeEach(async ({ page }) => {
-  await page.route('**/*', async route => {
-    const request=route.request(), url=new URL(request.url());
-    if(url.origin!=='http://localhost:3100' || request.method()!=='GET') return route.abort('blockedbyclient');
-    const upstream=await route.fetch({url:`http://localhost:3101${url.pathname}${url.search}`,headers:{...request.headers(),host:'staff.bubblewash.co'},maxRedirects:0});
-    await route.fulfill({response:upstream,headers:fixtureEdgeResponseHeaders(upstream.headers())});
+  await page.route('**/*', route => {
+    const request = route.request();
+    return new URL(request.url()).origin === 'http://localhost:3102' && request.method() === 'GET'
+      ? route.continue()
+      : route.abort('blockedbyclient');
   });
 });
 
