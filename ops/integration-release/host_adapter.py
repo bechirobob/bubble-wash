@@ -559,7 +559,8 @@ class Host:
         environment = {'PATH': str(Path(node).parent)+':/usr/bin:/bin', 'HOME': '/home/ubuntu',
                        'NODE_ENV': 'production', 'NEXT_TELEMETRY_DISABLED': '1',
                        'BUBBLEWASH_DATABASE_PATH': str(database), 'BUBBLEWASH_DISABLE_DEMO_LOGIN': 'true'}
-        return self.run(['runuser', '-u', 'ubuntu', '--', node, '--conditions=react-server',
+        protected('/usr/sbin/runuser', parents=True)
+        return self.run(['/usr/sbin/runuser', '-u', 'ubuntu', '--', node, '--conditions=react-server',
                          '--experimental-strip-types', *args], cwd=target, env=environment, timeout=90).strip()
 
     @staticmethod

@@ -290,6 +290,9 @@ class HostTests(unittest.TestCase):
         with patch.object(a,'verify_completion_data',return_value=True),patch.object(a,'protected',return_value=()):self.assertTrue(self.host.migrate(self.root/'db.sqlite',set_stage=stages.append))
         self.assertEqual(stages,['PREFLIGHT','LABELS','OUTBOX','FEATURES','VERIFY','PRESERVATION'])
         self.assertEqual(len(self.commands),5)
+        for command, options in self.commands:
+            self.assertEqual(command[:4], ['/usr/sbin/runuser','-u','ubuntu','--'])
+            self.assertEqual(options['env']['PATH'],str(node.parent)+':/usr/bin:/bin')
         self.assertIn('scripts/migrate-booking-references.mjs',self.commands[1][0])
         args,kw=self.commands[2]
         self.assertIn('scripts/migrate-notification-outbox.mjs',args)
@@ -298,6 +301,24 @@ class HostTests(unittest.TestCase):
         self.assertEqual(kw['env']['BUBBLEWASH_DATABASE_PATH'],str(self.root/'db.sqlite'))
         node.write_text('changed')
         with patch.object(a,'protected',return_value=()),self.assertRaises(ValueError):self.host.migrate(self.root/'db.sqlite')
+
+    def test_restricted_path_real_subprocess_needs_absolute_runuser(self):
+        # Version-only probe: no user switching, shell, service or database action.
+        environment={'PATH':'/usr/bin:/usr/bin:/bin'}
+        self.assertIsNone(shutil.which('runuser',path=environment['PATH']))
+        with self.assertRaises(FileNotFoundError):
+            subprocess.run(['runuser','--version'],env=environment,capture_output=True,check=True)
+        result=subprocess.run(['/usr/sbin/runuser','--version'],env=environment,capture_output=True,check=True)
+        self.assertEqual(result.returncode,0)
+
+    def test_unprotected_launcher_refuses_before_subprocess(self):
+        node=self.root/'node';node.write_text('runtime')
+        self.plan['node']={'path':str(node),'sha256':k.digest(node)}
+        def protection(path,**kwargs):
+            if str(path)=='/usr/sbin/runuser':raise ValueError('unprotected launcher')
+        self.host.run=lambda *a,**kw:self.fail('must not invoke unprotected launcher')
+        with patch.object(a,'protected',side_effect=protection),self.assertRaises(ValueError):
+            self.host.node(self.root,['--version'],self.root/'copy.sqlite')
 
     def test_verifier_uses_readonly_existing_database_and_no_initializer(self):
         calls=[];self.host.node=lambda target,args,database:(calls.append((target,args,database)) or (json.dumps({'ok':True,'status':'exact-post-feature-ready','databaseChanged':False}) if '--verify' in args else 'exact-additive-ready'))
