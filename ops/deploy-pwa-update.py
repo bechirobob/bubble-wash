@@ -20,7 +20,7 @@ STATE = Path('/var/lib/bubblewash-release')
 JOURNAL_PLAN = 'fa82c3eac9f920f86a04f45a64ec3a9259b567585fdd74ac30b06b7d7062dd65'
 # The completed migration journal is historical evidence, not the live code pointer.
 JOURNAL_TARGET_SHA = '5f256800d65dbe3b69f54e95afa0e8ab30b5e881'
-BASE_SHA = 'ff78cfb5288a4855651b2712d0aa16bd799965d3'
+BASE_SHA = '1ddf328332836aeefe41d4a4e6f05ed79d4589a3'
 DEPENDENCIES = ('deploy-preserving.py', 'deploy-survey-only.py', 'deploy-survey-update.py', 'survey-only-source-pins.json',
                 'inactive-staging/prepare_pair.py', 'inactive-staging/stage_artifact.py')
 
