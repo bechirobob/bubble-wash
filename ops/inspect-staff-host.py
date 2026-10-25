@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Read only Caddy's local active HTTP routes. Never print configuration bodies."""
 import hashlib
+import copy
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ import urllib.request
 
 HOSTS = {'bubblewash.co', 'www.bubblewash.co', 'staff.bubblewash.co', '*.bubblewash.co'}
 LIMIT = 2 * 1024 * 1024
+STAFF_BLOCK=b'\n\n# Separate Bubble Wash staff home-screen app\nstaff.bubblewash.co {\n\treverse_proxy 127.0.0.1:3000\n}\n'
 
 
 def summarise(config):
@@ -70,6 +72,70 @@ def persistent_summary(unit_properties, raw=None):
             'blockLines':block.group(0).count('\n')+1}
 
 
+
+def exact_staff_delta(before, after):
+    expected={'match':[{'host':['staff.bubblewash.co']}],
+      'handle':[{'handler':'subroute','routes':[{'handle':[{'handler':'reverse_proxy','upstreams':[{'dial':'127.0.0.1:3000'}]}]}]}],
+      'terminal':True}
+    reduced=copy.deepcopy(after);count=0
+    for server in reduced.get('apps',{}).get('http',{}).get('servers',{}).values():
+        routes=server.get('routes',[]);kept=[]
+        for route in routes:
+            if route==expected:count+=1
+            else:kept.append(route)
+        if len(kept)!=len(routes):server['routes']=kept
+    return count==1 and reduced==before
+
+
+def baseline_comparison(raw):
+    """Read/adapt only; stdout, stderr and private config never leave this host."""
+    values={}; report={}
+    for name, args, stdin in (
+        ('stdin', ['adapt','--config','-','--adapter','caddyfile'], raw),
+        ('file', ['adapt','--config','/etc/caddy/Caddyfile','--adapter','caddyfile'], None),
+        ('candidate', ['adapt','--config','-','--adapter','caddyfile'], raw+STAFF_BLOCK),
+    ):
+        try:
+            result=subprocess.run(['/usr/bin/caddy',*args],input=stdin,capture_output=True,
+                                  cwd='/etc/caddy',timeout=30)
+            if result.returncode!=0:
+                report[name]={'status':'adapt-command-failed'};continue
+            if len(result.stdout)>LIMIT:
+                report[name]={'status':'adapt-output-too-large'};continue
+            value=json.loads(result.stdout)
+            if not isinstance(value,dict):raise ValueError('non-object')
+            values[name]=value;report[name]={'status':'ok'}
+        except subprocess.TimeoutExpired:report[name]={'status':'adapt-timeout'}
+        except json.JSONDecodeError:report[name]={'status':'adapt-non-json'}
+        except Exception:report[name]={'status':'adapt-unavailable'}
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:2019/config/',timeout=5) as response:
+            body=response.read(LIMIT+1)
+        if len(body)>LIMIT:raise ValueError('too large')
+        value=json.loads(body)
+        if not isinstance(value,dict):raise ValueError('non-object')
+        values['active']=value;report['active']={'status':'ok'}
+    except Exception:report['active']={'status':'active-unavailable'}
+    for left,right,label in (('stdin','file','stdinEqualsFile'),('file','active','fileEqualsActive'),('stdin','active','stdinEqualsActive')):
+        if left in values and right in values:report[label]=values[left]==values[right]
+    # Fixed schema categories only. No routes, hostnames, paths, values, stderr,
+    # arbitrary object keys or configuration bodies are emitted.
+    if 'file' in values and 'active' in values and values['file']!=values['active']:
+        a,b=values['file'],values['active']
+        report['differentSections']=[key for key in ('admin','apps','logging','storage') if a.get(key)!=b.get(key)]
+        report['otherTopLevelDifference']={k:v for k,v in a.items() if k not in ('admin','apps','logging','storage')}!={k:v for k,v in b.items() if k not in ('admin','apps','logging','storage')}
+        aa,bb=a.get('apps',{}),b.get('apps',{})
+        report['httpDifference']=aa.get('http')!=bb.get('http') if isinstance(aa,dict) and isinstance(bb,dict) else True
+        report['tlsDifference']=aa.get('tls')!=bb.get('tls') if isinstance(aa,dict) and isinstance(bb,dict) else True
+    if 'stdin' in values and 'candidate' in values:
+        try:report['candidateExactAdditiveDelta']=exact_staff_delta(values['stdin'],values['candidate'])
+        except Exception:report['candidateExactAdditiveDelta']=False
+    placeholders=re.findall(rb'\{\$([A-Za-z_][A-Za-z0-9_]*)(?::([^}]*))?\}',raw)
+    report['environmentPlaceholderCount']=len(placeholders)
+    report['environmentPlaceholderUnsetCount']=sum(name.decode() not in os.environ for name,_ in placeholders)
+    return report
+
+
 def inspect_persistent():
     try:
         props=subprocess.run(['systemctl','show','caddy.service','--property=ExecStart,ExecReload'],
@@ -88,7 +154,12 @@ def inspect_persistent():
             if len(raw)!=info.st_size:raise ValueError('changed source')
             fields=('st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns')
             if any(getattr(info,k)!=getattr(path.lstat(),k) for k in fields):raise ValueError('changed source')
-        return persistent_summary(props,raw)
+        result=persistent_summary(props,raw)
+        baseline=baseline_comparison(raw)
+        # Refuse comparison evidence if the persistent source changed meanwhile.
+        if any(getattr(info,k)!=getattr(path.lstat(),k) for k in fields):raise ValueError('changed source')
+        result['baseline']=baseline
+        return result
     except Exception:
         return {'status':'persistent-source-unavailable'}
 

@@ -28,7 +28,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Test bounded read-only inspection
-        run: python3 -B -m unittest discover -s tests -p 'test_staff_host_inspection.py' -v
+        run: |
+          python3 -B -m unittest discover -s tests -p 'test_staff_host_inspection.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_staff_host_diagnostic.py' -v
       - name: Connect through existing approved production tailnet
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
         with:
