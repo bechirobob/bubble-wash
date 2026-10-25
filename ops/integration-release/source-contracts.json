@@ -1,11 +1,11 @@
 {
   "baseCommit": "5dc997db0393e1cf88dde29859b7e1c4550ee4ee",
   "controlDependencies": {
-    "ops/inactive-staging/prepare_pair.py": "1b3ca324c50241d561868f432b081bb761875c9cd696df30846a976997529a2e"
+    "ops/inactive-staging/prepare_pair.py": "45e9416c1d3c78496871e6222630ce9ebec25c91b1a33e830d2b0f34a9802eea"
   },
   "controlRunner": {
-    "contentSha256": "db7448dc5b3cb8b83a9861a18f73beccf511545559c43b8c79cae87c0ea3b31b",
-    "files": 492,
+    "contentSha256": "a9c66b4b574d82bc2739287aa0f19868eb72907bc4e6336deac23e8efe4d634a",
+    "files": 496,
     "schema": "bubblewash-control-runner/v1"
   },
   "ownerFiles": {

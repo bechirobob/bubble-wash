@@ -578,18 +578,22 @@ class Host:
         args = [str(capsule)] + ([mode] if mode else []) + ['--database', str(database), '--source', self.plan['candidate']]
         return self.node(Path(self.plan['candidate']), args, database)
 
-    def migrate(self, database, resume=False):
+    def migrate(self, database, resume=False, set_stage=lambda _: None):
         # Initial execution requires the original exact schema. Explicit held
         # completion accepts only one of the separately checked partial stages.
+        set_stage('PREFLIGHT')
         if resume:
             require(self.completion_schema(database) in ('pre-migration', 'labels-only', 'outbox-complete'), 'completion stage is not partial')
         else:
             self.acknowledgement(self.feature(database, '--preflight'),
                                  {'ok': True, 'status': 'exact-pre-migration-ready', 'databaseChanged': False})
+        set_stage('LABELS')
         result = self.node(Path(self.plan['candidate']), ['scripts/migrate-booking-references.mjs', '--database', str(database)], database)
         self.acknowledgement(result, {'ok': True, 'migration': 'permanent-booking-vendor-labels-v1', 'historicalBackfill': False})
+        set_stage('OUTBOX')
         result = self.node(Path(self.plan['candidate']), ['scripts/migrate-notification-outbox.mjs', '--database', str(database)], database)
         self.acknowledgement(result, {'ok': True, 'migration': 'notification-outbox-exact-additive-v1'})
+        set_stage('FEATURES')
         result = read_result(self.feature(database))
         require(set(result) == {'ok','status','migration','createdTables','ownershipColumnAdded','locationColumnsAdded','optionalCustomerTableCreated'}
                 and result['ok'] is True and result['status'] == 'exact-post-feature-ready'
@@ -597,8 +601,10 @@ class Host:
                 and type(result['createdTables']) is int and 0 <= result['createdTables'] <= 5
                 and type(result['ownershipColumnAdded']) is bool and type(result['locationColumnsAdded']) is bool
                 and result['optionalCustomerTableCreated'] is False, 'feature migration result uncertain')
+        set_stage('VERIFY')
         self.acknowledgement(self.feature(database, '--verify'),
                              {'ok': True, 'status': 'exact-post-feature-ready', 'databaseChanged': False})
+        set_stage('PRESERVATION')
         verify_completion_data(Path(self.plan['snapshot']), database, 'complete')
         return True
 

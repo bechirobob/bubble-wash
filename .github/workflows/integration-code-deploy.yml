@@ -23,14 +23,14 @@ on:
         required: true
         default: inspect
         type: choice
-        options: [prepare, materialize, inspect-host-evidence, inspect, execute, recover, complete-migration]
+        options: [prepare, resume-retained, materialize, inspect-host-evidence, inspect, execute, recover, complete-migration]
       completion_confirmation:
         description: 'Completion only, after explicit approval: complete-migration: followed by the exact full plan SHA-256. Otherwise leave empty.'
         required: false
         default: ''
         type: string
       preparation_pins:
-        description: 'Prepare only: public JSON backupSha256, receiptRun, storeSha, storeId, node:{path,sha256}. Never credentials or configuration.'
+        description: 'Prepare/resume-retained: public JSON; resume additionally requires independently inspected retainedPins. backupSha256, receiptRun, storeSha, storeId, node:{path,sha256}. Never credentials or configuration.'
         required: false
         default: ''
         type: string
@@ -73,7 +73,7 @@ jobs:
             exit 0
           fi
           [[ "$CANDIDATE_SHA" =~ ^[a-f0-9]{40}$ && "$FALLBACK_SHA" =~ ^[a-f0-9]{40}$ ]]
-          if [[ "$RELEASE_MODE" == prepare ]]; then
+          if [[ "$RELEASE_MODE" == prepare || "$RELEASE_MODE" == resume-retained ]]; then
             [[ -z "$PLAN_ID$PLAN_SHA256$COMPLETION_CONFIRMATION$MATERIALIZATION_REVIEW" && -n "$PREPARATION_PINS" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
           elif [[ "$RELEASE_MODE" == materialize ]]; then
             [[ -z "$PLAN_ID$PLAN_SHA256$COMPLETION_CONFIRMATION$PREPARATION_PINS" && -n "$MATERIALIZATION_REVIEW" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
@@ -81,7 +81,7 @@ jobs:
             [[ "$PLAN_ID" =~ ^[a-f0-9]{64}$ && "$PLAN_SHA256" =~ ^[a-f0-9]{64}$ && -z "$PREPARATION_PINS$MATERIALIZATION_REVIEW" ]]
           fi
           [[ "$CANDIDATE_SHA" != "$FALLBACK_SHA" ]]
-          [[ "$RELEASE_MODE" == prepare || "$RELEASE_MODE" == materialize || "$RELEASE_MODE" == inspect || "$RELEASE_MODE" == execute || "$RELEASE_MODE" == recover || "$RELEASE_MODE" == complete-migration ]]
+          [[ "$RELEASE_MODE" == prepare || "$RELEASE_MODE" == resume-retained || "$RELEASE_MODE" == materialize || "$RELEASE_MODE" == inspect || "$RELEASE_MODE" == execute || "$RELEASE_MODE" == recover || "$RELEASE_MODE" == complete-migration ]]
           if [[ "$RELEASE_MODE" == complete-migration ]]; then
             [[ "$COMPLETION_CONFIRMATION" == "complete-migration:$PLAN_SHA256" ]]
           else
@@ -99,7 +99,7 @@ jobs:
           path: runtime-candidate
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: inputs.mode == 'prepare' || inputs.mode == 'materialize'
+        if: inputs.mode == 'prepare' || inputs.mode == 'resume-retained' || inputs.mode == 'materialize'
         with:
           ref: ${{ inputs.fallback_sha }}
           path: runtime-fallback
@@ -120,11 +120,12 @@ jobs:
           TARGET_SHA="$CANDIDATE_SHA" python3 ops/check-release-ci.py
           python3 ops/integration-release/contracts.py --verify-fallback-ci "$FALLBACK_SHA"
       - name: Verify exact preparation request and both runtime checkouts before transport
-        if: inputs.mode == 'prepare'
+        if: inputs.mode == 'prepare' || inputs.mode == 'resume-retained'
         run: |
           set -euo pipefail
           python3 -B ops/integration-release/select_source.py --release ../runtime-fallback --profile integration-fallback-v1 --commit "$FALLBACK_SHA"
           python3 -B -m unittest discover -s tests -p 'test_integration_prepare.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_retained*.py' -v
           python3 -B - <<'PYREQUEST'
           import json, os, pathlib, sys
           sys.path.insert(0, 'ops/integration-release')
@@ -135,13 +136,15 @@ jobs:
               require(len(result) == len(rows), 'duplicate preparation input')
               return result
           public = json.loads(os.environ['PREPARATION_PINS'], object_pairs_hook=unique)
-          require(type(public) is dict and set(public) == {'backupSha256','receiptRun','storeSha','storeId','node'}, 'only public preparation pins are accepted')
+          retained = os.environ['RELEASE_MODE'] == 'resume-retained'
+          fields = {'backupSha256','receiptRun','storeSha','storeId','node'} | ({'retainedPins'} if retained else set())
+          require(type(public) is dict and set(public) == fields, 'only public preparation pins are accepted')
           request = {**public, 'runId':os.environ['GITHUB_RUN_ID'], 'runAttempt':int(os.environ['GITHUB_RUN_ATTEMPT']), 'candidateSha':os.environ['CANDIDATE_SHA'], 'fallbackSha':os.environ['FALLBACK_SHA']}
-          validate_preparation_request(request, read_json(HERE/'source-contracts.json'))
+          validate_preparation_request(request, read_json(HERE/'source-contracts.json'), retained)
           with (pathlib.Path(os.environ['RUNNER_TEMP'])/'integration-preparation-request.json').open('xb') as stream:
               stream.write(canonical(request))
           PYREQUEST
-          python3 -B ops/integration-release/stream_host.py --mode prepare --preparation-request "$RUNNER_TEMP/integration-preparation-request.json" > "$RUNNER_TEMP/integration-preparation.py"
+          python3 -B ops/integration-release/stream_host.py --mode "$RELEASE_MODE" --preparation-request "$RUNNER_TEMP/integration-preparation-request.json" > "$RUNNER_TEMP/integration-preparation.py"
           python3 -B -c 'import os,sys; from pathlib import Path; sys.path.insert(0,"ops/integration-release"); from contracts import git_binding; git_binding(Path.cwd(),os.environ["GITHUB_SHA"])' 
       - name: Bind reviewed materialization inputs to actual published checkout trees
         if: inputs.mode == 'materialize'
@@ -176,6 +179,7 @@ jobs:
           python3 -B -m unittest discover -s tests -p 'test_integration_host_evidence.py' -v
           python3 -B -m unittest discover -s tests -p 'test_binding_diagnostic.py' -v
           python3 -B -m unittest discover -s tests -p 'test_archive_binding_diagnostic.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_retained*.py' -v
           python3 -B ops/integration-release/stream_host.py --mode inspect-host-evidence > /dev/null
       - name: Create no credentials; connect through existing approved production tailnet
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
@@ -197,8 +201,8 @@ jobs:
               tailscale ssh root@hermes "/usr/sbin/runuser -u ubuntu -- /bin/sh -c \"umask 077; /usr/bin/tar --no-same-owner -xf - -C '$release_dir' && test ! -e '$release_dir/.release-sha' && printf '%s\\n' '$sha' > '$release_dir/.release-sha'\"" < "$RUNNER_TEMP/integration-$label.tar"
             done
           done
-      - name: Prepare inactive pair and rehearse two copies of one private preimage
-        if: inputs.mode == 'prepare'
+      - name: Prepare or resume the retained pair using isolated private copies
+        if: inputs.mode == 'prepare' || inputs.mode == 'resume-retained'
         run: |
           set -euo pipefail
           tailscale ssh root@hermes 'python3 -I -B -' < "$RUNNER_TEMP/integration-preparation.py"
@@ -208,7 +212,7 @@ jobs:
           set -euo pipefail
           tailscale ssh root@hermes 'python3 -I -B -' < "$RUNNER_TEMP/integration-materialization.py"
       - name: Consume pre-staged reviewed package, never install gates or resume maintenance
-        if: inputs.mode != 'prepare' && inputs.mode != 'materialize'
+        if: inputs.mode != 'prepare' && inputs.mode != 'resume-retained' && inputs.mode != 'materialize'
         run: |
           set -euo pipefail
           if [[ "$RELEASE_MODE" == inspect-host-evidence ]]; then

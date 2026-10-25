@@ -286,7 +286,9 @@ class HostTests(unittest.TestCase):
             return json.dumps({'ok':True,'migration':'notification-outbox-exact-additive-v1'})
         self.host.run=run
         self.plan['snapshot']=str(self.root/'snapshot')
-        with patch.object(a,'verify_completion_data',return_value=True),patch.object(a,'protected',return_value=()):self.assertTrue(self.host.migrate(self.root/'db.sqlite'))
+        stages=[]
+        with patch.object(a,'verify_completion_data',return_value=True),patch.object(a,'protected',return_value=()):self.assertTrue(self.host.migrate(self.root/'db.sqlite',set_stage=stages.append))
+        self.assertEqual(stages,['PREFLIGHT','LABELS','OUTBOX','FEATURES','VERIFY','PRESERVATION'])
         self.assertEqual(len(self.commands),5)
         self.assertIn('scripts/migrate-booking-references.mjs',self.commands[1][0])
         args,kw=self.commands[2]

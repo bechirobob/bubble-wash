@@ -440,6 +440,46 @@ class PreparationTests(unittest.TestCase):
             with self.assertRaises(ValueError):p.prepare_pair(request,**modules)
             self.assertEqual(calls,[]);reserve.assert_not_called()
 
+    def retained_fixture(self, modules):
+        payload=b'synthetic retained preimage'
+        pins={'operation':p.RETAINED_OPERATION,'preimage':{'sha256':p.sha(payload),'size':len(payload)},
+              'pair':{label:{'manifestSha256':'c'*64,'archiveSha256':'d'*64,'archiveSize':10240} for label in p.PAIR}}
+        proofs={label:{'sha':commit,'tree':tree,'artifactManifestSha256':'c'*64,
+                 'runtime':modules['contracts'].runtime_manifest(None,commit),
+                 'dependencies':modules['contracts'].dependency_manifest(None)} for label,(commit,tree) in p.PAIR.items()}
+        def copy(destination,*args):destination.write_bytes(payload)
+        return pins,{'pins':pins,'pair':proofs},copy
+
+    def test_retained_resume_skips_all_builds_freezes_and_live_snapshot(self):
+        with self.orchestration() as (request,modules,calls,reserve):
+            pins,observed,copy=self.retained_fixture(modules);request['retainedPins']=pins
+            with mock.patch.object(p,'inspect_retained',return_value=observed) as inspect, \
+                 mock.patch.object(p,'copy_retained_preimage',side_effect=copy), \
+                 mock.patch.object(p,'private_copy') as live_copy:
+                out=p.prepare_pair(request,**modules)
+            self.assertTrue(out['ok']);live_copy.assert_not_called()
+            self.assertEqual([x[0] for x in calls],['probes']);self.assertEqual(inspect.call_count,2)
+            evidence=json.loads((self.root/'private/evidence.json').read_bytes())
+            self.assertEqual(evidence['retainedFrom'],pins)
+
+    def test_retained_pin_mismatch_never_probes_or_copies(self):
+        with self.orchestration() as (request,modules,calls,reserve):
+            pins,observed,copy=self.retained_fixture(modules)
+            request['retainedPins']=json.loads(json.dumps(pins));request['retainedPins']['preimage']['sha256']='f'*64
+            with mock.patch.object(p,'inspect_retained',return_value=observed), mock.patch.object(p,'copy_retained_preimage') as copier:
+                out=p.prepare_pair(request,**modules)
+            self.assertFalse(out['ok']);self.assertTrue(out['auditPersisted']);copier.assert_not_called()
+            self.assertEqual(calls,[]);self.assertFalse((self.root/'private/evidence.json').exists())
+
+    def test_retained_probe_failure_keeps_new_audit_without_success(self):
+        with self.orchestration('probe') as (request,modules,calls,reserve):
+            pins,observed,copy=self.retained_fixture(modules);request['retainedPins']=pins
+            with mock.patch.object(p,'inspect_retained',return_value=observed), mock.patch.object(p,'copy_retained_preimage',side_effect=copy):
+                out=p.prepare_pair(request,**modules)
+            self.assertFalse(out['ok']);self.assertTrue(out['auditPersisted'])
+            raw=(self.root/'private/failure.json').read_text();self.assertNotIn('must remain private',raw)
+            self.assertFalse((self.root/'private/evidence.json').exists())
+
 
 class PrivateCopyLifecycleTests(unittest.TestCase):
     def setUp(self):

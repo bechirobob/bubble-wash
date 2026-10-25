@@ -75,7 +75,7 @@ def git_tree(files):
 
 
 @contextlib.contextmanager
-def anchored_file(root, name, owners):
+def anchored_file(root, name, owners, max_size=512 * 1024**2):
     """No privileged pathname-following reads from an app-controlled build."""
     parts = Path(name).parts
     require(parts and not Path(name).is_absolute() and all(p not in ('', '.', '..') for p in parts))
@@ -98,7 +98,7 @@ def anchored_file(root, name, owners):
         held.append(leaf)
         info = os.fstat(leaf)
         require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid in owners and
-                not info.st_mode & 0o022 and info.st_size <= 512 * 1024**2)
+                not info.st_mode & 0o022 and info.st_size <= max_size)
         yield leaf, info
         require(metadata(os.fstat(leaf)) == metadata(info) and
                 metadata(os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)) == metadata(info))
@@ -370,7 +370,7 @@ def pinned_rehearsal_report(core, adapter, target, node, unit):
     return PinnedReport()
 
 
-def rehearse_pair(core, adapter, candidate, fallback, preimage, values, status, owner, node, operation, bound, set_stage=lambda _: None):
+def rehearse_pair(core, adapter, candidate, fallback, preimage, values, status, owner, node, operation, bound, set_stage=lambda _: None, report_directory=None):
     """Copy-only use of the reviewed migration methods. No durable state exists."""
     initial = core.database_fingerprint(preimage)
     timings = {}
@@ -387,7 +387,13 @@ def rehearse_pair(core, adapter, candidate, fallback, preimage, values, status, 
                 require(Path(copy).resolve(strict=True) != preimage.resolve(strict=True) and
                         Path(copy).name == 'rehearsal.sqlite' and Path(copy).parent.parent == core.RUNTIME)
                 started = time.monotonic()
-                host.migrate(copy)
+                if report_directory is None:
+                    host.migrate(copy)
+                else:
+                    def migration_stage(value):
+                        require(value in ('PREFLIGHT', 'LABELS', 'OUTBOX', 'FEATURES', 'VERIFY', 'PRESERVATION'))
+                        report.migration_stage = value
+                    host.migrate(copy, set_stage=migration_stage)
                 host.acknowledgement(host.feature(copy, '--verify'),
                     {'ok': True, 'status': 'exact-post-feature-ready', 'databaseChanged': False})
                 adapter.verify_completion_data(preimage, copy, 'complete')
@@ -401,8 +407,14 @@ def rehearse_pair(core, adapter, candidate, fallback, preimage, values, status, 
                               'bubblewash-prepare-' + operation + '-' + label, report, prepare_snapshot=prepare)
                 require(report.failure is None and report.cleanup and report.safe_to_remove and
                         report.node_stages == ['RUNTIME_BEFORE', 'RUNTIME_AFTER'])
+            except BaseException as error:
+                if report_directory is not None:
+                    report.fail(error)
+                raise
             finally:
                 signal.setitimer(signal.ITIMER_REAL, 0)
+                if report_directory is not None:
+                    save_probe_report(report_directory, label, report)
             require(core.database_fingerprint(preimage) == initial)
             timings[label + 'RehearsalSeconds'] = round(time.monotonic() - started, 3)
             bound()
@@ -412,14 +424,144 @@ def rehearse_pair(core, adapter, candidate, fallback, preimage, values, status, 
     return timings
 
 
+RETAINED_OPERATION = '40144518668-1'
+
+
+def validate_retained_pins(pins):
+    require(type(pins) is dict and set(pins) == {'operation', 'pair', 'preimage'} and
+            pins['operation'] == RETAINED_OPERATION and type(pins['pair']) is dict and
+            set(pins['pair']) == set(PAIR))
+    require(type(pins['preimage']) is dict and set(pins['preimage']) == {'sha256', 'size'})
+    for label in PAIR:
+        row = pins['pair'][label]
+        require(type(row) is dict and set(row) == {'manifestSha256', 'archiveSha256', 'archiveSize'})
+        require(all(type(row[key]) is str and re.fullmatch('[a-f0-9]{64}', row[key])
+                    for key in ('manifestSha256', 'archiveSha256')))
+        require(type(row['archiveSize']) is int and 0 < row['archiveSize'] <= 2*1024**3)
+    require(type(pins['preimage']['sha256']) is str and re.fullmatch('[a-f0-9]{64}', pins['preimage']['sha256']) and
+            type(pins['preimage']['size']) is int and 0 < pins['preimage']['size'] <= 2*1024**3)
+    return pins
+
+
+def inspect_retained(*, core, contracts, adapter, stager, contract):
+    """Read-only exact retained bytes. Public callers return pins, not pair rows."""
+    private = STATE/'rehearsal-evidence'/RETAINED_OPERATION
+    stager.protected_directory(private, 0)
+    require(stat.S_IMODE(private.stat().st_mode) == 0o700)
+    require(not os.path.lexists(private/'evidence.json'))
+    pins = {'operation': RETAINED_OPERATION, 'pair': {}}
+    proofs = {}
+    for label, (release_sha, tree) in PAIR.items():
+        manifest_name = release_sha+'-manifest.json'
+        archive_name = release_sha+'.tar'
+        with anchored_file(private, manifest_name, (0,), stager.MAX_MANIFEST) as (fd, info):
+            require(stat.S_IMODE(info.st_mode) == 0o600)
+            raw = b''
+            while chunk := os.read(fd, 1024**2): raw += chunk
+        manifest_sha = sha(raw)
+        manifest = stager.parse_manifest(raw, manifest_sha)
+        with anchored_file(private, archive_name, (0,), stager.MAX_ARCHIVE) as (fd, info):
+            require(stat.S_IMODE(info.st_mode) == 0o600)
+            with os.fdopen(os.dup(fd), 'rb') as stream:
+                require(stager.digest_stream(stream) == manifest['archiveSha256'])
+                stager.inspect_tar_headers(stream)
+                with tarfile.open(fileobj=stream, mode='r:') as tar:
+                    seen = set()
+                    for member in tar:
+                        require(member.name not in seen and member.name in manifest['files'] and not member.pax_headers)
+                        row = manifest['files'][member.name]
+                        if row['type'] == 'file':
+                            require(member.isreg() and not member.issparse() and member.size == row['size'] and member.mode == row['mode'])
+                            with tar.extractfile(member) as payload:
+                                require(stager.digest_stream(payload) == row['sha256'])
+                        else:
+                            require(member.issym() and member.size == 0 and member.linkname == row['target'])
+                        seen.add(member.name)
+                    require(seen == set(manifest['files']))
+            archive_size = info.st_size
+        root = STATE/'releases'/release_sha
+        stager.protected_directory(root, 0)
+        actual = set()
+        for current, dirs, files in os.walk(root, followlinks=False):
+            directory = Path(current)
+            di = directory.lstat()
+            require(stat.S_ISDIR(di.st_mode) and di.st_uid == 0 and stat.S_IMODE(di.st_mode) == 0o755)
+            for name in dirs:
+                require(not (directory/name).is_symlink())
+            for name in files:
+                item = directory/name
+                relative = item.relative_to(root).as_posix()
+                require(relative in manifest['files'])
+                row = manifest['files'][relative]
+                si = item.lstat()
+                require(si.st_uid == 0)
+                if row['type'] == 'link':
+                    require(stat.S_ISLNK(si.st_mode) and os.readlink(item) == row['target'] and
+                            item.resolve(strict=True).is_relative_to(root))
+                else:
+                    require(stat.S_ISREG(si.st_mode) and stat.S_IMODE(si.st_mode) == row['mode'])
+                    observed = file_row(root, relative, (0,))
+                    require({key: observed[key] for key in row} == row)
+                actual.add(relative)
+        require(actual == set(manifest['files']))
+        require(git_tree(source_files(root, 0, label == 'candidate')) == tree)
+        contracts.verify_source(root, contract, 'integration-'+label+'-v1')
+        adapter.require_no_runtime_cache(root)
+        require((root/'.release-sha').read_text().strip() == release_sha)
+        proofs[label] = {'sha': release_sha, 'tree': tree, 'artifactManifestSha256': manifest_sha,
+                         'runtime': contracts.runtime_manifest(root, release_sha),
+                         'dependencies': contracts.dependency_manifest(root/'node_modules')}
+        pins['pair'][label] = {'manifestSha256': manifest_sha, 'archiveSha256': manifest['archiveSha256'],
+                               'archiveSize': archive_size}
+    with anchored_file(private, 'preimage.sqlite', (0,), stager.MAX_ARCHIVE) as (fd, info):
+        require(stat.S_IMODE(info.st_mode) == 0o600)
+        with os.fdopen(os.dup(fd), 'rb') as stream: preimage_sha = stager.digest_stream(stream)
+        pins['preimage'] = {'sha256': preimage_sha, 'size': info.st_size}
+    validate_retained_pins(pins)
+    return {'pins': pins, 'pair': proofs}
+
+
+def copy_retained_preimage(destination, pins, stager):
+    """Byte copy, never SQLite-open the retained original for writing."""
+    private = STATE/'rehearsal-evidence'/RETAINED_OPERATION
+    with anchored_file(private, 'preimage.sqlite', (0,), stager.MAX_ARCHIVE) as (fd, info):
+        require(stat.S_IMODE(info.st_mode) == 0o600 and info.st_size == pins['preimage']['size'])
+        h = hashlib.sha256()
+        with destination.open('xb') as out:
+            os.fchmod(out.fileno(), 0o600)
+            while chunk := os.read(fd, 1024**2): h.update(chunk); out.write(chunk)
+            out.flush(); os.fsync(out.fileno())
+        require(h.hexdigest() == pins['preimage']['sha256'])
+
+
+def save_probe_report(private, label, report):
+    failure = report.failure or {'stage': 'COMPLETE', 'error': 'NONE'}
+    # The historical report supplies fixed codes only, never stderr or exceptions.
+    value = {'schema': 'bubblewash-retained-probe/v1', 'probe': label,
+             'stage': failure['stage'], 'error': failure['error'],
+             'cleanup': report.cleanup, 'safeToRemove': report.safe_to_remove,
+             'activationAttempted': False,
+             'migrationStage': getattr(report, 'migration_stage', 'NOT_STARTED')}
+    require(value['migrationStage'] in ('NOT_STARTED','PREFLIGHT','LABELS','OUTBOX','FEATURES','VERIFY','PRESERVATION'))
+    require(label in ('candidate', 'fallback') and
+            all(type(value[key]) is str and re.fullmatch('[A-Z_]{1,64}', value[key]) for key in ('stage', 'error')))
+    with (private/(label+'-probe.json')).open('xb') as stream:
+        os.fchmod(stream.fileno(), 0o600); stream.write(canonical(value)); stream.flush(); os.fsync(stream.fileno())
+    print(json.dumps(value), flush=True)
+
+
 def prepare_pair(request, *, core, guards, scanner, contracts, adapter, stager, contract):
     """All modules and request public pins are authenticated by the control stream.
 
     The bootstrap may not accept arbitrary source contracts, module paths or
     environment values. The existing exact-hosted-run check runs before tailnet.
     """
-    require(os.geteuid() == 0 and set(request) == {'runId', 'runAttempt', 'candidateSha', 'fallbackSha',
-            'backupSha256', 'receiptRun', 'storeSha', 'storeId', 'node'})
+    retained = request.get('retainedPins')
+    base_keys = {'runId', 'runAttempt', 'candidateSha', 'fallbackSha',
+                 'backupSha256', 'receiptRun', 'storeSha', 'storeId', 'node'}
+    require(os.geteuid() == 0 and set(request) == base_keys | ({'retainedPins'} if retained is not None else set()))
+    if retained is not None:
+        validate_retained_pins(retained)
     require(re.fullmatch('[1-9][0-9]{0,19}', request['runId']) and request['runAttempt'] == 1)
     require(all(request[key+'Sha'] == value[0] for key, value in PAIR.items()))
     require(re.fullmatch('[a-f0-9]{64}', request['backupSha256']) and
@@ -482,56 +624,67 @@ def prepare_pair(request, *, core, guards, scanner, contracts, adapter, stager, 
             bound()
             stage = 'DIRECTORIES'
             private = reserve_directories(stager, operation)
-            frozen, proofs = {}, {}
-            for label, (release_sha, tree) in PAIR.items():
-                build = WORK / ('prepare-build-' + operation + '-' + release_sha)
-                root = WORK / ('prepare-runtime-' + operation + '-' + release_sha)
-                for path in (build, root):
-                    guards.safe_path(path, owner, True)
-                    require(path.stat().st_uid == owner.pw_uid and not (path/'data/submissions.jsonl').exists())
-                    require(guards.inspect_read(path/'.release-sha', owner, 'source', 128).decode().strip() == release_sha)
-                    require(not (path/'node_modules').exists() and not (path/'.next').exists())
-                    contracts.verify_source(path, contract, 'integration-' + label + '-v1')
-                    require(git_tree(source_files(path, owner.pw_uid, label == 'candidate')) == tree)
-                source = source_files(root, owner.pw_uid, label == 'candidate')
-                require(git_tree(source) == tree)
-                contracts.verify_source(root, contract, 'integration-' + label + '-v1')
-                stage = 'BUILD_' + label.upper()
-                started = time.monotonic()
-                core.command(build_arguments(build, node['path'], 'bubblewash-prepare-' + operation + '-' + label + '-build'), timeout=930)
-                require(source_files(build, owner.pw_uid, label == 'candidate') == source)
-                core.command(build_arguments(root, node['path'], 'bubblewash-prepare-' + operation + '-' + label + '-production', build), timeout=930)
-                timings[label+'BuildSeconds'] = round(time.monotonic() - started, 3)
-                require(source_files(root, owner.pw_uid, label == 'candidate') == source)
-                require((root/'.next/BUILD_ID').is_file())
-                installed_dependencies = contracts.dependency_manifest(root/'node_modules')
-                dependencies, mode_changes = canonical_dependency_image(installed_dependencies)
-                runtime = contracts.runtime_manifest(root, release_sha)
+            if retained is not None:
+                observed = inspect_retained(core=core, contracts=contracts, adapter=adapter, stager=stager, contract=contract)
+                require(observed['pins'] == retained and operation != RETAINED_OPERATION)
+                frozen = {label: STATE/'releases'/row[0] for label, row in PAIR.items()}
+                proofs = observed['pair']
+                preimage = private/'preimage.sqlite'
+                copy_retained_preimage(preimage, retained, stager)
+                require(contracts.digest(preimage) == retained['preimage']['sha256'])
                 bound()
-                stage = 'FREEZE_' + label.upper()
-                frozen[label], artifact = freeze(root, release_sha, private, owner.pw_uid, stager, contracts, source)
-                require(git_tree(source_files(frozen[label], 0, label == 'candidate')) == tree)
-                contracts.verify_source(frozen[label], contract, 'integration-' + label + '-v1')
-                adapter.require_no_runtime_cache(frozen[label])
-                require(contracts.dependency_manifest(root/'node_modules') == installed_dependencies)
-                require(contracts.dependency_manifest(frozen[label]/'node_modules') == dependencies and
-                        contracts.runtime_manifest(frozen[label], release_sha) == runtime)
-                proofs[label] = {'sha': release_sha, 'tree': tree, 'artifactManifestSha256': artifact,
-                                 'runtime': runtime, 'dependencies': dependencies, 'dependencyModeChanges': mode_changes}
-            bound()
-            stage = 'PREIMAGE'
-            preimage = private/'preimage.sqlite'
-            started = time.monotonic()
-            private_copy(database, preimage, started+300)
-            timings['snapshotSeconds'] = round(time.monotonic()-started, 3)
-            bound()
+            else:
+                frozen, proofs = {}, {}
+                for label, (release_sha, tree) in PAIR.items():
+                    build = WORK / ('prepare-build-' + operation + '-' + release_sha)
+                    root = WORK / ('prepare-runtime-' + operation + '-' + release_sha)
+                    for path in (build, root):
+                        guards.safe_path(path, owner, True)
+                        require(path.stat().st_uid == owner.pw_uid and not (path/'data/submissions.jsonl').exists())
+                        require(guards.inspect_read(path/'.release-sha', owner, 'source', 128).decode().strip() == release_sha)
+                        require(not (path/'node_modules').exists() and not (path/'.next').exists())
+                        contracts.verify_source(path, contract, 'integration-' + label + '-v1')
+                        require(git_tree(source_files(path, owner.pw_uid, label == 'candidate')) == tree)
+                    source = source_files(root, owner.pw_uid, label == 'candidate')
+                    require(git_tree(source) == tree)
+                    contracts.verify_source(root, contract, 'integration-' + label + '-v1')
+                    stage = 'BUILD_' + label.upper()
+                    started = time.monotonic()
+                    core.command(build_arguments(build, node['path'], 'bubblewash-prepare-' + operation + '-' + label + '-build'), timeout=930)
+                    require(source_files(build, owner.pw_uid, label == 'candidate') == source)
+                    core.command(build_arguments(root, node['path'], 'bubblewash-prepare-' + operation + '-' + label + '-production', build), timeout=930)
+                    timings[label+'BuildSeconds'] = round(time.monotonic() - started, 3)
+                    require(source_files(root, owner.pw_uid, label == 'candidate') == source)
+                    require((root/'.next/BUILD_ID').is_file())
+                    installed_dependencies = contracts.dependency_manifest(root/'node_modules')
+                    dependencies, mode_changes = canonical_dependency_image(installed_dependencies)
+                    runtime = contracts.runtime_manifest(root, release_sha)
+                    bound()
+                    stage = 'FREEZE_' + label.upper()
+                    frozen[label], artifact = freeze(root, release_sha, private, owner.pw_uid, stager, contracts, source)
+                    require(git_tree(source_files(frozen[label], 0, label == 'candidate')) == tree)
+                    contracts.verify_source(frozen[label], contract, 'integration-' + label + '-v1')
+                    adapter.require_no_runtime_cache(frozen[label])
+                    require(contracts.dependency_manifest(root/'node_modules') == installed_dependencies)
+                    require(contracts.dependency_manifest(frozen[label]/'node_modules') == dependencies and
+                            contracts.runtime_manifest(frozen[label], release_sha) == runtime)
+                    proofs[label] = {'sha': release_sha, 'tree': tree, 'artifactManifestSha256': artifact,
+                                     'runtime': runtime, 'dependencies': dependencies, 'dependencyModeChanges': mode_changes}
+                bound()
+                stage = 'PREIMAGE'
+                preimage = private/'preimage.sqlite'
+                started = time.monotonic()
+                private_copy(database, preimage, started+300)
+                timings['snapshotSeconds'] = round(time.monotonic()-started, 3)
+                bound()
             stage = 'REHEARSE_CANDIDATE'
             def set_stage(value):
                 nonlocal stage
                 require(value in STAGES)
                 stage = value
             timings.update(rehearse_pair(core, adapter, frozen['candidate'], frozen['fallback'], preimage,
-                                        values, status, owner, node, operation, bound, set_stage))
+                                        values, status, owner, node, operation, bound, set_stage,
+                                        private if retained is not None else None))
             stage = 'FINAL'
             bound()
             for label, root in frozen.items():
@@ -542,13 +695,25 @@ def prepare_pair(request, *, core, guards, scanner, contracts, adapter, stager, 
             evidence = {'schema': 'bubblewash-inactive-preparation/v1', 'operation': operation, 'liveSha': LIVE,
                         'pair': proofs, 'timings': timings, 'sourceContractSha256': contract_digest,
                         'preimageSha256': contracts.digest(preimage), 'maintenanceApproval': False}
+            if retained is not None:
+                require(inspect_retained(core=core, contracts=contracts, adapter=adapter, stager=stager, contract=contract) == observed)
+                evidence['retainedFrom'] = retained
             with (private/'evidence.json').open('xb') as stream:
                 os.fchmod(stream.fileno(), 0o600); stream.write(canonical(evidence)); stream.flush(); os.fsync(stream.fileno())
             return {'ok': True, 'status': 'inactive-pair-rehearsed', 'timings': timings, 'productionChanged': False,
                     'liveDatabaseWritten': False, 'automaticRetry': False, 'maintenanceApproval': False}
     except BaseException:
-        return {'ok': False, 'status': 'preparation-refused-or-incomplete', 'stage': stage,
-                'automaticRetry': False, 'inspectBeforeRetry': True, 'maintenanceApproval': False}
+        result = {'ok': False, 'status': 'preparation-refused-or-incomplete', 'stage': stage,
+                  'automaticRetry': False, 'inspectBeforeRetry': True, 'maintenanceApproval': False}
+        if retained is not None and 'private' in locals():
+            try:
+                with (private/'failure.json').open('xb') as stream:
+                    os.fchmod(stream.fileno(), 0o600); stream.write(canonical(result)); stream.flush(); os.fsync(stream.fileno())
+            except BaseException:
+                result['auditPersisted'] = False
+            else:
+                result['auditPersisted'] = True
+        return result
 
 
 if __name__ == '__main__':

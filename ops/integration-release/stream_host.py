@@ -9,9 +9,19 @@ from contracts import HERE, VENDOR, digest, require, require_fallback_proof_bind
 from host_adapter import adapter_manifest, completion_confirmation
 
 
-def validate_preparation_request(request, contract):
+def validate_preparation_request(request, contract, retained=False):
     keys = {'runId','runAttempt','candidateSha','fallbackSha','backupSha256','receiptRun','storeSha','storeId','node'}
+    if retained:keys.add('retainedPins')
     require(type(request) is dict and set(request) == keys, 'invalid preparation fields')
+    if retained:
+        require(type(request['retainedPins']) is dict and request['runId']!='40144518668', 'retained pins and new run required')
+        import importlib.util
+        from contracts import PREPARATION_HELPER_SHA256
+        helper=HERE.parent/'inactive-staging/prepare_pair.py'
+        require(digest(helper)==PREPARATION_HELPER_SHA256,'preparation helper differs')
+        spec=importlib.util.spec_from_file_location('reviewed_retained_validator',helper)
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        module.validate_retained_pins(request['retainedPins'])
     require(type(request['runAttempt']) is int and request['runAttempt'] == 1, 'preparation retry refused')
     for key in ('runId','receiptRun'):
         require(type(request[key]) is str and re.fullmatch('[1-9][0-9]{0,19}',request[key]), 'invalid run identity')
@@ -56,7 +66,7 @@ def preparation_bootstrap(mode, request):
     import hashlib
     from contracts import read_json
     contract=read_json(HERE/'source-contracts.json')
-    if mode=='prepare': validate_preparation_request(request,contract)
+    if mode in ('prepare','resume-retained'): validate_preparation_request(request,contract,mode=='resume-retained')
     else:
         from materialize_plan import validate_materialization_request
         validate_materialization_request(request,contract)
@@ -80,7 +90,7 @@ protected(state)
 '''
     program += 'mode='+repr(mode)+'\nrequest='+repr(request)+'\nsources='+repr(sources)+'\n'
     program += 'base=state/"packages"/'+repr(package)+'\n'
-    program += '''if mode=='prepare':
+    program += '''if mode in ('prepare','resume-retained'):
  for name,permissions in (('packages',0o755),('releases',0o755),('plans',0o700),('rehearsal-evidence',0o700)):
   p=state/name
   if not os.path.lexists(p):p.mkdir(mode=permissions)
@@ -121,7 +131,7 @@ guards.core=core
     program += 'guards.pins='+repr(guard_pins)+'\nscanner.pins='+repr(pins)+'\n'
     program += '''scanner.core=core;scanner.guards=guards
 contract=contracts.read_json(base/'source-contracts.json')
-if mode=='prepare':
+if mode in ('prepare','resume-retained'):
  result=sys.modules['integration_preparation'].prepare_pair(request,core=core,guards=guards,scanner=scanner,
   contracts=contracts,adapter=host_adapter,stager=sys.modules['preparation_stager'],contract=contract)
  require(type(result) is dict)
@@ -152,16 +162,16 @@ if __name__ == '__main__':
     parser.add_argument('--plan-sha256', default='')
     parser.add_argument('--candidate-sha', default='')
     parser.add_argument('--fallback-sha', default='')
-    parser.add_argument('--mode', choices=('prepare','materialize','inspect-host-evidence','inspect','execute','recover','complete-migration'), required=True)
+    parser.add_argument('--mode', choices=('prepare','resume-retained','materialize','inspect-host-evidence','inspect','execute','recover','complete-migration'), required=True)
     parser.add_argument('--completion-confirmation', default='')
     parser.add_argument('--preparation-request', type=Path)
     parser.add_argument('--materialization-request', type=Path)
     args=parser.parse_args()
-    if args.mode in ('prepare','materialize'):
+    if args.mode in ('prepare','resume-retained','materialize'):
         from contracts import read_json
-        request_path = args.preparation_request if args.mode == 'prepare' else args.materialization_request
+        request_path = args.preparation_request if args.mode in ('prepare','resume-retained') else args.materialization_request
         require(request_path is not None and not any((args.plan_id,args.plan_sha256,args.candidate_sha,args.fallback_sha,args.completion_confirmation)), 'unexpected preparation inputs')
-        require(not (args.materialization_request if args.mode == 'prepare' else args.preparation_request), 'conflicting request')
+        require(not (args.materialization_request if args.mode in ('prepare','resume-retained') else args.preparation_request), 'conflicting request')
         print(preparation_bootstrap(args.mode,read_json(request_path)))
         raise SystemExit(0)
     require(not args.preparation_request and not args.materialization_request, 'unexpected request')
@@ -177,7 +187,7 @@ if __name__ == '__main__':
         modules = [('contracts', HERE/'contracts.py'),
                    ('host_adapter', HERE/'host_adapter.py'),
                    ('evidence_guard', HERE/'vendor/bubblewash-web-a476-baseline/ops/deploy-preserving.py'),
-                   ('binding_diagnostic', HERE/'binding_diagnostic.py')]
+                   ('retained_attempt', HERE/'retained_attempt.py')]
         print('import sys, types, json\nsys.dont_write_bytecode = True')
         for name, path in modules:
             body = path.read_text()
@@ -193,7 +203,9 @@ if __name__ == '__main__':
             print('m.__source_sha256__=hashlib.sha256('+repr(body)+'.encode()).hexdigest();m.__source_verified__=True')
         print("core=sys.modules['preparation_core'];guards=sys.modules['preparation_guards'];scanner=sys.modules['preparation_scanner'];guards.core=core;scanner.core=core;scanner.guards=guards")
         print('guards.pins='+repr(guard_pins)+';scanner.pins='+repr(pins))
-        print("try:\n print(json.dumps(sys.modules['binding_diagnostic'].inspect_binding(core,guards,scanner,sys.modules['contracts'],sys.modules['host_adapter'],sys.modules['integration_preparation']),sort_keys=True))\nexcept BaseException:\n print(json.dumps({'ok':False,'status':'binding-diagnostic-unavailable','releaseAcceptance':False,'automaticRetry':False}),file=sys.stderr)\n raise SystemExit(1)")
+        from contracts import read_json
+        print('inspection_contract='+repr(read_json(HERE/'source-contracts.json')))
+        print("try:\n print(json.dumps(sys.modules['retained_attempt'].inspect_retained(core,lambda:sys.modules['integration_preparation'].inspect_retained(core=core,contracts=sys.modules['contracts'],adapter=sys.modules['host_adapter'],stager=sys.modules['preparation_stager'],contract=inspection_contract)),sort_keys=True))\nexcept BaseException:\n print(json.dumps({'ok':False,'status':'binding-diagnostic-unavailable','releaseAcceptance':False,'automaticRetry':False}),file=sys.stderr)\n raise SystemExit(1)")
         raise SystemExit(0)
     require(re.fullmatch('[a-f0-9]{64}',args.plan_id) and re.fullmatch('[a-f0-9]{64}',args.plan_sha256), 'invalid plan identity')
     require(re.fullmatch('[a-f0-9]{40}',args.candidate_sha) and re.fullmatch('[a-f0-9]{40}',args.fallback_sha) and args.candidate_sha != args.fallback_sha, 'invalid published pair')
