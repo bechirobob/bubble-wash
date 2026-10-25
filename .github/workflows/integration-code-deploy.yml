@@ -119,6 +119,17 @@ jobs:
           python3 -m unittest discover -s tests -p 'test_integration_release_adapter.py' -v
           TARGET_SHA="$CANDIDATE_SHA" python3 ops/check-release-ci.py
           python3 ops/integration-release/contracts.py --verify-fallback-ci "$FALLBACK_SHA"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: inputs.mode == 'prepare' || inputs.mode == 'resume-retained'
+        with:
+          node-version: 24
+      - name: Test read-only preflight diagnostics against exact candidate dependencies
+        if: inputs.mode == 'prepare' || inputs.mode == 'resume-retained'
+        run: |
+          set -euo pipefail
+          (cd ../runtime-candidate && npm ci --omit=dev)
+          BW_TEST_CANDIDATE="$GITHUB_WORKSPACE/runtime-candidate" BW_TEST_NODE="$(command -v node)" python3 -B -m unittest discover -s tests -p 'test_feature_preflight_diagnostic.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_preflight_diagnostic.py' -v
       - name: Verify exact preparation request and both runtime checkouts before transport
         if: inputs.mode == 'prepare' || inputs.mode == 'resume-retained'
         run: |

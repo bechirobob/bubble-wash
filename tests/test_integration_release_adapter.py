@@ -373,9 +373,15 @@ class HostTests(unittest.TestCase):
         self.assertIn('default: inspect',text);self.assertIn('group: bubblewash-production',text)
         self.assertIn('TARGET_SHA="$CANDIDATE_SHA" python3 ops/check-release-ci.py',text)
         self.assertIn('contracts.py --verify-fallback-ci "$FALLBACK_SHA"',text)
-        for forbidden in ('daemon-reload','systemctl enable','npm ci','chmod','chown','cron','continue-on-error'):
+        for forbidden in ('daemon-reload','systemctl enable','chmod','chown','cron','continue-on-error'):
             self.assertNotIn(forbidden,text)
-        self.assertNotIn('secrets.',text.split('      - name: Create no credentials')[0])
+        before_host,host_steps=text.split('      - name: Create no credentials',1)
+        self.assertEqual(before_host.count('npm ci'),1)
+        self.assertIn('(cd ../runtime-candidate && npm ci --omit=dev)',before_host)
+        self.assertNotIn('npm ci',host_steps)
+        self.assertIn('BW_TEST_CANDIDATE="$GITHUB_WORKSPACE/runtime-candidate"',before_host)
+        self.assertIn('BW_TEST_NODE="$(command -v node)"',before_host)
+        self.assertNotIn('secrets.',before_host)
 
 if __name__=='__main__':unittest.main()
 

@@ -393,6 +393,20 @@ def rehearse_pair(core, adapter, candidate, fallback, preimage, values, status, 
                     def migration_stage(value):
                         require(value in ('PREFLIGHT', 'LABELS', 'OUTBOX', 'FEATURES', 'VERIFY', 'PRESERVATION'))
                         report.migration_stage = value
+                    migration_stage('PREFLIGHT')
+                    report.feature_preflight_diagnostic = adapter.validate_preflight_diagnostic(host.feature_preflight_diagnostic(copy))
+                    require(report.feature_preflight_diagnostic['ok'])
+                    original_ack = host.acknowledgement
+                    def checked_ack(raw, expected):
+                        try:
+                            return original_ack(raw, expected)
+                        except (ValueError, TypeError):
+                            if expected.get('status') == 'exact-pre-migration-ready':
+                                report.feature_preflight_diagnostic = {
+                                    'ok':False,'stage':'ORIGINAL_ACK','error':'ACK_INVALID',
+                                    'counts':dict.fromkeys(adapter.PREFLIGHT_COUNTS),'knownDiscrepancies':[],'processReturnCode':0}
+                            raise
+                    host.acknowledgement = checked_ack
                     host.migrate(copy, set_stage=migration_stage)
                 host.acknowledgement(host.feature(copy, '--verify'),
                     {'ok': True, 'status': 'exact-post-feature-ready', 'databaseChanged': False})
@@ -542,6 +556,8 @@ def save_probe_report(private, label, report):
              'cleanup': report.cleanup, 'safeToRemove': report.safe_to_remove,
              'activationAttempted': False,
              'migrationStage': getattr(report, 'migration_stage', 'NOT_STARTED')}
+    if hasattr(report, 'feature_preflight_diagnostic'):
+        value['featurePreflightDiagnostic'] = report.feature_preflight_diagnostic
     require(value['migrationStage'] in ('NOT_STARTED','PREFLIGHT','LABELS','OUTBOX','FEATURES','VERIFY','PRESERVATION'))
     require(label in ('candidate', 'fallback') and
             all(type(value[key]) is str and re.fullmatch('[A-Z_]{1,64}', value[key]) for key in ('stage', 'error')))

@@ -275,6 +275,32 @@ class PreparationTests(unittest.TestCase):
         core.rehearse=rehearse
         return core,adapter,candidate,fallback,preimage,calls,checks
 
+    def test_retained_diagnostic_refusal_prevents_migration_and_is_reported(self):
+        core,a,c,f,preimage,calls,checks=self.rehearsal();before=preimage.read_bytes()
+        diagnostic={'ok':False,'stage':'MODEL_BUILD','error':'MODEL_REFUSED','counts':{},'knownDiscrepancies':[],'processReturnCode':0}
+        a.Host.feature_preflight_diagnostic=lambda self,copy:diagnostic
+        a.validate_preflight_diagnostic=lambda value:value
+        core.RehearsalReport.fail=lambda self,error:setattr(self,'failure',{'stage':self.stage,'error':'CHECK_FAILED'})
+        audit=self.root/'audit';audit.mkdir()
+        with contextlib.redirect_stdout(__import__('io').StringIO()),self.assertRaises(ValueError):
+            p.rehearse_pair(core,a,c,f,preimage,{},self.root/'status',None,{},'123-1',lambda:None,report_directory=audit)
+        self.assertEqual(len(calls),1);self.assertFalse(any(row[0]=='migrate' for row in checks))
+        result=json.loads((audit/'candidate-probe.json').read_bytes())
+        self.assertEqual(result['featurePreflightDiagnostic'],diagnostic)
+        self.assertEqual(preimage.read_bytes(),before)
+
+    def test_successful_diagnostic_still_runs_both_original_copy_migrations(self):
+        core,a,c,f,preimage,calls,checks=self.rehearsal()
+        a.Host.feature_preflight_diagnostic=lambda self,copy:{'ok':True,'stage':'COMPLETE','error':'NONE'}
+        a.validate_preflight_diagnostic=lambda value:value
+        original=a.Host.migrate
+        def migrate(host,copy,set_stage):set_stage('PREFLIGHT');return original(host,copy)
+        a.Host.migrate=migrate
+        audit=self.root/'audit';audit.mkdir()
+        with contextlib.redirect_stdout(__import__('io').StringIO()):
+            p.rehearse_pair(core,a,c,f,preimage,{},self.root/'status',None,{},'123-1',lambda:None,report_directory=audit)
+        self.assertEqual(len(calls),2);self.assertEqual(sum(row[0]=='migrate' for row in checks),2)
+
     def test_two_probes_use_same_immutable_preimage(self):
         core,a,c,f,preimage,calls,checks=self.rehearsal();before=preimage.read_bytes(); stages=[]
         out=p.rehearse_pair(core,a,c,f,preimage,{},self.root/'status',None,{'path':'/usr/bin/node'},'123-1',lambda:None,stages.append)
