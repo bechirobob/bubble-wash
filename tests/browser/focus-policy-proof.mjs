@@ -79,6 +79,9 @@ export async function verifyFocusPolicy({ browser, fixture, origin, output }) {
         await context.addCookies([{ name: 'bubblewash_staff_session', value: fixture.sessions.owner, domain: 'localhost', path: '/', httpOnly: true, sameSite: 'Lax', secure: false }]);
         await page.goto(origin + '/admin/surveys');
         await page.getByRole('heading', {name:'Survey results',exact:true}).waitFor();
+        await page.getByText('73 answered',{exact:true}).waitFor();
+        await verifyResearchShellLayout(page);
+        await page.screenshot({path:output+`survey-${name}-comparison-layout.png`,fullPage:true});
         const questionnaire = page.getByRole('combobox', { name:'Questionnaire', exact:true });
         await questionnaire.waitFor();
         const restingBorder = await questionnaire.evaluate(element => getComputedStyle(element).borderColor);
@@ -164,4 +167,30 @@ export async function verifyFocusPolicy({ browser, fixture, origin, output }) {
     }
   } finally { await safari.close(); }
   return checks;
+}
+
+// Actual layout proof: the shared empty navigation is only a divider, and
+// mobile comparison fields get the full row instead of sharing it with prose.
+export async function verifyResearchShellLayout(page) {
+  const divider = page.locator('.staffSectionNav[aria-hidden="true"]');
+  const dividerBounds = await divider.boundingBox();
+  assert.ok(dividerBounds && dividerBounds.height <= 2, 'empty navigation is a divider, not a 50px spacer');
+  const topbar = await page.locator('.staffTopbar').boundingBox();
+  assert.ok(Math.abs(dividerBounds.y - (topbar.y + topbar.height)) <= 1, 'divider directly follows the staff header');
+  if (page.viewportSize().width > 760) return;
+  const section = page.locator('details').filter({has:page.locator('summary').filter({hasText:'A closer comparison'})});
+  await section.waitFor();
+  if (!(await section.evaluate(element => element.open))) await section.locator('summary').click();
+  const compare = page.getByRole('combobox',{name:'Compare by',exact:true});
+  const answer = page.getByRole('combobox',{name:'Answer',exact:true});
+  const boxes = await Promise.all([compare.boundingBox(), answer.boundingBox()]);
+  const description = await section.getByText('Compare the same answer, using each group’s own answered base.',{exact:true}).boundingBox();
+  for (const box of boxes) {
+    assert.ok(box.width >= 120, 'selected comparison value has a readable mobile field width');
+    assert.ok(box.height >= 44, 'comparison select retains its touch target');
+    assert.ok(box.y >= description.y + description.height, 'comparison fields follow explanatory prose');
+  }
+  assert.ok(Math.abs(boxes[0].y - boxes[1].y) <= 1, 'comparison fields share an aligned row');
+  assert.ok(Math.abs(boxes[0].width - boxes[1].width) <= 1, 'comparison fields have equal columns');
+  assert.ok(boxes[1].x - (boxes[0].x + boxes[0].width) >= 11, 'comparison fields retain their gap');
 }

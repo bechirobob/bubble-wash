@@ -3,7 +3,7 @@ import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { chromium } from '@playwright/test';
 import Database from 'better-sqlite3';
-import { verifyFocusPolicy } from './focus-policy-proof.mjs';
+import { verifyFocusPolicy, verifyResearchShellLayout } from './focus-policy-proof.mjs';
 const fixture = JSON.parse(readFileSync('/tmp/bubblewash-results-fixture-proof.json','utf8'));
 const origin = 'http://localhost:3217';
 const output = resolve('test-results/survey-results') + '/';
@@ -77,6 +77,8 @@ try {
   await page.getByText('73 answered',{exact:true}).waitFor();
   assert.equal(await comparison.evaluate(element => element.open), true, 'comparison stays expanded across its own filter reload');
   tests.push('mobile comparison disclosure retains expansion while changing its filter');
+  await verifyResearchShellLayout(page);
+  await page.screenshot({path:output+'mobile-320-comparison-layout.png',fullPage:true});
   await page.getByRole('tab',{name:'Responses',exact:true}).click(); await page.getByRole('button',{name:/Open response from/}).first().waitFor(); assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false); await page.screenshot({path:output+'mobile-320-responses.png',fullPage:true}); tests.push('320px response list, pagination and bounded scrolling are rendered');
   await page.getByRole('tab',{name:'Patterns',exact:true}).click();
   await page.getByRole('combobox',{name:'Audience',exact:true}).selectOption('none');await page.getByRole('combobox',{name:'Area',exact:true}).selectOption('Airport');await page.waitForTimeout(300);

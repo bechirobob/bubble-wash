@@ -1495,7 +1495,7 @@ export function PortalShell({ headingAction, heading, title, allStaffAccess = fa
           </div>
         </details>
       </header>
-      {mainNavigation.length ? <nav className="staffSectionNav" aria-label={`${pageRole} workspace sections`}>{mainNavigation.map((item) => <Link key={item.view} href={item.href} aria-current={item.view === currentView ? "page" : undefined}>{item.label === "People & onboarding" ? "People" : item.label}</Link>)}</nav> : <div className="staffSectionNav" aria-hidden="true" />}
+      {mainNavigation.length ? <nav className="staffSectionNav" aria-label={`${pageRole} workspace sections`}>{mainNavigation.map((item) => <Link key={item.view} href={item.href} aria-current={item.view === currentView ? "page" : undefined}>{item.label === "People & onboarding" ? "People" : item.label}</Link>)}</nav> : <div className="staffSectionNav" aria-hidden="true" style={{ minHeight: 0 }} />}
       <section className="staffViewHeader"><div><p className="eyebrow">{promise.eyebrow}</p><h1>{promise.title}</h1>{!primaryView && promise.subtitle ? <p>{promise.subtitle}</p> : null}</div>{headingAction ?? (pageRole === "vendor" && currentView === "jobs" ? <LaundryFlowIcon stage="washing" /> : pageRole === "driver" && currentView === "route" ? <LaundryFlowIcon stage="return" /> : null)}</section>
       <div className="staffView">{children}</div>
     </main>
