@@ -1519,6 +1519,17 @@ dd { margin: 4px 0 0; color: var(--muted); }
 .staffAccountPanel, .invoicePanel { padding: 1.25rem; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); margin-block: 1.25rem; }
 .staffAccountPanel form, .invoicePanel form { display: grid; gap: 1rem; }
 .staffAccountPanel code { overflow-wrap: anywhere; }
+.staffAccountPanel .staffCaseRow { grid-template-columns: minmax(0, 1fr) auto auto; min-height: 64px; padding-block: 12px; gap: 12px; }
+.staffAccountIdentity { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.staffAccountActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.staffAccountActions .button { min-height: 44px; }
+.staffAccountToggle { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: .9rem; }
+.staffAccountToggle input { width: auto; }
+@media (max-width: 640px) {
+  .staffAccountPanel .staffCaseRow { grid-template-columns: minmax(0, 1fr) auto; }
+  .staffAccountPanel .staffCaseRow > .staffAccountActions { grid-column: 1 / -1; }
+}
+
 input, select, textarea { font-size: 1rem; }
 .textButton { min-height: 44px; padding: .5rem; }
 
