@@ -49,10 +49,13 @@ appendSubmissionRecord({ id: 'BW-BROWSEROVERDUE01', createdAt: new Date(Date.now
 if (researchFixture) getDatabase().exec(readFileSync(resolve('db/proposed/research-v1.sql'), 'utf8'));
 const server = spawn(process.execPath, ['--import', resolve('tests/browser/block-egress.mjs'), 'node_modules/next/dist/bin/next', 'start', '-H', 'localhost', '-p', '3101'], { env: process.env, stdio: 'inherit' });
 const edge = createFixtureEdge();
+const staffEdge = createFixtureEdge({ origin: 'http://localhost:3102', staffPresentation: true });
 edge.listen(3100, 'localhost');
-edge.on('error', error => { console.error(error.message); server.kill('SIGTERM'); });
+staffEdge.listen(3102, 'localhost');
+for (const listener of [edge, staffEdge]) listener.on('error', error => { console.error(error.message); server.kill('SIGTERM'); });
+function closeEdges() { for (const listener of [edge, staffEdge]) { listener.closeAllConnections(); listener.close(); } }
 let stopping = false;
 function stop() { if (!stopping) { stopping = true; server.kill('SIGTERM'); } }
 process.on('SIGTERM', stop); process.on('SIGINT', stop);
-server.on('exit', code => { edge.closeAllConnections(); edge.close(); getDatabase().close(); rmSync(directory, { recursive: true, force: true }); process.exit(stopping ? 0 : code ?? 1); });
-server.on('error', error => { edge.closeAllConnections(); edge.close(); console.error(error); getDatabase().close(); rmSync(directory, { recursive: true, force: true }); process.exit(1); });
+server.on('exit', code => { closeEdges(); getDatabase().close(); rmSync(directory, { recursive: true, force: true }); process.exit(stopping ? 0 : code ?? 1); });
+server.on('error', error => { closeEdges(); console.error(error); getDatabase().close(); rmSync(directory, { recursive: true, force: true }); process.exit(1); });

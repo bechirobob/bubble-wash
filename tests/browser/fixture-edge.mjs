@@ -33,7 +33,7 @@ export function fixtureEdgeResponseHeaders(headers, cookieName = 'bubblewash_sta
 
 // Loopback-only synthetic TLS-edge emulation. Never used by the application.
 // Browser headers remain native; the production same-origin guard stays unchanged.
-export function createFixtureEdge({ upstreamPort = 3101, origin = 'http://localhost:3100' } = {}) {
+export function createFixtureEdge({ upstreamPort = 3101, origin = 'http://localhost:3100', staffPresentation = false } = {}) {
   const expected = new URL(origin);
   if (expected.hostname !== 'localhost' || expected.protocol !== 'http:') throw new Error('Fixture edge must use localhost HTTP');
   return http.createServer((request, response) => {
@@ -42,8 +42,16 @@ export function createFixtureEdge({ upstreamPort = 3101, origin = 'http://localh
       response.writeHead(403).end('Fixture host rejected');
       return;
     }
+    // Staff identity testing is read-only. Do not emulate login or rewrite Origin.
+    if (staffPresentation && request.method !== 'GET') {
+      response.writeHead(405, { Allow: 'GET' }).end('Staff presentation fixture is read-only');
+      return;
+    }
+    const forwardedHeaders = staffPresentation
+      ? { ...request.headers, host: 'staff.bubblewash.co' }
+      : fixtureEdgeHeaders(request.method, target.pathname, request.headers, origin);
     const upstream = http.request({ hostname: 'localhost', port: upstreamPort, method: request.method,
-      path: `${target.pathname}${target.search}`, headers: fixtureEdgeHeaders(request.method, target.pathname, request.headers, origin) }, incoming => {
+      path: `${target.pathname}${target.search}`, headers: forwardedHeaders }, incoming => {
       const headers = fixtureEdgeResponseHeaders(incoming.headers);
       // Metadata-only transport proof: WebKit's protocol may omit Cookie from
       // request.allHeaders(). Observe receipt here, never expose a token value.

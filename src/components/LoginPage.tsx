@@ -5,6 +5,7 @@ import { FormEvent, Suspense, useMemo, useState, useSyncExternalStore } from "re
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, Grid2X2 } from "lucide-react";
 import { BrandLink } from "@/components/BrandLink";
+import { useWebApp } from "@/components/WebAppProvider";
 
 const showCredentialCards = process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_BUBBLEWASH_SHOW_DEMO_LOGIN === "true";
 const adminMfaRequired = process.env.NEXT_PUBLIC_BUBBLEWASH_ADMIN_MFA_REQUIRED === "true";
@@ -22,6 +23,7 @@ const clientReady = () => true;
 const serverReady = () => false;
 
 function LoginForm() {
+  const { appName } = useWebApp();
   const hydrated = useSyncExternalStore(subscribeToHydration, clientReady, serverReady);
   const searchParams = useSearchParams();
   const nextPath = useMemo(() => {
@@ -76,7 +78,7 @@ function LoginForm() {
     <main className="loginPage redesignLoginPage">
       <header className="redesignTopbar">
         <BrandLink label="Bubble Wash Staff" priority />
-        <nav className="redesignTextNav" aria-label="Staff login links"><Link href="/"><ArrowLeft aria-hidden="true" />Back to site</Link><Link href="/staff"><Grid2X2 aria-hidden="true" />Roles</Link></nav>
+        <nav className="redesignTextNav" aria-label="Staff login links"><Link href="/"><ArrowLeft aria-hidden="true" />{appName === "Bubble Wash Staff" ? "Staff home" : "Back to site"}</Link><Link href="/staff"><Grid2X2 aria-hidden="true" />Roles</Link></nav>
       </header>
       <section className="redesignLoginGrid" aria-labelledby="login-title">
         <aside className="redesignRoleList">

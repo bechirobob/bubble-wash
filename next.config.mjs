@@ -21,6 +21,9 @@ const nextConfig = {
   images: {
     remotePatterns: [{ protocol: "https", hostname: "images.unsplash.com" }],
   },
+  async redirects() {
+    return [{ source: "/", has: [{ type: "host", value: "staff.bubblewash.co" }], destination: "/staff", permanent: false }];
+  },
   async headers() {
     return [
       {

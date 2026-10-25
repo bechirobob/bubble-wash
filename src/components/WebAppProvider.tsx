@@ -10,6 +10,7 @@ type InstallPrompt = Event & {
 };
 
 type WebAppState = {
+  appName: string;
   available: boolean;
   installed: boolean;
   installing: boolean;
@@ -18,11 +19,11 @@ type WebAppState = {
 };
 
 const WebAppContext = createContext<WebAppState>({
-  available: false, installed: false, installing: false, message: "", install: async () => {},
+  appName: "Bubble Wash", available: false, installed: false, installing: false, message: "", install: async () => {},
 });
 
 /** Only the install page shows controls; registration never interrupts a task. */
-export function WebAppProvider({ children }: { children: React.ReactNode }) {
+export function WebAppProvider({ children, appName = "Bubble Wash" }: { children: React.ReactNode; appName?: string }) {
   const [prompt, setPrompt] = useState<InstallPrompt | null>(null);
   const [installed, setInstalled] = useState(false);
   const [installing, setInstalling] = useState(false);
@@ -70,8 +71,8 @@ export function WebAppProvider({ children }: { children: React.ReactNode }) {
       await prompt.prompt();
       const choice = await prompt.userChoice;
       setMessage(choice.outcome === "accepted"
-        ? "Installation requested. Open Bubble Wash from your home screen when it appears."
-        : "You can add Bubble Wash later from your browser menu.");
+        ? `Installation requested. Open ${appName} from your home screen when it appears.`
+        : `You can add ${appName} later from your browser menu.`);
     } catch {
       setMessage("Installation did not start. Use the steps below instead.");
     } finally {
@@ -80,7 +81,7 @@ export function WebAppProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  return <WebAppContext.Provider value={{ available: prompt !== null, installed, installing, message, install }}>{children}</WebAppContext.Provider>;
+  return <WebAppContext.Provider value={{ appName, available: prompt !== null, installed, installing, message, install }}>{children}</WebAppContext.Provider>;
 }
 
 export function useWebApp() { return useContext(WebAppContext); }

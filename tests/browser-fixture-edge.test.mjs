@@ -103,3 +103,39 @@ test('HTTP fixture removes only standalone Secure cookie attribute; production c
   assert.match(readFileSync(new URL('../src/lib/auth.ts', import.meta.url), 'utf8'), /secure: process.env.NODE_ENV === "production"/);
   assert.match(cookies[0], /; Secure;/);
 });
+
+test('staff presentation edge preserves redirects and Origin while rejecting all writes', async () => {
+  const received = [];
+  const upstream = http.createServer((request, response) => {
+    received.push({ method: request.method, host: request.headers.host, origin: request.headers.origin });
+    if (request.url === '/') response.writeHead(307, { Location: '/staff' }).end();
+    else response.end('staff presentation');
+  });
+  await new Promise(resolve => upstream.listen(0, 'localhost', resolve));
+  const edge = createFixtureEdge({ upstreamPort: upstream.address().port, origin: 'http://localhost:3102', staffPresentation: true });
+  await new Promise(resolve => edge.listen(0, 'localhost', resolve));
+  try {
+    async function send(path, method = 'GET', host = 'localhost:3102') {
+      return new Promise((resolve, reject) => {
+        const request = http.request(`http://localhost:${edge.address().port}${path}`, { method, headers: { host, origin: 'http://localhost:3102' } }, async response => {
+          let body = ''; for await (const chunk of response) body += chunk;
+          resolve({ status: response.statusCode, headers: response.headers, body });
+        });
+        request.on('error', reject); request.end();
+      });
+    }
+    const redirect = await send('/');
+    assert.equal(redirect.status, 307); assert.equal(redirect.headers.location, '/staff');
+    assert.equal((await send(redirect.headers.location)).body, 'staff presentation');
+    assert.deepEqual(received, Array(2).fill({ method: 'GET', host: 'staff.bubblewash.co', origin: 'http://localhost:3102' }));
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']) {
+      const rejected = await send('/api/login', method);
+      assert.equal(rejected.status, 405); assert.equal(rejected.headers.allow, 'GET');
+    }
+    assert.equal((await send('/', 'GET', 'wrong.invalid')).status, 403);
+    assert.equal(received.length, 2, 'Rejected requests never reach the runtime');
+  } finally {
+    edge.closeAllConnections(); upstream.closeAllConnections();
+    await Promise.all([new Promise(resolve => edge.close(resolve)), new Promise(resolve => upstream.close(resolve))]);
+  }
+});
