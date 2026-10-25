@@ -1894,3 +1894,5 @@ html:not([data-input-modality="pointer"]) .focusedPlanSegment:has(input:focus-vi
   .focusedPlanCompareChoice[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: -3px; }
 }
 
+
+.staffAppInstall { display: inline-flex; align-items: center; min-height: 44px; text-underline-offset: 3px; }

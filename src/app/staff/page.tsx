@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ArrowRight, Bike, Headphones, ShieldCheck, WashingMachine } from "lucide-react";
 import { BrandLink } from "@/components/BrandLink";
+import { headers } from "next/headers";
+import { isStaffAppHost, STAFF_APP_URL } from "@/lib/web-app";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +29,8 @@ const staffPaths = [
   },
 ];
 
-export default function StaffAccessPage() {
+export default async function StaffAccessPage() {
+  const staffApp = isStaffAppHost((await headers()).get("host"));
   return (
     <main className="loginPage staffAccessPage">
       <section className="loginShell staffAccessShell">
@@ -45,6 +48,7 @@ export default function StaffAccessPage() {
             </Link>
           )})}
         </div>
+        <p><a className="staffAppInstall" href={staffApp ? "/install" : `${STAFF_APP_URL}/install`}>Add staff app to home screen</a></p>
       </section>
     </main>
   );
