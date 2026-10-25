@@ -69,7 +69,12 @@ test('real staff worklist, safe writes, conflict recovery and admin reviews',asy
   await form.getByRole('button',{name:/Load latest values/}).click();
   await expect(form.getByLabel('Next step')).toHaveValue('Saved elsewhere');
   await item.getByRole('link',{name:'Open case',exact:true}).click();
-  await expect(page.locator('.caseDetail').getByText('CASE-WORKLIST-REFERENCE',{exact:true})).toBeVisible();
+  await expect(page).toHaveURL(url => url.pathname === '/admin' && url.searchParams.get('view') === 'cases' && url.searchParams.get('case') === 'BW-WORKLISTCASE');
+  // The dossier reference now includes a nested priority badge. Assert the
+  // selected dossier identity, not an exact text node from the retired header.
+  const caseReference=page.locator('.caseDetail .staffCaseDeskHeader > div > .staffCaseDeskReference');
+  await expect(caseReference).toBeVisible();
+  await expect(caseReference).toHaveText(/^CASE-WORKLIST-REFERENCE\s+Normal priority$/);
   await page.goBack();
   await page.getByRole('link',{name:'Assignment options',exact:true}).click();
   await page.getByLabel('Order reference').fill('BW-BROWSEROVERDUE01');
