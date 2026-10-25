@@ -24,6 +24,7 @@ test('archive requires confirmation, cancels safely and stays recoverable', asyn
   await expect(panel.getByRole('status')).toContainText('Confirm the account email');
   await expect(row).toBeVisible();
   await confirmation.getByRole('textbox').fill(email);
+  await panel.screenshot({ path: testInfo.outputPath('staff-archive-confirmation.png') });
   await confirmation.getByRole('button', { name: 'Confirm archive', exact: true }).click();
   await expect(panel.getByRole('status')).toContainText('Sign-in account archived');
   await expect(row).toHaveCount(0);
@@ -31,6 +32,7 @@ test('archive requires confirmation, cancels safely and stays recoverable', asyn
   await expect(row).toContainText('archived');
   await expect(row.getByRole('button')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await panel.screenshot({ path: testInfo.outputPath('staff-archive-archived.png') });
   await panel.locator('summary').click();
   const restore = panel.locator('details form');
   await restore.getByLabel('Name', { exact: true }).fill('Archive test');
@@ -42,6 +44,7 @@ test('archive requires confirmation, cancels safely and stays recoverable', asyn
   await expect(panel.locator('code')).toBeVisible();
   const activationLink = await panel.locator('code').textContent();
   await expect(row).toContainText('invited');
+  await panel.screenshot({ path: testInfo.outputPath('staff-archive-restored.png') });
   await page.goto(activationLink);
   await page.getByLabel('New password', { exact: true }).fill('synthetic-restored-password-123');
   await page.getByRole('button', { name: 'Activate access', exact: true }).click();
