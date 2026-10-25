@@ -10,9 +10,17 @@ test.use({ serviceWorkers: 'block' });
 // browser form sign-in. Authenticate before the first document so a late login
 // router navigation cannot discard the page's synthetic API route handlers.
 async function signIn(page, role) {
+  // The loopback fixture explicitly trusts these TEST-NET clients. Keep the real
+  // 10/minute login limiter intact; each role/device is a distinct test client.
+  // Early acceptance plus the full suite uses at most two logins per identity.
+  const projectIndex = ['portrait-320', 'portrait-390', 'webkit-portrait-390', 'desktop-1440'].indexOf(test.info().project.name);
+  const roleIndex = ['admin', 'vendor', 'driver', 'support'].indexOf(role);
+  expect(projectIndex).toBeGreaterThanOrEqual(0);
+  expect(roleIndex).toBeGreaterThanOrEqual(0);
+  const syntheticClientIp = `192.0.2.${200 + projectIndex * 4 + roleIndex}`;
   await page.route('**/*', route => new URL(route.request().url()).origin === 'http://localhost:3100' ? route.continue() : route.abort());
   const login = await page.context().request.post('/api/login', {
-    headers: { origin: 'http://localhost:3100' },
+    headers: { origin: 'http://localhost:3100', 'x-forwarded-for': syntheticClientIp },
     data: { email: `${role}@example.invalid`, password: `synthetic-${role}-password-123` },
   });
   expect(login.status()).toBe(200);
