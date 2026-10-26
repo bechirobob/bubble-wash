@@ -56,6 +56,8 @@ jobs:
         run: |
           export BW_TEST_CANDIDATE="$PWD" BW_TEST_FALLBACK="$PWD" BW_TEST_NODE="$(command -v node)"
           python3 -m unittest discover -s tests -p 'test_reference_*.py' -v
+      - name: Verify isolated UAT fixture selection
+        run: node --conditions=react-server --experimental-strip-types tests/uat-fixture-priority.integration.mjs
       - name: TypeScript
         run: npm run typecheck
       - name: Full dependency audit

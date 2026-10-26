@@ -68,7 +68,7 @@ def transient(unit, suffix, command):
     run(['/usr/bin/systemd-run','--unit=bubblewash-uat-'+suffix,'--wait','--pipe','--quiet','--collect',
          *sandbox_properties(unit),*command],timeout=120)
 
-def verify(revision):
+def verify(revision, allow_legacy_marker=False):
     if not re.fullmatch('[0-9a-f]{40}',revision): raise ValueError('Exact revision required')
     for path in (APP/'SOURCE_REVISION',APP/'scripts/uat-seed.mjs',APP/'.next/BUILD_ID',CONFIG/'release.json',CONFIG/'environment',UNIT): trusted(path)
     trusted(CONFIG/'environment',0o600)
@@ -81,7 +81,12 @@ def verify(revision):
     if account.pw_shell!='/usr/sbin/nologin' or account.pw_dir!=str(DATA) or account.pw_uid==0: raise ValueError('Wrong account')
     if DATA.is_symlink() or DATA.stat().st_uid!=account.pw_uid: raise ValueError('Wrong isolated data owner')
     if set(p.name for p in DATA.iterdir())!={'cache'}: raise ValueError('Existing data requires recovery review')
-    if (CONFIG/'activation-started.json').exists(): raise ValueError('Activation already attempted')
+    marker=CONFIG/'activation-started.json'
+    if marker.exists():
+        if not allow_legacy_marker: raise ValueError('Activation already attempted')
+        trusted(marker,0o600)
+        if json.loads(marker.read_text())!={'revision':revision,'accountsIssued':False}:raise ValueError('Not original preseed marker')
+    elif allow_legacy_marker:raise ValueError('Expected original failed attempt')
     state=run(['/usr/bin/systemctl','show',SERVICE,'-p','ActiveState','-p','DropInPaths'],capture=True).stdout.decode()
     if set(state.strip().splitlines())!={'ActiveState=inactive','DropInPaths='}: raise ValueError('Existing activity or overrides')
     return reviewed.decode(), environment((CONFIG/'environment').read_text())
@@ -120,22 +125,39 @@ def activate(revision):
     marker=CONFIG/'activation-started.json'
     fd=os.open(marker,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
     with os.fdopen(fd,'w') as stream: stream.write(json.dumps({'revision':revision,'accountsIssued':False})+'\n')
+    def stage(name):
+        temp=CONFIG/'activation-stage-new.json'
+        descriptor=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+        with os.fdopen(descriptor,'w') as out:
+            out.write(json.dumps({'revision':revision,'accountsIssued':False,'stage':name})+'\n');out.flush();os.fsync(out.fileno())
+        os.replace(temp,marker)
     started=False
     try:
+        stage('unit-verification')
         run(['/usr/bin/systemd-analyze','verify',str(UNIT)])
+        stage('daemon-reload')
         run(['/usr/bin/systemctl','daemon-reload'])
         loaded_unit()
         probe=Path(__file__).parents[2]/'scripts/uat-isolation-check.mjs'
+        stage('isolation-probe')
         transient(unit,'isolation-check',['/usr/bin/node','--input-type=module','--eval',probe.read_text()])
+        stage('synthetic-seed')
         transient(unit,'seed',['/usr/bin/node','--conditions=react-server','--experimental-strip-types','scripts/uat-seed.mjs','--approved-synthetic-only'])
+        stage('synthetic-priority')
+        priority=Path(__file__).parents[2]/'scripts/uat-prioritize-fixture.mjs'
+        transient(unit,'fixture-priority',['/usr/bin/node','--conditions=react-server','--experimental-strip-types','--input-type=module','--eval',priority.read_text()])
+        stage('environment-enable')
         # Atomic config replacement, preserving the session secret without logging it.
         temp=CONFIG/'environment.activation-new'
         fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
         with os.fdopen(fd,'w') as stream: stream.write(newenv); stream.flush(); os.fsync(stream.fileno())
         os.replace(temp,CONFIG/'environment')
+        stage('service-start')
         started=True
         run(['/usr/bin/systemctl','start',SERVICE])
+        stage('http-checks')
         checks()
+        stage('listener-check')
         run(['/usr/bin/systemctl','is-active','--quiet',SERVICE])
         pid=run(['/usr/bin/systemctl','show',SERVICE,'-p','MainPID','--value'],capture=True).stdout.decode().strip()
         if not pid.isdigit() or int(pid)<=1: raise ValueError('No UAT main process')
@@ -146,6 +168,7 @@ def activate(revision):
             try: run(['/usr/bin/systemctl','stop',SERVICE])
             except Exception: pass
         raise
+    stage('complete')
     return {'ok':True,'revision':revision,'state':'started-isolated-awaiting-accounts','accountsIssued':False,'routingChanged':False}
 
 def main():

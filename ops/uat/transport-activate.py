@@ -10,20 +10,25 @@ import shlex
 import subprocess
 
 ROOT=Path(__file__).resolve().parents[2]
-SOURCES=('ops/uat/activate-host.py','ops/uat/bubblewash-uat.service','scripts/uat-isolation-check.mjs','ops/add-uat-host.py')
+SOURCES=('ops/uat/activate-host.py','ops/uat/bubblewash-uat.service','scripts/uat-isolation-check.mjs','scripts/uat-prioritize-fixture.mjs','ops/add-uat-host.py','ops/uat/inspect-activation.py')
 PIN='e7de6a5ea121b50b3ae691451fe9377466d7bba7ca5748009f6612a10194b735'
 
 def context(env):
     if env.get('GITHUB_REPOSITORY')!='bechirobob/bubble-wash' or env.get('GITHUB_REF')!='refs/heads/main' or env.get('GITHUB_EVENT_NAME')!='workflow_dispatch' or env.get('GITHUB_RUN_ATTEMPT')!='1':raise ValueError('scope')
     source=env.get('SOURCE_SHA','');runtime=env.get('RUNTIME_SHA','');mode=env.get('UAT_ACTION','');run=env.get('GITHUB_RUN_ID','')
     if not re.fullmatch('[a-f0-9]{40}',source) or source!=env.get('GITHUB_SHA') or not re.fullmatch('[a-f0-9]{40}',runtime) or not re.fullmatch('[1-9][0-9]{0,19}',run):raise ValueError('pin')
-    if mode not in ('check','start','route-check','route-activate') or env.get('EXPECTED_CADDY_SHA')!=PIN:raise ValueError('mode/config pin')
+    if mode not in ('check','start','route-check','route-activate','inspect','repair-app-traversal') or env.get('EXPECTED_CADDY_SHA')!=PIN:raise ValueError('mode/config pin')
     return {'source':source,'runtime':runtime,'runId':run,'mode':mode,'caddy':PIN}
 
 def receipt(raw,ctx):
     if len(raw)>16384:raise ValueError('receipt bounds')
     expected={'ok':True,'mode':ctx['mode'],'source':ctx['source'],'runtime':ctx['runtime'],'accountsIssued':False,'automaticRetry':False}
-    if json.loads(raw)!=expected:raise ValueError('receipt mismatch')
+    value=json.loads(raw)
+    if ctx['mode']=='inspect':
+        spec=importlib.util.spec_from_file_location('uat_diagnostics',ROOT/'ops/uat/inspect-activation.py')
+        diagnostic=importlib.util.module_from_spec(spec);spec.loader.exec_module(diagnostic)
+        expected['diagnostics']=diagnostic.validate_receipt(value.get('diagnostics'))
+    if value!=expected:raise ValueError('receipt mismatch')
     return expected
 
 def main():

@@ -10,8 +10,8 @@ import subprocess
 import tempfile
 
 PIN='e7de6a5ea121b50b3ae691451fe9377466d7bba7ca5748009f6612a10194b735'
-FILES={'ops/uat/activate-host.py','ops/uat/bubblewash-uat.service','scripts/uat-isolation-check.mjs','ops/add-uat-host.py'}
-MODES={'check','start','route-check','route-activate'}
+FILES={'ops/uat/activate-host.py','ops/uat/bubblewash-uat.service','scripts/uat-isolation-check.mjs','scripts/uat-prioritize-fixture.mjs','ops/add-uat-host.py','ops/uat/inspect-activation.py'}
+MODES={'check','start','route-check','route-activate','inspect','repair-app-traversal'}
 
 def validate(ctx,sources):
     if set(ctx)!={'source','runtime','runId','mode','caddy'} or ctx['mode'] not in MODES or ctx['caddy']!=PIN: raise ValueError('context')
@@ -43,11 +43,36 @@ def route_ready(module,ctx,unit):
     no_accounts(module.DATA/'uat.sqlite')
     module.checks() # UAT login, anonymous forbidden and readiness503: no issued accounts.
 
+def repair_app_traversal(module,revision):
+    # One narrow repair: untouched preseed install affected by the known umask bug.
+    # No database may exist. No arbitrary resume or marker deletion is permitted.
+    module.verify(revision,allow_legacy_marker=True)
+    module.trusted(module.APP,0o700)
+    cache=module.APP/'.next/cache';module.trusted(cache)
+    if cache.stat().st_mode&0o777 not in (0o700,0o755):raise ValueError('Unexpected cache mode')
+    listeners=module.run(['/usr/bin/ss','-H','-ltnp','sport = :3108'],capture=True).stdout
+    if listeners.strip():raise ValueError('Port occupied')
+    old=module.CONFIG/'activation-started.json';saved=module.CONFIG/'activation-before-app-traversal-repair.json'
+    if os.path.lexists(saved):raise ValueError('Repair already attempted')
+    # Preserve the original marker using O_EXCL before changing any permissions.
+    fd=os.open(saved,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+    with os.fdopen(fd,'wb') as stream:stream.write(old.read_bytes());stream.flush();os.fsync(stream.fileno())
+    module.APP.chmod(0o755);cache.chmod(0o755)
+    old.unlink() # Verified original marker has a durable private recovery copy.
+    return module.activate(revision)
+
 def main(ctx,sources):
     try:
         validate(ctx,sources)
         if os.geteuid()!=0: raise ValueError('root')
         signal.alarm(300)
+        if ctx['mode']=='inspect':
+            import types
+            diagnostic=types.ModuleType('uat_readonly_inspection')
+            exec(compile(sources['ops/uat/inspect-activation.py'],'reviewed-inspection','exec'),diagnostic.__dict__)
+            facts=diagnostic.validate_receipt(diagnostic.inspect())
+            print(json.dumps({'ok':True,'mode':'inspect','source':ctx['source'],'runtime':ctx['runtime'],'accountsIssued':False,'automaticRetry':False,'diagnostics':facts}))
+            return
         for path in (Path('/var'),Path('/var/lib')):
             info=path.lstat()
             if path.is_symlink() or info.st_uid!=0 or info.st_mode&0o022: raise ValueError('staging ancestry')
@@ -61,6 +86,8 @@ def main(ctx,sources):
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
         if ctx['mode']=='check': module.verify(ctx['runtime'])
         elif ctx['mode']=='start': module.activate(ctx['runtime'])
+        elif ctx['mode']=='repair-app-traversal':
+            repair_app_traversal(module,ctx['runtime'])
         else:
             route_ready(module,ctx,sources['ops/uat/bubblewash-uat.service'])
             result=module.run(['/usr/bin/python3','-I','-B',str(stage/'ops/add-uat-host.py'),'--activate' if ctx['mode']=='route-activate' else '--check-only',ctx['caddy']],timeout=90,capture=True)
