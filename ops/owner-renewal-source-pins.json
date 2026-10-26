@@ -1,0 +1,16 @@
+{
+  "schema": "bubblewash-owner-renewal/v1",
+  "runtimeSha": "f7305933b15a285bbd393a2057bf5d27e4b9985c",
+  "sourceHashes": {
+    "ops/deploy-preserving.py": "29006085ee39680daa30fc34d05c3761b410f0f860835943eab8a60168da076a",
+    "ops/deploy-survey-only.py": "bb435e7a32baa516b8d89e65e64f2b2db0779657f6c25039130c9520f5d5e509",
+    "ops/deploy-survey-update.py": "8de4ce5d5f543bc52a4d81590490058681df4450dbe44702f426c97cf0fd4e0a",
+    "ops/pwa-update-source-pins.json": "746982f29aa6cec96a9c6bedcccd631c9df648af1dc80684c7f7f85afe4f3782",
+    "ops/exact-cleanup-host.py": "01593ea3cc688d43d489e929b7f391671f2abb381eb884d946996c8d8b3354c7",
+    "ops/owner-document-host.py": "02409c3032e86cf7897a7e939322425cb8c642d11fa3af8011d1c400f6ab362f",
+    "ops/owner-renewal-host.py": "eb71759bf348f293ec4fb6b3f800a4446e7895ce19aa9b5221a29cd21864982a",
+    "ops/owner-renewal-capsule.mjs": "a4da54a5a75e92c0dd60b1c066e4188055c5b43297452dd5a8120dd8c6c17b37",
+    "ops/host-facts/facts.py": "42ff5948773808b941ad2c9f8a7b6a6db95329b812d9d42ff2cf92b06df0f0eb",
+    ".github/backup/backup_release.py": "86d085e65b0e6dba906b57c296868da41b01c83982e5b93d6430fd73f05f6992"
+  }
+}

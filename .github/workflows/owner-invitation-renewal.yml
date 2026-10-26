@@ -1,0 +1,100 @@
+name: Renew expired existing owner invitation
+run-name: Owner renewal ${{ inputs.mode }} ${{ inputs.expected_live_sha }}
+on:
+  workflow_dispatch:
+    inputs:
+      expected_live_sha:
+        description: Exact separately reviewed live runtime SHA; never inferred from control main
+        required: true
+        type: string
+      mode:
+        description: Check is read-only. Issuance requires separate account and document approval.
+        required: true
+        default: check
+        type: choice
+        options: [check, renew-document]
+      issuance_approved:
+        description: Explicit action-time approval for one expired existing full-owner invitation renewal and private handoff
+        required: true
+        default: false
+        type: boolean
+      handover_ready:
+        description: Approved styling is live and private document plus final email route are ready
+        required: true
+        default: false
+        type: boolean
+      status_fingerprint:
+        description: Exact eligible fingerprint from the preceding read-only check; renewal only
+        required: false
+        type: string
+      handoff_public_key:
+        description: Single-line canonical base64 SPKI DER for the one-operation RSA3072 public key; no PEM headers, whitespace or private key
+        required: false
+        type: string
+      backup_sha256:
+        description: Latest verified encrypted archive SHA256 matching the current receipt; issuance only
+        required: false
+        type: string
+      receipt_run:
+        description: Matching successful backup run at most30 hours old; issuance only
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  owner_document:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify exact clean control contract before nested runtime checkout
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_RUN_ATTEMPT" == 1 && "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          python3 -B ops/integration-release/select_source.py --release . --runner-only
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Verify isolated renewal and host guards
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          node --conditions=react-server --experimental-strip-types tests/owner-renewal.integration.mjs
+          python3 -B -m unittest discover -s tests -p 'test_owner_renewal_host.py' -v
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+      - name: Verify existing private storage without changing access
+        if: inputs.mode == 'renew-document'
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+          BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+          BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+        run: python3 -B .github/backup/check_store.py
+      - name: Connect through the existing approved production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Check or issue once with ciphertext-only private storage
+        env:
+          BUBBLEWASH_ADDITIONAL_OWNER_INPUT: ${{ secrets.BUBBLEWASH_ADDITIONAL_OWNER_INPUT }}
+          OWNER_MODE: ${{ inputs.mode }}
+          ISSUANCE_APPROVED: ${{ inputs.issuance_approved }}
+          HANDOVER_READY: ${{ inputs.handover_ready }}
+          HANDOFF_PUBLIC_KEY: ${{ inputs.handoff_public_key }}
+          STATUS_FINGERPRINT: ${{ inputs.status_fingerprint }}
+          RUNTIME_SHA: ${{ inputs.expected_live_sha }}
+          BACKUP_SHA: ${{ inputs.backup_sha256 }}
+          RECEIPT_RUN: ${{ inputs.receipt_run }}
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+          BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+          BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+        run: python3 -I -B ops/owner-renewal-transport.py
