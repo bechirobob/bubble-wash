@@ -73,6 +73,9 @@ class HostPreparationTests(unittest.TestCase):
                     prepare.install(artifact,REV,'[Unit]\nDescription=Synthetic fixture\n')
                 config=Path(roots[2])/'environment'
                 self.assertEqual(config.stat().st_mode & 0o777,0o600)
+                self.assertEqual(Path(roots[0]).stat().st_mode & 0o777,0o755)
+                self.assertEqual((Path(roots[0])/'app').stat().st_mode & 0o777,0o755)
+                self.assertEqual((Path(roots[0])/'app/.next/cache').stat().st_mode & 0o777,0o755)
                 self.assertEqual((Path(roots[0])/'app/package.json').stat().st_mode & 0o777,0o644)
                 self.assertEqual((Path(roots[0])/'app/node_modules/next/dist/bin/next').stat().st_mode & 0o777,0o644)
                 self.assertEqual((Path(roots[0])/'app/node_modules').stat().st_mode & 0o777,0o755)

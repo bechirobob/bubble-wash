@@ -2,6 +2,7 @@ import importlib.util
 import json
 import sqlite3
 import tempfile
+from unittest import mock
 from pathlib import Path
 import unittest
 ROOT=Path(__file__).resolve().parents[1]
@@ -39,9 +40,28 @@ class TransportTests(unittest.TestCase):
             db.close()
             alias=Path(directory)/'alias.sqlite';alias.symlink_to(path)
             with self.assertRaises(ValueError):r.no_accounts(alias)
+    def test_narrow_repair_preserves_marker_and_refuses_repeat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);app=root/'app';app.mkdir();(app/'.next').mkdir();(app/'.next/cache').mkdir();config=root/'config';config.mkdir()
+            marker=config/'activation-started.json';marker.write_text('{"revision":"'+'a'*40+'","accountsIssued":false}')
+            module=mock.Mock(APP=app,CONFIG=config);module.run.return_value.stdout=b''
+            r.repair_app_traversal(module,'a'*40)
+            self.assertTrue((config/'activation-before-app-traversal-repair.json').exists());self.assertFalse(marker.exists())
+            self.assertEqual(app.stat().st_mode&0o777,0o755)
+            module.verify.assert_called_once_with('a'*40,allow_legacy_marker=True);module.activate.assert_called_once_with('a'*40)
+            marker.write_text('{}')
+            with self.assertRaises(ValueError):r.repair_app_traversal(module,'a'*40)
+            self.assertEqual(module.activate.call_count,1)
+    def test_repair_port_collision_does_not_change_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);app=root/'app';app.mkdir();(app/'.next').mkdir();(app/'.next/cache').mkdir();config=root/'config';config.mkdir()
+            marker=config/'activation-started.json';marker.write_text('{}')
+            module=mock.Mock(APP=app,CONFIG=config);module.run.return_value.stdout=b'LISTEN occupied'
+            with self.assertRaises(ValueError):r.repair_app_traversal(module,'a'*40)
+            self.assertTrue(marker.exists());module.activate.assert_not_called()
     def test_workflow_has_no_issuance_or_dns_action(self):
         text=(ROOT/'.github/workflows/uat-activate.yml').read_text()
-        self.assertIn('options: [check, start, route-check, route-activate]',text)
+        self.assertIn('options: [check, start, route-check, route-activate, inspect, repair-app-traversal]',text)
         self.assertIn('group: bubblewash-production',text)
         self.assertIn('environment: backup-storage',text)
         self.assertIn('check-release-ci.py',text)

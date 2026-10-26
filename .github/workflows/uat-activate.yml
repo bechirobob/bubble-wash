@@ -15,7 +15,7 @@ on:
         required: true
         default: check
         type: choice
-        options: [check, start, route-check, route-activate]
+        options: [check, start, route-check, route-activate, inspect, repair-app-traversal]
       expected_caddy_sha:
         description: Exact approved baseline Caddyfile SHA256
         required: true

@@ -130,9 +130,11 @@ def install(artifact, revision, unit_source):
                 with os.fdopen(fd, 'wb') as stream, archive.extractfile(member) as source: shutil.copyfileobj(source, stream)
     # Native modules and scripts need read access, never write access, to root-owned app.
     Path(ROOTS[0]).chmod(0o755)
+    app.chmod(0o755)  # mkdir mode is reduced by the private operator umask.
     for path in app.rglob('*'):
         if path.is_dir(): path.chmod(0o755)
     (app / '.next/cache').mkdir(exist_ok=True, mode=0o755)
+    (app / '.next/cache').chmod(0o755)
     data = Path(ROOTS[1]); os.chown(data, account.pw_uid, account.pw_gid)
     (data / 'cache').mkdir(mode=0o700); os.chown(data / 'cache', account.pw_uid, account.pw_gid)
     environment = '\n'.join([
