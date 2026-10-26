@@ -1,3 +1,4 @@
+import { uatRequestGuard } from "@/lib/uat-request-guard";
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createPrivacyRequest, optOutEarlyAccess } from "@/lib/data-store";
@@ -23,6 +24,8 @@ function normalizedContact(value: string) {
 export async function POST(request: NextRequest) {
   const guardError = sameOriginJsonGuard(request.headers, "privacy request");
   if (guardError) return guardError;
+  const uatGuard = await uatRequestGuard();
+  if (uatGuard) return uatGuard;
   if (isRateLimited(clientKey(request.headers, "privacy-request"), 5, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many privacy requests. Try again shortly." }, { status: 429 });
   }

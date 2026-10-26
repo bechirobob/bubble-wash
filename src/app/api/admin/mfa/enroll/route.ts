@@ -1,3 +1,4 @@
+import { canManageStaffSecurity } from "@/lib/staff-security-access";
 import { NextRequest, NextResponse } from "next/server";
 import {
   acknowledgeRecoveryCodes,
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
 
     if (action === "resume" || action === "acknowledge") {
       const current = decodeSession(request.cookies.get(sessionCookieName)?.value);
-      if (!current || current.role !== "admin") {
+      if (!current || !canManageStaffSecurity(current)) {
         return NextResponse.json({ ok: false, error: "Admin authentication required." }, { status: 401 });
       }
       if (action === "resume") {
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
     const email = text(body.email).toLowerCase();
     const password = typeof body.password === "string" ? body.password : "";
     const user = findStaffUser(email, password);
-    if (!user || user.role !== "admin") {
+    if (!user || !canManageStaffSecurity(user)) {
       return NextResponse.json({ ok: false, error: "Invalid Bubble Wash admin credentials." }, { status: 401 });
     }
 

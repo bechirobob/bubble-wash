@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const directory = mkdtempSync(join(tmpdir(), 'bw-uat-sealed-'));
+Object.assign(process.env, { NODE_ENV: 'production', BUBBLEWASH_UAT_ENABLED: 'true', BUBBLEWASH_UAT_ISOLATION_CONFIRMED: 'true', BUBBLEWASH_PUBLIC_URL: 'https://uat.example.invalid', BUBBLEWASH_DATABASE_PATH: join(directory,'synthetic.sqlite'), BUBBLEWASH_UAT_DATA_ROOT: directory, NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED:'false', NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED:'false', BUBBLEWASH_RESEARCH_EMAIL_ENABLED:'false', BUBBLEWASH_DISABLE_DEMO_LOGIN:'true', BUBBLEWASH_SESSION_SECRET:'synthetic-session-secret-only-for-test-123' });
+const {generateKeyPairSync,privateDecrypt,createDecipheriv,constants}=await import('node:crypto');
+const {sealHandover,issueSealedHandover,retrieveSealedHandover}=await import('../scripts/uat-sealed-handover.mjs');
+const {getDatabase}=await import('../src/lib/data-store.ts');
+const {upsertVendorAvailability,upsertDriverAvailability}=await import('../src/lib/availability-store.ts');
+const {findStaffUser}=await import('../src/lib/auth.ts');
+const db=getDatabase();
+const pair=generateKeyPairSync('rsa',{modulusLength:3072});
+const publicKey=pair.publicKey.export({type:'spki',format:'pem'});
+const request={action:'issue',approved:true,ready:true,publicKey};
+try {
+  assert.throws(()=>issueSealedHandover({...request,approved:false}));
+  assert.throws(()=>issueSealedHandover({...request,ready:false}));
+  const weak=generateKeyPairSync('rsa',{modulusLength:2048});
+  assert.throws(()=>sealHandover({},weak.publicKey.export({type:'spki',format:'pem'})));
+  assert.throws(()=>issueSealedHandover(request),'missing operational roster rolls back all account issuance');
+  assert.equal(db.prepare("SELECT 1 FROM sqlite_master WHERE name='staff_uat_accounts'").get(),undefined);
+  upsertVendorAvailability({vendorId:'uat-vendor-one',vendorName:'UAT Laundry One',serviceZones:['Osu'],serviceTypes:['Wash + fold'],capacityRemaining:10,availabilityStatus:'available',updatedBy:'synthetic-test'});
+  upsertDriverAvailability({driverId:'uat-driver-one',driverName:'UAT Driver One',serviceZones:['Osu'],capacityRemaining:10,availabilityStatus:'active',updatedBy:'synthetic-test'});
+  let reads=0;
+  assert.throws(()=>issueSealedHandover({...request,get publicKey(){return ++reads<3?publicKey:'invalid-after-inserts';}}),'sealing failure after credential inserts rolls back');
+  assert.equal(db.prepare("SELECT 1 FROM sqlite_master WHERE name='staff_uat_accounts'").get(),undefined);
+  const envelope=issueSealedHandover(request);
+  assert.deepEqual(JSON.parse(db.prepare('SELECT envelope FROM uat_sealed_handover').get().envelope),envelope);
+  const key=privateDecrypt({key:pair.privateKey,padding:constants.RSA_PKCS1_OAEP_PADDING,oaepHash:'sha256'},Buffer.from(envelope.wrappedKey,'base64'));
+  const decipher=createDecipheriv('aes-256-gcm',key,Buffer.from(envelope.iv,'base64'));
+  decipher.setAAD(Buffer.from(envelope.schema));decipher.setAuthTag(Buffer.from(envelope.tag,'base64'));
+  const value=JSON.parse(Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext,'base64')),decipher.final()]));
+  assert.equal(Date.parse(value.expires_at)-Date.parse(value.issued_at),168*3600*1000);
+  assert.equal(new Set(Object.values(value.accounts).map(a=>a.password)).size,4);
+  for(const [role,account] of Object.entries(value.accounts)) {
+    const identity=findStaffUser(account.username,account.password);
+    assert.equal(identity.role,role);assert.equal(identity.allStaffAccess,false);assert.equal(identity.temporaryAccess,true);
+    assert.ok(!JSON.stringify(envelope).includes(account.password));
+  }
+  assert.deepEqual(retrieveSealedHandover(publicKey),envelope,'recovery returns same ciphertext and original deadline');
+  const other=generateKeyPairSync('rsa',{modulusLength:3072});
+  assert.throws(()=>retrieveSealedHandover(other.publicKey.export({type:'spki',format:'pem'})),'wrong recipient cannot retrieve envelope');
+  const damaged=Buffer.from(envelope.ciphertext,'base64');damaged[0]^=1;
+  const verifier=createDecipheriv('aes-256-gcm',key,Buffer.from(envelope.iv,'base64'));
+  verifier.setAAD(Buffer.from(envelope.schema));verifier.setAuthTag(Buffer.from(envelope.tag,'base64'));
+  assert.throws(()=>{verifier.update(damaged);verifier.final();},'modified ciphertext cannot authenticate');
+  assert.throws(()=>issueSealedHandover(request),'no reissuance/reset after a lost transfer');
+  assert.equal(db.prepare('SELECT count(*) n FROM staff_uat_accounts').get().n,4);
+  console.log('Sealed issuance: atomic rollback, four valid roles, exact 168h, ciphertext-only recovery and no reissuance passed.');
+} finally {db.close();rmSync(directory,{recursive:true,force:true});}

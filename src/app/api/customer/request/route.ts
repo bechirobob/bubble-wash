@@ -1,3 +1,4 @@
+import { uatRequestGuard } from "@/lib/uat-request-guard";
 import { NextRequest, NextResponse } from "next/server";
 import { customerSessionCookieName, decodeCustomerSession } from "@/lib/customer-session";
 import { createCustomerRequest } from "@/lib/customer-requests";
@@ -5,6 +6,8 @@ import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { sameOriginJsonGuard } from "@/lib/security";
 
 export async function POST(request: NextRequest) {
+  const uatGuard = await uatRequestGuard();
+  if (uatGuard) return uatGuard;
   const guard = sameOriginJsonGuard(request.headers, "customer order request");
   if (guard) return guard;
   if (isRateLimited(clientKey(request.headers, "customer-request"), 10, 60_000)) {

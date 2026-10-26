@@ -1,3 +1,4 @@
+import { canManageStaffSecurity } from "@/lib/staff-security-access";
 import { NextRequest, NextResponse } from "next/server";
 import { currentStaffUsers, getCurrentStaffUser, type StaffRole } from "@/lib/auth";
 import { archiveStaffAccount, inviteStaffAccount, listStaffAccounts, suspendStaffAccount } from "@/lib/staff-accounts";
@@ -5,13 +6,13 @@ import { staffWriteGuard } from "@/lib/security";
 import { listDriverAvailability, listVendorAvailability } from "@/lib/availability-store";
 export async function GET() {
   const user = await getCurrentStaffUser();
-  if (user?.role !== "admin") return NextResponse.json({ ok: false }, { status: 403 });
+  if (!canManageStaffSecurity(user)) return NextResponse.json({ ok: false }, { status: 403 });
   return NextResponse.json({ ok: true, accounts: listStaffAccounts().map((a) => ({ email: a.email, name: a.name, role: a.role, entityId: a.entityId, status: a.status, updatedAt: a.updatedAt })) }, { headers: { "Cache-Control": "no-store" } });
 }
 export async function POST(request: NextRequest) {
   const guard = staffWriteGuard(request.headers); if (guard) return guard;
   const user = await getCurrentStaffUser();
-  if (user?.role !== "admin") return NextResponse.json({ ok: false }, { status: 403 });
+  if (!canManageStaffSecurity(user)) return NextResponse.json({ ok: false }, { status: 403 });
   try {
     const body = await request.json();
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";

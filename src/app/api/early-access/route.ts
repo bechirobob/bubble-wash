@@ -1,3 +1,4 @@
+import { uatRequestGuard } from "@/lib/uat-request-guard";
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { upsertEarlyAccessSignup } from "@/lib/data-store";
@@ -27,6 +28,8 @@ function normalizeGhanaPhone(value: string) {
 export async function POST(request: NextRequest) {
   const guardError = sameOriginJsonGuard(request.headers, "early-access signup");
   if (guardError) return guardError;
+  const uatGuard = await uatRequestGuard();
+  if (uatGuard) return uatGuard;
   if (isRateLimited(clientKey(request.headers, "early-access"), 8, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many signup attempts. Try again shortly." }, { status: 429 });
   }

@@ -11,6 +11,10 @@ export type StaffUser = {
   role: StaffRole;
   entityId?: string;
   allStaffAccess?: boolean;
+  username?: string;
+  temporaryAccess?: boolean;
+  accessStartsAt?: number;
+  accessExpiresAt?: number;
 };
 
 type Environment = Record<string, string | undefined>;

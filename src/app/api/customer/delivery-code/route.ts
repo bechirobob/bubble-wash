@@ -1,3 +1,4 @@
+import { uatRequestGuard } from "@/lib/uat-request-guard";
 import { randomInt, randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { customerSessionCookieName, decodeCustomerSession } from "@/lib/customer-session";
@@ -6,6 +7,8 @@ import { deliveryCodeHash } from "@/lib/chain-of-custody";
 import { sameOriginJsonGuard } from "@/lib/security";
 import { isRateLimited } from "@/lib/rate-limit";
 export async function POST(request: NextRequest) {
+  const uatGuard = await uatRequestGuard();
+  if (uatGuard) return uatGuard;
   const guard = sameOriginJsonGuard(request.headers, "delivery code recovery");
   if (guard) return guard;
   const session = decodeCustomerSession(request.cookies.get(customerSessionCookieName)?.value);

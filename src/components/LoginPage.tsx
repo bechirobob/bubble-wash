@@ -22,7 +22,7 @@ const subscribeToHydration = () => () => {};
 const clientReady = () => true;
 const serverReady = () => false;
 
-function LoginForm() {
+function LoginForm({ uat = false }: { uat?: boolean }) {
   const { appName } = useWebApp();
   const hydrated = useSyncExternalStore(subscribeToHydration, clientReady, serverReady);
   const searchParams = useSearchParams();
@@ -30,7 +30,7 @@ function LoginForm() {
     const value = searchParams.get("next");
     return value && ["/admin", "/vendors", "/drivers", "/support"].includes(value) ? value : "/admin";
   }, [searchParams]);
-  const [email, setEmail] = useState(showCredentialCards ? "admin@bubblewash.local" : "");
+  const [email, setEmail] = useState(!uat && showCredentialCards ? "admin@bubblewash.local" : "");
   const [password, setPassword] = useState("");
   const [totp, setTotp] = useState("");
   const [mfaStep, setMfaStep] = useState<"enroll" | "verify" | null>(null);
@@ -45,7 +45,7 @@ function LoginForm() {
       const response = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, totp, next: nextPath }),
+        body: JSON.stringify({ ...(uat ? { username: email } : { email }), password, totp, next: nextPath }),
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {
@@ -84,20 +84,20 @@ function LoginForm() {
         <aside className="redesignRoleList">
           <p className="eyebrow">Staff access</p>
           <h2>Staff sign-in</h2>
-          <p>Use your individual work account to open your assigned workspace.</p>
-          {showCredentialCards ? <div className="credentialList redesignCredentialList">{credentialCards.map(([role, emailValue]) => <button className="credentialCard" disabled={!hydrated} type="button" key={role} onClick={() => fillCredential(emailValue)}><strong>{role}</strong><span>{emailValue}</span></button>)}</div> : null}
+          <p>{uat ? "Use your individual test username and password. No email activation is required." : "Use your individual work account to open your assigned workspace."}</p>
+          {!uat && showCredentialCards ? <div className="credentialList redesignCredentialList">{credentialCards.map(([role, emailValue]) => <button className="credentialCard" disabled={!hydrated} type="button" key={role} onClick={() => fillCredential(emailValue)}><strong>{role}</strong><span>{emailValue}</span></button>)}</div> : null}
         </aside>
         <form className="redesignLoginForm" method="post" aria-busy={!hydrated} onSubmit={login}>
           <p className="eyebrow">Sign in</p>
           <h1 id="login-title">Open your workspace</h1>
-          <p>Enter your staff username or work email.</p>
-          <label>Staff username or email<input disabled={!hydrated} value={email} onChange={(event) => { setEmail(event.target.value); setMfaStep(null); setTotp(""); }} type="text" placeholder="Staff username or email" autoComplete="username" required /></label>
-          <label>Password<input disabled={!hydrated} value={password} onChange={(event) => { setPassword(event.target.value); setMfaStep(null); setTotp(""); }} type="password" placeholder="Password" autoComplete="current-password" required /></label>
-          {adminMfaRequired || mfaStep === "verify" ? <label>Admin authenticator or recovery code <small>(admin only)</small><input disabled={!hydrated} value={totp} onChange={(event) => setTotp(event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 18))} type="text" placeholder="6 digits or recovery code" inputMode="text" autoComplete="one-time-code" /></label> : null}
+          <p>{uat ? "Isolated UAT · Synthetic data only. Access ends automatically at the agreed seven-day deadline." : "Enter your staff username or work email."}</p>
+          <label>{uat ? "Test username" : "Staff username or email"}<input disabled={!hydrated} value={email} onChange={(event) => { setEmail(event.target.value); setMfaStep(null); setTotp(""); }} type="text" placeholder={uat ? "Test username" : "Staff username or email"} maxLength={160} autoComplete="username" required /></label>
+          <label>Password<input disabled={!hydrated} value={password} onChange={(event) => { setPassword(event.target.value); setMfaStep(null); setTotp(""); }} type="password" placeholder="Password" maxLength={200} autoComplete="current-password" required /></label>
+          {!uat && (adminMfaRequired || mfaStep === "verify") ? <label>Admin authenticator or recovery code <small>(admin only)</small><input disabled={!hydrated} value={totp} onChange={(event) => setTotp(event.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 18))} type="text" placeholder="6 digits or recovery code" inputMode="text" autoComplete="one-time-code" /></label> : null}
           <button className="button primary full" disabled={!hydrated} type="submit">Sign in</button>
-          {adminMfaRequired || mfaStep === "enroll" ? <Link className="inlineIconLink" href="/admin/mfa/enroll">Set up admin authenticator</Link> : null}
+          {!uat && (adminMfaRequired || mfaStep === "enroll") ? <Link className="inlineIconLink" href="/admin/mfa/enroll">Set up admin authenticator</Link> : null}
           <noscript>JavaScript is required for secure staff sign-in. Enable it and reload this page.</noscript>
-          <p className="destination">Sessions expire after eight hours. Sign out when using a shared device.</p>
+          <p className="destination">{uat ? "Sessions end after eight hours or at your test-access deadline, whichever comes first. Sign out on shared devices." : "Sessions expire after eight hours. Sign out when using a shared device."}</p>
           <p className={`status ${statusTone}`} role={statusTone === "error" ? "alert" : "status"} aria-live={statusTone === "error" ? "assertive" : "polite"}>{status}</p>
         </form>
       </section>
@@ -105,10 +105,10 @@ function LoginForm() {
   );
 }
 
-export function LoginPageClient() {
+export function LoginPageClient({ uat = false }: { uat?: boolean }) {
   return (
     <Suspense fallback={<main className="loginPage"><section className="loginShell"><p className="status">Loading staff login…</p></section></main>}>
-      <LoginForm />
+      <LoginForm uat={uat} />
     </Suspense>
   );
 }

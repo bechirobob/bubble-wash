@@ -1,4 +1,5 @@
 import "server-only";
+import { assertUatProviderTrafficDisabled, uatModeEnabled } from "./uat-environment.ts";
 
 import { bookingLabel } from "./booking-label.ts";
 import { randomUUID } from "node:crypto";
@@ -45,7 +46,7 @@ function envText(name: string) {
 }
 
 export function paystackConfigured() {
-  return Boolean(envText("PAYSTACK_SECRET_KEY"));
+  return !uatModeEnabled() && Boolean(envText("PAYSTACK_SECRET_KEY"));
 }
 
 export function publicBaseUrl() {
@@ -86,6 +87,7 @@ export function validCheckoutUrl(value: unknown): value is string {
 }
 
 export async function initializePaystackCheckout(input: CheckoutInput, requestedReference?: string) {
+  assertUatProviderTrafficDisabled();
   const secret = envText("PAYSTACK_SECRET_KEY");
   if (!secret) throw new CheckoutInitializationError("PAYSTACK_SECRET_KEY is not configured.", true);
 
@@ -144,6 +146,7 @@ export async function initializePaystackCheckout(input: CheckoutInput, requested
 }
 
 export async function verifyPaystackCheckout(reference: string) {
+  assertUatProviderTrafficDisabled();
   const secret = envText("PAYSTACK_SECRET_KEY");
   if (!secret) throw new Error("PAYSTACK_SECRET_KEY is not configured.");
   const response = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {

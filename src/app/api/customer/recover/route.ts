@@ -1,3 +1,4 @@
+import { uatRequestGuard } from "@/lib/uat-request-guard";
 import { bookingReferenceForOrder } from "@/lib/booking-references";
 import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
@@ -8,6 +9,8 @@ import { buildOrderSummaries } from "@/lib/submissions";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { sameOriginJsonGuard } from "@/lib/security";
 export async function POST(request: NextRequest) {
+  const uatGuard = await uatRequestGuard();
+  if (uatGuard) return uatGuard;
   const guard = sameOriginJsonGuard(request.headers, "customer recovery"); if (guard) return guard;
   if (isRateLimited(clientKey(request.headers, "customer-recovery"), 5, 3600000)) return NextResponse.json({ ok: false, error: "Too many recovery requests. Try again later." }, { status: 429 });
   const db = getDatabase();

@@ -1,6 +1,8 @@
 import "server-only";
 import { environmentStaffUsers, resolveStaffUsers, type StaffRole, type StaffUser } from "./staff-identity.ts";
 import { listStaffAccounts } from "./staff-accounts.ts";
+import { currentUatUsers } from "./uat-accounts.ts";
+import { assertUatEnvironment } from "./uat-environment.ts";
 
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers.js";
@@ -31,6 +33,7 @@ export const staffUsers = environmentStaffUsers(process.env);
 
 export function currentStaffUsers(database?: Parameters<typeof readStaffCredentialOverride>[1]): StaffUser[] {
   if (staffAccessDisabled()) return [];
+  if (process.env.BUBBLEWASH_UAT_ENABLED === "true") return currentUatUsers(database);
   return resolveStaffUsers(process.env, readStaffCredentialOverride("admin", database), listStaffAccounts(database), staffUsers);
 }
 
@@ -64,8 +67,12 @@ export function staffSessionDestination(user: Pick<StaffUser, "role" | "allStaff
   return { vendor: "/vendors", driver: "/drivers", support: "/support" }[user.role];
 }
 
+// Match once and always perform scrypt, including unknown usernames.
+const unknownIdentityHash = "scrypt$uat-unknown-identity$" + Buffer.alloc(64).toString("base64url");
 export function findStaffUser(identifier: string, password: string) {
-  return currentStaffUsers().find((user) => user.email.toLowerCase() === identifier.trim().toLowerCase() && verifyPasswordHash(password, user.passwordHash)) ?? null;
+  const user = currentStaffUsers().find((user) => user.email.toLowerCase() === identifier.trim().toLowerCase());
+  const valid = verifyPasswordHash(password, user?.passwordHash ?? unknownIdentityHash);
+  return user && valid ? user : null;
 }
 
 function ownerMfaProof(user: StaffUser, database?: Parameters<typeof readAdminMfaSetting>[1]) {
@@ -78,6 +85,10 @@ export function encodeSession(user: StaffUser, mfaVerified = false) {
   const proof = personalOwner ? ownerMfaProof(user) : undefined;
   if (personalOwner && (!mfaVerified || !proof)) throw new Error("Personal owner MFA verification is required.");
   const now = Math.floor(Date.now() / 1000);
+  if (user.temporaryAccess) {
+    assertUatEnvironment();
+    if (!user.accessStartsAt || !user.accessExpiresAt || Date.now() < user.accessStartsAt || Date.now() >= user.accessExpiresAt) throw new Error("Temporary test access is unavailable.");
+  }
   const session: StaffSession = {
     email: user.email,
     role: user.role,
@@ -85,7 +96,7 @@ export function encodeSession(user: StaffUser, mfaVerified = false) {
     entityId: user.entityId,
     credentialVersion: user.credentialVersion,
     issuedAt: now,
-    expiresAt: now + sessionMaxAgeSeconds,
+    expiresAt: user.temporaryAccess ? Math.min(now + sessionMaxAgeSeconds, Math.ceil(user.accessExpiresAt! / 1000)) : now + sessionMaxAgeSeconds,
     nonce: randomUUID(),
     ...(personalOwner ? { ownerMfaProof: proof } : {}),
   };
@@ -100,15 +111,19 @@ export function decodeSession(value?: string, users?: StaffUser[], database?: Pa
     const [payload, signature] = value.split(".");
     if (!payload || !signature || !safeEqual(signature, signPayload(payload))) return null;
     const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as StaffSession;
-    if (!session.expiresAt || session.expiresAt < Math.floor(Date.now() / 1000)) return null;
+    if (!session.expiresAt || session.expiresAt <= Math.floor(Date.now() / 1000)) return null;
     const user = (users ?? currentStaffUsers(database)).find((item) => item.email.toLowerCase() === session.email.toLowerCase() && item.role === session.role);
     if (!user || session.entityId !== user.entityId) return null;
+    if (user.temporaryAccess) {
+      assertUatEnvironment();
+      if (!user.accessStartsAt || !user.accessExpiresAt || Date.now() < user.accessStartsAt || Date.now() >= user.accessExpiresAt) return null;
+    }
     if (session.credentialVersion !== user.credentialVersion) return null;
     if (user.role === "admin" && user.allStaffAccess === true) {
       const proof = ownerMfaProof(user, database);
       if (!proof || !session.ownerMfaProof || !safeEqual(session.ownerMfaProof, proof)) return null;
     }
-    return { email: session.email, role: session.role, name: user.name, entityId: user.entityId, allStaffAccess: user.role === "admin" && user.allStaffAccess === true };
+    return { email: session.email, role: session.role, name: user.name, entityId: user.entityId, allStaffAccess: user.role === "admin" && user.allStaffAccess === true && !user.temporaryAccess, ...(user.temporaryAccess ? { temporaryAccess: true, username: user.username, accessExpiresAt: user.accessExpiresAt } : {}) };
   } catch {
     return null;
   }

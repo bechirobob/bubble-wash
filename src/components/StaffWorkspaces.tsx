@@ -1,4 +1,5 @@
 "use client";
+import { UatTestAccounts } from "./UatTestAccounts";
 import "./staff-desk.css";
 import { ClipboardList, Check, MapPin, ScanLine } from "lucide-react";
 import { bookingLabel } from "@/lib/booking-label";
@@ -124,6 +125,8 @@ type AutomationAction = ReturnType<typeof automationActionsForOrder>[number];
 type QueueStats = { focusLabel: string; focusCount: number; automationCount: number; riskCount: number; capacityLabel: string };
 type QueueView = "action" | "active" | "all";
 type WorkspaceProps = {
+  temporaryAccess?: boolean;
+  accessExpiresAt?: number;
   allStaffAccess?: boolean;
   userName: string;
   role: StaffRole;
@@ -1835,7 +1838,7 @@ function SupportTicketDesk({ userName, selectedCaseId = "", basePath, refreshTok
 }
 
 
-export function AdminWorkspace({ userName, role, allStaffAccess = false, initialView = "overview", selectedOrderId, selectedCaseId, selectedActivityId }: WorkspaceProps) {
+export function AdminWorkspace({ userName, role, allStaffAccess = false, temporaryAccess = false, accessExpiresAt, initialView = "overview", selectedOrderId, selectedCaseId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const pendingSubmission = useRef(false);
   const [pendingType, setPendingType] = useState("");
@@ -1873,18 +1876,19 @@ export function AdminWorkspace({ userName, role, allStaffAccess = false, initial
     { href: "/admin?view=orders", label: "Orders", view: "orders" },
     { href: "/admin?view=people", label: "People & onboarding", view: "people" },
     { href: "/admin?view=cases", label: "Cases", view: "cases" },
-    { href: "/admin?view=operations", label: "Privacy requests", view: "operations" },
+    ...(!temporaryAccess ? [{ href: "/admin?view=operations", label: "Privacy requests", view: "operations" }] : []),
     { href: "/admin?view=activity", label: "Recent changes", view: "activity", secondary: true },
   ];
 
   return (
     <PortalShell role={role} allStaffAccess={allStaffAccess} userName={userName} title="Admin workspace" currentView={initialView} navigation={navigation}>
+      {temporaryAccess ? <p className="status" role="note">Isolated UAT · Operational admin access only. You may add Vendor, Driver and Support test users. Production accounts, privacy administration and owner research are excluded.{accessExpiresAt ? ` Access ends ${new Date(accessExpiresAt).toISOString().replace("T", " ").replace(".000Z", " UTC")}.` : ""}</p> : null}
       {initialView === "overview" ? <AdminOverview userName={userName} /> : null}
       {initialView === "dispatch" ? <AdminDispatchWorkspace /> : null}
       {initialView === "orders" ? <SharedOrderBoard allStaffAccess={allStaffAccess} role="admin" userName={userName} selectedOrderId={selectedOrderId} basePath="/admin?view=orders" /> : null}
-      {initialView === "people" ? <><AvailabilityBoard role="admin" refreshToken={availabilityVersion} /><StaffAccessRoster refreshToken={rosterVersion} /><StaffAccountPanel /><AdminOnboardingCenter onSubmit={submitLead} status={formStatus} pendingType={pendingType} /></> : null}
+      {initialView === "people" ? <><AvailabilityBoard role="admin" refreshToken={availabilityVersion} /><StaffAccessRoster refreshToken={rosterVersion} />{temporaryAccess ? <UatTestAccounts /> : <StaffAccountPanel />}<AdminOnboardingCenter onSubmit={submitLead} status={formStatus} pendingType={pendingType} /></> : null}
       {initialView === "cases" ? <><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Open a new case</strong><small>Use when an existing case does not cover the issue</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="admin" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section><SupportTicketDesk userName={userName} selectedCaseId={selectedCaseId} basePath="/admin?view=cases" refreshToken={casesVersion} /></> : null}
-      {initialView === "operations" ? <AdminOperationsHealth /> : null}
+      {initialView === "operations" ? temporaryAccess ? <p className="staffEmptyState">Privacy administration is excluded from temporary UAT access.</p> : <AdminOperationsHealth /> : null}
       {initialView === "activity" ? <RecentActivity selectedId={selectedActivityId} basePath="/admin?view=activity" /> : null}
     </PortalShell>
   );

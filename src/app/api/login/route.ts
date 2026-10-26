@@ -18,8 +18,12 @@ export async function POST(request: NextRequest) {
   }
   try {
     const body = await request.json();
-    const email = typeof body.email === "string" ? body.email : "";
-    const password = typeof body.password === "string" ? body.password : "";
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json({ ok: false, error: "Invalid Bubble Wash staff credentials." }, { status: 400 });
+    }
+    const identifier = body.username ?? body.email;
+    const email = typeof identifier === "string" && identifier.length <= 160 ? identifier : "";
+    const password = typeof body.password === "string" && body.password.length <= 200 ? body.password : "";
     const totp = typeof body.totp === "string" ? body.totp.trim() : "";
     const nextPath = sanitizeNextPath(typeof body.next === "string" ? body.next : undefined);
     const user = findStaffUser(email, password);
@@ -39,7 +43,10 @@ export async function POST(request: NextRequest) {
     if (personalOwner && !totp) {
       return NextResponse.json({ ok: false, mfaStep: "verify", error: "Enter your personal authenticator or recovery code." }, { status: 401, headers: { "Cache-Control": "no-store" } });
     }
-    if (user.role === "admin" && (personalOwner || adminMfaRequired())) {
+    // Temporary identities exist only after the isolated-UAT resolver validates
+    // the fail-closed environment and absolute deadline. They use the approved
+    // UAT username/password flow, never owner capabilities or production MFA.
+    if (user.role === "admin" && !user.temporaryAccess && (personalOwner || adminMfaRequired())) {
       if (!adminMfaConfigured(user.email)) {
         if (process.env.NODE_ENV === "production") {
           return NextResponse.json({ ok: false, error: "Admin sign-in is temporarily unavailable." }, { status: 503 });

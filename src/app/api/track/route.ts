@@ -1,9 +1,12 @@
+import { uatRequestGuard } from "@/lib/uat-request-guard";
 import { NextRequest, NextResponse } from "next/server";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 import { publicTrackingView } from "@/lib/security";
 import { findOrderById, readSubmissionsForOrder } from "@/lib/submissions";
 
 export async function GET(request: NextRequest) {
+  const uatGuard = await uatRequestGuard();
+  if (uatGuard) return uatGuard;
   if (isRateLimited(clientKey(request.headers, "track"), 40, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many tracking requests. Try again shortly." }, { status: 429 });
   }

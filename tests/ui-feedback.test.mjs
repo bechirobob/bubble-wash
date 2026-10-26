@@ -71,7 +71,8 @@ test("staff access presents direct role choices without invented workspace descr
 test("login remains visible and reports the locked response as an accessible error", async () => {
   const page = await readFile(new URL("../src/app/login/page.tsx", import.meta.url), "utf8");
   const form = await readFile(new URL("../src/components/LoginPage.tsx", import.meta.url), "utf8");
-  assert.match(page, /return <LoginPageClient \/>/);
+  assert.match(page, /return <LoginPageClient uat=\{uat\} \/>/);
+  assert.match(page, /assertUatEnvironment\(\); uat = true/);
   assert.doesNotMatch(page, /staffAccessDisabled/);
   assert.match(form, /Login cannot be reached\./);
   assert.match(form, /statusTone === "error" \? "alert" : "status"/);

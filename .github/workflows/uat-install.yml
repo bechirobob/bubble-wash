@@ -1,0 +1,81 @@
+name: Prepare isolated UAT service (no activation)
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed main SHA; installs only new isolated UAT resources
+        required: true
+        type: string
+      isolation_approved:
+        description: Approved isolated uat.bubblewash.co service, no production/staging changes
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  install:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main' && inputs.isolation_approved
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      PYTHONDONTWRITEBYTECODE: '1'
+      NEXT_TELEMETRY_DISABLED: '1'
+      NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED: 'false'
+      NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED: 'false'
+      NEXT_PUBLIC_BUBBLEWASH_WHATSAPP: ''
+      NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL: ''
+      BUBBLEWASH_RESEARCH_EMAIL_ENABLED: 'false'
+      BUBBLEWASH_DISABLE_DEMO_LOGIN: 'true'
+    steps:
+      - name: Require exact reviewed source and first attempt
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Require successful exact-main CI
+        env:
+          TARGET_SHA: ${{ inputs.source_sha }}
+        run: python3 -B ops/check-release-ci.py
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Verify guarded installer and transport locally
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          python3 -B -m unittest discover -s tests -p 'test_uat_*.py' -v
+          npm ci
+          npm run test:uat
+          npm run typecheck
+          npm run audit:prod
+      - name: Build clean isolated UAT artifact on runner, never the VPS
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$RUNNER_TEMP/bubblewash-uat-build"
+          export BUBBLEWASH_UAT_ENABLED=true BUBBLEWASH_UAT_ISOLATION_CONFIRMED=true
+          export BUBBLEWASH_UAT_DATA_ROOT="$RUNNER_TEMP/bubblewash-uat-build"
+          export BUBBLEWASH_DATABASE_PATH="$BUBBLEWASH_UAT_DATA_ROOT/synthetic.sqlite"
+          export BUBBLEWASH_DATABASE_DRIVER=sqlite BUBBLEWASH_PUBLIC_URL=https://uat.bubblewash.co
+          unset PAYSTACK_SECRET_KEY RESEND_API_KEY WHATSAPP_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID BUBBLEWASH_RESEARCH_RESEND_KEY BUBBLEWASH_OWNER_RESEND_KEY
+          npm run build
+          npm prune --omit=dev --ignore-scripts
+          git diff --exit-code --quiet
+          python3 -B ops/uat/package-release.py --output "$RUNNER_TEMP/bubblewash-uat-release.tar.gz"
+      - name: Connect using existing approved tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Conditionally install only NEW UAT resources; do not retry uncertain outcomes
+        run: python3 -B ops/uat/transport-install.py --artifact "$RUNNER_TEMP/bubblewash-uat-release.tar.gz"

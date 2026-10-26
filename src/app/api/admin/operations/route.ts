@@ -1,3 +1,4 @@
+import { canManageStaffSecurity } from "@/lib/staff-security-access";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentStaffUser } from "@/lib/auth";
 import { listPrivacyRequests, operationsDataMetrics, updatePrivacyRequestStatus, type PrivacyRequest } from "@/lib/data-store";
@@ -7,7 +8,7 @@ const statuses = new Set<PrivacyRequest["status"]>(["received", "identity_review
 
 async function admin() {
   const user = await getCurrentStaffUser();
-  return user?.role === "admin" ? user : null;
+  return canManageStaffSecurity(user) ? user : null;
 }
 
 export async function GET() {

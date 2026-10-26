@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { isStaffAppHost, STAFF_APP_URL } from "@/lib/web-app";
 import { WebAppProvider } from "@/components/WebAppProvider";
 import "./globals.css";
+import { assertUatEnvironment, uatModeEnabled } from "@/lib/uat-environment";
 
 const customerMetadata: Metadata = {
   metadataBase: new URL("https://bubblewash.co"),
@@ -34,6 +35,7 @@ const customerMetadata: Metadata = {
 };
 
 export async function generateMetadata(): Promise<Metadata> {
+  if (uatModeEnabled()) return { title: "Bubble Wash · UAT", description: "Synthetic-data user acceptance testing. Not the live service.", robots: { index: false, follow: false } };
   if (!isStaffAppHost((await headers()).get("host"))) return customerMetadata;
   return {
     metadataBase: new URL(STAFF_APP_URL),
@@ -53,6 +55,9 @@ export const viewport: Viewport = {
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const staffApp = isStaffAppHost((await headers()).get("host"));
+  const uat = uatModeEnabled();
+  let isolatedUat = false;
+  if (uat) { try { assertUatEnvironment(); isolatedUat = true; } catch { /* Access stays fail-closed. */ } }
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -78,7 +83,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   };
   return (
     <html lang="en">
-      <body>{!staffApp && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replaceAll("<", "\\u003c") }} />}<WebAppProvider appName={staffApp ? "Bubble Wash Staff" : "Bubble Wash"}>{children}</WebAppProvider></body>
+      <body>{uat ? <aside className="uatEnvironmentNotice" aria-label="Test environment">{isolatedUat ? "UAT · Synthetic test data only. No real payments or messages. This is not the live service." : "UAT configuration is incomplete. Test access is unavailable; do not enter real data."}</aside> : null}{!staffApp && !uat && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replaceAll("<", "\\u003c") }} />}<WebAppProvider appName={staffApp ? "Bubble Wash Staff" : "Bubble Wash"}>{children}</WebAppProvider></body>
     </html>
   );
 }

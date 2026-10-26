@@ -65,3 +65,11 @@ The GitHub `Pilot CI` workflow runs the same lint, test, and Webpack production-
 
 Missing staff authentication/MFA, legal controller registration, customer-confirmation providers, public URL, persistent storage, fresh restore-verified encrypted backup, maintenance secret, or trusted-edge configuration blocks `/api/ready`. Manual commercial payment/follow-up mode remains explicit and does not claim that online checkout or commercial automated sends are live.
 
+
+## Isolated temporary UAT preparation
+
+See [UAT environment admission](docs/UAT_ENVIRONMENT.md) and `.env.uat.example` for the
+separate synthetic-data instance and seven-day username access. These controls do not
+provision or approve an environment, issue reviewer credentials, change production
+access, or enable real provider traffic. `npm run test:uat` verifies expiry, revocation,
+role/security boundaries and provider denial; it is included in `npm test`.

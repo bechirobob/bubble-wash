@@ -1,9 +1,11 @@
+import { uatModeEnabled } from "@/lib/uat-environment";
 import { NextRequest, NextResponse } from "next/server";
 import { staffAccessDisabled } from "@/lib/auth";
 import { activateStaffAccount } from "@/lib/staff-accounts";
 import { sameOriginJsonGuard } from "@/lib/security";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 export async function POST(request: NextRequest) {
+  if (uatModeEnabled()) return NextResponse.json({ ok: false, error: "Use the temporary username and password for UAT." }, { status: 403 });
   const guard = sameOriginJsonGuard(request.headers, "staff activation"); if (guard) return guard;
   if (staffAccessDisabled()) return NextResponse.json({ ok: false, error: "Login cannot be reached." }, { status: 503 });
   if (isRateLimited(clientKey(request.headers, "staff-activate"), 5, 60000)) return NextResponse.json({ ok: false, error: "Try again shortly." }, { status: 429 });
