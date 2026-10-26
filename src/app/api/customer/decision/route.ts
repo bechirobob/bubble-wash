@@ -1,8 +1,11 @@
+import { uatRequestGuard } from "@/lib/uat-request-guard";
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentStaffUser } from "@/lib/auth";
 import { staffWriteGuard } from "@/lib/security";
 import { decideCustomerRequest } from "@/lib/customer-decisions";
 export async function POST(request: NextRequest) {
+  const uatGuard = await uatRequestGuard();
+  if (uatGuard) return uatGuard;
   const guard = staffWriteGuard(request.headers); if (guard) return guard;
   const user = await getCurrentStaffUser();
   if (!user || !["admin", "support"].includes(user.role)) return NextResponse.json({ ok: false }, { status: 403 });

@@ -19,6 +19,10 @@ function safeEqual(left: string, right: string) {
 export async function POST(request: NextRequest) {
   const guardError = sameOriginJsonGuard(request.headers, "admin recovery request");
   if (guardError) return guardError;
+  // Isolated UAT must never expose master-account recovery, even with a token.
+  if (process.env.BUBBLEWASH_UAT_ENABLED === "true") {
+    return NextResponse.json({ ok: false, error: "Administrator recovery is unavailable in UAT." }, { status: 403 });
+  }
   if (staffAccessDisabled()) {
     return NextResponse.json({ ok: false, error: "Login cannot be reached." }, { status: 503 });
   }

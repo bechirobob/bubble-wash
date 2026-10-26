@@ -1,4 +1,5 @@
 import 'server-only';
+import { uatModeEnabled, assertUatProviderTrafficDisabled } from '../uat-environment.ts';
 import {randomUUID} from 'node:crypto';
 import {getDatabase} from '../data-store.ts';
 import {saveResponse} from './store.ts';
@@ -9,10 +10,11 @@ import {processResearchNotifications,type ResearchTransport} from './delivery.ts
 export const researchSender='Bubble Wash <bubblewash@becoreops.com>';
 // Dedicated survey credential only. Never fall back to owner-enrollment or general service keys.
 export function researchEmailReady(env:Record<string,string|undefined>=process.env){
- return deliveryApproved&&env.BUBBLEWASH_RESEARCH_EMAIL_ENABLED==='true'&&Boolean(env.BUBBLEWASH_RESEARCH_RESEND_KEY?.trim());
+ return !uatModeEnabled(env)&&deliveryApproved&&env.BUBBLEWASH_RESEARCH_EMAIL_ENABLED==='true'&&Boolean(env.BUBBLEWASH_RESEARCH_RESEND_KEY?.trim());
 }
 function transport(key:string,send:typeof fetch,testCopy?:{responseId:string;ownerEmail:string}):ResearchTransport{
  return async message=>{
+  if(uatModeEnabled())return {status:'not-accepted',retryable:false};
   if(testCopy&&message.idempotencyKey!=='bubblewash-research/'+testCopy.responseId)return {status:'not-accepted',retryable:false};
   if(!key||message.to!==responseRecipient||!/^bubblewash-research\/[a-f0-9-]{36}$/i.test(message.idempotencyKey))return {status:'not-accepted',retryable:false};
   try{
@@ -34,6 +36,7 @@ export async function dispatchResearchNotifications(){
 // Caller supplies the dedicated survey key and verified protected owner-email value.
 // Only this fixed synthetic payload can be sent to the protected owner instead of the research recipient. A prior/uncertain attempt is never resent.
 export async function sendSyntheticResearchTest(db:ReturnType<typeof getDatabase>,key:string,ownerEmail:string,send:typeof fetch=fetch){
+ assertUatProviderTrafficDisabled();
  if(!key||!/^\S+@\S+\.\S+$/.test(ownerEmail)||/[\r\n,;]/.test(ownerEmail)||ownerEmail.length>254)throw new Error('Dedicated key and verified operator test recipient required.');
  const input={adultEligible:true as const,instrument:'consumer' as const,schemaVersion,submissionKey:'20b2f9aa-77dd-4c7a-8efe-b23f176c77f1',identity:{name:'TEST ONLY — SYNTHETIC SURVEY RESPONSE',organisation:'',email:'synthetic-test@example.invalid',phone:'0200000000'},consent:true as const,answers:{'icp-student':'No','icp-business':'No','icp-corporate':'No','icp-household':'No',A1:'25 to 34',C3:'TEST ONLY. No real respondent information. Verifying durable save and the approved survey email path.'},reference:'operator-test-v1'};
  const token=randomUUID();

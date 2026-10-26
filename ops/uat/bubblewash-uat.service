@@ -1,0 +1,54 @@
+[Unit]
+Description=Bubble Wash isolated synthetic UAT (not production)
+After=network.target
+ConditionPathExists=/etc/bubblewash-uat/environment
+ConditionPathExists=/opt/bubblewash-uat/app/.next/BUILD_ID
+
+[Service]
+Type=simple
+User=bubblewash-uat
+Group=bubblewash-uat
+WorkingDirectory=/opt/bubblewash-uat/app
+EnvironmentFile=/etc/bubblewash-uat/environment
+Environment=NODE_ENV=production HOME=/var/lib/bubblewash-uat
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3108
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Accept Caddy's inbound loopback connection but deny every outbound connect,
+# including localhost providers/services. Readiness checks originate externally.
+IPAddressDeny=any
+IPAddressAllow=localhost
+SystemCallFilter=~connect
+SystemCallErrorNumber=EPERM
+SocketBindDeny=any
+SocketBindAllow=ipv4:tcp:3108
+ReadWritePaths=/var/lib/bubblewash-uat
+BindPaths=/var/lib/bubblewash-uat/cache:/opt/bubblewash-uat/app/.next/cache
+InaccessiblePaths=-/var/lib/bubblewash -/opt/bubblewash -/etc/bubblewash
+MemoryHigh=384M
+MemoryMax=512M
+CPUQuota=50%
+TasksMax=128
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

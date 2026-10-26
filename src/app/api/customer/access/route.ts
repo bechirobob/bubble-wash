@@ -1,3 +1,4 @@
+import { uatRequestGuard } from "@/lib/uat-request-guard";
 import { NextRequest, NextResponse } from "next/server";
 import { customerContactFingerprint, decodeCustomerSession, customerContactMatches, customerSessionCookieName, customerSessionCookieOptions, encodeCustomerSession } from "@/lib/customer-session";
 import { customerOrderView } from "@/lib/customer-orders";
@@ -11,6 +12,8 @@ function text(value: unknown, max = 160) {
 }
 
 export async function POST(request: NextRequest) {
+  const uatGuard = await uatRequestGuard();
+  if (uatGuard) return uatGuard;
   const guard = sameOriginJsonGuard(request.headers, "customer order access");
   if (guard) return guard;
   if (isRateLimited(clientKey(request.headers, "customer-access"), 8, 60_000)) {

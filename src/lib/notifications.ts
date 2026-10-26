@@ -1,5 +1,6 @@
 import { bookingLabel } from "@/lib/booking-label";
 import "server-only";
+import { uatModeEnabled } from "./uat-environment.ts";
 
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -103,6 +104,7 @@ function hash(value: string) {
 // Persist the exact body and destination once. A config/template/from-address
 // change must not alter a retry carrying an already-used idempotency key.
 function prepareRequest(record: NotificationOutboxRecord): PreparedRequest | { blocked: string } {
+  if (uatModeEnabled()) return { blocked: "External message delivery is disabled in UAT." };
   const message = messageFromOutbox(record);
   let url: string;
   let body: string;
@@ -166,6 +168,7 @@ function prepareRequest(record: NotificationOutboxRecord): PreparedRequest | { b
 }
 
 async function sendPreparedRequest(channel: NotificationChannel, request: PreparedRequest): Promise<ProviderOutcome> {
+  if (uatModeEnabled()) return { status: "manual_review", error: "External message delivery is disabled in UAT." };
   try {
     const response = await fetch(request.url, {
       method: "POST", redirect: "error",

@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""One pinned additive Caddy host; no application, database or auth changes."""
+import copy
+from contextlib import contextmanager
+import hashlib
+import json
+import os
+import re
+from pathlib import Path
+import stat
+import sys
+import subprocess
+import tempfile
+import urllib.request
+
+CONFIG=Path('/etc/caddy/Caddyfile')
+JSON_CONFIG_DIR=Path('/run')
+EXPECTED=''  # Bound to the approved read-only capacity receipt before activation.
+BLOCK=b'\n\n# Separate Bubble Wash uat home-screen app\nuat.bubblewash.co {\n\treverse_proxy 127.0.0.1:3108\n}\n'
+HOST='uat.bubblewash.co'
+LIMIT=2*1024*1024
+STAGE="binding"
+
+def require(value):
+    if not value:raise ValueError('uat route guard refused')
+
+def run(args,raw=None):
+    result=subprocess.run(['/usr/bin/caddy',*args],input=raw,capture_output=True,cwd=CONFIG.parent,timeout=30)
+    require(result.returncode==0 and len(result.stdout)<=LIMIT)
+    return result.stdout
+
+@contextmanager
+def temporary_config(raw,parent,suffix):
+    protected(parent,True)
+    fd,name=tempfile.mkstemp(prefix='.bubblewash-uat-',suffix=suffix,dir=parent)
+    path=Path(name)
+    try:
+        with os.fdopen(fd,'wb') as stream:
+            os.fchmod(stream.fileno(),0o600)
+            stream.write(raw);stream.flush();os.fsync(stream.fileno())
+        protected(path)
+        yield path
+    finally:
+        path.unlink()
+
+def adapt(raw):
+    # Older Caddy adapt treats '-' as a filename. Keep a real sibling file so
+    # relative imports retain their base. Any self-import/glob collision fails
+    # adaptation or baseline equality; never rewrite or filter existing imports.
+    with temporary_config(raw,CONFIG.parent,'.tmp') as path:
+        return json.loads(run(['adapt','--config',str(path),'--adapter','caddyfile']))
+
+def run_json(command,raw):
+    # Exact JSON lives outside the import directory. A .json name prevents
+    # implicit Caddyfile adaptation in older validate/reload implementations.
+    with temporary_config(raw,JSON_CONFIG_DIR,'.json') as path:
+        return run([command,'--config',str(path)])
+
+def active():
+    with urllib.request.urlopen('http://127.0.0.1:2019/config/',timeout=5) as response:raw=response.read(LIMIT+1)
+    require(len(raw)<=LIMIT)
+    return json.loads(raw)
+
+def route_group_slots(config):
+    """Recognize Route.group only in built-in HTTP route/subroute containers."""
+    slots={}
+    def routes(items,path):
+        for index,route in enumerate(items):
+            here=path+(index,)
+            if 'group' in route:slots[here+('group',)]=route['group']
+            for i,handler in enumerate(route.get('handle',[])):
+                if handler.get('handler')=='subroute':
+                    base=here+('handle',i)
+                    routes(handler.get('routes',[]),base+('routes',))
+                    routes(handler.get('errors',{}).get('routes',[]),base+('errors','routes'))
+    for name,server in config.get('apps',{}).get('http',{}).get('servers',{}).items():
+        base=('apps','http','servers',name)
+        routes(server.get('routes',[]),base+('routes',))
+        routes(server.get('errors',{}).get('routes',[]),base+('errors','routes'))
+    return slots
+
+def equal_except_generated_group_names(before,after):
+    """Comparison-only alpha-renaming: never modify the candidate to be loaded."""
+    left=route_group_slots(before);right=route_group_slots(after)
+    require(left.keys()==right.keys())
+    forward={};reverse={}
+    for path,a in left.items():
+        b=right[path]
+        require(isinstance(a,str) and isinstance(b,str) and
+                re.fullmatch(r'group[0-9]+',a) and re.fullmatch(r'group[0-9]+',b))
+        require(forward.setdefault(a,b)==b and reverse.setdefault(b,a)==a)
+    # A renamed symbol may not have opaque references outside recognized slots.
+    changed_left={a for a,b in forward.items() if a!=b}
+    changed_right={b for a,b in forward.items() if a!=b}
+    def no_external_references(value,path,slots,symbols):
+        if isinstance(value,dict):
+            for key,item in value.items():
+                require(key not in symbols)
+                no_external_references(item,path+(key,),slots,symbols)
+        elif isinstance(value,list):
+            for index,item in enumerate(value):no_external_references(item,path+(index,),slots,symbols)
+        elif isinstance(value,str) and value in symbols:require(path in slots)
+    no_external_references(before,(),left,changed_left)
+    no_external_references(after,(),right,changed_right)
+    comparison=copy.deepcopy(after)
+    for path,a in left.items():
+        item=comparison
+        for key in path[:-1]:item=item[key]
+        item[path[-1]]=a
+    return comparison==before
+
+def verify_delta(before,after):
+    """No wildcard, header, upstream, listener, TLS policy or other route changes."""
+    expected={'match':[{'host':[HOST]}],
+      'handle':[{'handler':'subroute','routes':[{'handle':[{'handler':'reverse_proxy','upstreams':[{'dial':'127.0.0.1:3108'}]}]}]}],
+      'terminal':True}
+    reduced=copy.deepcopy(after);count=0
+    for server in reduced.get('apps',{}).get('http',{}).get('servers',{}).values():
+        routes=server.get('routes',[])
+        kept=[]
+        for route in routes:
+            if route==expected:count+=1
+            else:kept.append(route)
+        if len(kept)!=len(routes):server['routes']=kept
+    require(count==1 and equal_except_generated_group_names(before,reduced))
+    left=route_group_slots(before);right=route_group_slots(reduced)
+    return len({name for path,name in left.items() if name!=right[path]})
+
+def protected(path,directory=False):
+    require(path.resolve(strict=True)==path)
+    for parent in (*path.parents,path):
+        info=parent.lstat();require(info.st_uid==0 and not info.st_mode & 0o022)
+    info=path.lstat()
+    require(stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode) and info.st_nlink==1)
+    return info
+
+def read_original():
+    info=protected(CONFIG)
+    require(info.st_size<=131072)
+    with os.fdopen(os.open(CONFIG,os.O_RDONLY|os.O_NOFOLLOW),'rb') as stream:raw=stream.read(131073)
+    require(len(raw)==info.st_size and hashlib.sha256(raw).hexdigest()==EXPECTED)
+    return raw,info
+
+def replace(raw,info):
+    # The temporary is never adapted or loaded while present in the config dir.
+    fd,name=tempfile.mkstemp(prefix='.bubblewash-uat-',dir=CONFIG.parent)
+    try:
+        with os.fdopen(fd,'wb') as stream:
+            os.fchmod(stream.fileno(),stat.S_IMODE(info.st_mode));os.fchown(stream.fileno(),info.st_uid,info.st_gid)
+            stream.write(raw);stream.flush();os.fsync(stream.fileno())
+        os.replace(name,CONFIG)
+        directory=os.open(CONFIG.parent,os.O_RDONLY|os.O_DIRECTORY)
+        try:os.fsync(directory)
+        finally:os.close(directory)
+    finally:
+        if os.path.exists(name):os.unlink(name)
+
+def main(check_only=True):
+    global STAGE
+    STAGE="binding"
+    require(os.geteuid()==0)
+    protected(Path('/usr/bin/caddy'))
+    original,info=read_original()
+    STAGE="baseline-adaptation"
+    before=adapt(original)
+    # Sibling-file adaptation must equal the persistent file and active state.
+    require(json.loads(run(['adapt','--config',str(CONFIG),'--adapter','caddyfile']))==before==active())
+    STAGE="exact-additive-delta"
+    candidate=original+BLOCK;after=adapt(candidate);renames=verify_delta(before,after)
+    if check_only:
+        require(read_original()[0]==original and active()==before)
+        print(json.dumps({'ok':True,'checkOnly':True,'exactUATRoute':True,'otherRoutesEquivalent':True,'groupRenamesCount':renames,'configurationChanged':False,'validationPerformed':False,'reloadPerformed':False}))
+        return
+    encoded=json.dumps(after,separators=(',',':')).encode()
+    STAGE='candidate-validation'
+    run_json('validate',encoded)
+    require(read_original()[0]==original and adapt(original)==before==active())
+    STAGE='recovery-copy'
+    protected(Path('/var/backups'),True)
+    backup=Path(tempfile.mkdtemp(prefix='bubblewash-uat-route-',dir='/var/backups'))
+    for name,raw in (('Caddyfile.before',original),('active.before.json',json.dumps(before).encode())):
+        fd=os.open(backup/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+        with os.fdopen(fd,'wb') as stream:stream.write(raw);stream.flush();os.fsync(stream.fileno())
+    for path in (backup,backup.parent):
+        fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY)
+        try:os.fsync(fd)
+        finally:os.close(fd)
+    STAGE="persistent-file"
+    require(read_original()[0]==original and active()==before)
+    replace(candidate,info)
+    try:
+        require(adapt(candidate)==after and json.loads(run(['adapt','--config',str(CONFIG),'--adapter','caddyfile']))==after and active()==before)
+        STAGE='reload'
+        try:run_json('reload',encoded)
+        except Exception:
+            # An acknowledgement failure is not permission to blindly retry.
+            if active()!=after:raise
+        STAGE="active-verification"
+        require(active()==after and CONFIG.read_bytes()==candidate)
+    except Exception:
+        # Restore only our own pending disk change when the active service is
+        # positively still baseline. Never overwrite an unknown third state.
+        if active()==before and CONFIG.read_bytes()==candidate:replace(original,info)
+        raise
+    print(json.dumps({'ok':True,'host':HOST,'upstream':'127.0.0.1:3108','configurationSha256':hashlib.sha256(candidate).hexdigest(),
+                      'backup':str(backup),'otherRoutesEquivalent':True,'groupRenamesCount':renames,'automaticHttps':True,'applicationChanged':False}))
+
+if __name__=='__main__':
+    try:
+        require(len(sys.argv) == 3 and sys.argv[1] in ('--check-only','--activate'))
+        require(re.fullmatch(r'[a-f0-9]{64}', sys.argv[2]))
+        EXPECTED = sys.argv[2]
+        main(check_only=sys.argv[1] != '--activate')
+    except Exception:
+        print(json.dumps({'ok':False,'status':'uat-route-refused-or-unverified','stage':STAGE,'automaticRetry':False}))
+        raise SystemExit(1)

@@ -1,5 +1,6 @@
 import { submissionIdentity } from "@/lib/submission-identity";
 import "server-only";
+import { uatRequestGuard } from "@/lib/uat-request-guard";
 import { bookingAvailable, validatePickupSlot, validateAddons } from "@/lib/booking-policy";
 import { saveBookingOnce } from "@/lib/operational-store";
 import { freezePricing } from "@/lib/billing";
@@ -262,6 +263,9 @@ async function authorizeSubmission(submissionType: string) {
 }
 
 export async function submitForm(request: Request, nativeBooking = false) {
+  // Keep the isolated test database closed to anonymous internet submissions.
+  const uatGuard = await uatRequestGuard();
+  if (uatGuard) return uatGuard;
   if (isRateLimited(clientKey(request.headers, "submit"), 30, 60_000)) {
     return NextResponse.json({ ok: false, error: "Too many requests. Try again shortly." }, { status: 429 });
   }

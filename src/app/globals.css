@@ -1918,3 +1918,6 @@ html:not([data-input-modality="pointer"]) .focusedPlanSegment:has(input:focus-vi
 @media (max-width: 600px) {
   .customerOrderSummary .sectionHeading { flex-direction: column; align-items: flex-start; gap: 12px; }
 }
+
+/* Explicit test-environment boundary; uses the established neutral interface. */
+.uatEnvironmentNotice { padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 14px; line-height: 1.5; text-align: center; overflow-wrap: anywhere; }

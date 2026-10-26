@@ -1,3 +1,4 @@
+import { canManageStaffSecurity } from "@/lib/staff-security-access";
 import { maintenanceAuthorized } from "@/lib/maintenance-auth";
 import { bookingAvailable } from "@/lib/booking-policy";
 import { NextRequest, NextResponse } from "next/server";
@@ -56,7 +57,7 @@ function readinessResponse(request: NextRequest, database: ReturnType<typeof ope
     if (!warning.includes("MFA enrollment")) return true;
     return !adminMfaReady;
   });
-  const detailed = maintenanceAuthorized(request.headers) || decodeSession(request.cookies.get(sessionCookieName)?.value, staff, database)?.role === "admin";
+  const detailed = maintenanceAuthorized(request.headers) || canManageStaffSecurity(decodeSession(request.cookies.get(sessionCookieName)?.value, staff, database));
   return NextResponse.json({
     ok: ready,
     service: "Bubble Wash operations app",

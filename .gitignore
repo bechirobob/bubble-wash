@@ -54,3 +54,6 @@ next-env.d.ts
 
 # generated actual-component visual evidence
 /tests/visual-fixture/dist/
+
+# Safe isolated UAT template contains no secrets
+!.env.uat.example

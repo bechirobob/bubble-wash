@@ -1,3 +1,4 @@
+import { uatRequestGuard } from "@/lib/uat-request-guard";
 import { NextRequest, NextResponse } from "next/server";
 import { customerSessionCookieName, decodeCustomerSession } from "@/lib/customer-session";
 import { customerOrderView } from "@/lib/customer-orders";
@@ -5,6 +6,8 @@ import { readSubmissionRecordsForOrder } from "@/lib/data-store";
 import { buildOrderSummaries } from "@/lib/submissions";
 
 export async function GET(request: NextRequest) {
+  const uatGuard = await uatRequestGuard();
+  if (uatGuard) return uatGuard;
   const session = decodeCustomerSession(request.cookies.get(customerSessionCookieName)?.value);
   if (!session) return NextResponse.json({ ok: false, error: "Verify your booking details to continue." }, { status: 401 });
   const records = readSubmissionRecordsForOrder(session.orderId);
