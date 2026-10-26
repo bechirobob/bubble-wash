@@ -61,7 +61,7 @@ class TransportTests(unittest.TestCase):
             self.assertTrue(marker.exists());module.activate.assert_not_called()
     def test_workflow_has_no_issuance_or_dns_action(self):
         text=(ROOT/'.github/workflows/uat-activate.yml').read_text()
-        self.assertIn('options: [check, start, route-check, route-activate, inspect, repair-app-traversal]',text)
+        self.assertIn('options: [check, start, route-check, route-activate, inspect, repair-app-traversal, resume-fixture-priority]',text)
         self.assertIn('group: bubblewash-production',text)
         self.assertIn('environment: backup-storage',text)
         self.assertIn('check-release-ci.py',text)

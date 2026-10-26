@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 import tempfile
+import base64
+import sqlite3
 import unittest
 from unittest.mock import patch
 
@@ -41,6 +43,35 @@ class ActivationTests(unittest.TestCase):
                 self.assertTrue((Path(tmp)/'activation-started.json').exists())
                 self.assertIn((['/usr/bin/systemctl','stop','bubblewash-uat.service'],),[c.args for c in run.call_args_list])
                 with self.assertRaises(FileExistsError):m.activate('a'*40)
+    def test_eval_capsule_preserves_javascript_without_expansion(self):
+        source='const suffix="one"; console.log(`uat-vendor-${suffix}`);'
+        capsule=m.eval_capsule(source)
+        self.assertNotIn('$',capsule)
+        encoded=capsule.split('base64,',1)[1].split("'",1)[0]
+        self.assertEqual(base64.b64decode(encoded).decode(),source)
+        with self.assertRaises(ValueError):m.eval_capsule('x'*131073)
+    def test_priority_resume_never_reseeds_and_retains_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config=Path(tmp);old=config/'activation-started.json';old.write_text('{"stage":"synthetic-priority"}')
+            with patch.object(m,'CONFIG',config),patch.object(m,'verify',return_value=('unit','newenv')) as verify,patch.object(m,'trusted'),patch.object(m,'loaded_unit'),patch.object(m,'transient') as transient,patch.object(m,'run') as run,patch.object(m,'checks',side_effect=ValueError('intentional end')):
+                run.return_value.stdout=b''
+                with self.assertRaises(ValueError):m.activate('a'*40,resume_priority=True)
+                verify.assert_called_once_with('a'*40,allow_priority_resume=True)
+                self.assertEqual((config/'activation-before-priority-resume.json').read_text(),'{"stage":"synthetic-priority"}')
+                self.assertNotIn('seed',[call.args[1] for call in transient.call_args_list])
+                self.assertIn('fixture-priority',[call.args[1] for call in transient.call_args_list])
+                with self.assertRaises(FileExistsError):m.activate('a'*40,resume_priority=True)
+    def test_pristine_seed_rejects_existing_submissions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory=Path(tmp);(directory/'cache').mkdir();db=sqlite3.connect(directory/'uat.sqlite');db.execute('CREATE TABLE submissions(id TEXT)');db.execute("INSERT INTO submissions VALUES('synthetic-existing')");db.commit();db.close()
+            with patch.object(m,'DATA',directory),self.assertRaisesRegex(ValueError,'Existing submissions'):m.pristine_seed()
+            (directory/'unexpected').touch()
+            with patch.object(m,'DATA',directory),self.assertRaisesRegex(ValueError,'closed pristine'):m.pristine_seed()
+    def test_pristine_seed_rejects_issued_accounts_before_roster(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory=Path(tmp);(directory/'cache').mkdir();db=sqlite3.connect(directory/'uat.sqlite')
+            db.executescript("CREATE TABLE submissions(id TEXT);CREATE TABLE staff_uat_accounts(username TEXT);INSERT INTO staff_uat_accounts VALUES('synthetic');");db.close()
+            with patch.object(m,'DATA',directory),self.assertRaisesRegex(ValueError,'Existing issuance'):m.pristine_seed()
     def test_probe_no_remote_destination_or_plaintext(self):
         probe=(ROOT/'scripts/uat-isolation-check.mjs').read_text()
         self.assertIn("host:'127.0.0.1', port:9",probe)

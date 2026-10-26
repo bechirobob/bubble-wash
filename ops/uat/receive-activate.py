@@ -11,7 +11,7 @@ import tempfile
 
 PIN='e7de6a5ea121b50b3ae691451fe9377466d7bba7ca5748009f6612a10194b735'
 FILES={'ops/uat/activate-host.py','ops/uat/bubblewash-uat.service','scripts/uat-isolation-check.mjs','scripts/uat-prioritize-fixture.mjs','ops/add-uat-host.py','ops/uat/inspect-activation.py'}
-MODES={'check','start','route-check','route-activate','inspect','repair-app-traversal'}
+MODES={'check','start','route-check','route-activate','inspect','repair-app-traversal','resume-fixture-priority'}
 
 def validate(ctx,sources):
     if set(ctx)!={'source','runtime','runId','mode','caddy'} or ctx['mode'] not in MODES or ctx['caddy']!=PIN: raise ValueError('context')
@@ -86,6 +86,7 @@ def main(ctx,sources):
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
         if ctx['mode']=='check': module.verify(ctx['runtime'])
         elif ctx['mode']=='start': module.activate(ctx['runtime'])
+        elif ctx['mode']=='resume-fixture-priority': module.activate(ctx['runtime'],resume_priority=True)
         elif ctx['mode']=='repair-app-traversal':
             repair_app_traversal(module,ctx['runtime'])
         else:

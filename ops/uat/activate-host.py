@@ -3,6 +3,8 @@
 Default is verification only. Failed activation retains its marker and requires review.
 """
 import argparse
+import base64
+import sqlite3
 import http.client
 import json
 import os
@@ -64,11 +66,34 @@ def sandbox_properties(unit):
     if '--property' not in values: raise ValueError('Missing sandbox')
     return values
 
+def eval_capsule(source):
+    # systemd expands dollar expressions in ExecStart arguments even without a shell.
+    # Transport code as base64 so JS template strings and regex anchors are opaque.
+    if len(source.encode())>131072:raise ValueError('Capsule size limit')
+    return "await import('data:text/javascript;base64,"+base64.b64encode(source.encode()).decode()+"')"
+
+def pristine_seed():
+    database=DATA/'uat.sqlite'
+    if set(p.name for p in DATA.iterdir())!={'cache','uat.sqlite'} or database.is_symlink() or not database.is_file() or database.resolve()!=database:
+        raise ValueError('Expected closed pristine seeded database')
+    db=sqlite3.connect(database.as_uri()+'?mode=ro&immutable=1',uri=True,timeout=2)
+    try:
+        db.execute('PRAGMA query_only=ON');db.execute('PRAGMA trusted_schema=OFF')
+        if db.execute('SELECT 1 FROM submissions LIMIT 1').fetchone():raise ValueError('Existing submissions')
+        for table in ('staff_uat_accounts','uat_sealed_handover'):
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone() and db.execute('SELECT 1 FROM '+table+' LIMIT 1').fetchone():raise ValueError('Existing issuance')
+        vendors=db.execute('SELECT vendor_id,vendor_name,capacity_remaining,availability_status,service_zones,service_types FROM vendor_availability ORDER BY vendor_id').fetchall()
+        drivers=db.execute('SELECT driver_id,driver_name,capacity_remaining,availability_status,service_zones FROM driver_availability ORDER BY driver_id').fetchall()
+        expected_v=[('uat-vendor-'+suffix,'UAT Laundry '+suffix,20,'available','["Osu"]','["Wash + fold"]') for suffix in ('one','two')]
+        expected_d=[('uat-driver-'+suffix,'UAT Driver '+suffix,20,'active','["Osu"]') for suffix in ('one','two')]
+        if vendors!=expected_v or drivers!=expected_d:raise ValueError('Seed differs from pristine fixture')
+    finally:db.close()
+
 def transient(unit, suffix, command):
     run(['/usr/bin/systemd-run','--unit=bubblewash-uat-'+suffix,'--wait','--pipe','--quiet','--collect',
          *sandbox_properties(unit),*command],timeout=120)
 
-def verify(revision, allow_legacy_marker=False):
+def verify(revision, allow_legacy_marker=False, allow_priority_resume=False):
     if not re.fullmatch('[0-9a-f]{40}',revision): raise ValueError('Exact revision required')
     for path in (APP/'SOURCE_REVISION',APP/'scripts/uat-seed.mjs',APP/'.next/BUILD_ID',CONFIG/'release.json',CONFIG/'environment',UNIT): trusted(path)
     trusted(CONFIG/'environment',0o600)
@@ -80,13 +105,16 @@ def verify(revision, allow_legacy_marker=False):
     account=pwd.getpwnam('bubblewash-uat')
     if account.pw_shell!='/usr/sbin/nologin' or account.pw_dir!=str(DATA) or account.pw_uid==0: raise ValueError('Wrong account')
     if DATA.is_symlink() or DATA.stat().st_uid!=account.pw_uid: raise ValueError('Wrong isolated data owner')
-    if set(p.name for p in DATA.iterdir())!={'cache'}: raise ValueError('Existing data requires recovery review')
+    if allow_priority_resume:pristine_seed()
+    elif set(p.name for p in DATA.iterdir())!={'cache'}: raise ValueError('Existing data requires recovery review')
     marker=CONFIG/'activation-started.json'
     if marker.exists():
-        if not allow_legacy_marker: raise ValueError('Activation already attempted')
+        if not (allow_legacy_marker or allow_priority_resume): raise ValueError('Activation already attempted')
         trusted(marker,0o600)
-        if json.loads(marker.read_text())!={'revision':revision,'accountsIssued':False}:raise ValueError('Not original preseed marker')
-    elif allow_legacy_marker:raise ValueError('Expected original failed attempt')
+        expected={'revision':revision,'accountsIssued':False}
+        if allow_priority_resume:expected['stage']='synthetic-priority'
+        if json.loads(marker.read_text())!=expected:raise ValueError('Unexpected recovery marker')
+    elif allow_legacy_marker or allow_priority_resume:raise ValueError('Expected original failed attempt')
     state=run(['/usr/bin/systemctl','show',SERVICE,'-p','ActiveState','-p','DropInPaths'],capture=True).stdout.decode()
     if set(state.strip().splitlines())!={'ActiveState=inactive','DropInPaths='}: raise ValueError('Existing activity or overrides')
     return reviewed.decode(), environment((CONFIG/'environment').read_text())
@@ -120,8 +148,19 @@ def checks():
     status,body=request('/api/uat/ready')
     if status!=503 or json.loads(body).get('environment')!='isolated-uat': raise ValueError('Unexpected account readiness')
 
-def activate(revision):
-    unit,newenv=verify(revision)
+def activate(revision, resume_priority=False):
+    unit,newenv=verify(revision,allow_priority_resume=True) if resume_priority else verify(revision)
+    if resume_priority:
+        trusted(APP,0o755);trusted(APP/'.next/cache',0o755)
+        loaded_unit()
+        if run(['/usr/bin/ss','-H','-ltnp','sport = :3108'],capture=True).stdout.strip():raise ValueError('Port occupied')
+        old=CONFIG/'activation-started.json';saved=CONFIG/'activation-before-priority-resume.json'
+        fd=os.open(saved,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+        with os.fdopen(fd,'wb') as stream:stream.write(old.read_bytes());stream.flush();os.fsync(stream.fileno())
+        directory=os.open(CONFIG,os.O_RDONLY|os.O_DIRECTORY)
+        try:os.fsync(directory)
+        finally:os.close(directory)
+        old.unlink() # Durable original evidence retained; this resume cannot repeat.
     marker=CONFIG/'activation-started.json'
     fd=os.open(marker,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
     with os.fdopen(fd,'w') as stream: stream.write(json.dumps({'revision':revision,'accountsIssued':False})+'\n')
@@ -140,12 +179,13 @@ def activate(revision):
         loaded_unit()
         probe=Path(__file__).parents[2]/'scripts/uat-isolation-check.mjs'
         stage('isolation-probe')
-        transient(unit,'isolation-check',['/usr/bin/node','--input-type=module','--eval',probe.read_text()])
-        stage('synthetic-seed')
-        transient(unit,'seed',['/usr/bin/node','--conditions=react-server','--experimental-strip-types','scripts/uat-seed.mjs','--approved-synthetic-only'])
+        transient(unit,'isolation-check',['/usr/bin/node','--input-type=module','--eval',eval_capsule(probe.read_text())])
+        if not resume_priority:
+            stage('synthetic-seed')
+            transient(unit,'seed',['/usr/bin/node','--conditions=react-server','--experimental-strip-types','scripts/uat-seed.mjs','--approved-synthetic-only'])
         stage('synthetic-priority')
         priority=Path(__file__).parents[2]/'scripts/uat-prioritize-fixture.mjs'
-        transient(unit,'fixture-priority',['/usr/bin/node','--conditions=react-server','--experimental-strip-types','--input-type=module','--eval',priority.read_text()])
+        transient(unit,'fixture-priority',['/usr/bin/node','--conditions=react-server','--experimental-strip-types','--input-type=module','--eval',eval_capsule(priority.read_text())])
         stage('environment-enable')
         # Atomic config replacement, preserving the session secret without logging it.
         temp=CONFIG/'environment.activation-new'
