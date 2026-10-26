@@ -1,0 +1,78 @@
+name: Issue approved private UAT handover
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed main control commit
+        required: true
+        type: string
+      runtime_sha:
+        description: Exact installed isolated UAT release commit
+        required: true
+        type: string
+      handoff_public_key:
+        description: Pinned UAT recipient public key in base64 SPKI DER (never private key)
+        required: true
+        type: string
+      mode:
+        description: Issue once, or recover the same sealed package without new access
+        required: true
+        type: choice
+        options: [issue, retrieve]
+      issuance_approved:
+        description: Owner explicitly approved these UAT role grants and private encrypted storage
+        required: true
+        default: false
+        type: boolean
+      handover_ready:
+        description: Isolated host and confidential document are verified for immediate handover
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  handover:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main' && inputs.issuance_approved && inputs.handover_ready
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      RUNTIME_SHA: ${{ inputs.runtime_sha }}
+      MODE: ${{ inputs.mode }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Require exact main and first attempt
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" && "$RUNTIME_SHA" =~ ^[a-f0-9]{40}$ && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require successful exact-main CI
+        env:
+          TARGET_SHA: ${{ inputs.source_sha }}
+        run: python3 -B ops/check-release-ci.py
+      - name: Verify private handover failure guards
+        run: python3 -B -m unittest discover -s tests -p 'test_uat_private_handoff.py' -v
+      - name: Connect using the existing approved tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Capture ciphertext into existing verified private storage
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+          BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+          BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+          HANDOFF_PUBLIC_KEY: ${{ inputs.handoff_public_key }}
+          ISSUANCE_APPROVED: ${{ inputs.issuance_approved }}
+          HANDOVER_READY: ${{ inputs.handover_ready }}
+        run: python3 -I -B ops/uat/private-handoff.py

@@ -1,0 +1,68 @@
+name: Guarded isolated UAT activation or additive route
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed main SHA containing these operators
+        required: true
+        type: string
+      runtime_sha:
+        description: Exact installed UAT runtime SHA from successful install receipt
+        required: true
+        type: string
+      mode:
+        description: No accounts or DNS changes; start only after checking install
+        required: true
+        default: check
+        type: choice
+        options: [check, start, route-check, route-activate]
+      expected_caddy_sha:
+        description: Exact approved baseline Caddyfile SHA256
+        required: true
+        type: string
+        default: e7de6a5ea121b50b3ae691451fe9377466d7bba7ca5748009f6612a10194b735
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  activate:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      RUNTIME_SHA: ${{ inputs.runtime_sha }}
+      UAT_ACTION: ${{ inputs.mode }}
+      EXPECTED_CADDY_SHA: ${{ inputs.expected_caddy_sha }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Require exact main source and first attempt
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          [[ "$RUNTIME_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_CADDY_SHA" == e7de6a5ea121b50b3ae691451fe9377466d7bba7ca5748009f6612a10194b735 ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Require successful exact-main CI
+        env:
+          TARGET_SHA: ${{ inputs.source_sha }}
+        run: python3 -B ops/check-release-ci.py
+      - name: Test bounded operators
+        run: |
+          python3 -B -m unittest discover -s tests -p 'test_uat_*.py' -v
+          python3 -B -m unittest discover -s tests -p test_add_uat_host.py -v
+      - name: Connect through existing approved tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Execute one pinned UAT action; never automatically retry
+        run: python3 -B ops/uat/transport-activate.py
