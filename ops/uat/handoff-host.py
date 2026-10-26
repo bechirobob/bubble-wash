@@ -8,11 +8,13 @@ import pwd
 import re
 import resource
 import stat
+import sqlite3
 import subprocess
 
 APP=Path('/opt/bubblewash-uat/app'); CONFIG=Path('/etc/bubblewash-uat')
 SERVICE='bubblewash-uat.service'
 UNIT=Path('/etc/systemd/system/bubblewash-uat.service')
+DATABASE=Path('/var/lib/bubblewash-uat/uat.sqlite')
 
 def require(value):
     if not value: raise ValueError('UAT handoff refused')
@@ -63,9 +65,29 @@ def service_identity():
     lines=result.stdout.decode().splitlines();require(result.returncode==0 and len(lines)==1 and '127.0.0.1:3108' in lines[0] and ('pid='+values['MainPID']+',') in lines[0])
 
 
+def issuance_counts():
+    # SQLite read-only mode includes any committed WAL, unlike immutable=1.
+    # Query only fixed COUNTs, never identities, hashes, envelopes or customer data.
+    path=DATABASE
+    require(path.is_file() and not path.is_symlink() and path.resolve()==path)
+    for suffix in ('-wal','-shm'):
+        sibling=Path(str(path)+suffix)
+        require(not sibling.is_symlink())
+    database=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=2)
+    try:
+        database.execute('PRAGMA query_only=ON');database.execute('PRAGMA trusted_schema=OFF')
+        database.execute('BEGIN')
+        counts=[]
+        for table in ('staff_uat_accounts','uat_sealed_handover'):
+            exists=database.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(table,)).fetchone()
+            counts.append(database.execute('SELECT COUNT(*) FROM '+table).fetchone()[0] if exists else 0)
+        require(all(type(value) is int and 0<=value<=1000 for value in counts))
+        return tuple(counts)
+    finally:database.close()
+
 def main(request):
     resource.setrlimit(resource.RLIMIT_CORE,(0,0))
-    require(os.geteuid()==0 and request['mode'] in ('issue','retrieve') and request['approved'] is True and request['ready'] is True)
+    require(os.geteuid()==0 and request['mode'] in ('issue','retrieve','check') and request['approved'] is True and request['ready'] is True)
     require(re.fullmatch('[a-f0-9]{40}',request['runtimeSha']) and re.fullmatch('[a-f0-9]{64}',request['capsuleSha256']) and re.fullmatch('[a-f0-9]{64}',request['unitSha256']))
     for p in (APP/'SOURCE_REVISION',APP/'scripts/uat-sealed-handover.mjs',CONFIG/'environment',CONFIG/'activation-started.json',UNIT):protected(p)
     require((APP/'SOURCE_REVISION').read_text()==request['runtimeSha']+'\n')
@@ -76,6 +98,11 @@ def main(request):
     account=pwd.getpwnam('bubblewash-uat');require(account.pw_uid>0 and account.pw_shell=='/usr/sbin/nologin')
     service_identity()
     status,ready=readiness();require((status,ready)==(503,False) if request['mode']=='issue' else status in (200,503))
+    if request['mode'] in ('check','issue'):
+        require(issuance_counts()==(0,0))
+    if request['mode']=='check':
+        require((status,ready)==(503,False))
+        print(json.dumps({'ok':True,'mode':'check','hostVerified':True,'localReadinessStatus':status,'localReady':ready,'uatAccountCount':0,'sealedPackageCount':0}));return
     payload={'action':request['mode'],'approved':True,'ready':True,'publicKey':request['publicKey']}
     command=['/usr/bin/systemd-run','--unit=bubblewash-uat-handoff','--wait','--pipe','--quiet','--collect',*sandbox_properties(unit),'/usr/bin/node','--conditions=react-server','--experimental-strip-types','scripts/uat-sealed-handover.mjs']
     result=subprocess.run(command,input=json.dumps(payload).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,env={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LC_ALL':'C'},timeout=90)

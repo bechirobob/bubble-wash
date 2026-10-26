@@ -15,10 +15,10 @@ on:
         required: true
         type: string
       mode:
-        description: Issue once, or recover the same sealed package without new access
+        description: Read-only check, issue once, or recover the same sealed package without new access
         required: true
         type: choice
-        options: [issue, retrieve]
+        options: [check, issue, retrieve]
       issuance_approved:
         description: Owner explicitly approved these UAT role grants and private encrypted storage
         required: true

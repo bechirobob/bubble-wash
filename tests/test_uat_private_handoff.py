@@ -5,6 +5,11 @@ import json
 from pathlib import Path
 import unittest
 import subprocess
+import tempfile
+import sqlite3
+import io
+import urllib.error
+from types import SimpleNamespace
 from unittest import mock
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,path):
@@ -99,4 +104,38 @@ class Guards(unittest.TestCase):
         self.assertEqual(api.calls.count(('releases','POST')),1)
         self.assertNotIn(('releases/42','PATCH'),api.calls)
         self.assertTrue(api.release['draft'])
+    def test_honest_public_client_and_sanitized_failure(self):
+        body=b'{"environment":"isolated-uat","externalProviders":"disabled","productionReady":false,"ok":false}'
+        response=mock.MagicMock();response.__enter__.return_value=response;response.status=503;response.read.return_value=body
+        with mock.patch.object(m.urllib.request,'urlopen',return_value=response) as get:m.public_readiness('check')
+        request=get.call_args.args[0]
+        self.assertEqual(request.get_header('User-agent'),'BubbleWash-UAT-Verification/1.0')
+        error=urllib.error.HTTPError(request.full_url,403,'Forbidden',{},io.BytesIO(b'SECRET HTML 1010'))
+        with mock.patch.object(m.urllib.request,'urlopen',side_effect=error),self.assertRaises(ValueError):m.public_readiness('check')
+        receipt=m.failure_receipt();self.assertEqual(receipt['stage'],'public-readiness');self.assertEqual(receipt['publicHttpStatus'],403);self.assertFalse(receipt['publicJson']);self.assertNotIn('SECRET',json.dumps(receipt))
+    def test_check_never_publishes_or_accepts_nonzero_count(self):
+        value={'ok':True,'mode':'check','hostVerified':True,'localReadinessStatus':503,'localReady':False,'uatAccountCount':0,'sealedPackageCount':0}
+        with mock.patch.object(m,'publish') as publish:
+            receipt=m.finish_capture({'mode':'check'},json.dumps(value).encode(),mock.Mock(),mock.Mock(),self.env)
+            self.assertTrue(receipt['readOnly']);self.assertFalse(receipt['credentialsRetrieved']);publish.assert_not_called()
+            with self.assertRaises(ValueError):m.finish_capture({'mode':'check'},json.dumps(dict(value,uatAccountCount=4)).encode(),mock.Mock(),mock.Mock(),self.env)
+            publish.assert_not_called()
+    def test_host_check_never_invokes_capsule(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);app=root/'app';config=root/'config';app.mkdir();config.mkdir();(app/'scripts').mkdir()
+            (app/'SOURCE_REVISION').write_text('a'*40+'\n');capsule=app/'scripts/uat-sealed-handover.mjs';capsule.write_text('synthetic code')
+            env=config/'environment';env.write_text('synthetic env');env.chmod(0o600);(config/'activation-started.json').write_text('{}')
+            unit=root/'unit';unit.write_text('synthetic unit')
+            request={'mode':'check','approved':True,'ready':True,'runtimeSha':'a'*40,'capsuleSha256':hashlib.sha256(capsule.read_bytes()).hexdigest(),'unitSha256':hashlib.sha256(unit.read_bytes()).hexdigest(),'publicKey':'unused'}
+            with mock.patch.object(host,'APP',app),mock.patch.object(host,'CONFIG',config),mock.patch.object(host,'UNIT',unit),mock.patch.object(host,'protected'),mock.patch.object(host,'environment'),mock.patch.object(host,'service_identity'),mock.patch.object(host,'readiness',return_value=(503,False)),mock.patch.object(host,'issuance_counts',return_value=(0,0)),mock.patch.object(host.os,'geteuid',return_value=0),mock.patch.object(host.resource,'setrlimit'),mock.patch.object(host.pwd,'getpwnam',return_value=SimpleNamespace(pw_uid=1001,pw_shell='/usr/sbin/nologin')),mock.patch.object(host.subprocess,'run') as run,mock.patch('sys.stdout',new_callable=io.StringIO) as output:
+                host.main(request);run.assert_not_called()
+                value=json.loads(output.getvalue());self.assertEqual(value['uatAccountCount'],0);self.assertEqual(value['sealedPackageCount'],0)
+    def test_readonly_counts_include_committed_wal_without_private_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'uat.sqlite';database=sqlite3.connect(path);database.execute('PRAGMA journal_mode=WAL');database.executescript('CREATE TABLE staff_uat_accounts(username TEXT);CREATE TABLE uat_sealed_handover(envelope TEXT);');database.commit()
+            with mock.patch.object(host,'DATABASE',path):
+                self.assertEqual(host.issuance_counts(),(0,0))
+                database.execute("INSERT INTO staff_uat_accounts VALUES('DO-NOT-EXPOSE')");database.execute("INSERT INTO uat_sealed_handover VALUES('CIPHERTEXT')");database.commit()
+                self.assertEqual(host.issuance_counts(),(1,1))
+            database.close()
 if __name__=='__main__':unittest.main()
