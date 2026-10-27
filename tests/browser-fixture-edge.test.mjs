@@ -21,11 +21,11 @@ test('fixture edge forwards real HTTP bodies, Host, cookies and response cookies
     if (['/admin', '/vendors', '/drivers', '/support'].includes(request.url)) response.setHeader('x-fixture-staff-cookie-received', 'upstream-untrusted');
     response.end(JSON.stringify({ headers: request.headers, body }));
   });
-  await new Promise(resolve => upstream.listen(0, 'localhost', resolve));
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
   const edge = createFixtureEdge({ upstreamPort: upstream.address().port });
-  await new Promise(resolve => edge.listen(0, 'localhost', resolve));
+  await new Promise(resolve => edge.listen(0, '127.0.0.1', resolve));
   try {
-    const url = `http://localhost:${edge.address().port}`;
+    const url = `http://127.0.0.1:${edge.address().port}`;
     async function send(path, options = {}) {
       return new Promise((resolve, reject) => {
         const request = http.request(`${url}${path}`, options, async response => {
@@ -111,13 +111,13 @@ test('staff presentation edge preserves redirects and Origin while rejecting all
     if (request.url === '/') response.writeHead(307, { Location: '/staff' }).end();
     else response.end('staff presentation');
   });
-  await new Promise(resolve => upstream.listen(0, 'localhost', resolve));
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
   const edge = createFixtureEdge({ upstreamPort: upstream.address().port, origin: 'http://localhost:3102', staffPresentation: true });
-  await new Promise(resolve => edge.listen(0, 'localhost', resolve));
+  await new Promise(resolve => edge.listen(0, '127.0.0.1', resolve));
   try {
     async function send(path, method = 'GET', host = 'localhost:3102') {
       return new Promise((resolve, reject) => {
-        const request = http.request(`http://localhost:${edge.address().port}${path}`, { method, headers: { host, origin: 'http://localhost:3102' } }, async response => {
+        const request = http.request(`http://127.0.0.1:${edge.address().port}${path}`, { method, headers: { host, origin: 'http://localhost:3102' } }, async response => {
           let body = ''; for await (const chunk of response) body += chunk;
           resolve({ status: response.statusCode, headers: response.headers, body });
         });
@@ -138,4 +138,19 @@ test('staff presentation edge preserves redirects and Origin while rejecting all
     edge.closeAllConnections(); upstream.closeAllConnections();
     await Promise.all([new Promise(resolve => edge.close(resolve)), new Promise(resolve => upstream.close(resolve))]);
   }
+});
+
+
+test('synthetic listeners pin IPv4 loopback without changing browser origins or environment isolation', () => {
+  for (const name of ['start-fixture.mjs', 'start-results-fixture.mjs', 'start-worklist-fixture.mjs']) {
+    const source = readFileSync(new URL(`./browser/${name}`, import.meta.url), 'utf8');
+    assert.match(source, /'start', '-H', '127\.0\.0\.1'/);
+    assert.match(source, /\.listen\(\d+, '127\.0\.0\.1'\)/);
+    assert.doesNotMatch(source, /\.listen\(\d+, 'localhost'\)|'-H', 'localhost'/);
+    assert.match(source, /BUBBLEWASH_PUBLIC_URL: 'http:\/\/localhost:/);
+    assert.match(source, /for \(const key of Object\.keys\(process\.env\)\) delete process\.env\[key\]/);
+  }
+  const cookie = readFileSync(new URL('./browser/00-cookie-transport.spec.mjs', import.meta.url), 'utf8');
+  assert.match(cookie, /server\.listen\(0, '127\.0\.0\.1', resolve\)/);
+  assert.match(cookie, /const origin = `http:\/\/localhost:/);
 });

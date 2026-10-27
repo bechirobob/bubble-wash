@@ -47,11 +47,11 @@ availability.upsertDriverAvailability({ driverId: 'driver-browser', driverName: 
 const { appendSubmissionRecord, getDatabase } = await import('../../src/lib/data-store.ts');
 appendSubmissionRecord({ id: 'BW-BROWSEROVERDUE01', createdAt: new Date(Date.now() - 3600000).toISOString(), source: 'synthetic-browser-fixture', data: { submissionType: 'pickup-booking', name: 'Synthetic overdue customer', company: 'Synthetic overdue account', email: 'overdue@example.invalid', phone: '0200000000', pickupAddress: 'Synthetic reception, Osu, Accra', pickupDate: new Date().toISOString().slice(0, 10), pickupWindow: '8:00–10:00', plan: 'Weekly', paymentPreference: 'Invoice me', alertPreference: 'Call me' } });
 if (researchFixture) getDatabase().exec(readFileSync(resolve('db/proposed/research-v1.sql'), 'utf8'));
-const server = spawn(process.execPath, ['--import', resolve('tests/browser/block-egress.mjs'), 'node_modules/next/dist/bin/next', 'start', '-H', 'localhost', '-p', '3101'], { env: process.env, stdio: 'inherit' });
+const server = spawn(process.execPath, ['--import', resolve('tests/browser/block-egress.mjs'), 'node_modules/next/dist/bin/next', 'start', '-H', '127.0.0.1', '-p', '3101'], { env: process.env, stdio: 'inherit' });
 const edge = createFixtureEdge();
 const staffEdge = createFixtureEdge({ origin: 'http://localhost:3102', staffPresentation: true });
-edge.listen(3100, 'localhost');
-staffEdge.listen(3102, 'localhost');
+edge.listen(3100, '127.0.0.1');
+staffEdge.listen(3102, '127.0.0.1');
 for (const listener of [edge, staffEdge]) listener.on('error', error => { console.error(error.message); server.kill('SIGTERM'); });
 function closeEdges() { for (const listener of [edge, staffEdge]) { listener.closeAllConnections(); listener.close(); } }
 let stopping = false;
