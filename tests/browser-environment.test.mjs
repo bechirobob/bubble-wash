@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { validateVersions, verifyBrowser } from '../scripts/verify-browser-environment.mjs';
+import { validateVersions, verifyBrowser, readInstalledVersions } from '../scripts/verify-browser-environment.mjs';
 
 const read = name => readFileSync(new URL(`../${name}`, import.meta.url), 'utf8');
 const config = JSON.parse(read('scripts/browser-environment.json'));
@@ -13,6 +13,11 @@ const check = (changes = {}) => validateVersions(changes.config ?? config, chang
   changes.installed ?? installed, changes.node ?? '22.23.4', changes.python ?? '3.12', changes.os ?? os);
 
 test('prepared image matches the locked browser and native packages without runtime upgrades', () => check());
+
+test('installed metadata resolves through real package exports, including native sharp', () => {
+  // No mocked package resolver: catch dependency export-map incompatibilities before CI readiness.
+  assert.deepEqual(readInstalledVersions(), installed);
+});
 for (const [name, changes] of Object.entries({
   'mutable image tag': { config: { ...config, image: config.image.split('@')[0] } },
   'wrong image version': { config: { ...config, image: config.image.replace('v1.64.1', 'v1.62.1') } },

@@ -48,13 +48,20 @@ export async function verifyBrowser(engines, checkExecutable = executable => acc
   return checks;
 }
 
+export function readInstalledVersions(require = createRequire(resolve('package.json'))) {
+  const installed = Object.fromEntries(['@playwright/test', 'playwright', 'playwright-core', 'better-sqlite3']
+    .map(name => [name, require(`${name}/package.json`).version]));
+  // sharp does not export package.json; use its documented native runtime metadata.
+  installed.sharp = require('sharp').versions.sharp;
+  return installed;
+}
+
 export async function verifyBrowserEnvironment() {
   const started = performance.now();
   const require = createRequire(resolve('package.json'));
   const config = JSON.parse(await readFile(new URL('./browser-environment.json', import.meta.url), 'utf8'));
   const lock = JSON.parse(await readFile('package-lock.json', 'utf8'));
-  const installed = Object.fromEntries(['@playwright/test', 'playwright', 'playwright-core', 'better-sqlite3', 'sharp']
-    .map(name => [name, require(`${name}/package.json`).version]));
+  const installed = readInstalledVersions(require);
   const python = execFileSync('python3', ['-c', 'import sys; print("%s.%s" % sys.version_info[:2])'], { encoding: 'utf8' }).trim();
   validateVersions(config, lock, installed, process.versions.node, python, await readFile('/etc/os-release', 'utf8'));
   assert.equal(process.env.PLAYWRIGHT_BROWSERS_PATH, '/ms-playwright');
