@@ -17,7 +17,7 @@ test('native and emulated loopback cookie transport premise', async ({ browser, 
       response.end(JSON.stringify({ nativeSent: names.includes('fixture_native'), adaptedSent: names.includes('fixture_adapted') }));
     } else response.writeHead(404).end();
   });
-  await new Promise(resolve => server.listen(0, 'localhost', resolve));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://localhost:${server.address().port}`;
   const context = await browser.newContext();
   context.setDefaultNavigationTimeout(15_000);

@@ -20,7 +20,13 @@ concurrency:
 jobs:
   browser:
     name: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'gps' && 'gps-development' || 'browser' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+      options: --user 1001 --shm-size=1g
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 25
     env:
       NEXT_TELEMETRY_DISABLED: '1'
@@ -39,54 +45,14 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Set up Python for the existing synthetic survey fixture
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
       - name: Install locked dependencies
         run: npm ci
-      - name: Prefer the existing official Ubuntu archive mirror
-        timeout-minutes: 1
-        run: |
-          sudo python3 - <<'PY'
-          import os
-          import re
-          import stat
-
-          def checked_open(path, mode):
-              flags = os.O_RDONLY if mode == 'r' else os.O_RDWR
-              fd = os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK)
-              try:
-                  info = os.fstat(fd)
-                  if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
-                      raise RuntimeError('Expected a root-owned regular APT file without group/other write access')
-                  return os.fdopen(fd, mode, encoding='utf-8', newline='')
-              except BaseException:
-                  os.close(fd)
-                  raise
-
-          with checked_open('/etc/apt/sources.list.d/ubuntu.sources', 'r') as source:
-              text = source.read(65537)
-          fields = re.findall(r'^URIs:[^\n]*(?:\n[ \t]+[^\n]*)*', text, re.MULTILINE | re.IGNORECASE)
-          if len(text) > 65536 or not fields or any(
-              field.split(':', 1)[1].split() != ['mirror+file:/etc/apt/apt-mirrors.txt'] for field in fields
-          ):
-              raise RuntimeError('Unexpected Ubuntu APT mirror reference')
-
-          # Runner image ubuntu24/20261012.334: preserve all existing sources and trust.
-          expected = (
-              'http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n'
-              'https://archive.ubuntu.com/ubuntu/\tpriority:2\n'
-              'https://security.ubuntu.com/ubuntu/\tpriority:3\n'
-          )
-          preferred = expected.replace('priority:1', 'priority:2', 1).replace(
-              'https://archive.ubuntu.com/ubuntu/\tpriority:2',
-              'https://archive.ubuntu.com/ubuntu/\tpriority:1', 1
-          )
-          with checked_open('/etc/apt/apt-mirrors.txt', 'r+') as mirrors:
-              if mirrors.read(len(expected) + 1) != expected:
-                  raise RuntimeError('Unexpected Ubuntu APT mirrors or priorities')
-              mirrors.seek(0)
-              mirrors.write(preferred)
-          PY
-      - name: Install official test browsers
-        run: npx playwright install --with-deps chromium webkit
+      - name: Verify prepared browsers and native modules
+        run: node scripts/verify-browser-environment.mjs
       - name: Verify fixture egress guard
         run: node --test tests/browser-egress.test.mjs
       - name: Build production runtime for synthetic test data

@@ -50,9 +50,9 @@ appendSubmissionRecord({ id:'BW-WORKLISTCASE',createdAt:old,source:'synthetic',d
 appendSubmissionRecord({ id:'BW-WORKLISTASSIGN',createdAt:new Date(Date.now()-1800000).toISOString(),source:'synthetic',data:{submissionType:'admin-operation',orderId:'BW-BROWSEROVERDUE01',vendorId:'vendor-browser',driverId:'driver-browser',orderStatus:'Delivered'} });
 const { notificationOutboxSummary } = await import('../../src/lib/notifications.ts');notificationOutboxSummary();
 getDatabase().prepare(`INSERT INTO notification_outbox (id,dedupe_key,channel,target,payload,status,attempts,next_attempt_at,created_at,updated_at,delivery_state) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run('synthetic-review','synthetic-review','email','customer','{}','failed',2,old,old,old,'manual_review');
-const server = spawn(process.execPath, ['--import', resolve('tests/browser/block-egress.mjs'), 'node_modules/next/dist/bin/next', 'start', '-H', 'localhost', '-p', '3196'], { env: process.env, stdio: 'inherit' });
+const server = spawn(process.execPath, ['--import', resolve('tests/browser/block-egress.mjs'), 'node_modules/next/dist/bin/next', 'start', '-H', '127.0.0.1', '-p', '3196'], { env: process.env, stdio: 'inherit' });
 const edge = createFixtureEdge({ upstreamPort: 3196, origin: 'http://localhost:3195' });
-edge.listen(3195, 'localhost');
+edge.listen(3195, '127.0.0.1');
 edge.on('error', error => { console.error(error.message); server.kill('SIGTERM'); });
 let stopping = false;
 function stop() { if (!stopping) { stopping = true; server.kill('SIGTERM'); } }

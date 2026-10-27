@@ -50,8 +50,8 @@ db.prepare("UPDATE research_responses SET created_at='2026-10-23T12:00:00.000Z'"
 const firstId = db.prepare('SELECT id FROM research_responses LIMIT 1').get().id;
 const fixtureFile = '/tmp/bubblewash-results-fixture-proof.json';
 writeFileSync(fixtureFile, JSON.stringify({ sessions, firstId, directory }), { mode: 0o600 });
-const server = spawn(process.execPath, ['--import', resolve('tests/browser/block-egress.mjs'), 'node_modules/next/dist/bin/next', 'start', '-H', 'localhost', '-p', '3218'], { env: process.env, stdio: 'inherit' });
-const edge = createFixtureEdge({ upstreamPort: 3218, origin: 'http://localhost:3217' }); edge.listen(3217, 'localhost');
+const server = spawn(process.execPath, ['--import', resolve('tests/browser/block-egress.mjs'), 'node_modules/next/dist/bin/next', 'start', '-H', '127.0.0.1', '-p', '3218'], { env: process.env, stdio: 'inherit' });
+const edge = createFixtureEdge({ upstreamPort: 3218, origin: 'http://localhost:3217' }); edge.listen(3217, '127.0.0.1');
 let stopping = false;
 function stop() { if (!stopping) { stopping = true; server.kill('SIGTERM'); } }
 process.on('SIGTERM', stop); process.on('SIGINT', stop);

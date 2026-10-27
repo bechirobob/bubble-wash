@@ -50,7 +50,8 @@ export function createFixtureEdge({ upstreamPort = 3101, origin = 'http://localh
     const forwardedHeaders = staffPresentation
       ? { ...request.headers, host: 'staff.bubblewash.co' }
       : fixtureEdgeHeaders(request.method, target.pathname, request.headers, origin);
-    const upstream = http.request({ hostname: 'localhost', port: upstreamPort, method: request.method,
+    // Use deterministic loopback transport; the browser-visible Host/Origin stays localhost.
+    const upstream = http.request({ hostname: '127.0.0.1', port: upstreamPort, method: request.method,
       path: `${target.pathname}${target.search}`, headers: forwardedHeaders }, incoming => {
       const headers = fixtureEdgeResponseHeaders(incoming.headers);
       // Metadata-only transport proof: WebKit's protocol may omit Cookie from
