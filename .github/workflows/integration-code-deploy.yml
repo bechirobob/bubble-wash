@@ -120,7 +120,7 @@ jobs:
           python3 -B -m unittest discover -s tests -p 'test_quiet_boundary.py' -v
           TARGET_SHA="$CANDIDATE_SHA" python3 ops/check-release-ci.py
           python3 ops/integration-release/contracts.py --verify-fallback-ci "$FALLBACK_SHA"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         if: inputs.mode == 'prepare' || inputs.mode == 'resume-retained'
         with:
           node-version: 24
