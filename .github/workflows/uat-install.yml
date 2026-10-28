@@ -45,7 +45,7 @@ jobs:
         env:
           TARGET_SHA: ${{ inputs.source_sha }}
         run: python3 -B ops/check-release-ci.py
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
       - name: Verify guarded installer and transport locally
