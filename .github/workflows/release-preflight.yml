@@ -29,6 +29,11 @@ on:
         description: 'Exact release path verified by the preceding aggregate inspection'
         required: false
         type: string
+      inspect_workspace_attempt:
+        description: 'Read-only diagnosis of fixed failed attempt 41492657040 only'
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -48,8 +53,14 @@ jobs:
       - name: Test aggregate-only inspection and existing transport
         run: python3 -B -m unittest discover -s .github/backup -p 'test_*.py' -v
       - name: Reject conflicting inspection modes
-        if: github.event_name == 'workflow_dispatch' && inputs.inspect_owner && inputs.inspect_rollback
+        if: github.event_name == 'workflow_dispatch' && ((inputs.inspect_owner && inputs.inspect_rollback) || (inputs.inspect_workspace_attempt && (inputs.inspect_owner || inputs.inspect_rollback)))
         run: exit 1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: github.event_name == 'workflow_dispatch' && inputs.inspect_workspace_attempt
+        with:
+          ref: 1406b0e217ed02709ebe1c423aecb42c6be5b0aa
+          persist-credentials: false
+          path: inspection-runtime
       - name: Check existing private destination identity without uploading
         env:
           GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
@@ -68,7 +79,7 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
       - name: Inspect aggregate release prerequisites without changing the host
-        if: github.event_name != 'workflow_dispatch' || (!inputs.inspect_owner && !inputs.inspect_rollback)
+        if: github.event_name != 'workflow_dispatch' || (!inputs.inspect_owner && !inputs.inspect_rollback && !inputs.inspect_workspace_attempt)
         shell: bash
         run: |
           set -euo pipefail
@@ -102,5 +113,14 @@ jobs:
           set -euo pipefail
           if ! python3 -B .github/backup/stream_rollback_preflight.py "$EXPECTED_LIVE_SHA" "$EXPECTED_RELEASE_PATH" | tailscale ssh root@hermes 'python3 -B -' 2>/dev/null; then
             echo 'Pinned read-only inspection failed. No retry or alternate access attempted.'
+            exit 1
+          fi
+      - name: Inspect only failed workspace attempt 41492657040
+        if: github.event_name == 'workflow_dispatch' && inputs.inspect_workspace_attempt && !inputs.inspect_owner && !inputs.inspect_rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! python3 -B .github/backup/stream_workspace_attempt.py | tailscale ssh root@hermes 'python3 -B -' 2>/dev/null; then
+            echo 'Fixed-attempt read-only diagnosis failed. No retry or alternate access attempted.'
             exit 1
           fi

@@ -131,7 +131,7 @@ class RollbackInspectionTests(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[1]/'workflows/release-preflight.yml').read_text()
         self.assertIn("run: python3 -B -m unittest", workflow)
         self.assertIn("inputs.inspect_owner && inputs.inspect_rollback", workflow)
-        self.assertIn("(!inputs.inspect_owner && !inputs.inspect_rollback)", workflow)
+        self.assertIn("(!inputs.inspect_owner && !inputs.inspect_rollback && !inputs.inspect_workspace_attempt)", workflow)
         self.assertIn("inputs.inspect_rollback && !inputs.inspect_owner", workflow)
         self.assertIn('"$EXPECTED_LIVE_SHA" "$EXPECTED_RELEASE_PATH"', workflow)
         self.assertNotIn('stream_rollback_preflight.py ${{', workflow)
