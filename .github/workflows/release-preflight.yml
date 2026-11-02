@@ -17,7 +17,16 @@ on:
         default: false
         type: boolean
       expected_live_sha:
-        description: 'Full currently deployed SHA, required for private owner inspection'
+        description: 'Full currently deployed SHA, required for either pinned inspection'
+        required: false
+        type: string
+      inspect_rollback:
+        description: 'Inspect only the named UAT flag and exact live rollback files'
+        required: false
+        default: false
+        type: boolean
+      expected_release_path:
+        description: 'Exact release path verified by the preceding aggregate inspection'
         required: false
         type: string
 permissions:
@@ -38,6 +47,9 @@ jobs:
           persist-credentials: false
       - name: Test aggregate-only inspection and existing transport
         run: python3 -B -m unittest discover -s .github/backup -p 'test_*.py' -v
+      - name: Reject conflicting inspection modes
+        if: github.event_name == 'workflow_dispatch' && inputs.inspect_owner && inputs.inspect_rollback
+        run: exit 1
       - name: Check existing private destination identity without uploading
         env:
           GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
@@ -56,7 +68,7 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
       - name: Inspect aggregate release prerequisites without changing the host
-        if: github.event_name != 'workflow_dispatch' || !inputs.inspect_owner
+        if: github.event_name != 'workflow_dispatch' || (!inputs.inspect_owner && !inputs.inspect_rollback)
         shell: bash
         run: |
           set -euo pipefail
@@ -78,5 +90,17 @@ jobs:
           # stdin. Never echo, source, upload, or save the input stream.
           if ! python3 .github/backup/stream_owner_preflight.py | tailscale ssh root@hermes 'python3 -B -' 2>/dev/null; then
             echo 'Private owner inspection could not complete safely. No account or email was created.'
+            exit 1
+          fi
+      - name: Inspect pinned UAT flag and rollback files without changing the host
+        if: github.event_name == 'workflow_dispatch' && inputs.inspect_rollback && !inputs.inspect_owner
+        env:
+          EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+          EXPECTED_RELEASE_PATH: ${{ inputs.expected_release_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! python3 -B .github/backup/stream_rollback_preflight.py "$EXPECTED_LIVE_SHA" "$EXPECTED_RELEASE_PATH" | tailscale ssh root@hermes 'python3 -B -' 2>/dev/null; then
+            echo 'Pinned read-only inspection failed. No retry or alternate access attempted.'
             exit 1
           fi

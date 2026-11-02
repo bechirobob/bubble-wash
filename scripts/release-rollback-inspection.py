@@ -106,4 +106,3 @@ def rollback_inspection(expected_sha, expected_path):
     finally:
         if fd is not None:
             os.close(fd)
-
