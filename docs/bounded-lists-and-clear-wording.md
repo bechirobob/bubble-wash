@@ -1,5 +1,93 @@
 # Bounded lists and clearer wording
 
+## Staff workspace refinement — 2026-11-02
+
+The staff shell, job flow and case-linked order use white ledger surfaces and
+straight neutral dividers. Active navigation, mobile stages and selected cases
+retain a neutral selection fill. Main headings are 24px on desktop and 22px on
+mobile; job and case headings use 22px/20px. The approved role characters,
+two-line workspace switcher, stage/count pairing, blue-green actions and real
+brand artwork remain intact. Instructions that merely repeat a view's title are
+removed; payment/message review boundaries and operational warnings remain.
+
+Vendor and rider current-job forms remain mounted while searching or changing
+queue filters. If the searched response excludes the job, its draft remains
+visible with actions disabled until availability is verified again. Clear filters
+restores Needs action, empties the search and returns focus to the search input.
+The collapsed filter heading indicates an active filter. Order links expose their
+reference in the accessible name. No server contract, role or customer flow changes.
+
+The follow-up keeps the queue mounted while an order detail is open: loaded pages,
+drafts and internal scrolling survive, the detail heading receives focus, and Back
+returns to the originating order link and document scroll position. Detail reads
+do not replace queue results. Filtered-out current jobs have a specific explanation,
+distinct from a failed availability read or a genuinely empty queue.
+
+Survey result panels now share the white ledger surface and neutral selected tabs;
+chart colour, owner-only access, filters, response dialogs and pagination retain
+their existing meaning. Vendor status text no longer has a tinted tile. Filter
+controls occupy a full row above search; new-case disclosures reserve an unbroken
+action column. The navigation focus ring is inset so the scrolling nav cannot clip
+it into stray strokes; Sign out loses only its inherited divider, not its focus.
+
+Customer change requests show pickup date/window only for rescheduling. Switching
+request type preserves those mounted draft values but disables irrelevant fields
+so cancellation/care/refund payloads do not include them. A failed send retains
+the selected request and note; success resets to rescheduling. Existing retry keys,
+server confirmation, order access, billing and customer branding are unchanged.
+An already-authenticated order no longer shows the sign-in form's contact hint
+inside its change-request status area.
+
+The first candidate's full prepared-browser run passed (41447897487, c18f5cd).
+Independent screenshot review identified the remaining survey/status fills and
+filter/disclosure alignment issues above. Follow-up browser coverage directly visits
+admin dispatch/orders/people/cases/activity/privacy, vendor capacity/history, rider
+history and support cases/history, in addition to the existing saved four-role,
+customer, survey and worklist journeys. A separate queue/detail/back regression
+checks page and focus restoration. New screenshots and exact-candidate browser
+results are required before declaring the follow-up visually complete.
+
+On cdc421a, survey proof and the expanded staff route checks passed. The new queue
+return regression failed before navigation because its fixtures did not qualify
+for Needs action; the test now deliberately chooses All active and checks that
+filter on return as well as page and focus. The complete follow-up browser run
+must pass before this navigation behavior or the customer request refinement is
+reported as verified.
+
+The corrected queue/detail/back regression and customer request-type draft/payload
+checks passed at Chromium 320/390/1440 and WebKit 390 on ee00c9d. Final exact-head
+verification includes the authenticated-order status correction above.
+
+Scope reconciliation:
+
+| Surface | Refinement and validation scope |
+| --- | --- |
+| Admin board/orders/details | White ledger, compact headings, icon/count pairing, search reset, list page/scroll/focus return; synthetic action and route checks |
+| Dispatch/people/cases/activity/privacy | Shared surfaces and shorter headings/copy; direct rendered route sweep; existing role/write/failure journeys retained |
+| Vendor jobs/capacity/history | Draft-safe job filtering, clear availability wording, aligned filter controls; capacity draft and history route review |
+| Rider stops/details/history | Labelled route actions, role artwork, long-destination containment, queue return and direct history review |
+| Support cases/history | White dossier, non-wrapping new-case action, retained failed-save drafts and direct history review |
+| Worklist/payment/message reviews | Shared shell/copy; existing ownership, retry, Back/Forward, paging and read-only boundary tests |
+| Owner survey results | White panels, neutral tabs, unchanged chart meaning; filters, pagination, dialog/focus and owner-access proof |
+| Customer manage/request | Request-specific fields, retained drafts/retries and accurate status; long-content and request transport tests |
+| Public booking/tracking/services/privacy | Product identity and behavior deliberately unchanged; existing public/customer journeys and customer/staff separation checks remain required |
+
+Representative screenshots and automated route checks are not exhaustive physical
+device validation. The final screenshot review and release blockers remain explicit;
+no production deployment is claimed by this record.
+
+Release remains blocked by unchanged dependency audit findings (glob/minimatch,
+17 moderate findings) and runner source-admission guard test failures. Neither the
+audit threshold nor admission controls have been weakened. Dependencies and runner
+pins require a separately reviewed compatibility/update plan.
+
+Candidate validation: TypeScript, focused lint and 12 bounded-list/worklist/style
+checks passed locally. The existing prepared GitHub browser suite owns graphical
+acceptance at Chromium 320/390/1440 and WebKit 390; the service-desk tests exercise
+draft preservation, empty search recovery, keyboard focus, neutral surfaces,
+heading size and job/queue placement. Screenshots must be inspected before visual
+completion or release. This record does not claim deployment.
+
 This presentation-only change uses the existing compact Bubble Wash layout. It does not change authorization, assignments, payment actions, reference allocation, notification delivery, or the logo.
 
 ## Included

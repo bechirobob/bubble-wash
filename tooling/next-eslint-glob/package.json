@@ -4,7 +4,7 @@
   "private": true,
   "main": "index.cjs",
   "dependencies": {
-    "glob": "13.0.6",
-    "minimatch": "10.2.6"
+    "glob": "14.0.3",
+    "minimatch": "11.0.4"
   }
 }

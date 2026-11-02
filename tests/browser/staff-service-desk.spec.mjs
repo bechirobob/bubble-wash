@@ -29,7 +29,7 @@ async function signIn(page, role) {
 }
 async function fixtureOrders(page, readRows) {
   let fulfilled = 0;
-  const respond = route => { fulfilled++; return route.fulfill({ json: { ok: true, orders: typeof readRows === 'function' ? readRows() : readRows, nextOffset: null } }); };
+  const respond = route => { fulfilled++; return route.fulfill({ json: { ok: true, orders: typeof readRows === 'function' ? readRows(route.request()) : readRows, nextOffset: null } }); };
   await page.route('**/api/orders?*', respond);
   await page.route('**/api/orders', respond);
   return () => expect.poll(() => fulfilled, { message: 'Workspace fetched the intended synthetic order projection' }).toBeGreaterThan(0);
@@ -41,6 +41,37 @@ async function expectWorkspaceSwitcher(page) {
   await expect(trigger.locator('svg rect')).toHaveCount(0);
   await expect(trigger).not.toContainText('⌄');
   await expect(trigger).toHaveCSS('min-height', '44px');
+}
+
+async function expectCompactWhiteWorkspace(page, testInfo) {
+  await expect(page.locator('.portalPage.staffDesk')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  const heading = page.locator('.staffViewHeader h1');
+  if (testInfo.project.use.viewport.width <= 700) {
+    expect(await heading.evaluate(node => parseFloat(getComputedStyle(node).fontSize))).toBeLessThanOrEqual(24);
+  }
+  await expect(page.locator('.staffSectionNav a[aria-current="page"]')).toHaveCSS('background-color', 'rgb(240, 240, 240)');
+  const decoration = await page.locator('.staffViewHeader h1, .staffSectionNav a[aria-current="page"], .staffStageLane.selected .staffStageSelector').evaluateAll(nodes => nodes.map(node => {
+    const style = getComputedStyle(node);
+    return { box: style.boxShadow, text: style.textShadow, filter: style.filter };
+  }));
+  for (const style of decoration) {
+    expect(style.box).toBe('none');
+    expect(style.text).toBe('none');
+    expect(style.filter).not.toContain('drop-shadow');
+  }
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+}
+
+async function expectJobAndQueueGeometry(page, testInfo) {
+  const sheet = await page.locator('.staffRoleFeatured').boundingBox();
+  const queue = await page.locator('.staffRoleLedger').boundingBox();
+  expect(sheet).not.toBeNull();
+  expect(queue).not.toBeNull();
+  if (testInfo.project.use.viewport.width <= 700) {
+    expect(queue.y).toBeGreaterThanOrEqual(sheet.y + sheet.height - 1);
+  } else {
+    expect(queue.x).toBeGreaterThanOrEqual(sheet.x + sheet.width - 1);
+  }
 }
 
 async function expectStaffControlLinks(page) {
@@ -55,6 +86,9 @@ async function expectStaffControlLinks(page) {
   await expect(navigation.nth(1)).toBeFocused();
   await expect(navigation.nth(1)).toHaveCSS('outline-style', 'solid');
   await expect(navigation.nth(1)).toHaveCSS('outline-width', '2px');
+  await expect(navigation.nth(1)).toHaveCSS('outline-offset', '-2px');
+  await expect(navigation.nth(1)).toHaveCSS('border-left-width', '0px');
+  await expect(page.locator('.staffSignOut')).toHaveCSS('border-left-width', '0px');
 }
 
 test('approved service board stays compact and history tools are secondary', async ({ page }, testInfo) => {
@@ -70,6 +104,10 @@ test('approved service board stays compact and history tools are secondary', asy
   await washing.click();
   await expect(washing).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.staffStageLane.selected')).toContainText('BW-1036');
+  await expectCompactWhiteWorkspace(page, testInfo);
+  if (testInfo.project.use.viewport.width <= 700) {
+    await expect(page.locator('.staffStageLane.selected .staffStageSelector')).toHaveCSS('background-color', 'rgb(240, 240, 240)');
+  }
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expectStaffControlLinks(page);
   const followUp = page.getByRole('navigation', { name: 'Operations follow-up', exact: true });
@@ -116,16 +154,48 @@ test('approved service board stays compact and history tools are secondary', asy
   await expect(page.locator('.staffAccountMenu')).not.toHaveAttribute('open', '');
 });
 
-test('vendor current job retains intake draft across refresh reordering', async ({ page }, testInfo) => {
+test('vendor current job retains intake draft through search, filters and refresh reordering', async ({ page }, testInfo) => {
   await signIn(page, 'vendor');
   const job = { ...orders[2], vendor: 'Synthetic vendor', status: 'At Vendor', lastEventType: 'driver-route-log', workflowStage: { ...orders[2].workflowStage, key: 'at-vendor', label: 'At Vendor' } };
   let rows = [job, { ...orders[4], vendor: 'Synthetic vendor' }];
-  const assertOrdersRead = await fixtureOrders(page, () => rows);
+  const assertOrdersRead = await fixtureOrders(page, request => {
+    const query = new URL(request.url()).searchParams.get('q')?.toLowerCase();
+    return query ? rows.filter(order => `${order.bookingReference} ${order.customer}`.toLowerCase().includes(query)) : rows;
+  });
   await page.goto('/vendors');
   await assertOrdersRead();
   await expect(page.locator('.staffWorkTicket')).toContainText('BW-1036');
   await page.locator('.staffWorkTicket').getByRole('button', { name: 'Confirm bag intake', exact: true }).click();
   await page.getByLabel('Bag/item count', { exact: true }).fill('3');
+  await expectCompactWhiteWorkspace(page, testInfo);
+  await expectJobAndQueueGeometry(page, testInfo);
+  await expect(page.locator('.staffJobFlow')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await expect(page.locator('.staffOrderState')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  const tools = page.locator('.staffQueueTools');
+  await tools.locator('summary').click();
+  const search = tools.getByRole('searchbox', { name: 'Find an order', exact: true });
+  await search.fill('NO-SYNTHETIC-ORDER-MATCH');
+  await expect(tools.locator('summary')).toHaveText('Find and filter orders · Filtered');
+  await expect(page.getByRole('region', { name: 'Order queue', exact: true }).getByText('No orders match this search.', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Bag/item count', { exact: true })).toHaveValue('3');
+  await expect(page.getByLabel('Bag/item count', { exact: true })).toBeDisabled();
+  await expect(page.locator('.staffSyncLine')).toContainText('outside these search results');
+  await expect(page.locator('.sharedBoardSection')).not.toContainText('No shared orders yet');
+  const filterBoxes = await tools.locator('.staffTextFilters button').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().y));
+  expect(Math.max(...filterBoxes) - Math.min(...filterBoxes)).toBeLessThanOrEqual(1);
+  await tools.getByRole('button', { name: 'History', exact: true }).click();
+  await expect(page.getByLabel('Bag/item count', { exact: true })).toHaveValue('3');
+  await page.screenshot({ path: testInfo.outputPath('vendor-filtered-draft.png'), fullPage: true });
+  await tools.getByRole('button', { name: 'Clear filters', exact: true }).click();
+  await expect(search).toHaveValue('');
+  await expect(search).toBeFocused();
+  await expect(tools.getByRole('button', { name: 'Needs action', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(tools.getByRole('button', { name: 'Clear filters', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Bag/item count', { exact: true })).toHaveValue('3');
+  await expect(page.getByLabel('Bag/item count', { exact: true })).toBeEnabled();
+  await tools.getByRole('button', { name: 'All active', exact: true }).click();
+  await expect(page.getByLabel('Bag/item count', { exact: true })).toHaveValue('3');
+  await tools.getByRole('button', { name: 'Clear filters', exact: true }).click();
   rows = [...rows].reverse();
   await page.locator('.staffRoleLedger').getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.getByLabel('Bag/item count', { exact: true })).toHaveValue('3');
@@ -151,6 +221,8 @@ test('rider vendor collection does not display customer destination or unrelated
   await expect(page.locator('.staffRouteFacts')).toContainText('Vendor destination needed');
   await expect(page.locator('.staffTicketNavigation').getByRole('link', { name: 'Directions', exact: true })).toHaveCount(0);
   await expect(page.locator('.staffTicketNavigation').getByRole('link', { name: 'Scan bag', exact: true })).toHaveAttribute('href', '/scan');
+  await expectCompactWhiteWorkspace(page, testInfo);
+  await expectJobAndQueueGeometry(page, testInfo);
   await expectStaffControlLinks(page);
   await page.screenshot({ path: testInfo.outputPath('rider-vendor-collection.png'), fullPage: true });
 });
@@ -280,4 +352,121 @@ test('long rider destination names stay inside ticket and assigned stop rows', a
   expect(overflowing).toBe(0);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path:testInfo.outputPath('rider-long-destination.png'), fullPage:true });
+});
+
+// Visit the actual role destinations: an href assertion is not a rendered review.
+for (const [role, routes] of Object.entries({
+  admin: [['dispatch', 'Rider routes and ETAs'], ['orders', 'Order operations'], ['people', 'Partners and staff'], ['cases', 'Customer cases'], ['activity', 'Recent changes'], ['operations', 'Privacy requests']],
+  vendor: [['capacity', 'Today’s availability'], ['activity', 'Saved updates']],
+  driver: [['activity', 'Saved route updates']],
+  support: [['cases', 'Customer cases'], ['activity', 'Saved support updates']],
+})) {
+  test(`${role} secondary workspace routes retain readable controls and navigation`, async ({ page }, testInfo) => {
+    await signIn(page, role);
+    const path = { admin: '/admin', vendor: '/vendors', driver: '/drivers', support: '/support' }[role];
+    for (const [view, title] of routes) {
+      await page.goto(`${path}?view=${view}`);
+      await expect(page.getByRole('heading', { level: 1, name: title, exact: true })).toBeVisible();
+      await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+      await expectCompactWhiteWorkspace(page, testInfo);
+      await expectWorkspaceSwitcher(page);
+      const menu = page.locator('.staffAccountMenu > summary');
+      await menu.focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('.staffAccountMenu')).toHaveAttribute('open', '');
+      await page.keyboard.press('Escape');
+      await expect(menu).toBeFocused();
+      await expect(page.locator('.staffAccountMenu')).not.toHaveAttribute('open', '');
+      if (role === 'vendor' && view === 'capacity') {
+        const capacity = page.getByRole('spinbutton', { name: 'Order slots remaining', exact: true });
+        await expect(capacity).toBeVisible();
+        await capacity.fill('7');
+        await expect(capacity).toHaveValue('7'); // Local draft only; no capacity write.
+      }
+      if (role === 'admin' && view === 'people') {
+        const editor = page.locator('.staffRosterEditor').first();
+        if (await editor.count()) await editor.locator('summary').click();
+      }
+      if (role === 'support' && view === 'cases') {
+        const summary = page.locator('.staffRosterEditor > summary').filter({ hasText: 'Open a new case' });
+        await expect(summary.locator('b')).toHaveCSS('white-space', 'nowrap');
+        const bounds = await summary.evaluate(node => { const a=node.querySelector('span').getBoundingClientRect(), b=node.querySelector('b').getBoundingClientRect(); return {textRight:a.right,actionLeft:b.left}; });
+        expect(bounds.textRight).toBeLessThanOrEqual(bounds.actionLeft);
+        await summary.click();
+        await expect(page.locator('.staffRosterEditor[open] form')).toBeVisible();
+      }
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`${role}-${view}-workspace.png`), fullPage: true });
+    }
+  });
+}
+
+test('paged order queue retains context and updates the saved detail row after retry', async ({ page }, testInfo) => {
+  await signIn(page, 'admin');
+  const rows = Array.from({ length: 23 }, (_, index) => ({ ...orders[1], orderId: `queue-context-${index}`, bookingReference: `BW-${4000 + index}`, customer: `Synthetic queue customer ${index}`, status: 'Pickup scheduled', workflowStage: { ...orders[1].workflowStage, key: 'pickup-scheduled', label: 'Pickup scheduled' } }));
+  const requestedOffsets = [];
+  let detailMode = '503';
+  let saved = 0;
+  await page.route('**/api/orders?*', async route => {
+    const params = new URL(route.request().url()).searchParams;
+    const query = params.get('q');
+    if (query) {
+      if (detailMode === 'network') return route.abort('failed');
+      if (detailMode === '503' || detailMode === '403') return route.fulfill({ status: Number(detailMode), json: { ok: false, error: 'Synthetic detail read failure' } });
+      return route.fulfill({ json: { ok: true, orders: detailMode === 'empty' ? [] : rows.filter(order => order.orderId === query), nextOffset: null } });
+    }
+    const offset = Number(params.get('offset') || 0);
+    requestedOffsets.push(offset);
+    return route.fulfill({ json: { ok: true, orders: rows.slice(offset, offset + 10), nextOffset: offset === 0 ? 10 : offset === 10 ? 20 : null } });
+  });
+  await page.route('**/api/orders/advance', async route => {
+    expect(route.request().postDataJSON()).toMatchObject({ orderId: 'queue-context-15', actionKey: 'admin-assign-vendor' });
+    saved++;
+    rows[15] = { ...rows[15], status: 'Vendor assigned', workflowStage: { ...rows[15].workflowStage, key: 'vendor-assigned', label: 'Vendor assigned' } };
+    await route.fulfill({ json: { ok: true, nextStatus: 'Vendor assigned', id: 'synthetic-saved-event' } });
+  });
+  await page.goto('/admin?view=orders');
+  await page.locator('.staffQueueTools > summary').click();
+  await page.getByRole('button', { name: 'All active', exact: true }).click();
+  await page.getByRole('button', { name: 'Load older orders', exact: true }).click();
+  await expect.poll(() => requestedOffsets.includes(10)).toBe(true);
+  await page.getByRole('button', { name: 'Next page of Order queue', exact: true }).click();
+  const target = page.getByRole('link', { name: 'View order BW-4015', exact: true });
+  await target.focus();
+  const region = page.getByRole('region', { name: 'Order queue', exact: true });
+  const scrollBefore = await region.evaluate(node => node.scrollTop);
+  await target.click();
+  await expect(page.getByRole('heading', { name: 'Order details unavailable', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Order not found', exact: true })).toHaveCount(0);
+  detailMode = 'network';
+  const retry = page.getByRole('button', { name: 'Retry loading order', exact: true });
+  await retry.click();
+  await expect(page.locator('.sharedBoardSection > [role="status"]')).toContainText('Unable to load shared orders.');
+  await expect(retry).toBeVisible();
+  detailMode = 'success';
+  await retry.click();
+  await expect(page.locator('.orderDetail h2')).toHaveText('Synthetic queue customer 15');
+  await expect(page.locator('.orderDetail h2')).toBeFocused();
+  await page.locator('.orderDetail').getByRole('button', { name: 'Assign vendor + driver', exact: true }).click();
+  await expect.poll(() => saved).toBe(1);
+  await expect(page.locator('.staffDetailHeader')).toContainText('Vendor assigned');
+  await expect(page.locator('.orderDetail').getByRole('button', { name: 'Assign vendor + driver', exact: true })).toHaveCount(0);
+  const readsBeforeBack = requestedOffsets.length;
+  await page.getByRole('link', { name: 'Back to order list', exact: false }).click();
+  await expect(target).toBeVisible();
+  await expect(target).toBeFocused();
+  await expect(target.locator('..')).toContainText('Vendor assigned');
+  await expect(page.getByRole('button', { name: 'All active', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('navigation', { name: 'Order queue pages', exact: true })).toContainText('Page 2 of 2');
+  await expect.poll(() => region.evaluate(node => node.scrollTop)).toBe(scrollBefore);
+  expect(requestedOffsets.length).toBe(readsBeforeBack);
+  await expect(page.getByRole('button', { name: 'Load older orders', exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('order-queue-return-context.png'), fullPage: true });
+  for (const mode of ['403', 'empty']) {
+    detailMode = mode;
+    await page.goto('/admin?view=orders&order=queue-context-15');
+    await expect(page.getByRole('heading', { name: 'Order not found', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Retry loading order', exact: true })).toHaveCount(0);
+    await expect(page.locator('.orderDetail')).toHaveCount(0);
+  }
 });

@@ -163,27 +163,27 @@ function noticeClass(message: string) {
 function rolePromise(role: StaffRole, view: string) {
   const copy: Record<StaffRole, Record<string, { eyebrow: string; title: string; subtitle: string }>> = {
     admin: {
-      overview: { eyebrow: "Operations", title: "Service board", subtitle: "A read-only view of orders, partners, routes, support, and payment follow-up." },
-      dispatch: { eyebrow: "Dispatch", title: "Rider routes and ETAs", subtitle: "Check assigned routes, locations shared with the page open, pickup windows, and estimated drive times." },
-      orders: { eyebrow: "Orders", title: "Order operations", subtitle: "Review one queue, then open an order for its next verified action and full history." },
-      people: { eyebrow: "People & onboarding", title: "Partners and staff", subtitle: "Manage vendor capacity, rider coverage, and the operating roster in one clear place." },
-      cases: { eyebrow: "Support oversight", title: "Customer cases", subtitle: "Review open cases and follow-up without entering the support team workspace." },
-      activity: { eyebrow: "History", title: "Recent changes", subtitle: "Saved updates, not a task list. This view covers the latest 80 available records." },
-      operations: { eyebrow: "Administration", title: "Privacy requests", subtitle: "Review requests and record their status. Message review and system details are available below." },
+      overview: { eyebrow: "Operations", title: "Service board", subtitle: "" },
+      dispatch: { eyebrow: "Dispatch", title: "Rider routes and ETAs", subtitle: "Assigned routes, pickup windows and rider updates." },
+      orders: { eyebrow: "Orders", title: "Order operations", subtitle: "" },
+      people: { eyebrow: "People & onboarding", title: "Partners and staff", subtitle: "" },
+      cases: { eyebrow: "Support oversight", title: "Customer cases", subtitle: "" },
+      activity: { eyebrow: "History", title: "Recent changes", subtitle: "Latest 80 saved updates." },
+      operations: { eyebrow: "Administration", title: "Privacy requests", subtitle: "" },
     },
     vendor: {
-      jobs: { eyebrow: "Vendor workspace", title: "Wash floor", subtitle: "Open one assigned job at a time to accept, receive, wash, or mark it ready." },
-      capacity: { eyebrow: "Vendor capacity", title: "Today’s availability", subtitle: "Keep capacity and service coverage accurate for assignment." },
-      activity: { eyebrow: "Vendor history", title: "Saved updates", subtitle: "Review the production updates recorded by this workspace." },
+      jobs: { eyebrow: "Vendor workspace", title: "Wash floor", subtitle: "" },
+      capacity: { eyebrow: "Vendor capacity", title: "Today’s availability", subtitle: "" },
+      activity: { eyebrow: "Vendor history", title: "Saved updates", subtitle: "" },
     },
     driver: {
-      route: { eyebrow: "Driver workspace", title: "Your next stop", subtitle: "Open the next stop for directions, optional live sharing, handoff evidence, delivery, or a delay report." },
-      activity: { eyebrow: "Route history", title: "Saved route updates", subtitle: "Review handoffs and route evidence already recorded." },
+      route: { eyebrow: "Driver workspace", title: "Your next stop", subtitle: "" },
+      activity: { eyebrow: "Route history", title: "Saved route updates", subtitle: "" },
     },
     support: {
-      cases: { eyebrow: "Support desk", title: "Customer cases", subtitle: "Work one case at a time, keeping every decision attached to its case history." },
-      orders: { eyebrow: "Order follow-up", title: "Orders needing support", subtitle: "Find an order, review customer impact, and record the next support action." },
-      activity: { eyebrow: "Support history", title: "Saved support updates", subtitle: "Review case and customer follow-up activity." },
+      cases: { eyebrow: "Support desk", title: "Customer cases", subtitle: "" },
+      orders: { eyebrow: "Order follow-up", title: "Orders needing support", subtitle: "" },
+      activity: { eyebrow: "Support history", title: "Saved support updates", subtitle: "" },
     },
   };
   return copy[role][view] ?? Object.values(copy[role])[0];
@@ -520,7 +520,7 @@ function AvailabilityBoard({ role, mode = "all", refreshToken = 0 }: { role: Sta
   return (
     <section className="staffContentSection availabilitySection" aria-busy={!hasLoaded}>
       <div className="staffSectionHeader">
-        <div><h2>Availability and coverage</h2><p>Available slots and service areas for assigning orders.</p></div>
+        <div><h2>Availability and coverage</h2></div>
         <button className="button secondary" type="button" onClick={() => loadAvailability()}>Refresh</button>
       </div>
 
@@ -864,7 +864,7 @@ function OrderQueueRow({ order, href }: { order: OrderSummary; href: string }) {
     <div><strong>{order.workflowStage.label}</strong><span>{workTiming(order)}</span></div>
     <div><strong>{order.area}</strong><span>{order.routeWindow}</span></div>
     <div><strong>{order.vendor !== "Unassigned" ? order.vendor : "Vendor pending"}</strong><span>{order.driver !== "Unassigned" ? order.driver : "Rider pending"}</span></div>
-    <Link href={href}>View order</Link>
+    <Link href={href} aria-label={`View order ${bookingLabel(order)}`}>View order</Link>
   </article>;
 }
 
@@ -1287,6 +1287,12 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
   const [featuredSnapshot, setFeaturedSnapshot] = useState<OrderSummary | null>(null);
   const [ordersUnavailable, setOrdersUnavailable] = useState(false);
   const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const [detailOrders, setDetailOrders] = useState<OrderSummary[]>([]);
+  const [detailLoadedId, setDetailLoadedId] = useState("");
+  const [detailUnavailableId, setDetailUnavailableId] = useState("");
+  const returnLink = useRef<HTMLAnchorElement | null>(null);
+  const returnScrollY = useRef(0);
+  const detailHeading = useRef<HTMLHeadingElement>(null);
   const [liveLocations, setLiveLocations] = useState<DispatchLiveLocation[]>([]);
   const [locationError, setLocationError] = useState("");
   const [status, setStatus] = useState("Loading shared order board…");
@@ -1294,30 +1300,50 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
   const [hasLoaded, setHasLoaded] = useState(false);
   const [queueView, setQueueView] = useState<QueueView>("action");
   const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const olderPagesLoaded = useRef(false);
 
+  const markDetailFailure = useCallback((responseStatus?: number) => {
+    if (!selectedOrderId) return;
+    const inaccessible = responseStatus !== undefined && [401, 403, 404].includes(responseStatus);
+    setDetailLoadedId(selectedOrderId);
+    setDetailUnavailableId(inaccessible ? "" : selectedOrderId);
+    if (inaccessible) setDetailOrders([]);
+  }, [selectedOrderId]);
+
   async function loadOrders(showLoading = true, offset = 0) {
     if (showLoading) setStatus("Loading shared order board…");
-    olderPagesLoaded.current = offset > 0;
+    if (!selectedOrderId) olderPagesLoaded.current = offset > 0;
     try {
       const response = await fetch(`/api/orders?${new URLSearchParams({ offset: String(offset), q: selectedOrderId || query })}`);
       const data = await response.json();
       if (!response.ok || !data.ok) {
         setOrdersUnavailable(true);
+          markDetailFailure(response.status);
         setStatus(data.error ?? "Unable to load shared orders.");
         setHasLoaded(true);
         return;
       }
       setOrdersUnavailable(false);
+      if (selectedOrderId) {
+        setDetailUnavailableId("");
+        setDetailOrders(data.orders);
+        setOrders(current => current.map(order => data.orders.find((updated: OrderSummary) => updated.orderId === order.orderId) ?? order));
+        setFeaturedSnapshot(current => current ? data.orders.find((updated: OrderSummary) => updated.orderId === current.orderId) ?? current : null);
+        setDetailLoadedId(selectedOrderId);
+      }
+      else {
       setOrders((current) => offset ? [...current, ...data.orders.filter((order: OrderSummary) => !current.some((existing) => existing.orderId === order.orderId))] : data.orders);
       setFeaturedSnapshot((current) => current ? data.orders.find((order: OrderSummary) => order.orderId === current.orderId) ?? current : data.orders.find((order: OrderSummary) => !isClosedOrder(order) && orderMatchesRoleFocus(order, role, userName, allStaffAccess)) ?? null);
       setNextOffset(data.nextOffset);
+      }
       setHasLoaded(true);
       setLastSyncedAt(new Date().toISOString());
-      setStatus(data.orders.length ? "Updated." : "No shared orders yet.");
+      setStatus(data.orders.length ? "Updated." : query.trim() && !selectedOrderId ? "No orders match this search." : "No orders to show.");
     } catch {
       setOrdersUnavailable(true);
+          markDetailFailure();
       setStatus("Unable to load shared orders.");
       setHasLoaded(true);
     }
@@ -1326,7 +1352,7 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
   useEffect(() => {
     let active = true;
     async function refresh(showLoading = false) {
-      if (!active || (!showLoading && (document.hidden || olderPagesLoaded.current))) return;
+      if (!active || (!showLoading && (document.hidden || (!selectedOrderId && olderPagesLoaded.current)))) return;
       if (showLoading) setStatus("Loading shared order board…");
       try {
         const response = await fetch(`/api/orders?${new URLSearchParams({ q: selectedOrderId || query })}`);
@@ -1334,32 +1360,44 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
         if (!active) return;
         if (!response.ok || !data.ok) {
           setOrdersUnavailable(true);
+          markDetailFailure(response.status);
         setStatus(data.error ?? "Unable to load shared orders.");
           setHasLoaded(true);
           return;
         }
         setOrdersUnavailable(false);
+      if (selectedOrderId) {
+        setDetailUnavailableId("");
+        setDetailOrders(data.orders);
+        setOrders(current => current.map(order => data.orders.find((updated: OrderSummary) => updated.orderId === order.orderId) ?? order));
+        setFeaturedSnapshot(current => current ? data.orders.find((updated: OrderSummary) => updated.orderId === current.orderId) ?? current : null);
+        setDetailLoadedId(selectedOrderId);
+      }
+      else {
       setOrders(data.orders);
         setFeaturedSnapshot((current) => current ? data.orders.find((order: OrderSummary) => order.orderId === current.orderId) ?? current : data.orders.find((order: OrderSummary) => !isClosedOrder(order) && orderMatchesRoleFocus(order, role, userName, allStaffAccess)) ?? null);
       setNextOffset(data.nextOffset);
+      }
         setHasLoaded(true);
         setLastSyncedAt(new Date().toISOString());
-        setStatus(data.orders.length ? "Updated." : "No shared orders yet.");
+        setStatus(data.orders.length ? "Updated." : query.trim() && !selectedOrderId ? "No orders match this search." : "No orders to show.");
       } catch {
         if (active) {
           setOrdersUnavailable(true);
+          markDetailFailure();
       setStatus("Unable to load shared orders.");
           setHasLoaded(true);
         }
       }
     }
-    refresh(true);
+    // Keep loaded older queue pages while a detail is open and on return.
+    if (selectedOrderId || !olderPagesLoaded.current) void refresh(true);
     const interval = window.setInterval(() => void refresh(false), 30_000);
     return () => {
       active = false;
       window.clearInterval(interval);
     };
-  }, [selectedOrderId, query, role, userName, allStaffAccess]);
+  }, [selectedOrderId, query, role, userName, allStaffAccess, markDetailFailure]);
 
   useEffect(() => {
     if (role !== "admin" || !selectedOrderId) return;
@@ -1392,7 +1430,7 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
   const visibleOrders = matchingOrders;
   const stats = queueStats(activeOrders, role, userName, 0, allStaffAccess);
   const queueHeading = !hasLoaded ? "Loading order queue…" : queueView === "action" ? (stats.focusCount ? `${stats.focusCount} ${stats.focusLabel} in loaded orders` : "No work for this role in loaded orders") : queueView === "active" ? `${activeOrders.length} active orders loaded` : `${orders.length} orders loaded`;
-  const selectedOrder = selectedOrderId ? orders.find((order) => order.orderId.toLowerCase() === selectedOrderId.toLowerCase()) : null;
+  const selectedOrder = selectedOrderId ? detailOrders.find((order) => order.orderId.toLowerCase() === selectedOrderId.toLowerCase()) : null;
   const selectedLiveLocation = role === "admin" && selectedOrder ? liveLocationForOrder(selectedOrder, liveLocations) : undefined;
   const selectedDispatchEta = selectedOrder && dispatchStages.has(selectedOrder.workflowStage.key) ? dispatchEtaForLeg(selectedOrder) : null;
   const canSeePayment = role === "admin" || role === "support";
@@ -1400,15 +1438,25 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
   const detailHref = (orderId: string) => `${basePath}${basePath.includes("?") ? "&" : "?"}order=${encodeURIComponent(orderId)}`;
   const queueOrders = role === "driver" ? [...visibleOrders].sort((a, b) => ["Customer pickups", "Vendor handoffs", "Return deliveries", "Other assigned work"].indexOf(driverStopGroup(a)) - ["Customer pickups", "Vendor handoffs", "Return deliveries", "Other assigned work"].indexOf(driverStopGroup(b))) : visibleOrders;
 
-  const featuredOrder = !selectedOrderId && !query && queueView === "action" && (presentationRole === "vendor" || presentationRole === "driver") ? featuredSnapshot : undefined;
-  const featuredUnavailable = ordersUnavailable || Boolean(featuredSnapshot && !orders.some((order) => order.orderId === featuredSnapshot.orderId));
+  const featuredOrder = (presentationRole === "vendor" || presentationRole === "driver") ? featuredSnapshot : undefined;
+  const featuredMissing = Boolean(featuredSnapshot && !orders.some((order) => order.orderId === featuredSnapshot.orderId));
+  const featuredOutsideSearch = !ordersUnavailable && Boolean(normalizedQuery) && featuredMissing;
+  const featuredUnavailable = ordersUnavailable || featuredMissing;
+  useEffect(() => {
+    if (selectedOrderId) detailHeading.current?.focus();
+    else if (returnLink.current) {
+      returnLink.current.focus({ preventScroll: true });
+      window.scrollTo({ top: returnScrollY.current, behavior: "instant" });
+    }
+  }, [selectedOrderId, selectedOrder?.orderId]);
+
   return (
     <section className={`staffContentSection sharedBoardSection ${featuredOrder ? "staffRoleWorkboard" : ""}`} aria-busy={!hasLoaded}>
       {presentationRole === "driver" && !selectedOrderId && !featuredOrder ? <details className="staffRouteDisclosure"><summary>Route map and stops</summary><DispatchBoard orders={orders} role="driver" basePath={basePath} hasLoaded={hasLoaded} lastSyncedAt={lastSyncedAt} error={/unable/i.test(status) ? status : ""} embedded /></details> : null}
       {selectedOrderId ? selectedOrder ? <article className="staffDetailView orderDetail">
-        <Link className="staffBackLink" href={basePath}>← Back to order list</Link>
+        <Link className="staffBackLink" href={basePath} scroll={false}>← Back to order list</Link>
         <header className="staffDetailHeader">
-          <div><span className="staffFieldLabel">{bookingLabel(selectedOrder)}</span><h2>{selectedOrder.customer}</h2><p>{selectedOrder.workflowStage.label} · {workflowPhaseLabel(selectedOrder.workflowStage.key)}</p></div>
+          <div><span className="staffFieldLabel">{bookingLabel(selectedOrder)}</span><h2 ref={detailHeading} tabIndex={-1}>{selectedOrder.customer}</h2><p>{selectedOrder.workflowStage.label} · {workflowPhaseLabel(selectedOrder.workflowStage.key)}</p></div>
           <StageCountdown order={selectedOrder} />
         </header>
 
@@ -1438,26 +1486,34 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
 
           <details className="staffDetailDisclosure"><summary><span><strong>Order history</strong><small>{compactTimelineLabel(selectedOrder.eventCount)}</small></span></summary><div className="staffDisclosureBody"><BoundedList label="Order history" noun="updates" className="staffTimeline">{selectedOrder.timeline.map((event) => <div key={`${selectedOrder.orderId}-${event.id}-${event.createdAt}`}><time>{formatShortTime(event.createdAt)}</time><div><strong>{event.status}</strong><span>{event.type} · {event.actor}</span><p>{event.note}</p></div></div>)}</BoundedList></div></details>
         </div>
-      </article> : hasLoaded ? <div className="staffEmptyState"><h2>Order not found</h2><p>This order is not available to this staff role.</p><Link href={basePath}>Back to the order list</Link></div> : <LoadingSkeleton label="Loading order details" rows={4} variant="detail" /> : <>
+      </article> : detailLoadedId === selectedOrderId ? <div className="staffEmptyState"><h2>{detailUnavailableId === selectedOrderId ? "Order details unavailable" : "Order not found"}</h2><p>{detailUnavailableId === selectedOrderId ? "We couldn’t load this order. Try again." : "This order is not available to this staff role."}</p>{detailUnavailableId === selectedOrderId ? <button className="button secondary" type="button" onClick={() => void loadOrders()}>Retry loading order</button> : null}<Link href={basePath}>Back to the order list</Link></div> : <LoadingSkeleton label="Loading order details" rows={4} variant="detail" /> : null}
+      <div hidden={Boolean(selectedOrderId)} onClickCapture={(event) => {
+        const link = (event.target as Element).closest<HTMLAnchorElement>("a[href]");
+        if (link && new URL(link.href).searchParams.has("order")) {
+          returnLink.current = link;
+          returnScrollY.current = window.scrollY;
+        }
+      }}>
         <div className={featuredOrder ? "staffRoleGrid" : "staffQueueOnly"}>
         {presentationRole === "vendor" ? <VendorCapacitySummary canManage={role !== "admin"} /> : null}
         {featuredOrder ? <div className="staffRoleFeatured"><article className={`staffWorkTicket ${presentationRole === "driver" ? "staffRoutePass" : ""}`}>
           <header className="staffTicketHeader"><div><span className="staffJobReference">{presentationRole === "vendor" ? "Current job" : driverStopGroup(featuredOrder)}</span><h2>{presentationRole === "vendor" ? bookingLabel(featuredOrder) : ["picked-up", "ready"].includes(featuredOrder.workflowStage.key) ? featuredOrder.vendor : featuredOrder.area || "Assigned stop"}</h2></div><span className="staffOrderState">{featuredOrder.workflowStage.label}</span></header>
           {presentationRole === "vendor" ? <><div className="staffJobFlow">{([ ["collection", "Received", ["at-vendor"]], ["washing", "Washing", ["washing"]], ["return", "Ready", ["ready", "out-for-delivery", "delivered"]] ] as const).map(([key, label, stages]) => <span key={key} className={(stages as readonly string[]).includes(featuredOrder.workflowStage.key) ? "current" : ""}><LaundryFlowIcon stage={key} />{label}</span>)}</div><dl className="staffTicketFacts"><div><dt>Service</dt><dd>{featuredOrder.serviceType || "Not recorded"}</dd></div><div><dt>Intake</dt><dd><RecordedIntakeCount key={`${featuredOrder.orderId}:${featuredOrder.activityUpdatedAt}`} orderId={featuredOrder.orderId} /></dd></div><div><dt>Due</dt><dd>{workTiming(featuredOrder)}</dd></div></dl></> : <><p className="staffStopAddress">{["picked-up", "ready"].includes(featuredOrder.workflowStage.key) ? `${featuredOrder.workflowStage.key === "ready" ? "Vendor collection" : "Vendor handoff"} — confirm the assigned destination in order details.` : featuredOrder.pickupAddress || "Street address not recorded"}{!["picked-up", "ready"].includes(featuredOrder.workflowStage.key) && featuredOrder.landmark ? <small>{featuredOrder.landmark}</small> : null}</p><div className="staffRouteFacts"><strong>{bookingLabel(featuredOrder)}</strong><span>{featuredOrder.dispatch?.scheduledWindow || featuredOrder.routeWindow || "Window not recorded"}</span><span>{dispatchEtaForLeg(featuredOrder).label}: {dispatchEtaForLeg(featuredOrder).text}{dispatchEtaForLeg(featuredOrder).updatedAt ? ` · ${dispatchFreshness(dispatchEtaForLeg(featuredOrder).updatedAt)}` : ""}</span></div><div className="staffTicketNavigation">{featuredOrder.workflowStage.key !== "picked-up" && hasCustomerRoutePreview(featuredOrder) && featuredOrder.route.googleMapsUrl ? <a className="button primary" href={hasHubToCustomerDirections(featuredOrder) && featuredOrder.route.directionsUrl ? featuredOrder.route.directionsUrl : featuredOrder.route.googleMapsUrl} target="_blank" rel="noopener noreferrer"><MapPin size={18} aria-hidden="true" />Directions</a> : <Link className="button secondary" href={detailHref(featuredOrder.orderId)}>Review destination</Link>}<Link className="button secondary" href="/scan"><ScanLine size={18} aria-hidden="true" />Scan bag</Link></div><CustomerContactActions order={featuredOrder} role={role} /></>}
-          <p className="staffSyncLine">{featuredUnavailable ? "Current job availability could not be verified. Last saved details and drafts remain visible; actions are paused. Refresh to check again." : presentationRole === "driver" ? "" : "Current saved job"}</p><AutomatedOrderActions unavailable={featuredUnavailable} key={featuredOrder.orderId} allStaffAccess={allStaffAccess} order={featuredOrder} role={role} userName={userName} onSaved={() => loadOrders(false)} />
+          <p className="staffSyncLine">{featuredOutsideSearch ? "Current job is outside these search results. Your draft is kept. Clear filters to check availability before saving." : featuredUnavailable ? "Current job availability could not be verified. Your draft is kept and actions are paused. Refresh to check again." : presentationRole === "driver" ? "" : "Current saved job"}</p><AutomatedOrderActions unavailable={featuredUnavailable} key={featuredOrder.orderId} allStaffAccess={allStaffAccess} order={featuredOrder} role={role} userName={userName} onSaved={() => loadOrders(false)} />
           {queueOrders.some((order) => order.orderId !== featuredOrder.orderId) ? <button className="staffQuietAction" type="button" onClick={() => { if (window.confirm("Switch to the next assigned job? Any unsaved action fields on this job will be discarded.")) setFeaturedSnapshot(queueOrders.find((order) => order.orderId !== featuredOrder.orderId) ?? null); }}>Next assigned job</button> : null}
           <Link className="staffTicketDetails" href={detailHref(featuredOrder.orderId)}>{presentationRole === "vendor" ? "Job details & production exception" : "Stop details, live sharing & exceptions"} →</Link>
         </article></div> : null}
         <section className="staffRoleLedger"><div className="staffSectionHeader"><div><h2>{featuredOrder ? presentationRole === "vendor" ? "Job queue" : "Assigned stops" : queueHeading}</h2><p>{stats.riskCount} at risk · {stats.automationCount} verified actions in loaded orders</p></div><button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh</button></div>
-        <details className="staffQueueTools"><summary>Find and filter orders</summary><div className="staffFilterBar">
+        <details className="staffQueueTools"><summary>Find and filter orders{query || queueView !== "action" ? " · Filtered" : ""}</summary><div className="staffFilterBar">
           <div className="staffTextFilters" aria-label="Order queue view">{([ ["action", "Needs action"], ["active", "All active"], ["all", "History"] ] as Array<[QueueView, string]>).map(([key, label]) => <button aria-pressed={queueView === key} className={queueView === key ? "active" : ""} key={key} type="button" onClick={() => setQueueView(key)}>{label}</button>)}</div>
-          <label className="staffSearch"><span>Find an order</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value);  }} placeholder="Reference or customer name…" /></label>
+          <label className="staffSearch"><span>Find an order</span><input ref={searchRef} type="search" value={query} onChange={(event) => { olderPagesLoaded.current = false; setQuery(event.target.value); }} placeholder="Reference or customer name…" /></label>
+          {query || queueView !== "action" ? <button className="staffQuietAction" type="button" onClick={() => { olderPagesLoaded.current = false; setQuery(""); setQueueView("action"); searchRef.current?.focus(); }}>Clear filters</button> : null}
         </div></details>
         <BoundedList label="Order queue" noun="orders" className="staffOrderList" resetKey={`${queueView}:${query}`} loading={!hasLoaded} emptyState={<p className="staffEmptyState">{normalizedQuery ? "No orders match this search." : queueView === "action" ? "No orders in this loaded page currently need action from this role." : "No orders in this view yet."}</p>} header={featuredOrder ? undefined : <div className="staffOrderListHeader" aria-hidden="true"><span>Order</span><span>Stage</span><span>Collection</span><span>Assignment</span><span></span></div>}>
           {queueOrders.map((order, index) => <div key={order.orderId}>{featuredOrder ? <Link className={`staffRoleQueueRow ${presentationRole === "driver" ? "staffRouteLeg" : ""}`} href={detailHref(order.orderId)}>{presentationRole === "driver" ? <span className="staffLegNumber">{index + 1}</span> : <LaundryFlowIcon stage="washing" />}<span><strong>{presentationRole === "driver" ? driverStopGroup(order) : bookingLabel(order)}</strong><small>{presentationRole === "driver" ? `${["picked-up", "ready"].includes(order.workflowStage.key) ? order.vendor : order.area} · ${bookingLabel(order)}` : order.workflowStage.label}</small><small>{workTiming(order)}</small></span><span aria-hidden="true">→</span></Link> : <OrderQueueRow href={detailHref(order.orderId)} order={order} />}</div>)}
         </BoundedList>
         <div className="tableActionRow">{nextOffset !== null ? <button className="button secondary" onClick={() => loadOrders(false, nextOffset)}>Load older orders</button> : null}</div></section></div>
-      </>}
+      </div>
       <p className={noticeClass(status)} role="status" aria-live="polite">{status}{lastSyncedAt ? ` Last updated ${formatMetricTime(lastSyncedAt)}.` : ""}</p>
     </section>
   );
@@ -1471,7 +1527,7 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
 }
 
 export function PortalShell({ headingAction, heading, title, allStaffAccess = false, role, pageRole = role, userName, currentView, navigation, children }: PortalShellProps) {
-  const promise = heading ?? (currentView === "reconciliation" ? { eyebrow: "Read-only review", title: "Payments to check", subtitle: "Check invoices and related cases. This list cannot move money or change payments." } : currentView === "notifications" ? { eyebrow: "Message review", title: "Notification follow-up", subtitle: "Check unsent messages and unclear delivery results. This page cannot resend messages or turn on delivery services." } : currentView === "worklist" ? { eyebrow: "Staff operations", title: "Worklist", subtitle: "Tasks, availability checks, and follow-ups. Open the record before taking action." } : rolePromise(pageRole, currentView));
+  const promise = heading ?? (currentView === "reconciliation" ? { eyebrow: "Read-only review", title: "Payments to check", subtitle: "" } : currentView === "notifications" ? { eyebrow: "Message review", title: "Notification follow-up", subtitle: "" } : currentView === "worklist" ? { eyebrow: "Staff operations", title: "Worklist", subtitle: "" } : rolePromise(pageRole, currentView));
 
   async function logoutStaff() {
     try {
@@ -1581,7 +1637,7 @@ function StaffAccessRoster({ refreshToken = 0 }: { refreshToken?: number }) {
 function AdminOnboardingCenter({ onSubmit, status, pendingType = "" }: { onSubmit: SubmitHandler; status: Record<string, string>; pendingType?: string }) {
   return (
     <section className="staffContentSection onboardingCenter" aria-labelledby="admin-onboarding-title">
-      <div className="staffSectionHeader"><div><h2 id="admin-onboarding-title">Onboard partners and staff</h2><p>Add one person or partner at a time. Roster entry does not expose or generate a password.</p></div></div>
+      <div className="staffSectionHeader"><div><h2 id="admin-onboarding-title">Onboard partners and staff</h2><p>Roster entries do not create or reveal passwords.</p></div></div>
       <div className="staffOnboardingList">
         <details className="staffRosterEditor"><summary><span><strong>Vendor partner</strong><small>Business, coverage, services, and capacity</small></span><b>Open form</b></summary><form className="staffForm" onSubmit={(event) => onSubmit(event, "vendor-application")}>
           <div className="formTitleRow"><h3>Onboard vendor</h3><span>Admin owned</span></div>
@@ -1813,9 +1869,9 @@ function SupportTicketDesk({ userName, selectedCaseId = "", basePath, refreshTok
     <div className="staffCaseDeskGrid">
       <aside className="staffCaseDeskIndex" aria-label="Case index">
         {indexStatus ? <p className="status error" role="status">{indexStatus}</p> : null}
-        <BoundedList label="Support cases" noun="cases" className="staffCaseDeskIndexItems" pageSize={10} loading={!hasLoaded} emptyState={<p className="staffEmptyState">No customer cases loaded.</p>}>
+        {!indexLoaded || indexCases.length ? <BoundedList label="Support cases" noun="cases" className="staffCaseDeskIndexItems" pageSize={10} loading={!hasLoaded} emptyState={<p className="staffEmptyState">No customer cases loaded.</p>}>
           {indexCases.map((item) => <article key={item.ticketId}><Link href={caseHref(item.ticketId)} aria-current={item.ticketId === selectedCase?.ticketId ? "page" : undefined} scroll={false}><span className="staffCaseDeskReference">{item.ticketId} · {item.priority}</span><strong>{String(item.root.data.issueType || "Support ticket")}</strong><small>{item.status} · {formatActivityTime(item.latest.createdAt)}</small></Link></article>)}
-        </BoundedList>
+        </BoundedList> : null}
       </aside>
       {!hasLoaded ? <LoadingSkeleton label="Loading support case details" rows={4} variant="detail" /> : loadError ? <div className="staffEmptyState"><h2>Case desk unavailable</h2><p>{loadError}</p><button className="button secondary" type="button" onClick={() => void loadTickets()}>Try again</button></div> : selectedCase ? <article className="staffCaseDeskDossier caseDetail">
         {selectedCaseId ? <Link className="staffBackLink" href={basePath}>← Back to case list</Link> : null}
