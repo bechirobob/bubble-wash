@@ -123,6 +123,15 @@ def configure(pins, sources):
         if args[0] == 'systemd-run' and any(a.startswith('--unit=') and a.endswith('-build') for a in args):
             require(args[-2] == '-c' and args[-1] == 'npm ci --no-audit --no-fund && npm run build && npm prune --omit=dev --no-audit --no-fund')
             require(bool(host_node))
+            homes = [arg[5:] for arg in args if arg.startswith('HOME=')]
+            require(len(homes) == 1 and Path(homes[0]).is_absolute() and
+                    '--property=WorkingDirectory=' + homes[0] in args and
+                    not any(arg.startswith('XDG_CONFIG_HOME=') for arg in args))
+            # Next initializes its config store even with telemetry disabled.
+            # Confine that build-only metadata to the existing cache root;
+            # do not admit a new source-root directory or alter the live env.
+            position = args.index('HOME=' + homes[0]) + 1
+            args = [*args[:position], 'XDG_CONFIG_HOME=' + homes[0] + '/.npm/build-config', *args[position:]]
             path, device, inode, size, mtime = host_node['identity']
             binding = 'const fs=require("node:fs");if(fs.realpathSync(process.execPath)!==' + json.dumps(path) + ')throw Error("Node path drift");const st=fs.statSync(process.execPath,{bigint:true});if(st.dev!==' + str(device) + 'n||st.ino!==' + str(inode) + 'n||st.size!==' + str(size) + 'n||st.mtimeNs!==' + str(mtime) + 'n)throw Error("Node identity drift");'
             args = [*args[:-1], 'node -e ' + shlex.quote(binding + NODE_CHECK) + ' && ' + args[-1] + ' && node -e ' + shlex.quote(binding + NATIVE_CHECK)]

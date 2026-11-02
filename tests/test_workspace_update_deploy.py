@@ -138,8 +138,10 @@ class RuntimeBinding(unittest.TestCase):
 
     def test_absent_uat_and_host_node_bind_build_and_native_checks(self):
         self.bind()
-        args=['systemd-run','--unit=fixture-build','/bin/bash','-c','npm ci --no-audit --no-fund && npm run build && npm prune --omit=dev --no-audit --no-fund']
+        args=['systemd-run','--unit=fixture-build','--property=WorkingDirectory='+str(self.target),'/usr/bin/env','HOME='+str(self.target),'/bin/bash','-c','npm ci --no-audit --no-fund && npm run build && npm prune --omit=dev --no-audit --no-fund']
         self.u.core.command(args)
+        self.assertIn('XDG_CONFIG_HOME='+str(self.target)+'/.npm/build-config',self.command.call_args.args[0])
+        self.assertNotIn('XDG_CONFIG_HOME='+str(self.target)+'/.npm/build-config',args)
         built=self.command.call_args.args[0][-1]
         self.assertIn(str(self.node),built);self.assertIn('Node identity drift',built)
         self.assertIn('npm prune --omit=dev',built);self.assertIn('Native runtime verified',built)
@@ -148,6 +150,12 @@ class RuntimeBinding(unittest.TestCase):
         self.assertEqual(call.args[0][:4],['runuser','-u','ubuntu','--'])
         self.assertEqual(call.args[1],100);self.assertIn('createRequire',call.args[0][-1])
         self.assertNotIn('DATABASE_PATH',call.args[0][-1])
+
+    def test_build_config_redirect_requires_bound_home(self):
+        self.bind()
+        command=['systemd-run','--unit=fixture-build','--property=WorkingDirectory='+str(self.target),'/usr/bin/env','HOME='+str(self.target),'/bin/bash','-c','npm ci --no-audit --no-fund && npm run build && npm prune --omit=dev --no-audit --no-fund']
+        for args in ([arg for arg in command if not arg.startswith('HOME=')], [command[0],'HOME=/different',*command[1:]], [command[0],'XDG_CONFIG_HOME=/elsewhere',*command[1:]], [arg.replace('HOME='+str(self.target),'HOME=/different') for arg in command]):
+            with self.assertRaises(ValueError):self.u.core.command(args)
 
     def test_process_only_uat_and_two_listeners_fail(self):
         (self.proc/'101/environ').write_bytes(b'BUBBLEWASH_UAT_ENABLED=true\0')
