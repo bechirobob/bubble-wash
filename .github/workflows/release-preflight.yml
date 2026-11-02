@@ -37,7 +37,7 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: Test aggregate-only inspection and existing transport
-        run: python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
+        run: python3 -B -m unittest discover -s .github/backup -p 'test_*.py' -v
       - name: Check existing private destination identity without uploading
         env:
           GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
