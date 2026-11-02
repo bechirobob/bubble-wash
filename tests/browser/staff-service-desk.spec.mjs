@@ -404,11 +404,14 @@ for (const [role, routes] of Object.entries({
 test('order detail returns to the same queue page and focused order', async ({ page }, testInfo) => {
   await signIn(page, 'admin');
   const rows = Array.from({ length: 23 }, (_, index) => ({ ...orders[1], orderId: `queue-context-${index}`, bookingReference: `BW-${4000 + index}`, customer: `Synthetic queue customer ${index}` }));
-  await fixtureOrders(page, request => {
+  const assertOrdersRead = await fixtureOrders(page, request => {
     const query = new URL(request.url()).searchParams.get('q');
     return query ? rows.filter(order => order.orderId === query) : rows;
   });
   await page.goto('/admin?view=orders');
+  await assertOrdersRead();
+  await page.locator('.staffQueueTools > summary').click();
+  await page.getByRole('button', { name: 'All active', exact: true }).click();
   const next = page.getByRole('button', { name: 'Next page of Order queue', exact: true });
   await next.click();
   const target = page.getByRole('link', { name: 'View order BW-4010', exact: true });
@@ -420,6 +423,7 @@ test('order detail returns to the same queue page and focused order', async ({ p
   await page.getByRole('link', { name: 'Back to order list', exact: false }).click();
   await expect(target).toBeVisible();
   await expect(target).toBeFocused();
+  await expect(page.getByRole('button', { name: 'All active', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('navigation', { name: 'Order queue pages', exact: true })).toContainText('Page 2 of 3');
   await page.screenshot({ path: testInfo.outputPath('order-queue-return-context.png'), fullPage: true });
 });

@@ -30,6 +30,12 @@ controls occupy a full row above search; new-case disclosures reserve an unbroke
 action column. The navigation focus ring is inset so the scrolling nav cannot clip
 it into stray strokes; Sign out loses only its inherited divider, not its focus.
 
+Customer change requests show pickup date/window only for rescheduling. Switching
+request type preserves those mounted draft values but disables irrelevant fields
+so cancellation/care/refund payloads do not include them. A failed send retains
+the selected request and note; success resets to rescheduling. Existing retry keys,
+server confirmation, order access, billing and customer branding are unchanged.
+
 The first candidate's full prepared-browser run passed (41447897487, c18f5cd).
 Independent screenshot review identified the remaining survey/status fills and
 filter/disclosure alignment issues above. Follow-up browser coverage directly visits
@@ -38,6 +44,13 @@ history and support cases/history, in addition to the existing saved four-role,
 customer, survey and worklist journeys. A separate queue/detail/back regression
 checks page and focus restoration. New screenshots and exact-candidate browser
 results are required before declaring the follow-up visually complete.
+
+On cdc421a, survey proof and the expanded staff route checks passed. The new queue
+return regression failed before navigation because its fixtures did not qualify
+for Needs action; the test now deliberately chooses All active and checks that
+filter on return as well as page and focus. The complete follow-up browser run
+must pass before this navigation behavior or the customer request refinement is
+reported as verified.
 
 Release remains blocked by unchanged dependency audit findings (glob/minimatch,
 17 moderate findings) and runner source-admission guard test failures. Neither the
