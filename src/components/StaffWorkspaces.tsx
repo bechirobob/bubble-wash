@@ -163,27 +163,27 @@ function noticeClass(message: string) {
 function rolePromise(role: StaffRole, view: string) {
   const copy: Record<StaffRole, Record<string, { eyebrow: string; title: string; subtitle: string }>> = {
     admin: {
-      overview: { eyebrow: "Operations", title: "Service board", subtitle: "A read-only view of orders, partners, routes, support, and payment follow-up." },
-      dispatch: { eyebrow: "Dispatch", title: "Rider routes and ETAs", subtitle: "Check assigned routes, locations shared with the page open, pickup windows, and estimated drive times." },
-      orders: { eyebrow: "Orders", title: "Order operations", subtitle: "Review one queue, then open an order for its next verified action and full history." },
-      people: { eyebrow: "People & onboarding", title: "Partners and staff", subtitle: "Manage vendor capacity, rider coverage, and the operating roster in one clear place." },
-      cases: { eyebrow: "Support oversight", title: "Customer cases", subtitle: "Review open cases and follow-up without entering the support team workspace." },
-      activity: { eyebrow: "History", title: "Recent changes", subtitle: "Saved updates, not a task list. This view covers the latest 80 available records." },
-      operations: { eyebrow: "Administration", title: "Privacy requests", subtitle: "Review requests and record their status. Message review and system details are available below." },
+      overview: { eyebrow: "Operations", title: "Service board", subtitle: "" },
+      dispatch: { eyebrow: "Dispatch", title: "Rider routes and ETAs", subtitle: "Assigned routes, pickup windows and rider updates." },
+      orders: { eyebrow: "Orders", title: "Order operations", subtitle: "" },
+      people: { eyebrow: "People & onboarding", title: "Partners and staff", subtitle: "" },
+      cases: { eyebrow: "Support oversight", title: "Customer cases", subtitle: "" },
+      activity: { eyebrow: "History", title: "Recent changes", subtitle: "Latest 80 saved updates." },
+      operations: { eyebrow: "Administration", title: "Privacy requests", subtitle: "" },
     },
     vendor: {
-      jobs: { eyebrow: "Vendor workspace", title: "Wash floor", subtitle: "Open one assigned job at a time to accept, receive, wash, or mark it ready." },
-      capacity: { eyebrow: "Vendor capacity", title: "Today’s availability", subtitle: "Keep capacity and service coverage accurate for assignment." },
-      activity: { eyebrow: "Vendor history", title: "Saved updates", subtitle: "Review the production updates recorded by this workspace." },
+      jobs: { eyebrow: "Vendor workspace", title: "Wash floor", subtitle: "" },
+      capacity: { eyebrow: "Vendor capacity", title: "Today’s availability", subtitle: "" },
+      activity: { eyebrow: "Vendor history", title: "Saved updates", subtitle: "" },
     },
     driver: {
-      route: { eyebrow: "Driver workspace", title: "Your next stop", subtitle: "Open the next stop for directions, optional live sharing, handoff evidence, delivery, or a delay report." },
-      activity: { eyebrow: "Route history", title: "Saved route updates", subtitle: "Review handoffs and route evidence already recorded." },
+      route: { eyebrow: "Driver workspace", title: "Your next stop", subtitle: "" },
+      activity: { eyebrow: "Route history", title: "Saved route updates", subtitle: "" },
     },
     support: {
-      cases: { eyebrow: "Support desk", title: "Customer cases", subtitle: "Work one case at a time, keeping every decision attached to its case history." },
-      orders: { eyebrow: "Order follow-up", title: "Orders needing support", subtitle: "Find an order, review customer impact, and record the next support action." },
-      activity: { eyebrow: "Support history", title: "Saved support updates", subtitle: "Review case and customer follow-up activity." },
+      cases: { eyebrow: "Support desk", title: "Customer cases", subtitle: "" },
+      orders: { eyebrow: "Order follow-up", title: "Orders needing support", subtitle: "" },
+      activity: { eyebrow: "Support history", title: "Saved support updates", subtitle: "" },
     },
   };
   return copy[role][view] ?? Object.values(copy[role])[0];
@@ -864,7 +864,7 @@ function OrderQueueRow({ order, href }: { order: OrderSummary; href: string }) {
     <div><strong>{order.workflowStage.label}</strong><span>{workTiming(order)}</span></div>
     <div><strong>{order.area}</strong><span>{order.routeWindow}</span></div>
     <div><strong>{order.vendor !== "Unassigned" ? order.vendor : "Vendor pending"}</strong><span>{order.driver !== "Unassigned" ? order.driver : "Rider pending"}</span></div>
-    <Link href={href}>View order</Link>
+    <Link href={href} aria-label={`View order ${bookingLabel(order)}`}>View order</Link>
   </article>;
 }
 
@@ -1294,6 +1294,7 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
   const [hasLoaded, setHasLoaded] = useState(false);
   const [queueView, setQueueView] = useState<QueueView>("action");
   const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const olderPagesLoaded = useRef(false);
 
@@ -1400,7 +1401,7 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
   const detailHref = (orderId: string) => `${basePath}${basePath.includes("?") ? "&" : "?"}order=${encodeURIComponent(orderId)}`;
   const queueOrders = role === "driver" ? [...visibleOrders].sort((a, b) => ["Customer pickups", "Vendor handoffs", "Return deliveries", "Other assigned work"].indexOf(driverStopGroup(a)) - ["Customer pickups", "Vendor handoffs", "Return deliveries", "Other assigned work"].indexOf(driverStopGroup(b))) : visibleOrders;
 
-  const featuredOrder = !selectedOrderId && !query && queueView === "action" && (presentationRole === "vendor" || presentationRole === "driver") ? featuredSnapshot : undefined;
+  const featuredOrder = !selectedOrderId && (presentationRole === "vendor" || presentationRole === "driver") ? featuredSnapshot : undefined;
   const featuredUnavailable = ordersUnavailable || Boolean(featuredSnapshot && !orders.some((order) => order.orderId === featuredSnapshot.orderId));
   return (
     <section className={`staffContentSection sharedBoardSection ${featuredOrder ? "staffRoleWorkboard" : ""}`} aria-busy={!hasLoaded}>
@@ -1449,9 +1450,10 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
           <Link className="staffTicketDetails" href={detailHref(featuredOrder.orderId)}>{presentationRole === "vendor" ? "Job details & production exception" : "Stop details, live sharing & exceptions"} →</Link>
         </article></div> : null}
         <section className="staffRoleLedger"><div className="staffSectionHeader"><div><h2>{featuredOrder ? presentationRole === "vendor" ? "Job queue" : "Assigned stops" : queueHeading}</h2><p>{stats.riskCount} at risk · {stats.automationCount} verified actions in loaded orders</p></div><button className="button secondary" type="button" onClick={() => loadOrders()}>Refresh</button></div>
-        <details className="staffQueueTools"><summary>Find and filter orders</summary><div className="staffFilterBar">
+        <details className="staffQueueTools"><summary>Find and filter orders{query || queueView !== "action" ? " · Filtered" : ""}</summary><div className="staffFilterBar">
           <div className="staffTextFilters" aria-label="Order queue view">{([ ["action", "Needs action"], ["active", "All active"], ["all", "History"] ] as Array<[QueueView, string]>).map(([key, label]) => <button aria-pressed={queueView === key} className={queueView === key ? "active" : ""} key={key} type="button" onClick={() => setQueueView(key)}>{label}</button>)}</div>
-          <label className="staffSearch"><span>Find an order</span><input type="search" value={query} onChange={(event) => { setQuery(event.target.value);  }} placeholder="Reference or customer name…" /></label>
+          <label className="staffSearch"><span>Find an order</span><input ref={searchRef} type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Reference or customer name…" /></label>
+          {query || queueView !== "action" ? <button className="staffQuietAction" type="button" onClick={() => { setQuery(""); setQueueView("action"); searchRef.current?.focus(); }}>Clear filters</button> : null}
         </div></details>
         <BoundedList label="Order queue" noun="orders" className="staffOrderList" resetKey={`${queueView}:${query}`} loading={!hasLoaded} emptyState={<p className="staffEmptyState">{normalizedQuery ? "No orders match this search." : queueView === "action" ? "No orders in this loaded page currently need action from this role." : "No orders in this view yet."}</p>} header={featuredOrder ? undefined : <div className="staffOrderListHeader" aria-hidden="true"><span>Order</span><span>Stage</span><span>Collection</span><span>Assignment</span><span></span></div>}>
           {queueOrders.map((order, index) => <div key={order.orderId}>{featuredOrder ? <Link className={`staffRoleQueueRow ${presentationRole === "driver" ? "staffRouteLeg" : ""}`} href={detailHref(order.orderId)}>{presentationRole === "driver" ? <span className="staffLegNumber">{index + 1}</span> : <LaundryFlowIcon stage="washing" />}<span><strong>{presentationRole === "driver" ? driverStopGroup(order) : bookingLabel(order)}</strong><small>{presentationRole === "driver" ? `${["picked-up", "ready"].includes(order.workflowStage.key) ? order.vendor : order.area} · ${bookingLabel(order)}` : order.workflowStage.label}</small><small>{workTiming(order)}</small></span><span aria-hidden="true">→</span></Link> : <OrderQueueRow href={detailHref(order.orderId)} order={order} />}</div>)}
@@ -1471,7 +1473,7 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
 }
 
 export function PortalShell({ headingAction, heading, title, allStaffAccess = false, role, pageRole = role, userName, currentView, navigation, children }: PortalShellProps) {
-  const promise = heading ?? (currentView === "reconciliation" ? { eyebrow: "Read-only review", title: "Payments to check", subtitle: "Check invoices and related cases. This list cannot move money or change payments." } : currentView === "notifications" ? { eyebrow: "Message review", title: "Notification follow-up", subtitle: "Check unsent messages and unclear delivery results. This page cannot resend messages or turn on delivery services." } : currentView === "worklist" ? { eyebrow: "Staff operations", title: "Worklist", subtitle: "Tasks, availability checks, and follow-ups. Open the record before taking action." } : rolePromise(pageRole, currentView));
+  const promise = heading ?? (currentView === "reconciliation" ? { eyebrow: "Read-only review", title: "Payments to check", subtitle: "Read-only payment review. No payment changes." } : currentView === "notifications" ? { eyebrow: "Message review", title: "Notification follow-up", subtitle: "Read-only delivery review. Messages cannot be resent here." } : currentView === "worklist" ? { eyebrow: "Staff operations", title: "Worklist", subtitle: "" } : rolePromise(pageRole, currentView));
 
   async function logoutStaff() {
     try {

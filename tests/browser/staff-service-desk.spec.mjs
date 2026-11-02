@@ -29,7 +29,7 @@ async function signIn(page, role) {
 }
 async function fixtureOrders(page, readRows) {
   let fulfilled = 0;
-  const respond = route => { fulfilled++; return route.fulfill({ json: { ok: true, orders: typeof readRows === 'function' ? readRows() : readRows, nextOffset: null } }); };
+  const respond = route => { fulfilled++; return route.fulfill({ json: { ok: true, orders: typeof readRows === 'function' ? readRows(route.request()) : readRows, nextOffset: null } }); };
   await page.route('**/api/orders?*', respond);
   await page.route('**/api/orders', respond);
   return () => expect.poll(() => fulfilled, { message: 'Workspace fetched the intended synthetic order projection' }).toBeGreaterThan(0);
@@ -41,6 +41,37 @@ async function expectWorkspaceSwitcher(page) {
   await expect(trigger.locator('svg rect')).toHaveCount(0);
   await expect(trigger).not.toContainText('⌄');
   await expect(trigger).toHaveCSS('min-height', '44px');
+}
+
+async function expectCompactWhiteWorkspace(page, testInfo) {
+  await expect(page.locator('.portalPage.staffDesk')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  const heading = page.locator('.staffViewHeader h1');
+  if (testInfo.project.use.viewport.width <= 700) {
+    expect(await heading.evaluate(node => parseFloat(getComputedStyle(node).fontSize))).toBeLessThanOrEqual(24);
+  }
+  await expect(page.locator('.staffSectionNav a[aria-current="page"]')).toHaveCSS('background-color', 'rgb(240, 240, 240)');
+  const decoration = await page.locator('.staffViewHeader h1, .staffSectionNav a[aria-current="page"], .staffStageLane.selected .staffStageSelector').evaluateAll(nodes => nodes.map(node => {
+    const style = getComputedStyle(node);
+    return { box: style.boxShadow, text: style.textShadow, filter: style.filter };
+  }));
+  for (const style of decoration) {
+    expect(style.box).toBe('none');
+    expect(style.text).toBe('none');
+    expect(style.filter).not.toContain('drop-shadow');
+  }
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+}
+
+async function expectJobAndQueueGeometry(page, testInfo) {
+  const sheet = await page.locator('.staffRoleFeatured').boundingBox();
+  const queue = await page.locator('.staffRoleLedger').boundingBox();
+  expect(sheet).not.toBeNull();
+  expect(queue).not.toBeNull();
+  if (testInfo.project.use.viewport.width <= 700) {
+    expect(queue.y).toBeGreaterThanOrEqual(sheet.y + sheet.height - 1);
+  } else {
+    expect(queue.x).toBeGreaterThanOrEqual(sheet.x + sheet.width - 1);
+  }
 }
 
 async function expectStaffControlLinks(page) {
@@ -70,6 +101,10 @@ test('approved service board stays compact and history tools are secondary', asy
   await washing.click();
   await expect(washing).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.staffStageLane.selected')).toContainText('BW-1036');
+  await expectCompactWhiteWorkspace(page, testInfo);
+  if (testInfo.project.use.viewport.width <= 700) {
+    await expect(page.locator('.staffStageLane.selected .staffStageSelector')).toHaveCSS('background-color', 'rgb(240, 240, 240)');
+  }
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expectStaffControlLinks(page);
   const followUp = page.getByRole('navigation', { name: 'Operations follow-up', exact: true });
@@ -116,16 +151,43 @@ test('approved service board stays compact and history tools are secondary', asy
   await expect(page.locator('.staffAccountMenu')).not.toHaveAttribute('open', '');
 });
 
-test('vendor current job retains intake draft across refresh reordering', async ({ page }, testInfo) => {
+test('vendor current job retains intake draft through search, filters and refresh reordering', async ({ page }, testInfo) => {
   await signIn(page, 'vendor');
   const job = { ...orders[2], vendor: 'Synthetic vendor', status: 'At Vendor', lastEventType: 'driver-route-log', workflowStage: { ...orders[2].workflowStage, key: 'at-vendor', label: 'At Vendor' } };
   let rows = [job, { ...orders[4], vendor: 'Synthetic vendor' }];
-  const assertOrdersRead = await fixtureOrders(page, () => rows);
+  const assertOrdersRead = await fixtureOrders(page, request => {
+    const query = new URL(request.url()).searchParams.get('q')?.toLowerCase();
+    return query ? rows.filter(order => `${order.bookingReference} ${order.customer}`.toLowerCase().includes(query)) : rows;
+  });
   await page.goto('/vendors');
   await assertOrdersRead();
   await expect(page.locator('.staffWorkTicket')).toContainText('BW-1036');
   await page.locator('.staffWorkTicket').getByRole('button', { name: 'Confirm bag intake', exact: true }).click();
   await page.getByLabel('Bag/item count', { exact: true }).fill('3');
+  await expectCompactWhiteWorkspace(page, testInfo);
+  await expectJobAndQueueGeometry(page, testInfo);
+  await expect(page.locator('.staffJobFlow')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  const tools = page.locator('.staffQueueTools');
+  await tools.locator('summary').click();
+  const search = tools.getByRole('searchbox', { name: 'Find an order', exact: true });
+  await search.fill('NO-SYNTHETIC-ORDER-MATCH');
+  await expect(tools.locator('summary')).toHaveText('Find and filter orders · Filtered');
+  await expect(page.getByText('No orders match this search.', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Bag/item count', { exact: true })).toHaveValue('3');
+  await expect(page.getByLabel('Bag/item count', { exact: true })).toBeDisabled();
+  await tools.getByRole('button', { name: 'History', exact: true }).click();
+  await expect(page.getByLabel('Bag/item count', { exact: true })).toHaveValue('3');
+  await page.screenshot({ path: testInfo.outputPath('vendor-filtered-draft.png'), fullPage: true });
+  await tools.getByRole('button', { name: 'Clear filters', exact: true }).click();
+  await expect(search).toHaveValue('');
+  await expect(search).toBeFocused();
+  await expect(tools.getByRole('button', { name: 'Needs action', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(tools.getByRole('button', { name: 'Clear filters', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Bag/item count', { exact: true })).toHaveValue('3');
+  await expect(page.getByLabel('Bag/item count', { exact: true })).toBeEnabled();
+  await tools.getByRole('button', { name: 'All active', exact: true }).click();
+  await expect(page.getByLabel('Bag/item count', { exact: true })).toHaveValue('3');
+  await tools.getByRole('button', { name: 'Clear filters', exact: true }).click();
   rows = [...rows].reverse();
   await page.locator('.staffRoleLedger').getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.getByLabel('Bag/item count', { exact: true })).toHaveValue('3');
@@ -151,6 +213,8 @@ test('rider vendor collection does not display customer destination or unrelated
   await expect(page.locator('.staffRouteFacts')).toContainText('Vendor destination needed');
   await expect(page.locator('.staffTicketNavigation').getByRole('link', { name: 'Directions', exact: true })).toHaveCount(0);
   await expect(page.locator('.staffTicketNavigation').getByRole('link', { name: 'Scan bag', exact: true })).toHaveAttribute('href', '/scan');
+  await expectCompactWhiteWorkspace(page, testInfo);
+  await expectJobAndQueueGeometry(page, testInfo);
   await expectStaffControlLinks(page);
   await page.screenshot({ path: testInfo.outputPath('rider-vendor-collection.png'), fullPage: true });
 });

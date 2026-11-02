@@ -1,5 +1,29 @@
 # Bounded lists and clearer wording
 
+## Staff workspace refinement — 2026-11-02
+
+The staff shell, job flow and case-linked order use white ledger surfaces and
+straight neutral dividers. Active navigation, mobile stages and selected cases
+retain a neutral selection fill. Main headings are 24px on desktop and 22px on
+mobile; job and case headings use 22px/20px. The approved role characters,
+two-line workspace switcher, stage/count pairing, blue-green actions and real
+brand artwork remain intact. Instructions that merely repeat a view's title are
+removed; payment/message review boundaries and operational warnings remain.
+
+Vendor and rider current-job forms remain mounted while searching or changing
+queue filters. If the searched response excludes the job, its draft remains
+visible with actions disabled until availability is verified again. Clear filters
+restores Needs action, empties the search and returns focus to the search input.
+The collapsed filter heading indicates an active filter. Order links expose their
+reference in the accessible name. No server contract, role or customer flow changes.
+
+Candidate validation: TypeScript, focused lint and 19 bounded-list/worklist/style
+checks passed locally. The existing prepared GitHub browser suite owns graphical
+acceptance at Chromium 320/390/1440 and WebKit 390; the service-desk tests exercise
+draft preservation, empty search recovery, keyboard focus, neutral surfaces,
+heading size and job/queue placement. Screenshots must be inspected before visual
+completion or release. This record does not claim deployment.
+
 This presentation-only change uses the existing compact Bubble Wash layout. It does not change authorization, assignments, payment actions, reference allocation, notification delivery, or the logo.
 
 ## Included
