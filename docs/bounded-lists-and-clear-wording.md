@@ -17,7 +17,7 @@ restores Needs action, empties the search and returns focus to the search input.
 The collapsed filter heading indicates an active filter. Order links expose their
 reference in the accessible name. No server contract, role or customer flow changes.
 
-Candidate validation: TypeScript, focused lint and 19 bounded-list/worklist/style
+Candidate validation: TypeScript, focused lint and 12 bounded-list/worklist/style
 checks passed locally. The existing prepared GitHub browser suite owns graphical
 acceptance at Chromium 320/390/1440 and WebKit 390; the service-desk tests exercise
 draft preservation, empty search recovery, keyboard focus, neutral surfaces,
