@@ -520,7 +520,7 @@ function AvailabilityBoard({ role, mode = "all", refreshToken = 0 }: { role: Sta
   return (
     <section className="staffContentSection availabilitySection" aria-busy={!hasLoaded}>
       <div className="staffSectionHeader">
-        <div><h2>Availability and coverage</h2><p>Available slots and service areas for assigning orders.</p></div>
+        <div><h2>Availability and coverage</h2></div>
         <button className="button secondary" type="button" onClick={() => loadAvailability()}>Refresh</button>
       </div>
 
@@ -1289,6 +1289,7 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [detailOrders, setDetailOrders] = useState<OrderSummary[]>([]);
   const [detailLoadedId, setDetailLoadedId] = useState("");
+  const [detailUnavailableId, setDetailUnavailableId] = useState("");
   const returnLink = useRef<HTMLAnchorElement | null>(null);
   const returnScrollY = useRef(0);
   const detailHeading = useRef<HTMLHeadingElement>(null);
@@ -1303,6 +1304,14 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const olderPagesLoaded = useRef(false);
 
+  const markDetailFailure = useCallback((responseStatus?: number) => {
+    if (!selectedOrderId) return;
+    const inaccessible = responseStatus !== undefined && [401, 403, 404].includes(responseStatus);
+    setDetailLoadedId(selectedOrderId);
+    setDetailUnavailableId(inaccessible ? "" : selectedOrderId);
+    if (inaccessible) setDetailOrders([]);
+  }, [selectedOrderId]);
+
   async function loadOrders(showLoading = true, offset = 0) {
     if (showLoading) setStatus("Loading shared order board…");
     if (!selectedOrderId) olderPagesLoaded.current = offset > 0;
@@ -1311,14 +1320,17 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
       const data = await response.json();
       if (!response.ok || !data.ok) {
         setOrdersUnavailable(true);
-          if (selectedOrderId) setDetailLoadedId(selectedOrderId);
+          markDetailFailure(response.status);
         setStatus(data.error ?? "Unable to load shared orders.");
         setHasLoaded(true);
         return;
       }
       setOrdersUnavailable(false);
       if (selectedOrderId) {
+        setDetailUnavailableId("");
         setDetailOrders(data.orders);
+        setOrders(current => current.map(order => data.orders.find((updated: OrderSummary) => updated.orderId === order.orderId) ?? order));
+        setFeaturedSnapshot(current => current ? data.orders.find((updated: OrderSummary) => updated.orderId === current.orderId) ?? current : null);
         setDetailLoadedId(selectedOrderId);
       }
       else {
@@ -1331,7 +1343,7 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
       setStatus(data.orders.length ? "Updated." : query.trim() && !selectedOrderId ? "No orders match this search." : "No orders to show.");
     } catch {
       setOrdersUnavailable(true);
-          if (selectedOrderId) setDetailLoadedId(selectedOrderId);
+          markDetailFailure();
       setStatus("Unable to load shared orders.");
       setHasLoaded(true);
     }
@@ -1348,14 +1360,17 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
         if (!active) return;
         if (!response.ok || !data.ok) {
           setOrdersUnavailable(true);
-          if (selectedOrderId) setDetailLoadedId(selectedOrderId);
+          markDetailFailure(response.status);
         setStatus(data.error ?? "Unable to load shared orders.");
           setHasLoaded(true);
           return;
         }
         setOrdersUnavailable(false);
       if (selectedOrderId) {
+        setDetailUnavailableId("");
         setDetailOrders(data.orders);
+        setOrders(current => current.map(order => data.orders.find((updated: OrderSummary) => updated.orderId === order.orderId) ?? order));
+        setFeaturedSnapshot(current => current ? data.orders.find((updated: OrderSummary) => updated.orderId === current.orderId) ?? current : null);
         setDetailLoadedId(selectedOrderId);
       }
       else {
@@ -1369,7 +1384,7 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
       } catch {
         if (active) {
           setOrdersUnavailable(true);
-          if (selectedOrderId) setDetailLoadedId(selectedOrderId);
+          markDetailFailure();
       setStatus("Unable to load shared orders.");
           setHasLoaded(true);
         }
@@ -1382,7 +1397,7 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
       active = false;
       window.clearInterval(interval);
     };
-  }, [selectedOrderId, query, role, userName, allStaffAccess]);
+  }, [selectedOrderId, query, role, userName, allStaffAccess, markDetailFailure]);
 
   useEffect(() => {
     if (role !== "admin" || !selectedOrderId) return;
@@ -1471,7 +1486,7 @@ function SharedOrderBoard({ role, presentationRole = role, userName, allStaffAcc
 
           <details className="staffDetailDisclosure"><summary><span><strong>Order history</strong><small>{compactTimelineLabel(selectedOrder.eventCount)}</small></span></summary><div className="staffDisclosureBody"><BoundedList label="Order history" noun="updates" className="staffTimeline">{selectedOrder.timeline.map((event) => <div key={`${selectedOrder.orderId}-${event.id}-${event.createdAt}`}><time>{formatShortTime(event.createdAt)}</time><div><strong>{event.status}</strong><span>{event.type} · {event.actor}</span><p>{event.note}</p></div></div>)}</BoundedList></div></details>
         </div>
-      </article> : detailLoadedId === selectedOrderId ? <div className="staffEmptyState"><h2>Order not found</h2><p>This order is not available to this staff role.</p><Link href={basePath}>Back to the order list</Link></div> : <LoadingSkeleton label="Loading order details" rows={4} variant="detail" /> : null}
+      </article> : detailLoadedId === selectedOrderId ? <div className="staffEmptyState"><h2>{detailUnavailableId === selectedOrderId ? "Order details unavailable" : "Order not found"}</h2><p>{detailUnavailableId === selectedOrderId ? "We couldn’t load this order. Try again." : "This order is not available to this staff role."}</p>{detailUnavailableId === selectedOrderId ? <button className="button secondary" type="button" onClick={() => void loadOrders()}>Retry loading order</button> : null}<Link href={basePath}>Back to the order list</Link></div> : <LoadingSkeleton label="Loading order details" rows={4} variant="detail" /> : null}
       <div hidden={Boolean(selectedOrderId)} onClickCapture={(event) => {
         const link = (event.target as Element).closest<HTMLAnchorElement>("a[href]");
         if (link && new URL(link.href).searchParams.has("order")) {
@@ -1512,7 +1527,7 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
 }
 
 export function PortalShell({ headingAction, heading, title, allStaffAccess = false, role, pageRole = role, userName, currentView, navigation, children }: PortalShellProps) {
-  const promise = heading ?? (currentView === "reconciliation" ? { eyebrow: "Read-only review", title: "Payments to check", subtitle: "Read-only payment review. No payment changes." } : currentView === "notifications" ? { eyebrow: "Message review", title: "Notification follow-up", subtitle: "Read-only delivery review. Messages cannot be resent here." } : currentView === "worklist" ? { eyebrow: "Staff operations", title: "Worklist", subtitle: "" } : rolePromise(pageRole, currentView));
+  const promise = heading ?? (currentView === "reconciliation" ? { eyebrow: "Read-only review", title: "Payments to check", subtitle: "" } : currentView === "notifications" ? { eyebrow: "Message review", title: "Notification follow-up", subtitle: "" } : currentView === "worklist" ? { eyebrow: "Staff operations", title: "Worklist", subtitle: "" } : rolePromise(pageRole, currentView));
 
   async function logoutStaff() {
     try {
@@ -1622,7 +1637,7 @@ function StaffAccessRoster({ refreshToken = 0 }: { refreshToken?: number }) {
 function AdminOnboardingCenter({ onSubmit, status, pendingType = "" }: { onSubmit: SubmitHandler; status: Record<string, string>; pendingType?: string }) {
   return (
     <section className="staffContentSection onboardingCenter" aria-labelledby="admin-onboarding-title">
-      <div className="staffSectionHeader"><div><h2 id="admin-onboarding-title">Onboard partners and staff</h2><p>Add one person or partner at a time. Roster entry does not expose or generate a password.</p></div></div>
+      <div className="staffSectionHeader"><div><h2 id="admin-onboarding-title">Onboard partners and staff</h2><p>Roster entries do not create or reveal passwords.</p></div></div>
       <div className="staffOnboardingList">
         <details className="staffRosterEditor"><summary><span><strong>Vendor partner</strong><small>Business, coverage, services, and capacity</small></span><b>Open form</b></summary><form className="staffForm" onSubmit={(event) => onSubmit(event, "vendor-application")}>
           <div className="formTitleRow"><h3>Onboard vendor</h3><span>Admin owned</span></div>
@@ -1854,9 +1869,9 @@ function SupportTicketDesk({ userName, selectedCaseId = "", basePath, refreshTok
     <div className="staffCaseDeskGrid">
       <aside className="staffCaseDeskIndex" aria-label="Case index">
         {indexStatus ? <p className="status error" role="status">{indexStatus}</p> : null}
-        <BoundedList label="Support cases" noun="cases" className="staffCaseDeskIndexItems" pageSize={10} loading={!hasLoaded} emptyState={<p className="staffEmptyState">No customer cases loaded.</p>}>
+        {!indexLoaded || indexCases.length ? <BoundedList label="Support cases" noun="cases" className="staffCaseDeskIndexItems" pageSize={10} loading={!hasLoaded} emptyState={<p className="staffEmptyState">No customer cases loaded.</p>}>
           {indexCases.map((item) => <article key={item.ticketId}><Link href={caseHref(item.ticketId)} aria-current={item.ticketId === selectedCase?.ticketId ? "page" : undefined} scroll={false}><span className="staffCaseDeskReference">{item.ticketId} · {item.priority}</span><strong>{String(item.root.data.issueType || "Support ticket")}</strong><small>{item.status} · {formatActivityTime(item.latest.createdAt)}</small></Link></article>)}
-        </BoundedList>
+        </BoundedList> : null}
       </aside>
       {!hasLoaded ? <LoadingSkeleton label="Loading support case details" rows={4} variant="detail" /> : loadError ? <div className="staffEmptyState"><h2>Case desk unavailable</h2><p>{loadError}</p><button className="button secondary" type="button" onClick={() => void loadTickets()}>Try again</button></div> : selectedCase ? <article className="staffCaseDeskDossier caseDetail">
         {selectedCaseId ? <Link className="staffBackLink" href={basePath}>← Back to case list</Link> : null}

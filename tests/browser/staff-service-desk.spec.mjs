@@ -401,29 +401,72 @@ for (const [role, routes] of Object.entries({
   });
 }
 
-test('order detail returns to the same queue page and focused order', async ({ page }, testInfo) => {
+test('paged order queue retains context and updates the saved detail row after retry', async ({ page }, testInfo) => {
   await signIn(page, 'admin');
-  const rows = Array.from({ length: 23 }, (_, index) => ({ ...orders[1], orderId: `queue-context-${index}`, bookingReference: `BW-${4000 + index}`, customer: `Synthetic queue customer ${index}` }));
-  const assertOrdersRead = await fixtureOrders(page, request => {
-    const query = new URL(request.url()).searchParams.get('q');
-    return query ? rows.filter(order => order.orderId === query) : rows;
+  const rows = Array.from({ length: 23 }, (_, index) => ({ ...orders[1], orderId: `queue-context-${index}`, bookingReference: `BW-${4000 + index}`, customer: `Synthetic queue customer ${index}`, status: 'Pickup scheduled', workflowStage: { ...orders[1].workflowStage, key: 'pickup-scheduled', label: 'Pickup scheduled' } }));
+  const requestedOffsets = [];
+  let detailMode = '503';
+  let saved = 0;
+  await page.route('**/api/orders?*', async route => {
+    const params = new URL(route.request().url()).searchParams;
+    const query = params.get('q');
+    if (query) {
+      if (detailMode === 'network') return route.abort('failed');
+      if (detailMode === '503' || detailMode === '403') return route.fulfill({ status: Number(detailMode), json: { ok: false, error: 'Synthetic detail read failure' } });
+      return route.fulfill({ json: { ok: true, orders: detailMode === 'empty' ? [] : rows.filter(order => order.orderId === query), nextOffset: null } });
+    }
+    const offset = Number(params.get('offset') || 0);
+    requestedOffsets.push(offset);
+    return route.fulfill({ json: { ok: true, orders: rows.slice(offset, offset + 10), nextOffset: offset === 0 ? 10 : offset === 10 ? 20 : null } });
+  });
+  await page.route('**/api/orders/advance', async route => {
+    expect(route.request().postDataJSON()).toMatchObject({ orderId: 'queue-context-15', actionKey: 'admin-assign-vendor' });
+    saved++;
+    rows[15] = { ...rows[15], status: 'Vendor assigned', workflowStage: { ...rows[15].workflowStage, key: 'vendor-assigned', label: 'Vendor assigned' } };
+    await route.fulfill({ json: { ok: true, nextStatus: 'Vendor assigned', id: 'synthetic-saved-event' } });
   });
   await page.goto('/admin?view=orders');
-  await assertOrdersRead();
   await page.locator('.staffQueueTools > summary').click();
   await page.getByRole('button', { name: 'All active', exact: true }).click();
-  const next = page.getByRole('button', { name: 'Next page of Order queue', exact: true });
-  await next.click();
-  const target = page.getByRole('link', { name: 'View order BW-4010', exact: true });
-  await expect(target).toBeVisible();
+  await page.getByRole('button', { name: 'Load older orders', exact: true }).click();
+  await expect.poll(() => requestedOffsets.includes(10)).toBe(true);
+  await page.getByRole('button', { name: 'Next page of Order queue', exact: true }).click();
+  const target = page.getByRole('link', { name: 'View order BW-4015', exact: true });
+  await target.focus();
+  const region = page.getByRole('region', { name: 'Order queue', exact: true });
+  const scrollBefore = await region.evaluate(node => node.scrollTop);
   await target.click();
-  await expect(page.locator('.orderDetail h2')).toHaveText('Synthetic queue customer 10');
+  await expect(page.getByRole('heading', { name: 'Order details unavailable', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Order not found', exact: true })).toHaveCount(0);
+  detailMode = 'network';
+  const retry = page.getByRole('button', { name: 'Retry loading order', exact: true });
+  await retry.click();
+  await expect(page.locator('.sharedBoardSection > [role="status"]')).toContainText('Unable to load shared orders.');
+  await expect(retry).toBeVisible();
+  detailMode = 'success';
+  await retry.click();
+  await expect(page.locator('.orderDetail h2')).toHaveText('Synthetic queue customer 15');
   await expect(page.locator('.orderDetail h2')).toBeFocused();
-  await expect(page.getByRole('region', { name: 'Order queue', exact: true })).toHaveCount(0);
+  await page.locator('.orderDetail').getByRole('button', { name: 'Assign vendor + driver', exact: true }).click();
+  await expect.poll(() => saved).toBe(1);
+  await expect(page.locator('.staffDetailHeader')).toContainText('Vendor assigned');
+  await expect(page.locator('.orderDetail').getByRole('button', { name: 'Assign vendor + driver', exact: true })).toHaveCount(0);
+  const readsBeforeBack = requestedOffsets.length;
   await page.getByRole('link', { name: 'Back to order list', exact: false }).click();
   await expect(target).toBeVisible();
   await expect(target).toBeFocused();
+  await expect(target.locator('..')).toContainText('Vendor assigned');
   await expect(page.getByRole('button', { name: 'All active', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('navigation', { name: 'Order queue pages', exact: true })).toContainText('Page 2 of 3');
+  await expect(page.getByRole('navigation', { name: 'Order queue pages', exact: true })).toContainText('Page 2 of 2');
+  await expect.poll(() => region.evaluate(node => node.scrollTop)).toBe(scrollBefore);
+  expect(requestedOffsets.length).toBe(readsBeforeBack);
+  await expect(page.getByRole('button', { name: 'Load older orders', exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('order-queue-return-context.png'), fullPage: true });
+  for (const mode of ['403', 'empty']) {
+    detailMode = mode;
+    await page.goto('/admin?view=orders&order=queue-context-15');
+    await expect(page.getByRole('heading', { name: 'Order not found', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Retry loading order', exact: true })).toHaveCount(0);
+    await expect(page.locator('.orderDetail')).toHaveCount(0);
+  }
 });

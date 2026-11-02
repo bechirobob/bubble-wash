@@ -47,7 +47,7 @@ export function VendorCapacityForm({ onSaved }: { onSaved: () => void }) {
     } finally { locked.current = false; setBusy(false); }
   }
   return <section className="staffContentSection"><div className="staffNarrowForm">
-    <h2>Confirm today&apos;s capacity</h2><p>Confirm remaining slots, even when unchanged. Only an administrator can change approved coverage or services.</p>
+    <h2>Confirm today&apos;s capacity</h2><p>Confirm slots daily. Coverage and service changes require an administrator.</p>
     <button className="button" type="button" disabled={busy} onClick={() => { setVendor(null); setMessage(""); setRefresh((value) => value + 1); onSaved(); }}>Refresh capacity</button>
     {vendor ? <form key={`${vendor.revision}:${refresh}`} className="staffForm" onSubmit={save}>
       <p>{vendor.vendorName} · {vendor.serviceZones.join(", ")} · {vendor.serviceTypes.join(", ")}</p>
