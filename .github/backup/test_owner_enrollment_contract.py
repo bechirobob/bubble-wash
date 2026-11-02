@@ -65,7 +65,11 @@ class ExactProfileTests(unittest.TestCase):
         # The reviewed dev-only Zod patch is candidate-only; rollback stays historical.
         candidate_lock = '5ee351083ccf449022dfcd3f466cea7e541423294a4854458feb719a3350d966'
         self.assertEqual(CONTRACT['profiles']['integration-candidate-v1']['sourceFiles']['package-lock.json'], candidate_lock)
-        self.assertEqual(hashlib.sha256((ROOT / 'package-lock.json').read_bytes()).hexdigest(), candidate_lock)
+        # The CI runner's reviewed development tooling is independent of both
+        # historical host profiles; neither host dependency pin is refreshed.
+        runner_lock = '9ccc8d6a3295ef01cb10a3c54e2be0381fbb5593300444e686e5c19923f35323'
+        self.assertEqual(hashlib.sha256((ROOT / 'package-lock.json').read_bytes()).hexdigest(), runner_lock)
+        self.assertNotEqual(runner_lock, candidate_lock)
         self.assertEqual(CONTRACT['profiles']['integration-fallback-v1']['sourceFiles']['package-lock.json'], historical['package-lock.json'])
         for profile in CONTRACT['profiles'].values():
             self.assertEqual({key: profile['sourceFiles'][key] for key in unchanged}, {key: historical[key] for key in unchanged})
