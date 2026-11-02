@@ -186,6 +186,8 @@ jobs:
         run: |
           python3 -m unittest discover -s .github/backup -p 'test_*.py' -v
           python3 -m unittest discover -s tests -p 'test_preserving_deploy.py' -v
+          python3 -m unittest discover -s tests -p 'test_pwa_update_deploy.py' -v
+          python3 -m unittest discover -s tests -p 'test_workspace_update_deploy.py' -v
           python3 -m unittest discover -s tests -p 'test_owner_deploy.py' -v
           python3 ops/integration-release/select_source.py --release . --runner-only
           python3 ops/check-owner-enrollment-source.py --verify-runner
