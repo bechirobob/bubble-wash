@@ -35,6 +35,8 @@ request type preserves those mounted draft values but disables irrelevant fields
 so cancellation/care/refund payloads do not include them. A failed send retains
 the selected request and note; success resets to rescheduling. Existing retry keys,
 server confirmation, order access, billing and customer branding are unchanged.
+An already-authenticated order no longer shows the sign-in form's contact hint
+inside its change-request status area.
 
 The first candidate's full prepared-browser run passed (41447897487, c18f5cd).
 Independent screenshot review identified the remaining survey/status fills and
@@ -51,6 +53,28 @@ for Needs action; the test now deliberately chooses All active and checks that
 filter on return as well as page and focus. The complete follow-up browser run
 must pass before this navigation behavior or the customer request refinement is
 reported as verified.
+
+The corrected queue/detail/back regression and customer request-type draft/payload
+checks passed at Chromium 320/390/1440 and WebKit 390 on ee00c9d. Final exact-head
+verification includes the authenticated-order status correction above.
+
+Scope reconciliation:
+
+| Surface | Refinement and validation scope |
+| --- | --- |
+| Admin board/orders/details | White ledger, compact headings, icon/count pairing, search reset, list page/scroll/focus return; synthetic action and route checks |
+| Dispatch/people/cases/activity/privacy | Shared surfaces and shorter headings/copy; direct rendered route sweep; existing role/write/failure journeys retained |
+| Vendor jobs/capacity/history | Draft-safe job filtering, clear availability wording, aligned filter controls; capacity draft and history route review |
+| Rider stops/details/history | Labelled route actions, role artwork, long-destination containment, queue return and direct history review |
+| Support cases/history | White dossier, non-wrapping new-case action, retained failed-save drafts and direct history review |
+| Worklist/payment/message reviews | Shared shell/copy; existing ownership, retry, Back/Forward, paging and read-only boundary tests |
+| Owner survey results | White panels, neutral tabs, unchanged chart meaning; filters, pagination, dialog/focus and owner-access proof |
+| Customer manage/request | Request-specific fields, retained drafts/retries and accurate status; long-content and request transport tests |
+| Public booking/tracking/services/privacy | Product identity and behavior deliberately unchanged; existing public/customer journeys and customer/staff separation checks remain required |
+
+Representative screenshots and automated route checks are not exhaustive physical
+device validation. The final screenshot review and release blockers remain explicit;
+no production deployment is claimed by this record.
 
 Release remains blocked by unchanged dependency audit findings (glob/minimatch,
 17 moderate findings) and runner source-admission guard test failures. Neither the

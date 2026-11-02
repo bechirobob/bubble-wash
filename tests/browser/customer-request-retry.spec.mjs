@@ -86,6 +86,7 @@ test('request-specific fields preserve drafts without submitting irrelevant pick
   });
   await page.goto('/manage');
   const form = page.locator('.customerRequestForm');
+  await expect(form.getByRole('status')).not.toContainText('Use the same email or phone');
   const action = form.getByRole('combobox', { name: 'Request', exact: true });
   const date = form.locator('input[name="requestedDate"]');
   const window = form.locator('select[name="requestedWindow"]');

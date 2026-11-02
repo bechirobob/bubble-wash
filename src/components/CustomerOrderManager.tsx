@@ -28,7 +28,7 @@ export function CustomerOrderManager() {
     if (recoveryToken) window.history.replaceState(null, "", window.location.pathname);
     const recoveryOptions = recoveryToken ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: recoveryToken }) } : {};
     fetch(recoveryToken ? "/api/customer/recover" : "/api/customer/order", { ...recoveryOptions, cache: "no-store" }).then(async (response) => {
-      if (active) { const data = await response.json(); if (active && response.ok) { setOrder(data.order); setReferences(data.references || []); } else if (active && recoveryToken) setStatus(data.error || "Recovery link could not be verified."); }
+      if (active) { const data = await response.json(); if (active && response.ok) { setOrder(data.order); setReferences(data.references || []); setStatus(recoveryToken ? "Booking verified." : ""); } else if (active && recoveryToken) setStatus(data.error || "Recovery link could not be verified."); }
     }).catch(() => {});
     return () => { active = false; };
   }, []);
