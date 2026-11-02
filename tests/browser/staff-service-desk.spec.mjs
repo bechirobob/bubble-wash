@@ -86,6 +86,9 @@ async function expectStaffControlLinks(page) {
   await expect(navigation.nth(1)).toBeFocused();
   await expect(navigation.nth(1)).toHaveCSS('outline-style', 'solid');
   await expect(navigation.nth(1)).toHaveCSS('outline-width', '2px');
+  await expect(navigation.nth(1)).toHaveCSS('outline-offset', '-2px');
+  await expect(navigation.nth(1)).toHaveCSS('border-left-width', '0px');
+  await expect(page.locator('.staffSignOut')).toHaveCSS('border-left-width', '0px');
 }
 
 test('approved service board stays compact and history tools are secondary', async ({ page }, testInfo) => {
@@ -167,14 +170,19 @@ test('vendor current job retains intake draft through search, filters and refres
   await expectCompactWhiteWorkspace(page, testInfo);
   await expectJobAndQueueGeometry(page, testInfo);
   await expect(page.locator('.staffJobFlow')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  await expect(page.locator('.staffOrderState')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   const tools = page.locator('.staffQueueTools');
   await tools.locator('summary').click();
   const search = tools.getByRole('searchbox', { name: 'Find an order', exact: true });
   await search.fill('NO-SYNTHETIC-ORDER-MATCH');
   await expect(tools.locator('summary')).toHaveText('Find and filter orders · Filtered');
-  await expect(page.getByText('No orders match this search.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Order queue', exact: true }).getByText('No orders match this search.', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Bag/item count', { exact: true })).toHaveValue('3');
   await expect(page.getByLabel('Bag/item count', { exact: true })).toBeDisabled();
+  await expect(page.locator('.staffSyncLine')).toContainText('outside these search results');
+  await expect(page.locator('.sharedBoardSection')).not.toContainText('No shared orders yet');
+  const filterBoxes = await tools.locator('.staffTextFilters button').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().y));
+  expect(Math.max(...filterBoxes) - Math.min(...filterBoxes)).toBeLessThanOrEqual(1);
   await tools.getByRole('button', { name: 'History', exact: true }).click();
   await expect(page.getByLabel('Bag/item count', { exact: true })).toHaveValue('3');
   await page.screenshot({ path: testInfo.outputPath('vendor-filtered-draft.png'), fullPage: true });
@@ -344,4 +352,74 @@ test('long rider destination names stay inside ticket and assigned stop rows', a
   expect(overflowing).toBe(0);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path:testInfo.outputPath('rider-long-destination.png'), fullPage:true });
+});
+
+// Visit the actual role destinations: an href assertion is not a rendered review.
+for (const [role, routes] of Object.entries({
+  admin: [['dispatch', 'Rider routes and ETAs'], ['orders', 'Order operations'], ['people', 'Partners and staff'], ['cases', 'Customer cases'], ['activity', 'Recent changes'], ['operations', 'Privacy requests']],
+  vendor: [['capacity', 'Today’s availability'], ['activity', 'Saved updates']],
+  driver: [['activity', 'Saved route updates']],
+  support: [['cases', 'Customer cases'], ['activity', 'Saved support updates']],
+})) {
+  test(`${role} secondary workspace routes retain readable controls and navigation`, async ({ page }, testInfo) => {
+    await signIn(page, role);
+    const path = { admin: '/admin', vendor: '/vendors', driver: '/drivers', support: '/support' }[role];
+    for (const [view, title] of routes) {
+      await page.goto(`${path}?view=${view}`);
+      await expect(page.getByRole('heading', { level: 1, name: title, exact: true })).toBeVisible();
+      await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+      await expectCompactWhiteWorkspace(page, testInfo);
+      await expectWorkspaceSwitcher(page);
+      const menu = page.locator('.staffAccountMenu > summary');
+      await menu.focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('.staffAccountMenu')).toHaveAttribute('open', '');
+      await page.keyboard.press('Escape');
+      await expect(menu).toBeFocused();
+      await expect(page.locator('.staffAccountMenu')).not.toHaveAttribute('open', '');
+      if (role === 'vendor' && view === 'capacity') {
+        const capacity = page.getByRole('spinbutton', { name: 'Order slots remaining', exact: true });
+        await expect(capacity).toBeVisible();
+        await capacity.fill('7');
+        await expect(capacity).toHaveValue('7'); // Local draft only; no capacity write.
+      }
+      if (role === 'admin' && view === 'people') {
+        const editor = page.locator('.staffRosterEditor').first();
+        if (await editor.count()) await editor.locator('summary').click();
+      }
+      if (role === 'support' && view === 'cases') {
+        const summary = page.locator('.staffRosterEditor > summary').filter({ hasText: 'Open a new case' });
+        await expect(summary.locator('b')).toHaveCSS('white-space', 'nowrap');
+        const bounds = await summary.evaluate(node => { const a=node.querySelector('span').getBoundingClientRect(), b=node.querySelector('b').getBoundingClientRect(); return {textRight:a.right,actionLeft:b.left}; });
+        expect(bounds.textRight).toBeLessThanOrEqual(bounds.actionLeft);
+        await summary.click();
+        await expect(page.locator('.staffRosterEditor[open] form')).toBeVisible();
+      }
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`${role}-${view}-workspace.png`), fullPage: true });
+    }
+  });
+}
+
+test('order detail returns to the same queue page and focused order', async ({ page }, testInfo) => {
+  await signIn(page, 'admin');
+  const rows = Array.from({ length: 23 }, (_, index) => ({ ...orders[1], orderId: `queue-context-${index}`, bookingReference: `BW-${4000 + index}`, customer: `Synthetic queue customer ${index}` }));
+  await fixtureOrders(page, request => {
+    const query = new URL(request.url()).searchParams.get('q');
+    return query ? rows.filter(order => order.orderId === query) : rows;
+  });
+  await page.goto('/admin?view=orders');
+  const next = page.getByRole('button', { name: 'Next page of Order queue', exact: true });
+  await next.click();
+  const target = page.getByRole('link', { name: 'View order BW-4010', exact: true });
+  await expect(target).toBeVisible();
+  await target.click();
+  await expect(page.locator('.orderDetail h2')).toHaveText('Synthetic queue customer 10');
+  await expect(page.locator('.orderDetail h2')).toBeFocused();
+  await expect(page.getByRole('region', { name: 'Order queue', exact: true })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Back to order list', exact: false }).click();
+  await expect(target).toBeVisible();
+  await expect(target).toBeFocused();
+  await expect(page.getByRole('navigation', { name: 'Order queue pages', exact: true })).toContainText('Page 2 of 3');
+  await page.screenshot({ path: testInfo.outputPath('order-queue-return-context.png'), fullPage: true });
 });

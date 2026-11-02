@@ -17,6 +17,33 @@ restores Needs action, empties the search and returns focus to the search input.
 The collapsed filter heading indicates an active filter. Order links expose their
 reference in the accessible name. No server contract, role or customer flow changes.
 
+The follow-up keeps the queue mounted while an order detail is open: loaded pages,
+drafts and internal scrolling survive, the detail heading receives focus, and Back
+returns to the originating order link and document scroll position. Detail reads
+do not replace queue results. Filtered-out current jobs have a specific explanation,
+distinct from a failed availability read or a genuinely empty queue.
+
+Survey result panels now share the white ledger surface and neutral selected tabs;
+chart colour, owner-only access, filters, response dialogs and pagination retain
+their existing meaning. Vendor status text no longer has a tinted tile. Filter
+controls occupy a full row above search; new-case disclosures reserve an unbroken
+action column. The navigation focus ring is inset so the scrolling nav cannot clip
+it into stray strokes; Sign out loses only its inherited divider, not its focus.
+
+The first candidate's full prepared-browser run passed (41447897487, c18f5cd).
+Independent screenshot review identified the remaining survey/status fills and
+filter/disclosure alignment issues above. Follow-up browser coverage directly visits
+admin dispatch/orders/people/cases/activity/privacy, vendor capacity/history, rider
+history and support cases/history, in addition to the existing saved four-role,
+customer, survey and worklist journeys. A separate queue/detail/back regression
+checks page and focus restoration. New screenshots and exact-candidate browser
+results are required before declaring the follow-up visually complete.
+
+Release remains blocked by unchanged dependency audit findings (glob/minimatch,
+17 moderate findings) and runner source-admission guard test failures. Neither the
+audit threshold nor admission controls have been weakened. Dependencies and runner
+pins require a separately reviewed compatibility/update plan.
+
 Candidate validation: TypeScript, focused lint and 12 bounded-list/worklist/style
 checks passed locally. The existing prepared GitHub browser suite owns graphical
 acceptance at Chromium 320/390/1440 and WebKit 390; the service-desk tests exercise

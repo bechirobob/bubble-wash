@@ -47,8 +47,9 @@ try {
   assert.equal(await page.locator('main.portalPage.staffDesk').count(), 1);
   assert.equal(await page.locator('.staffWorkspaceSwitcherIcon path').getAttribute('d'), 'M-8 -4H8M-8 4H3');
   assert.equal(identity.header, 'rgba(0, 0, 0, 0)');
-  assert.equal(identity.summary, 'rgb(251, 252, 252)');
-  assert.equal(identity.work, 'rgb(251, 252, 252)');
+  assert.equal(identity.summary, 'rgb(255, 255, 255)');
+  assert.equal(identity.work, 'rgb(255, 255, 255)');
+  assert.equal(await page.getByRole('tab', {name:'Patterns',exact:true}).evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(240, 240, 240)');
   assert.equal(identity.chart, 'rgb(8, 117, 142)');
   tests.push('results use the approved shared staff shell, restrained surfaces and chart blue');
   await page.screenshot({path:output+'desktop-patterns.png',fullPage:true});
