@@ -102,7 +102,7 @@ class RollbackInspectionTests(unittest.TestCase):
             return original(path,flags,*args,**kwargs)
         with patch.object(m.os,'open',side_effect=guarded), patch.object(m.sqlite3,'connect',side_effect=AssertionError), patch.object(Path,'write_text',side_effect=AssertionError), patch.object(Path,'write_bytes',side_effect=AssertionError):
             self.assertFalse(self.inspect()['inspectionFailed'])
-        self.assertEqual([c.args[0][0] for c in self.command.call_args_list],['runuser','ss'])
+        self.assertEqual([c.args[0][0] for c in self.command.call_args_list],['runuser','ss','runuser','ss'])
         self.assertIn('show',self.command.call_args_list[0].args[0])
 
     def test_stream_pins_and_no_aggregate_invocation(self):
@@ -135,5 +135,30 @@ class RollbackInspectionTests(unittest.TestCase):
         self.assertIn("inputs.inspect_rollback && !inputs.inspect_owner", workflow)
         self.assertIn('"$EXPECTED_LIVE_SHA" "$EXPECTED_RELEASE_PATH"', workflow)
         self.assertNotIn('stream_rollback_preflight.py ${{', workflow)
+
+    def test_changed_service_or_listener_binding_fails(self):
+        for kind in ('unit', 'listener'):
+            calls = {'runuser':0,'ss':0}
+            def command(args):
+                calls[args[0]] += 1
+                if args[0] == 'ss':
+                    return 'pid=102' if kind == 'listener' and calls['ss'] > 1 else 'pid=101'
+                return self.properties.replace('MainPID=100', 'MainPID=102') if kind == 'unit' and calls['runuser'] > 1 else self.properties
+            self.command.side_effect = command
+            self.failed(self.inspect())
+
+    def test_changed_process_directory_or_executable_fails(self):
+        for name in ('cwd','exe'):
+            original = m.bounded_bytes; changed = False
+            link = self.proc/'101'/name
+            destination = link.readlink()
+            def read(path,limit):
+                nonlocal changed
+                raw = original(path,limit)
+                if path == self.proc/'101/environ' and not changed:
+                    changed = True; link.unlink(); link.symlink_to(self.home/'different'/'node' if name == 'exe' else self.home/'different')
+                return raw
+            with patch.object(m,'bounded_bytes',side_effect=read): self.failed(self.inspect())
+            link.unlink(); link.symlink_to(destination)
 
 if __name__ == '__main__': unittest.main()

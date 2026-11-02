@@ -67,13 +67,14 @@ def rollback_inspection(expected_sha, expected_path):
         if unit.get('LoadState') != 'loaded' or unit.get('ActiveState') != 'active' or len(listeners) != 1 or unit.get('EnvironmentFiles') != f'{ENV_FILE} (ignore_errors=no)' or Path(unit.get('WorkingDirectory', '/')).resolve() != target:
             raise ValueError('service binding failed')
         pids = (int(unit.get('MainPID', '0')), int(next(iter(listeners))))
-        identities, flags, cgroups, environments = [], [], [], []
+        identities, flags, cgroups, environments, executables = [], [], [], [], []
         for pid in pids:
             if pid <= 1:
                 raise ValueError('invalid process')
             identities.append(process_identity(pid))
             base = PROC / str(pid)
-            if (base / 'cwd').resolve(strict=True) != target or (base / 'exe').resolve().name != 'node':
+            executables.append((base / 'exe').resolve())
+            if (base / 'cwd').resolve(strict=True) != target or executables[-1].name != 'node':
                 raise ValueError('process binding failed')
             cgroups.append(bounded_bytes(base / 'cgroup', 65536))
             environments.append(bounded_bytes(base / 'environ', 1048576))
@@ -81,11 +82,17 @@ def rollback_inspection(expected_sha, expected_path):
             if len(values) > 1:
                 raise ValueError('duplicate flag')
             flags.append(values[0].decode() if values else None)
+        unit_after = dict(line.split('=', 1) for line in command(args).splitlines() if '=' in line)
+        listeners_after = set(re.findall(r'pid=(\d+)', command(['ss', '-H', '-ltnp', 'sport = :3000'])))
+        if unit_after != unit or listeners_after != listeners:
+            raise ValueError('service binding changed')
         if not cgroups[0] or cgroups[0] != cgroups[1] or any(
                 process_identity(pid) != identity or
+                (PROC / str(pid) / 'cwd').resolve(strict=True) != target or
+                (PROC / str(pid) / 'exe').resolve() != executable or
                 bounded_bytes(PROC / str(pid) / 'environ', 1048576) != environment or
                 bounded_bytes(PROC / str(pid) / 'cgroup', 65536) != cgroup
-                for pid, identity, environment, cgroup in zip(pids, identities, environments, cgroups)):
+                for pid, identity, environment, cgroup, executable in zip(pids, identities, environments, cgroups, executables)):
             raise ValueError('unstable process binding')
         if any(retained_read(fd, name, 2 * 1024 * 1024) != raw for name, raw in raw_files.items()) or inspection_file(marker_path, 65536) != marker_raw or inspection_file(ENV_FILE, 65536) != env_raw or CURRENT.resolve(strict=True) != target:
             raise ValueError('unstable evidence')
