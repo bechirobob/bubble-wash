@@ -158,6 +158,20 @@ def production_inventory():
 
 
 
+def verify_config_timestamps(config_objects,started_ns):
+    """Preserve the exact guard; summarize failed comparisons by fixed category."""
+    categories={str(Path(p.APP)/name):'runtime-source' for name in p.PIN_FILES}
+    categories.update({str(Path(p.APP)/'SOURCE_REVISION'):'runtime-revision',
+        p.UNIT:'service-unit',p.ENVIRONMENT:'environment'})
+    require(set(config_objects)==set(categories) and type(started_ns) is int)
+    failures=set()
+    for path,info in config_objects.items():
+        require(type(info) is tuple and len(info)==4 and all(type(value) is int for value in info))
+        for index,comparison in ((2,'mtime-after-process-start'),(3,'ctime-after-process-start')):
+            if info[index]>started_ns:failures.add((categories[path],comparison))
+    if failures:raise p.TimestampGuardFailure(sorted(failures))
+
+
 def collect(pins,eligible=True,private=False):
     require(os.geteuid()==0)
     require(set(pins)=={'runtimeRevision','runtimeFiles','unitSha256'})
@@ -177,7 +191,7 @@ def collect(pins,eligible=True,private=False):
     boot=re.search(r'^btime ([0-9]+)$',read('/proc/stat').decode(),re.M);require(boot)
     started_ns=(int(boot[1])*1000000000)+(ticks*1000000000//os.sysconf('SC_CLK_TCK'))
     # Reject file replacement/reload after the process started. Not an outbound probe.
-    require(all(max(info[2:])<=started_ns for info in config_objects.values()))
+    verify_config_timestamps(config_objects,started_ns)
     parts=[p.verify_runtime(p.APP,p.UNIT,pins['runtimeRevision'],pins['runtimeFiles'],pins['unitSha256']),
         p.verify_environment(read(p.ENVIRONMENT,16384),read('/proc/'+str(pid)+'/environ')),
         p.verify_service(props,process,account.pw_uid,account.pw_gid)]

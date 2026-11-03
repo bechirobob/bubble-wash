@@ -265,3 +265,22 @@ environment, but the historical generic transport receipt cannot prove which
 failure occurred on that runner. No raw historical stderr is recoverable from
 the receipt. These diagnostics and environment handling are locally tested;
 another host inspection still requires the existing exact-source and access gates.
+
+For the file-timestamp guard only, an inspection failure may include a
+`timestampFailures` list. It contains at most eight unique, sorted pairs drawn
+from four categories (`runtime-revision`, `runtime-source`, `service-unit`,
+`environment`) and two comparisons (`mtime-after-process-start`,
+`ctime-after-process-start`). Multiple source files collapse into the same
+category; no filenames, counts, paths, timestamps, inode values or configuration
+contents leave the receiver. Other failure stages and restore/receipt modes
+reject these details. Receiver and workflow still exit unsuccessfully.
+
+The predicate is unchanged: each observed modification/status-change timestamp
+must be no later than the calculated process start. Equality still passes and no
+tolerance is added. The calculation combines whole-second `/proc/stat` boot time
+with process-start clock ticks, so it is not nanosecond-precise despite its units.
+A synthetic near-start example demonstrates possible precision-related rejection,
+but does not identify the live host's cause. A ctime comparison alone also does
+not establish a content change. The diagnostic is an observed comparison, not
+permission to restart, alter files, or weaken the guard. It stops before runtime
+content, environment content, production inventory or account-state validation.

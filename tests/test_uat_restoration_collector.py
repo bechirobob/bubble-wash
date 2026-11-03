@@ -78,6 +78,17 @@ class Collector(unittest.TestCase):
                     return (1,2,1000000000000 if recent else 1,1)
                 self.trusted.side_effect=trusted
                 with self.assertRaises(ValueError):c.collect({'runtimeRevision':'a'*40,'runtimeFiles':{},'unitSha256':'b'*64})
+    def test_timestamp_failure_stops_before_config_contents_or_accounts(self):
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            self.setup_context(stack)
+            self.trusted.return_value=(1,2,1000000000000,1)
+            with self.assertRaises(c.p.TimestampGuardFailure):
+                c.collect({'runtimeRevision':'a'*40,'runtimeFiles':{},'unitSha256':'b'*64})
+            c.production_inventory.assert_not_called()
+            p.verify_runtime.assert_not_called()
+            p.verify_environment.assert_not_called()
+            p.inspect_accounts.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()
