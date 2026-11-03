@@ -18,6 +18,9 @@ class RenewalHostTests(unittest.TestCase):
  def test_wrong_runtime_refused(self):
   r=copy.deepcopy(req);r['context']['runtimeSha']='b'*40
   with self.assertRaises(ValueError):host.validate(r)
+ def test_previous_runtime_refused(self):
+  r=copy.deepcopy(req);r['context']['runtimeSha']='f7305933b15a285bbd393a2057bf5d27e4b9985c'
+  with self.assertRaises(ValueError):host.validate(r)
  def test_retry_refused(self):
   r=copy.deepcopy(req);r['context']['runAttempt']='2'
   with self.assertRaises(ValueError):host.validate(r)
@@ -46,7 +49,7 @@ class RenewalHostTests(unittest.TestCase):
  def test_all_dependency_hashes_checked(self):
   for path in transport.SOURCE_PINS:self.assertTrue(transport.source(path))
  def test_payload_compiles_and_never_uses_old_entry(self):
-  pins={'runtimeSha':host.LIVE,'runtimePins':json.loads((ROOT/'ops/pwa-update-source-pins.json').read_bytes())}
+  pins={'runtimeSha':host.LIVE,'runtimePins':json.loads((ROOT/'ops/customer-update-source-pins.json').read_bytes())}
   raw=transport.payload(req,pins);compile(raw,'fixture','exec')
   self.assertIn(b'host.main(',raw);self.assertNotIn(b'base.entry(',raw)
  def test_no_service_or_config_mutation_paths(self):

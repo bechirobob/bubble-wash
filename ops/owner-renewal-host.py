@@ -10,7 +10,7 @@ import signal
 import subprocess
 import types
 
-LIVE='f7305933b15a285bbd393a2057bf5d27e4b9985c'
+LIVE='277a3f8df85068f3245ddc30a6c446d10d9bdc39'
 STAGE='binding'
 ATTEMPTED=False
 base=old=modules=pins=None
