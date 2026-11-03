@@ -32,9 +32,11 @@ or public artifacts to transport credentials.
    Node's react-server condition and TypeScript stripping. An `inspect` request
    on private stdin opens the existing database read-only and returns an eligible
    count and compare-and-swap fingerprint. Retain the receipt privately.
-5. Materialize the resolved authoritative PDF through the supported Library route
-   on the consuming executor. Verify version and readability. Parse only the four
-   role credentials and compare them with the exact original targets privately.
+5. Read the authoritative version-5 PDF page 2 through Library read; complete
+   page text has been verified and permits private extraction without local PDF
+   bytes. If bytes become necessary, use only supported Library materialization.
+   Compare the four role credentials with the exact original targets privately.
+   Do not store them in GitHub without separate action-time destination approval.
 6. Submit `restore` with `fingerprint` and exactly four `{username,password}` entries
    through a reviewed confidential stdin route. Never reissue the cohort or renew
    subordinate accounts. Receipt output contains only count, window and status.
@@ -49,3 +51,5 @@ Test: `node --conditions=react-server --experimental-strip-types tests/uat-resto
 
 Until these execution gates pass, this is a draft implementation, not restored
 access. No restoration workflow, production deployment or routing change is added.
+
+Local collector/transport/receipt additions are described in `restoration-workflow-design.md`. Exact-source CI, protected workflow release, and authorized live verification remain separate execution gates.

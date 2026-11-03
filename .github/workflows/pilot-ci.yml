@@ -50,6 +50,8 @@ jobs:
         run: npm run lint
       - name: Unit and integration tests
         run: npm test
+      - name: Verify isolated UAT restoration controls
+        run: python3 -B -m unittest discover -s tests -p 'test_uat_restoration_*.py' -v
       - name: Verify guarded migration and completion
         env:
           PYTHONDONTWRITEBYTECODE: '1'
