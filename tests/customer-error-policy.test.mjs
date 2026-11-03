@@ -21,3 +21,13 @@ test('console remains visible diagnostic and URL secrets are omitted with bounde
   assert.equal(boundedCustomerText('failed /api/track?trackingToken=private#secret'), 'failed /api/track');
   assert.equal(boundedCustomerText('x'.repeat(1000)).length, 300);
 });
+
+test('only header-proven public RSC prefetch cancellation is classified separately', () => {
+  const event = { kind: 'requestfailed', path: '/services', method: 'GET', resource: 'fetch', external: false, navigation: false, rscQuery: true, rscHeader: '1', prefetchHeader: '1', failure: 'net::ERR_ABORTED' };
+  assert.equal(classifyCustomerEvent(event), 'cancelled-next-prefetch');
+  for (const change of [{ kind: 'pageerror' }, { kind: 'response', status: 500 }, { path: '/api/track' }, { path: '/unknown' }, { method: 'POST' }, { resource: 'script' }, { resource: 'document' }, { external: true }, { navigation: true }, { rscQuery: false }, { rscHeader: '' }, { prefetchHeader: '' }, { prefetchHeader: 'invalid' }, { failure: 'net::ERR_FAILED' }]) {
+    const actual = classifyCustomerEvent({ ...event, ...change });
+    assert.notEqual(actual, 'cancelled-next-prefetch', JSON.stringify(change));
+    if (!change.external) assert.equal(actual, 'unexpected', JSON.stringify(change));
+  }
+});

@@ -9,6 +9,25 @@ test.beforeEach(async ({ page }) => {
     return new URL(request.url()).origin === 'http://localhost:3100' && request.method() === 'GET' ? route.continue() : route.abort();
   });
 });
+async function capturePublicPage(page, testInfo, name) {
+  const height = await page.evaluate(() => document.documentElement.scrollHeight);
+  console.log('CUSTOMER_CAPTURE ' + JSON.stringify({ name, cssHeight: height, scale: 'css' }));
+  if (height <= 30000) return page.screenshot({ path: testInfo.outputPath(name + '.png'), fullPage: true, scale: 'css' });
+  // Overlapping viewport tiles retain all content if even CSS pixels exceed the
+  // renderer's full-page limit. Width assertions remain independent and strict.
+  const viewportHeight = await page.evaluate(() => innerHeight);
+  const last = Math.max(0, height - viewportHeight);
+  const positions = [];
+  for (let y = 0; y < last; y += Math.floor(viewportHeight * .8)) positions.push(y);
+  positions.push(last);
+  for (const [index, y] of positions.entries()) {
+    await page.evaluate(top => window.scrollTo({ top, behavior: 'instant' }), y);
+    await expect.poll(() => page.evaluate(target => Math.abs(scrollY - target) <= 1, y)).toBe(true);
+    console.log('CUSTOMER_CAPTURE_TILE ' + JSON.stringify({ name, index, expectedY: y, actualY: await page.evaluate(() => scrollY), viewportHeight }));
+    await page.screenshot({ path: testInfo.outputPath(`${name}-tile-${String(index).padStart(3, '0')}.png`), scale: 'css' });
+  }
+}
+
 for (const path of ['/', '/services', '/book', '/track', '/manage', '/early-access', '/privacy', '/terms', '/refund-policy', '/install']) {
   test(`public route ${path} keeps expanded controls within the viewport`, async ({ page }, testInfo) => {
     await page.goto(path);
@@ -45,7 +64,7 @@ for (const path of ['/', '/services', '/book', '/track', '/manage', '/early-acce
       return { tag: node.tagName, className: String(node.className).slice(0, 100), x: Math.round(box.x), right: Math.round(box.right), width: Math.round(box.width) };
     }).filter(box => box.width > 0 && (box.x < -1 || box.right > innerWidth + 1)).slice(0, 30));
     console.log('CUSTOMER_OVERFLOW ' + JSON.stringify({ path, project: testInfo.project.name, overflow }));
-    await page.screenshot({ path: testInfo.outputPath('public-enlarged-text.png'), fullPage: true });
+    await capturePublicPage(page, testInfo, 'public-enlarged-text');
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   });
 }
@@ -67,6 +86,7 @@ test('pricing to booking and Back retains the selected estimate', async ({ page 
   await page.screenshot({ path: testInfo.outputPath('pricing-return-before-assertion.png'), fullPage: true });
   await expect(form.getByRole('combobox', { name: 'Collection plan', exact: true })).toHaveValue('Twice weekly');
   await expect(form.locator('input[type="number"]')).toHaveValue('60.5');
+  if (!(await form.locator('.estimateExtras').evaluate(node => node.open))) await form.locator('.estimateExtras > summary').click();
   await expect(form.getByRole('checkbox').first()).toBeChecked();
   await page.screenshot({ path: testInfo.outputPath('pricing-return.png'), fullPage: true });
 });

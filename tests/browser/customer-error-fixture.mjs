@@ -20,7 +20,8 @@ export const test = base.extend({
     }
     function requestInfo(request) {
       const url = new URL(request.url());
-      return { path: url.pathname, method: request.method(), resource: request.resourceType(), external: url.origin !== 'http://localhost:3100' };
+      const headers = request.headers();
+      return { path: url.pathname, method: request.method(), resource: request.resourceType(), external: url.origin !== 'http://localhost:3100', navigation: request.isNavigationRequest(), rscQuery: url.searchParams.has('_rsc'), rscHeader: headers.rsc ?? '', prefetchHeader: headers['next-router-prefetch'] ?? '' };
     }
     const pageError = error => record({ kind: 'pageerror', message: boundedCustomerText(error.message) });
     const consoleError = message => { if (message.type() === 'error' || message.type() === 'warning') record({ kind: 'console', level: message.type(), message: boundedCustomerText(message.text()) }); };
