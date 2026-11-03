@@ -1,0 +1,115 @@
+# Exact-reviewed-source UAT controls; restore additionally requires separate storage and access approval.
+name: Restore original isolated UAT cohort
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [inspect, restore, receipt]
+        default: inspect
+        required: true
+      source_sha:
+        type: string
+        required: true
+      operation_id:
+        type: string
+        required: true
+      admin_route_approved:
+        type: boolean
+        default: false
+      restoration_approved:
+        type: boolean
+        default: false
+      github_credential_storage_approved:
+        type: boolean
+        default: false
+      secret_cleanup_approved:
+        type: boolean
+        default: false
+      public_verification_ready:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  operation:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      UAT_OPERATION_ID: ${{ inputs.operation_id }}
+      UAT_RESTORE_MODE: ${{ inputs.mode }}
+      ADMIN_ROUTE_APPROVED: ${{ inputs.admin_route_approved }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Require exact reviewed main and first attempt
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == bechirobob/bubble-wash && "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          python3 -B ops/integration-release/select_source.py --release . --runner-only
+      - name: Require successful exact-source CI
+        env:
+          TARGET_SHA: ${{ inputs.source_sha }}
+        run: python3 -B ops/check-release-ci.py
+      - name: Require restore attestations before any credential-bearing step
+        if: inputs.mode == 'restore'
+        env:
+          RESTORATION_APPROVED: ${{ inputs.restoration_approved }}
+          STORAGE_APPROVED: ${{ inputs.github_credential_storage_approved }}
+          CLEANUP_APPROVED: ${{ inputs.secret_cleanup_approved }}
+          PUBLIC_READY: ${{ inputs.public_verification_ready }}
+        run: |
+          set -euo pipefail
+          [[ "$ADMIN_ROUTE_APPROVED" == true && "$RESTORATION_APPROVED" == true && "$STORAGE_APPROVED" == true && "$CLEANUP_APPROVED" == true && "$PUBLIC_READY" == true ]]
+      - name: Connect only through independently approved administrative route
+        if: inputs.admin_route_approved
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Read-only operation without credential secret
+        if: inputs.mode != 'restore'
+        run: |
+          python3 -I -B - <<'PY'
+          import importlib.util,json,os
+          from pathlib import Path
+          try:
+              spec=importlib.util.spec_from_file_location('transport','ops/uat/restoration-transport.py')
+              module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+              print(json.dumps(module.perform(Path.cwd(),os.environ),sort_keys=True))
+          except BaseException:
+              print('{"ok":false,"automaticRetry":false,"state":"uncertain-stop"}')
+              raise SystemExit(1)
+          PY
+      - name: One separately approved private restoration attempt
+        if: inputs.mode == 'restore' && inputs.restoration_approved && inputs.github_credential_storage_approved && inputs.secret_cleanup_approved && inputs.public_verification_ready
+        env:
+          RESTORATION_APPROVED: ${{ inputs.restoration_approved }}
+          GITHUB_CREDENTIAL_STORAGE_APPROVED: ${{ inputs.github_credential_storage_approved }}
+          SECRET_CLEANUP_APPROVED: ${{ inputs.secret_cleanup_approved }}
+          PUBLIC_VERIFICATION_READY: ${{ inputs.public_verification_ready }}
+          BUBBLEWASH_UAT_RESTORE_ONCE: ${{ secrets.BUBBLEWASH_UAT_RESTORE_ONCE }}
+        run: |
+          python3 -I -B - <<'PY'
+          import importlib.util,json,os
+          from pathlib import Path
+          try:
+              spec=importlib.util.spec_from_file_location('transport','ops/uat/restoration-transport.py')
+              module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+              print(json.dumps(module.perform(Path.cwd(),os.environ),sort_keys=True))
+          except BaseException:
+              print('{"ok":false,"automaticRetry":false,"state":"uncertain-stop"}')
+              raise SystemExit(1)
+          PY
+# Secret removal is coordinator-owned using an existing authorized admin route.
+# This design does not grant secrets-admin permissions or claim GitHub enforces one use.
