@@ -109,7 +109,7 @@ def publish(backup,api,env,request,raw,host):
 def main():
     resource.setrlimit(resource.RLIMIT_CORE,(0,0));stage='input';attempted=False
     try:
-        pins={'runtimeSha':'f7305933b15a285bbd393a2057bf5d27e4b9985c','runtimePins':json.loads(source('ops/pwa-update-source-pins.json'))};request,host=input_request(os.environ,pins)
+        pins={'runtimeSha':'277a3f8df85068f3245ddc30a6c446d10d9bdc39','runtimePins':json.loads(source('ops/customer-update-source-pins.json'))};request,host=input_request(os.environ,pins)
         facts=module('owner_bounded_transport','ops/host-facts/facts.py')
         backup=api=None
         if request['mode']=='renew-document':
