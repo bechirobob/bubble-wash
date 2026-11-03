@@ -9,7 +9,8 @@ async function beforeHardNavigation(page, label) {
   const tracker = prefetches.get(page);
   tracker.arm();
   tracker.setPhase(`settling before ${label}`);
-  await expect.poll(() => tracker.settled(), { timeout: 15_000, message: `Existing RSC prefetches finish before ${label}` }).toBe(true);
+  await expect.poll(() => tracker.settled(), { timeout: 15_000, message: `Existing RSC and dispatch reads finish before ${label}` }).toBe(true);
+  expect(tracker.dispatchFailures(), `Dispatch reads succeeded before ${label}`).toBe(0);
   tracker.setPhase(label);
 }
 function safeError(message) {
@@ -96,6 +97,12 @@ async function runStaffWorkflow(browser, testInfo, gpsOnly = false) {
       const page = await context.newPage(); pages[role] = page;
       const tracker = observePrefetches(page, event => console.log(`[${fixture}] ${role} ${Date.now()} ${JSON.stringify(event)}`));
       prefetches.set(page, tracker);
+      let navigationEvents = 0;
+      page.on('framenavigated', frame => {
+        if (frame !== page.mainFrame() || navigationEvents++ >= 20) return;
+        const url = new URL(frame.url());
+        console.log(`[${fixture}] ${role} ${Date.now()} ${JSON.stringify({ event: 'main-frame-navigation', path: url.pathname, phase: tracker.phase() })}`);
+      });
       page.on('pageerror', error => {
         const message = safeError(error.message);
         errors.push(message);
@@ -308,6 +315,7 @@ async function runStaffWorkflow(browser, testInfo, gpsOnly = false) {
 
       expect(external, 'No browser request may contact an external service').toEqual([]);
       expect(errors, 'No uncaught browser errors').toEqual([]);
+    for (const page of Object.values(pages)) expect(prefetches.get(page).dispatchFailures(), 'No failed dispatch GETs').toBe(0);
       return;
     }
 
@@ -406,6 +414,7 @@ async function runStaffWorkflow(browser, testInfo, gpsOnly = false) {
     await evidence(admin, testInfo, 'admin-overdue-stopped');
     expect(external, 'No browser request may contact an external service').toEqual([]);
     expect(errors, 'No uncaught browser errors').toEqual([]);
+    for (const page of Object.values(pages)) expect(prefetches.get(page).dispatchFailures(), 'No failed dispatch GETs').toBe(0);
   } catch (error) {
     console.error(`[${fixture}] journey failed: ${error.message}`);
     console.error(`[${fixture}] page errors: ${JSON.stringify(errors)}`);

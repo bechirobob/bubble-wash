@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { Calculator, CalendarPlus } from "lucide-react";
-import { FormEvent, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { addons, plans, zones, type AddonKey, type PlanName, type ZoneKey } from "@/lib/pricing";
 import { formatMoney, postJSON, type Quote } from "@/lib/public-ui";
+import { readPricingHistory, withPricingHistory } from "@/lib/pricing-history";
 import { PlanCatalogue } from "@/components/PlanCatalogue";
 
 const addonEntries = Object.entries(addons) as Array<[AddonKey, (typeof addons)[AddonKey]]>;
@@ -15,7 +16,9 @@ const clientReady = () => true;
 const serverReady = () => false;
 
 export function PricingCalculator({ initialPlan = "Twice weekly", available = true, showCatalogue = false }: { initialPlan?: PlanName; available?: boolean; showCatalogue?: boolean }) {
-  const hydrated = useSyncExternalStore(subscribeToHydration, clientReady, serverReady);
+  const clientHydrated = useSyncExternalStore(subscribeToHydration, clientReady, serverReady);
+  const [historyReady, setHistoryReady] = useState(false);
+  const hydrated = clientHydrated && historyReady;
   const [plan, setPlan] = useState<PlanName>(initialPlan);
   const [zone, setZone] = useState<ZoneKey>("core");
   const [kg, setKg] = useState("60");
@@ -27,6 +30,27 @@ export function PricingCalculator({ initialPlan = "Twice weekly", available = tr
   const revision = useRef(0);
   const zoneEntries = useMemo(() => Object.entries(zones) as Array<[ZoneKey, (typeof zones)[ZoneKey]]>, []);
   const selectedPlan = plans.find((item) => item.name === plan) ?? plans[1];
+
+  useEffect(() => {
+    // Restore the current navigation entry after hydration, before enabling edits.
+    // History contains only estimate choices, never identity or payment data.
+    const restore = () => {
+      const saved = readPricingHistory(window.history.state, window.location.pathname + window.location.search);
+      if (saved) {
+        setPlan(saved.plan); setZone(saved.zone); setKg(saved.kg); setSelectedAddons(saved.addons);
+        revision.current += 1; setQuote(null); setStatus(""); setTone(""); setPending(false);
+      }
+      setHistoryReady(true);
+    };
+    const frame = window.requestAnimationFrame(restore);
+    window.addEventListener('popstate', restore);
+    return () => { window.cancelAnimationFrame(frame); window.removeEventListener('popstate', restore); };
+  }, []);
+
+  function rememberEstimate() {
+    const href = window.location.pathname + window.location.search;
+    window.history.replaceState(withPricingHistory(window.history.state, href, { plan, zone, kg, addons: selectedAddons }), "");
+  }
 
   function invalidate() {
     revision.current += 1;
@@ -85,7 +109,7 @@ export function PricingCalculator({ initialPlan = "Twice weekly", available = tr
       <aside className="quoteSummary" aria-live="polite">
         <p className="sectionLabel">{quote ? "Your monthly estimate" : "Your selected plan"}</p>
         <h3>{selectedPlan.name}</h3>
-        {quote ? <><strong className="quoteTotal">{formatMoney(quote.estimatedMonthlyTotal)}</strong><span className="quotePeriod">{quote.routeFeePending ? "monthly estimate excluding custom delivery" : "estimated monthly total"}</span><dl className="miniFacts"><div><dt>Monthly service fee</dt><dd>{formatMoney(quote.subscription)}</dd></div><div><dt>Processing per pickup</dt><dd>{formatMoney(quote.processingPerPickup)}</dd></div><div><dt>Recurring extras per pickup</dt><dd>{formatMoney(quote.addonsPerPickup)}</dd></div><div><dt>Route fee per pickup</dt><dd>{quote.routeFeePending ? "To be confirmed" : formatMoney(quote.zoneFee)}</dd></div><div><dt>Minimum adjustment per pickup</dt><dd>{formatMoney(quote.minimumAdjustment)}</dd></div><div><dt>{quote.routeFeePending ? "Per pickup, excluding custom delivery" : "Total per pickup"}</dt><dd>{formatMoney(quote.perPickupTotal)}</dd></div><div><dt>Scheduled pickups</dt><dd>{quote.monthlyPickups} per calendar month</dd></div></dl>{quote.occasionalLines.length > 0 && <p>Quoted separately, not included above: {quote.occasionalLines.map(item => `${item.label} (${formatMoney(item.fee)} fee when requested)`).join("; ")}. The affected pickup’s total depends on its load, route and minimum.</p>}<small>{quote.routeFeePending && "Custom delivery is not included. The team must confirm its cost before activation. "}This estimate covers the monthly service fee and {quote.monthlyPickups} scheduled pickups at the entered weight, with selected recurring upgrades. Occasional services are quoted separately. Your final bill uses the weight recorded when your laundry arrives. The GHS 450 pickup minimum is included. Plans include the stated number of collections per calendar month; additional dates are quoted separately. Volume rates apply to the whole load.</small><Link className="button primary full" href={`/book?${new URLSearchParams({ plan, addons: selectedAddons.join(",") })}`}><CalendarPlus aria-hidden="true" />{available ? "Continue to booking" : "Check pickup availability"}</Link></> : <><strong className="quoteTotal">{formatMoney(selectedPlan.subscription)}</strong><span className="quotePeriod">monthly service fee, before processing</span><dl className="miniFacts"><div><dt>Schedule</dt><dd>{selectedPlan.pickups}</dd></div><div><dt>Suitable for</dt><dd>{selectedPlan.audience}</dd></div></dl><small>Run the estimate for scheduled pickups. Occasional services and unconfirmed custom delivery are quoted separately.</small></>}
+        {quote ? <><strong className="quoteTotal">{formatMoney(quote.estimatedMonthlyTotal)}</strong><span className="quotePeriod">{quote.routeFeePending ? "monthly estimate excluding custom delivery" : "estimated monthly total"}</span><dl className="miniFacts"><div><dt>Monthly service fee</dt><dd>{formatMoney(quote.subscription)}</dd></div><div><dt>Processing per pickup</dt><dd>{formatMoney(quote.processingPerPickup)}</dd></div><div><dt>Recurring extras per pickup</dt><dd>{formatMoney(quote.addonsPerPickup)}</dd></div><div><dt>Route fee per pickup</dt><dd>{quote.routeFeePending ? "To be confirmed" : formatMoney(quote.zoneFee)}</dd></div><div><dt>Minimum adjustment per pickup</dt><dd>{formatMoney(quote.minimumAdjustment)}</dd></div><div><dt>{quote.routeFeePending ? "Per pickup, excluding custom delivery" : "Total per pickup"}</dt><dd>{formatMoney(quote.perPickupTotal)}</dd></div><div><dt>Scheduled pickups</dt><dd>{quote.monthlyPickups} per calendar month</dd></div></dl>{quote.occasionalLines.length > 0 && <p>Quoted separately, not included above: {quote.occasionalLines.map(item => `${item.label} (${formatMoney(item.fee)} fee when requested)`).join("; ")}. The affected pickup’s total depends on its load, route and minimum.</p>}<small>{quote.routeFeePending && "Custom delivery is not included. The team must confirm its cost before activation. "}This estimate covers the monthly service fee and {quote.monthlyPickups} scheduled pickups at the entered weight, with selected recurring upgrades. Occasional services are quoted separately. Your final bill uses the weight recorded when your laundry arrives. The GHS 450 pickup minimum is included. Plans include the stated number of collections per calendar month; additional dates are quoted separately. Volume rates apply to the whole load.</small><Link className="button primary full" onClick={rememberEstimate} href={`/book?${new URLSearchParams({ plan, addons: selectedAddons.join(",") })}`}><CalendarPlus aria-hidden="true" />{available ? "Continue to booking" : "Check pickup availability"}</Link></> : <><strong className="quoteTotal">{formatMoney(selectedPlan.subscription)}</strong><span className="quotePeriod">monthly service fee, before processing</span><dl className="miniFacts"><div><dt>Schedule</dt><dd>{selectedPlan.pickups}</dd></div><div><dt>Suitable for</dt><dd>{selectedPlan.audience}</dd></div></dl><small>Run the estimate for scheduled pickups. Occasional services and unconfirmed custom delivery are quoted separately.</small></>}
       </aside>
     </div>
   );

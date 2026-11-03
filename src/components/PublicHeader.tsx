@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Menu, X } from "lucide-react";
 import { BrandLink } from "@/components/BrandLink";
 type NavItem = { href: string; label: string; match?: string };
@@ -17,12 +17,17 @@ const navigation: NavItem[] = [
 
 export function PublicHeader({ available }: { available: boolean }) {
   const pathname = usePathname();
+  return <PublicNavigation key={pathname} pathname={pathname} available={available} />;
+}
+
+function PublicNavigation({ pathname, available }: { pathname: string; available: boolean }) {
+  const menuButton = useRef<HTMLButtonElement>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     if (!mobileOpen) return;
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setMobileOpen(false);
+      if (event.key === "Escape") { setMobileOpen(false); menuButton.current?.focus(); }
     }
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
@@ -31,7 +36,7 @@ export function PublicHeader({ available }: { available: boolean }) {
   return (
     <header className="siteHeader" id="top">
       <BrandLink priority onClick={() => setMobileOpen(false)} />
-      <button className="menuButton" type="button" aria-controls="site-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen((current) => !current)}>
+      <button ref={menuButton} className="menuButton" type="button" aria-controls="site-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen((current) => !current)}>
         {mobileOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
         <span>{mobileOpen ? "Close" : "Menu"}</span>
       </button>
