@@ -242,3 +242,26 @@ satisfy preflight or authorize retry. Administrative-route, exact-source CI,
 first-attempt, concurrency and separate restoration/secret gates remain in force.
 The previously captured generic failure cannot be diagnosed retroactively. A new
 inspection needs coordinator review after this change passes exact-source CI.
+
+The runner transport additionally reports fixed `transport-*` categories for
+missing/denied/unavailable subprocess startup, timeout, output overflow, closed
+stdin, I/O failure, signalled/nonzero exit, absent/invalid failure receipt, and
+cleanup failure. Receipt validation after a zero exit remains a separate stage.
+No exit number, exception text, stdout or stderr is exposed. A broken stdin pipe
+does not hide an already-failed child's exit: output is drained within the same
+limits before classification. Failure never authorizes an automatic retry.
+
+The pinned Tailscale action installs `/usr/local/bin/tailscale`; its v1.94.2 SSH
+wrapper calls Go `os.UserConfigDir()` to write public SSH host keys. On Linux,
+that function fails when both `XDG_CONFIG_HOME` and `HOME` are absent. For only
+the fixed Tailscale SSH target, the transport supplies a fresh private temporary
+`XDG_CONFIG_HOME`, removed after subprocess cleanup. It never inherits runner
+HOME/configuration, auth sockets, tokens or passwords. The directory contains
+only Tailscale's public host-key file; requests still travel through private
+stdin. Other subprocesses retain the original restricted environment.
+
+This source-level dependency explains a deterministic failure in the old child
+environment, but the historical generic transport receipt cannot prove which
+failure occurred on that runner. No raw historical stderr is recoverable from
+the receipt. These diagnostics and environment handling are locally tested;
+another host inspection still requires the existing exact-source and access gates.

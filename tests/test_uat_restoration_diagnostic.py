@@ -3,7 +3,9 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import types
@@ -114,6 +116,80 @@ r.main(bundle)
             with self.assertRaises(SystemExit) as error:exec(code,{})
         self.assertEqual(error.exception.code,1)
         self.assertEqual(json.loads(output.getvalue()),self.failure())
+
+    def test_transport_categories_use_only_fixed_labels(self):
+        cases=[('startup-missing',['/nonexistent-uat-diagnostic-helper'],{},b''),
+            ('exit-no-receipt',[sys.executable,'-c','import sys;sys.stderr.write(sys.argv[1]);sys.exit(7)',CANARY],{},b''),
+            ('exit-invalid-receipt',[sys.executable,'-c','import sys;print(sys.argv[1]);sys.exit(7)',CANARY],{},b''),
+            ('exit-signal',[sys.executable,'-c','import os,signal;os.kill(os.getpid(),signal.SIGTERM)'],{},b''),
+            ('timeout',[sys.executable,'-c','import time;time.sleep(5)'],{'timeout':.1},b''),
+            ('output-limit',[sys.executable,'-c','import sys;sys.stderr.write(sys.argv[1]*1000)',CANARY],{'limit':100},b'')]
+        for category,command,kwargs,payload in cases:
+            with self.subTest(category=category):
+                with self.assertRaises(t.TransportFailure) as captured:
+                    t.exchange(command,payload,inspection_bundle=self.bundle,**kwargs)
+                result=t.inspection_failure(captured.exception,self.bundle,'transport')
+                self.assertEqual(result['failureStage'],'transport-'+category)
+                self.assertNotIn(CANARY,json.dumps(result))
+                self.assertNotIn(CANARY,str(captured.exception))
+                t.validate_inspection_failure(result,self.bundle)
+                with self.assertRaises(ValueError):t.validate_inspection_failure(result,self.bundle,host_only=True)
+
+    def test_early_child_exit_drains_output_and_classifies_exit(self):
+        command=[sys.executable,'-c','import os,sys;os.close(0);sys.stderr.write(sys.argv[1]);sys.exit(9)',CANARY]
+        with self.assertRaises(t.TransportFailure) as captured:
+            t.exchange(command,b'x'*16384,inspection_bundle=self.bundle)
+        self.assertEqual(captured.exception.category,'exit-no-receipt')
+
+    def test_tailscale_config_is_private_temporary_and_never_inherited(self):
+        command=['/usr/local/bin/tailscale','ssh','root@hermes','synthetic-command']
+        with mock.patch.dict(os.environ,{'HOME':CANARY,'XDG_CONFIG_HOME':CANARY,
+             'SSH_AUTH_SOCK':CANARY,'BUBBLEWASH_UAT_RESTORE_ONCE':CANARY}):
+            with t.child_environment(command) as env:
+                self.assertEqual(set(env),{'PATH','LC_ALL','XDG_CONFIG_HOME'})
+                self.assertEqual(env['PATH'],'/usr/sbin:/usr/bin:/sbin:/bin')
+                path=Path(env['XDG_CONFIG_HOME'])
+                self.assertTrue(path.is_absolute() and path.is_dir())
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode),0o700)
+                (path/'tailscale').mkdir();(path/'tailscale/ssh_known_hosts').write_text('synthetic-public-key')
+            self.assertFalse(path.exists())
+            with t.child_environment(['/usr/bin/node']) as env:
+                self.assertEqual(env,{'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LC_ALL':'C'})
+
+    def test_config_cleanup_and_sanitized_startup_errors(self):
+        command=['/usr/local/bin/tailscale','ssh','root@hermes','synthetic-command']
+        for category,error in [('startup-denied',PermissionError(CANARY)),('startup-unavailable',OSError(CANARY))]:
+            directories=[]
+            def start(*args,**kwargs):
+                directory=Path(kwargs['env']['XDG_CONFIG_HOME']);directories.append(directory)
+                self.assertTrue(directory.is_dir())
+                raise error
+            with self.subTest(category=category),mock.patch.object(t.subprocess,'Popen',side_effect=start):
+                with self.assertRaises(t.TransportFailure) as captured:t.exchange(command,b'')
+            self.assertEqual(captured.exception.category,category)
+            self.assertNotIn(CANARY,str(captured.exception))
+            self.assertTrue(directories and all(not d.exists() for d in directories))
+
+    def test_termination_failure_still_closes_every_pipe(self):
+        child=mock.Mock();child.poll.return_value=None
+        child.wait.side_effect=subprocess.TimeoutExpired(CANARY,2)
+        child.kill.side_effect=OSError(CANARY)
+        selector=mock.Mock();selector.get_map.return_value={}
+        selector.close.side_effect=OSError(CANARY)
+        with mock.patch.object(t.subprocess,'Popen',return_value=child),mock.patch.object(t.selectors,'DefaultSelector',return_value=selector),mock.patch.object(t.os,'set_blocking'):
+            with self.assertRaises(t.TransportFailure) as captured:t.exchange([sys.executable],b'synthetic-private-input')
+        self.assertEqual(captured.exception.category,'cleanup')
+        for stream in (child.stdin,child.stdout,child.stderr):stream.close.assert_called_once()
+        self.assertNotIn(CANARY,str(captured.exception))
+
+    def test_directory_removal_error_is_sanitized_cleanup_failure(self):
+        directory=mock.MagicMock();directory.__enter__.return_value='/tmp/synthetic-config'
+        directory.__exit__.side_effect=OSError(CANARY)
+        with mock.patch.object(t.tempfile,'TemporaryDirectory',return_value=directory):
+            with self.assertRaises(t.TransportFailure) as captured:
+                with t.child_environment(['/usr/local/bin/tailscale','ssh','root@hermes']):pass
+        self.assertEqual(captured.exception.category,'cleanup')
+        self.assertNotIn(CANARY,str(captured.exception))
 
 
 if __name__=='__main__':unittest.main()
