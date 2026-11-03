@@ -32,6 +32,15 @@ for (const path of ['/', '/services', '/book', '/track', '/manage', '/early-acce
   test(`public route ${path} keeps expanded controls within the viewport`, async ({ page }, testInfo) => {
     await page.goto(path);
     await expect(page.locator('h1').first()).toBeVisible();
+    if (path === '/') {
+      // Use the ordinary dismissal before reviewing the actual home. Waiting
+      // for opening first also prevents a pre-hydration hidden check passing.
+      const opening = page.getByRole('dialog', { name: 'Bubble Wash opening' });
+      await expect(opening).toBeVisible();
+      await page.getByRole('button', { name: 'Skip intro', exact: true }).click();
+      await expect(opening).not.toBeVisible();
+      await expect(page.locator('#home-title')).toBeVisible();
+    }
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     const menu = page.getByRole('button', { name: 'Menu', exact: true });
     if (await menu.isVisible()) {
