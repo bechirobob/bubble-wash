@@ -1,8 +1,9 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, expectCustomerFailure } from './customer-error-fixture.mjs';
 
 // Read-only rendered coverage. Every mutation and external origin is blocked.
 test.use({ serviceWorkers: 'block' });
 test.beforeEach(async ({ page }) => {
+  expectCustomerFailure(page, { kind: 'response', path: '/api/customer/order', method: 'GET', status: 401 });
   await page.route('**/*', route => {
     const request = route.request();
     return new URL(request.url()).origin === 'http://localhost:3100' && request.method() === 'GET' ? route.continue() : route.abort();

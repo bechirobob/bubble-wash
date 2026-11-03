@@ -1,7 +1,8 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, expectCustomerFailure } from './customer-error-fixture.mjs';
 
 test.use({ serviceWorkers: 'block' });
 test.beforeEach(async ({ page }) => {
+  expectCustomerFailure(page, { kind: 'response', path: '/api/customer/order', method: 'GET', status: 401 });
   await page.route('**/*', route => {
     const request = route.request();
     return new URL(request.url()).origin === 'http://localhost:3100' && request.method() === 'GET' ? route.continue() : route.abort();
@@ -30,6 +31,7 @@ test('mobile menu Escape restores focus and route history leaves it closed', asy
 
 test('private tracking link can retry in memory without exposing token in page or storage', async ({ page }, testInfo) => {
   let calls = 0;
+  expectCustomerFailure(page, { kind: 'requestfailed', path: '/api/track', method: 'GET' });
   await page.route('**/api/track?*', route => ++calls === 1 ? route.abort('connectionreset') : route.fulfill({ json: tracking('Clean and ready') }));
   await page.goto('/track#tracking=synthetic-private-token');
   const retry = page.getByRole('button', { name: 'Try tracking again' });
@@ -47,6 +49,7 @@ test('private tracking link can retry in memory without exposing token in page o
 test('new tracking lookup wins over delayed automatic response', async ({ page }) => {
   let release, started = false, finished = false;
   const held = new Promise(resolve => { release = resolve; });
+  expectCustomerFailure(page, { kind: 'requestfailed', path: '/api/track', method: 'GET' });
   await page.route('**/api/track?*', async route => {
     if (new URL(route.request().url()).searchParams.get('trackingToken') === 'old-synthetic') {
       started = true; await held;
@@ -66,6 +69,7 @@ test('new tracking lookup wins over delayed automatic response', async ({ page }
 });
 
 test('recovery is verified once and a lost response never replays the token', async ({ page }) => {
+  expectCustomerFailure(page, { kind: 'requestfailed', path: '/api/customer/recover', method: 'POST' });
   const bodies = []; let release;
   const held = new Promise(resolve => { release = resolve; });
   await page.route('**/api/customer/recover', async route => {
@@ -101,6 +105,7 @@ test('successful recovery opens the verified order without exposing its token', 
 
 test('stalled one-shot recovery times out and unlocks access without replay', async ({ page }) => {
   let calls = 0;
+  expectCustomerFailure(page, { kind: 'requestfailed', path: '/api/customer/recover', method: 'POST' });
   await page.route('**/api/customer/recover', () => { calls++; /* Intentionally no response. */ });
   await page.goto('/manage#recovery=synthetic-stalled');
   await expect.poll(() => calls).toBe(1);
@@ -111,6 +116,7 @@ test('stalled one-shot recovery times out and unlocks access without replay', as
 });
 
 test('expired recovery link shows failure and leaves fresh recovery available', async ({ page }) => {
+  expectCustomerFailure(page, { kind: 'response', path: '/api/customer/recover', method: 'POST', status: 410 });
   await page.route('**/api/customer/recover', route => route.fulfill({ status: 410, json: { ok: false, error: 'This recovery link has expired.' } }));
   await page.goto('/manage#recovery=synthetic-expired');
   await expect(page.locator('.manageAccessForm').getByRole('status')).toContainText('expired');
@@ -120,6 +126,7 @@ test('expired recovery link shows failure and leaves fresh recovery available', 
 
 test('stalled tracking times out into a usable retry', async ({ page }) => {
   let calls = 0;
+  expectCustomerFailure(page, { kind: 'requestfailed', path: '/api/track', method: 'GET' });
   await page.route('**/api/track?*', route => { if (++calls > 1) return route.fulfill({ json: tracking('Recovered result') }); });
   await page.goto('/track#tracking=synthetic-stalled');
   await expect(page.getByRole('button', { name: 'Try tracking again' })).toBeVisible({ timeout: 20000 });

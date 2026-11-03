@@ -1,8 +1,9 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, expectCustomerFailure } from './customer-error-fixture.mjs';
 
 // Transport-only synthetic responses: no submitted data reaches a provider or DB.
 test.use({ serviceWorkers: 'block' });
 test.beforeEach(async ({ page }) => {
+  expectCustomerFailure(page, { kind: 'response', path: '/api/customer/order', method: 'GET', status: 401 });
   await page.route('**/*', route => {
     const request = route.request();
     return new URL(request.url()).origin === 'http://localhost:3100' && request.method() === 'GET'
@@ -13,6 +14,7 @@ test.beforeEach(async ({ page }) => {
 test('privacy distinguishes pending and unfamiliar errors from success and retains the draft', async ({ page }, testInfo) => {
   let release, calls = 0;
   const held = new Promise(resolve => { release = resolve; });
+  expectCustomerFailure(page, { kind: 'response', path: '/api/privacy/requests', method: 'POST', status: 503 });
   await page.route('**/api/privacy/requests', async route => {
     calls++;
     if (calls === 1) {
@@ -46,6 +48,7 @@ test('privacy distinguishes pending and unfamiliar errors from success and retai
 
 test('booking preserves failed draft and focuses confirmed result only after success', async ({ page }, testInfo) => {
   const payloads = [];
+  expectCustomerFailure(page, { kind: 'response', path: '/api/submit', method: 'POST', status: 503 });
   await page.route('**/api/submit', route => {
     payloads.push(route.request().postDataJSON());
     return payloads.length === 1
