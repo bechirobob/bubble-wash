@@ -51,10 +51,11 @@ class Context(unittest.TestCase):
 
 class BoundedPipe(unittest.TestCase):
     def test_payload_is_stdin_not_arguments_or_environment(self):
-        code='import os,sys,json; x=sys.stdin.buffer.read(); print(json.dumps({"received":len(x),"only":sorted(os.environ)}))'
+        code='import os,sys,json; x=sys.stdin.buffer.read(); print(json.dumps({"received":len(x),"only":sorted(os.environ),"path":os.environ["PATH"]}))'
         result=json.loads(t.exchange([sys.executable,'-c',code],b'synthetic-private-input'))
         self.assertEqual(result['received'],23)
         self.assertNotIn('BUBBLEWASH_UAT_RESTORE_ONCE',result['only'])
+        self.assertEqual(result['path'],'/usr/sbin:/usr/bin:/sbin:/bin')
     def test_overflow_and_timeout_fail_without_echoing_output(self):
         with self.assertRaisesRegex(ValueError,'^UAT confidential transport refused$'):
             t.exchange([sys.executable,'-c','import sys;sys.stderr.write("synthetic-private"*10000)'],b'',limit=100)
@@ -68,7 +69,7 @@ class BoundedPipe(unittest.TestCase):
 class Receiver(unittest.TestCase):
     def bundle(self):return {name:(ROOT/name).read_text() for name in t.SOURCE_FILES}
     def test_request_never_in_remote_command(self):
-        args=t.remote_command(self.bundle());self.assertEqual(args[:3],['tailscale','ssh','root@hermes'])
+        args=t.remote_command(self.bundle());self.assertEqual(args[:3],['/usr/local/bin/tailscale','ssh','root@hermes'])
         self.assertNotIn('synthetic-only-test-password',repr(args))
     def test_node_request_uses_private_pipe_and_absolute_imports(self):
         bundle=self.bundle();payload={'action':'restore','accounts':accounts()}
