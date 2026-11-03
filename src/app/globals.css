@@ -1879,8 +1879,8 @@ html:not([data-input-modality="pointer"]) .focusedPlanSegment:has(input:focus-vi
 .focusedPlanCompareChoice > span { min-width: 0; }
 .focusedPlanCompareChoice strong { display: block; font-size: .92rem; overflow-wrap: anywhere; }
 .focusedPlanCompareChoice small { margin-top: 4px; font-size: .8rem; }
-.focusedPlanCompareChoice[aria-pressed="true"] { background: var(--brand-soft); }
-.focusedPlanCompareChoice:focus-visible { outline-offset: -3px; }
+.focusedPlanCompareChoice:has(input:checked) { background: var(--brand-soft); }
+.focusedPlanCompareChoice:has(input:focus-visible) { outline-offset: -3px; }
 .focusedPlanComparePrice { flex-shrink: 0; text-align: end; font-variant-numeric: tabular-nums; }
 .focusedPlanBenefits { max-height: 16rem; overflow-y: auto; overscroll-behavior-y: auto; scrollbar-gutter: stable; margin: 0; }
 .focusedPlanBenefits li { margin: 0; padding-block: 10px; }
@@ -1902,7 +1902,7 @@ html:not([data-input-modality="pointer"]) .focusedPlanSegment:has(input:focus-vi
 }
 @media (forced-colors: active) {
   .focusedPlanSegment:has(input:checked) { outline: 2px solid Highlight; outline-offset: -3px; }
-  .focusedPlanCompareChoice[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: -3px; }
+  .focusedPlanCompareChoice:has(input:checked) { outline: 2px solid Highlight; outline-offset: -3px; }
 }
 
 
@@ -1921,3 +1921,11 @@ html:not([data-input-modality="pointer"]) .focusedPlanSegment:has(input:focus-vi
 
 /* Explicit test-environment boundary; uses the established neutral interface. */
 .uatEnvironmentNotice { padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 14px; line-height: 1.5; text-align: center; overflow-wrap: anywhere; }
+
+.focusedPlanComparisonGroup { border: 0; padding: 0; margin: 0; min-width: 0; }
+.focusedPlanCompareChoice { cursor: pointer; position: relative; }
+.focusedPlanCompareChoice > input { flex: 0 0 18px; width: 18px; min-height: 18px; height: 18px; padding: 0; margin: 3px 0 0; accent-color: var(--brand); }
+.focusedPlanCompareChoice:has(input:disabled) { cursor: default; opacity: .55; }
+.focusedPlanCompareChoice:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: -3px; }
+
+@media (forced-colors: active) { .focusedPlanCompareChoice:has(input:focus-visible) { outline-color: Highlight; } }

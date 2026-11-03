@@ -74,7 +74,7 @@ function calculator({ deferred = false, hydrated = true, available = true } = {}
     zone: () => find(render(), n => n.type === "select" && n.props.value === "core"),
     submitButton: () => find(render(), n => n.type === "button" && n.props.type === "submit"),
     select: name => find(render(), n => n.type === 'input' && n.props.type === 'radio' && n.props.value === name),
-    compare: name => find(render(), n => n.type === 'button' && n.props.className === 'focusedPlanCompareChoice' && n.props['aria-label'].startsWith(`Choose ${name},`)),
+    compare: name => find(render(), n => n.type === 'input' && n.props.name === 'comparison-plan' && n.props['aria-label'].startsWith(`Choose ${name},`)),
     plan: () => find(render(), n => n.type === 'select' && plans.some(p => p.name === n.props.value)),
     extra: () => find(render(), n => n.type === 'input' && n.props.type === 'checkbox'),
     addon: label => find(render(), n => n.type === 'label' && n.props.className === 'checkOption' && JSON.stringify(n.props.children).includes(label)).props.children[0],
@@ -148,7 +148,7 @@ test('comparison selection preserves calculator inputs and discards an old in-fl
   view.weight().props.onChange({ target: { value: '60.5' } });
   view.extra().props.onChange();
   const pending = view.submit();
-  view.compare('Three times weekly').props.onClick();
+  view.compare('Three times weekly').props.onChange();
   assert.equal(view.select('Three times weekly').props.checked, true);
   assert.equal(view.plan().props.value, 'Three times weekly');
   assert.equal(view.weight().props.value, '60.5');
@@ -182,7 +182,7 @@ test('server-rendered pricing controls remain disabled until handlers are ready'
   }
   view.weight().props.onChange({ target: { value: '60.5' } });
   view.extra().props.onChange();
-  view.compare('Twice weekly').props.onClick();
+  view.compare('Twice weekly').props.onChange();
   assert.equal(view.weight().props.value, '60.5');
   assert.equal(view.extra().props.checked, true);
   await view.submit();

@@ -18,7 +18,7 @@ This follow-up is separate from the successful runtime1406b0e deployment. Base15
 | Route / state | Source disposition | Candidate verification / remaining gate |
 | --- | --- | --- |
 | Home and public header; menu open/closed | Header changed; brand, imagery, colour bands and home layout retained | Escape/navigation regression added; 320/390/desktop/WebKit screenshots and enlarged text blocked pending permitted browser CI |
-| Services; catalogue, extras, estimate, booking link | Retained | Existing catalogue tests plus new booking/Back selection regression; actual Back behavior and pixels unverified |
+| Services; catalogue, extras, estimate, booking link | Comparison choices changed to native single-select radios; pricing retained | Existing catalogue tests plus new booking/Back selection regression; actual Back behavior and pixels unverified |
 | Booking available; failed submit and confirmation | Focus/copy changed | New failure/draft/idempotency/focus test; available only in synthetic fixture, production pause unchanged; browser execution pending |
 | Booking paused | Retained | Existing availability HTTP regression; fresh paused-state pixels still required |
 | Tracking; link loading, error, retry, stale response, result | Changed | Synthetic transport regressions including timeout; error/result screenshots prepared, not yet captured |
@@ -40,3 +40,9 @@ The current task is restricted to source work with no publication or deployment.
 ## Content dependency from independent live review
 
 The public privacy page says operator details “will be published here.” Accurate legal/operator information remains a content launch dependency; this UI patch neither invents that information nor changes privacy commitments. Independent desktop live review found home/services/tracking/manage with expanded recovery/early-access/privacy visually clean, but does not cover this local candidate's dynamic outcomes or mobile layouts. Paused-booking review used no guessed link or live submission; available-booking acceptance remains synthetic-fixture work.
+
+## Final comparison correction and error checks
+
+Source confirmed that comparison choices were pressed-state buttons, not actual checkbox inputs; all choices already selected one shared plan. They now use a native radio group with a label and arrow-key behavior, synchronized with the top frequency selector and calculator. Pricing and available choices are unchanged. Native keyboard interaction is covered by the updated browser regression; actual pixels and execution remain pending.
+
+After an authorized push: inspect exact-head CI, TypeScript/lint/build results, test failures, browser page errors and failed network requests; no green-by-assumption. After a separately authorized exact deployment: verify release identity/service health and read-only public/customer/staff entry routes; inspect approved bounded/redacted browser/runtime error evidence. Do not read raw logs that may contain secrets/customer data, submit live forms, replay recovery tokens, or call mutating readiness endpoints. Report activation separately from completion of this audit. These checks are required by the user's Nov3 request and do not waive any publication or release gate.

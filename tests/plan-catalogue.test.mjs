@@ -37,7 +37,7 @@ function catalogue(initial = 'Twice weekly') {
 
 test('frequency controls remain one native radio group with full accessible names', () => {
   const tree = catalogue()();
-  const groups = all(tree, node => node.type === 'fieldset');
+  const groups = byClass(tree, 'focusedPlanFrequency');
   assert.equal(groups.length, 1);
   assert.equal(text(all(groups[0], node => node.type === 'legend')[0]), 'Pickups per week');
   const choices = byClass(tree, 'focusedPlanSegment');
@@ -81,17 +81,17 @@ test('all four selections show one accurate plan card, fee, schedule, benefits a
 test('comparison choices reuse plan selection without submitting or navigating', () => {
   const render = catalogue();
   for (const plan of plans) {
-    const choices = byClass(render(), 'focusedPlanCompareChoice');
+    const choices = all(render(), node => node.type === 'input' && node.props.name === 'comparison-plan');
     assert.equal(choices.length, 4);
     const choice = choices.find(node => node.props['aria-label'].startsWith(`Choose ${plan.name},`));
-    assert.equal(choice.props.type, 'button');
+    assert.equal(choice.props.type, 'radio');
     assert.ok(choice.props['aria-label'].includes(formatMoney(plan.subscription)));
-    choice.props.onClick();
+    choice.props.onChange();
     const tree = render();
     assert.equal(text(all(byClass(tree, 'focusedPlanCard')[0], node => node.type === 'h3')[0]), plan.name);
-    const selected = byClass(tree, 'focusedPlanCompareChoice').filter(node => node.props['aria-pressed']);
+    const selected = all(tree, node => node.type === 'input' && node.props.name === 'comparison-plan' && node.props.checked);
     assert.equal(selected.length, 1);
-    assert.ok(text(selected[0]).includes(plan.name));
+    assert.equal(selected[0].props.value, plan.name);
   }
 });
 

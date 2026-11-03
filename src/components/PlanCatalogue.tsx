@@ -40,14 +40,14 @@ export function PlanCatalogue({ selected, onSelect, disabled = false }: { select
             <summary><span>Compare all {plans.length} plans</span><ChevronDown aria-hidden="true" /></summary>
             <div className="focusedPlanDisclosureBody">
               <p>Monthly service fees. Laundry is charged separately by weight.</p>
-              <ul className="focusedPlanComparison" aria-label="All commercial plans">
+              <fieldset className="focusedPlanComparisonGroup"><legend className="srOnly">Compare and select a commercial plan</legend><ul className="focusedPlanComparison">
                 {plans.map(item => <li key={item.name}>
-                  <button type="button" disabled={disabled} className="focusedPlanCompareChoice" aria-pressed={item.name === plan.name} onClick={() => onSelect(item.name)} aria-label={`Choose ${item.name}, ${item.pickups}, ${formatMoney(item.subscription)} monthly service fee`}>
+                  <label className="focusedPlanCompareChoice"><input type="radio" name="comparison-plan" disabled={disabled} value={item.name} checked={item.name === plan.name} onChange={() => onSelect(item.name)} aria-label={`Choose ${item.name}, ${item.pickups}, ${formatMoney(item.subscription)} monthly service fee`} />
                     <span><strong>{item.name}</strong><small>{item.pickups}</small></span>
                     <span className="focusedPlanComparePrice"><strong>{formatMoney(item.subscription)}</strong><small>{item.name === plan.name ? "Selected" : "Choose plan"}</small></span>
-                  </button>
+                  </label>
                 </li>)}
-              </ul>
+              </ul></fieldset>
             </div>
           </details>
           <details className="focusedPlanDisclosure">
