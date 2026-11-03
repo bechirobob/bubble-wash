@@ -5,6 +5,7 @@ This module creates no secrets, downloads no credentials and performs no HTTP.
 """
 import ast
 import base64
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -13,12 +14,24 @@ import resource
 import selectors
 import shlex
 import subprocess
+import tempfile
 import time
 
 REPOSITORY='bechirobob/bubble-wash'
 UUID=re.compile('[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
 SOURCE_FILES=('ops/uat/restoration-transport.py','ops/uat/restoration-preflight.py','ops/uat/restoration-collector.py','ops/uat/restoration-receiver.py','scripts/uat-restore-original.mjs','ops/uat/restoration-runtime-pins.json')
 INSPECTION_STAGES={'source-verification','transport','receipt-validation','host-inspection'}
+TRANSPORT_FAILURES={'config-directory','startup-missing','startup-denied','startup-unavailable',
+    'timeout','output-limit','stdin-closed','io-error','exit-no-receipt','exit-invalid-receipt',
+    'exit-signal','exit-nonzero','cleanup'}
+INSPECTION_STAGES|={'transport-'+category for category in TRANSPORT_FAILURES}
+
+
+class TransportFailure(ValueError):
+    def __init__(self,category):
+        if category not in TRANSPORT_FAILURES:raise ValueError('Unknown transport category')
+        super().__init__('UAT confidential transport refused')
+        self.category=category
 
 
 def diagnostic_sites(bundle):
@@ -35,6 +48,7 @@ def diagnostic_sites(bundle):
 def inspection_failure(error,bundle,stage):
     """Never stringify exceptions, tracebacks, locals, paths or remote output."""
     require(stage in INSPECTION_STAGES)
+    if stage=='transport' and isinstance(error,TransportFailure):stage='transport-'+error.category
     result={'ok':False,'readOnly':True,'automaticRetry':False,
         'state':'inspection-failed','failureStage':stage,'failureSites':[]}
     try:
@@ -92,43 +106,101 @@ def private_input(env):
     return dict(request,accounts=accounts)
 
 
+@contextlib.contextmanager
+def child_environment(command):
+    """Only public SSH host keys get a fresh private directory; inherit nothing."""
+    env={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LC_ALL':'C'}
+    stack=contextlib.ExitStack()
+    try:
+        if command[:3]==['/usr/local/bin/tailscale','ssh','root@hermes']:
+            try:
+                directory=stack.enter_context(tempfile.TemporaryDirectory(prefix='bubblewash-uat-ssh-',dir='/tmp'))
+            except OSError:
+                raise TransportFailure('config-directory') from None
+            # Tailscale v1.94.2 writeKnownHosts uses os.UserConfigDir(). Without
+            # XDG_CONFIG_HOME or HOME it refuses before invoking system ssh.
+            # Do not inherit HOME, runner config, auth sockets or credentials.
+            env['XDG_CONFIG_HOME']=directory
+        yield env
+    finally:
+        try:stack.close()
+        except OSError:raise TransportFailure('cleanup') from None
+
+
 def exchange(command,payload,timeout=180,limit=16384,inspection_bundle=None):
+    with child_environment(command) as env:
+        return _exchange(command,payload,timeout,limit,inspection_bundle,env)
+
+
+def _exchange(command,payload,timeout,limit,inspection_bundle,env):
     """Concurrent bounded stdin/stdout/stderr; returns no stderr, even on failure."""
     require(type(payload) is bytes and len(payload)<=16384)
     resource.setrlimit(resource.RLIMIT_CORE,(0,0))
-    child=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
-        env={'PATH':'/usr/sbin:/usr/bin:/sbin:/bin','LC_ALL':'C'})
-    selector=selectors.DefaultSelector();outputs={child.stdout:bytearray(),child.stderr:bytearray()}
-    for stream in (child.stdin,child.stdout,child.stderr):os.set_blocking(stream.fileno(),False)
-    selector.register(child.stdin,selectors.EVENT_WRITE)
-    for stream in outputs:selector.register(stream,selectors.EVENT_READ)
-    offset=0;deadline=time.monotonic()+timeout
     try:
+        child=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env)
+    except FileNotFoundError:raise TransportFailure('startup-missing') from None
+    except PermissionError:raise TransportFailure('startup-denied') from None
+    except OSError:raise TransportFailure('startup-unavailable') from None
+    selector=None
+    try:
+        selector=selectors.DefaultSelector();outputs={child.stdout:bytearray(),child.stderr:bytearray()}
+        for stream in (child.stdin,child.stdout,child.stderr):os.set_blocking(stream.fileno(),False)
+        selector.register(child.stdin,selectors.EVENT_WRITE)
+        for stream in outputs:selector.register(stream,selectors.EVENT_READ)
+        offset=0;deadline=time.monotonic()+timeout;stdin_closed=False
         while selector.get_map():
-            require(time.monotonic()<deadline)
+            if time.monotonic()>=deadline:raise TransportFailure('timeout')
             for key,_ in selector.select(.1):
                 stream=key.fileobj
                 if stream is child.stdin:
-                    if offset<len(payload):offset+=os.write(stream.fileno(),payload[offset:offset+4096])
+                    try:
+                        if offset<len(payload):offset+=os.write(stream.fileno(),payload[offset:offset+4096])
+                    except BlockingIOError:continue
+                    except BrokenPipeError:
+                        # Drain bounded output to distinguish remote exit from
+                        # a pipe symptom. Never return unvalidated stderr/stdout.
+                        stdin_closed=True;selector.unregister(stream);stream.close();continue
                     if offset==len(payload):selector.unregister(stream);stream.close()
                 else:
-                    chunk=os.read(stream.fileno(),4096)
+                    try:chunk=os.read(stream.fileno(),4096)
+                    except BlockingIOError:continue
                     if not chunk:selector.unregister(stream);continue
-                    outputs[stream].extend(chunk);require(len(outputs[stream])<=limit)
-        code=child.wait(timeout=2)
+                    outputs[stream].extend(chunk)
+                    if len(outputs[stream])>limit:raise TransportFailure('output-limit')
+        try:code=child.wait(timeout=2)
+        except subprocess.TimeoutExpired:raise TransportFailure('timeout') from None
         raw=bytes(outputs[child.stdout])
         if code!=0:
             # Only the inspect caller opts in. Never relay arbitrary nonzero
             # output or change the write/receipt transport's rejection rules.
-            require(inspection_bundle is not None)
-            value=validate_inspection_failure(json.loads(raw),inspection_bundle,host_only=True)
+            if code<0:raise TransportFailure('exit-signal')
+            if inspection_bundle is None:raise TransportFailure('exit-nonzero')
+            if not raw:raise TransportFailure('exit-no-receipt')
+            try:value=validate_inspection_failure(json.loads(raw),inspection_bundle,host_only=True)
+            except (ValueError,TypeError,KeyError):raise TransportFailure('exit-invalid-receipt') from None
             return json.dumps(value).encode()
+        if stdin_closed:raise TransportFailure('stdin-closed')
         return raw
+    except OSError:
+        raise TransportFailure('io-error') from None
     finally:
-        selector.close()
-        if child.poll() is None:child.kill();child.wait()
-        for stream in (child.stdin,child.stdout,child.stderr):stream.close()
-        payload=b''
+        cleanup_failed=False
+        try:
+            if selector is not None:selector.close()
+        except BaseException:cleanup_failed=True
+        try:
+            if child.poll() is None:child.kill()
+        except ProcessLookupError:pass
+        except BaseException:cleanup_failed=True
+        try:child.wait(timeout=2)
+        except BaseException:cleanup_failed=True
+        # Do not let a selector/termination/reap error skip pipe closure.
+        try:
+            for stream in (child.stdin,child.stdout,child.stderr):
+                try:stream.close()
+                except BaseException:cleanup_failed=True
+        finally:payload=b''
+        if cleanup_failed:raise TransportFailure('cleanup') from None
 
 
 def source_bundle(root,revision):
