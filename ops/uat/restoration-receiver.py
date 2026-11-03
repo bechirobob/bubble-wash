@@ -52,8 +52,12 @@ def execute(bundle,request):
     t.require(mode in ('inspect','restore','receipt') and t.UUID.fullmatch(operation))
     t.require(set(request)==({'mode','operationId','accounts'} if mode=='restore' else {'mode','operationId'}))
     pins=json.loads(bundle['ops/uat/restoration-runtime-pins.json'])
+    if mode=='inspect':
+        try:
+            return c.collect(pins,eligible=True,private=True)['public']
+        except BaseException as error:
+            return t.inspection_failure(error,bundle,'host-inspection')
     first=c.collect(pins,eligible=mode!='receipt',private=True)
-    if mode=='inspect':return first['public']
     if mode=='receipt':return t.validate_receipt(json.dumps(node_request(bundle,{'action':'receipt','operationId':operation,'expectedDatabaseIdentity':first['private']['database']},operation)).encode(),'receipt')
     # Private snapshot output never reaches the runner's public receipt/log stream.
     snapshot=node_request(bundle,{'action':'inspect','expectedDatabaseIdentity':first['private']['database']},operation)
@@ -84,3 +88,5 @@ def main(bundle):
         # A failed command may already have committed. Never infer safe retry.
         print('{"ok":false,"automaticRetry":false,"state":"uncertain-stop"}')
         raise SystemExit(1)
+    # Diagnostics are observable failures, never successful preflight receipts.
+    if result.get('ok') is False:raise SystemExit(1)
