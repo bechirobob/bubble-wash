@@ -115,10 +115,10 @@
   "runtimeContent": {
     "directories": 118,
     "files": 652,
-    "sha256": "2628b4d2bd9053389258bd1c1162cd9f6c10a972ba7789b4d2199959232c2ece"
+    "sha256": "0f51faabc32ad704507b5c4f946f067e8c01557831064a395b97e8b2610ac908"
   },
-  "runtimeSha": "3a8574a49e28d03e1029a3bb0dc239738d66db3f",
-  "runtimeTree": "31d72aa0e71cb03a383c31e8c71a470e3a5d38cd",
+  "runtimeSha": "277a3f8df85068f3245ddc30a6c446d10d9bdc39",
+  "runtimeTree": "ec1c605bb1146fb7be5334c8f97ac9023eb16846",
   "schema": "bubblewash-customer-update/v1",
   "sourceScope": {
     "directories": [

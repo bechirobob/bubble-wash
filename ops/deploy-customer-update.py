@@ -10,7 +10,7 @@ import types
 import zlib
 
 BASE_SHA = '1406b0e217ed02709ebe1c423aecb42c6be5b0aa'
-RUNTIME_SHA = '3a8574a49e28d03e1029a3bb0dc239738d66db3f'
+RUNTIME_SHA = '277a3f8df85068f3245ddc30a6c446d10d9bdc39'
 DEPENDENCIES = ('deploy-workspace-update.py', 'deploy-pwa-update.py', 'deploy-preserving.py',
                 'deploy-survey-only.py', 'deploy-survey-update.py', 'survey-only-source-pins.json',
                 'inactive-staging/prepare_pair.py', 'inactive-staging/stage_artifact.py')
