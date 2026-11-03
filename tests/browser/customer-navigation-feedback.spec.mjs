@@ -1,4 +1,5 @@
-import { test, expect, expectCustomerFailure } from './customer-error-fixture.mjs';
+import { observeNavigationResponse } from './navigation-response-proof.mjs';
+import { test, expect, expectCustomerFailure, verifyNavigationResponse } from './customer-error-fixture.mjs';
 
 test.use({ serviceWorkers: 'block' });
 test.beforeEach(async ({ page }) => {
@@ -12,6 +13,7 @@ const tracking = (status) => ({ ok: true, tracking: { id: 'synthetic', bookingRe
 const order = { orderId: 'synthetic', customer: 'Synthetic customer', createdAt: '2026-11-01', status: 'Received', nextStep: 'Confirm pickup', area: 'Osu', plan: 'Weekly', service: 'Wash', timeline: [] };
 
 test('mobile menu Escape restores focus and route history leaves it closed', async ({ page }) => {
+  await observeNavigationResponse(page, '/track');
   await page.goto('/services');
   const menu = page.getByRole('button', { name: 'Menu', exact: true });
   if (page.viewportSize().width > 780) {
@@ -29,8 +31,12 @@ test('mobile menu Escape restores focus and route history leaves it closed', asy
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Track order', exact: true }).click();
   await expect(page).toHaveURL(/\/track$/);
   await expect(menu).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('heading', { name: 'Follow your laundry.', exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Private tracking code', exact: true })).toBeVisible();
+  await verifyNavigationResponse(page);
   await page.goBack();
   await expect(page).toHaveURL(/\/services$/);
+  await expect(page.getByRole('heading', { name: 'Laundry plans & pricing.', exact: true })).toBeVisible();
   await expect(menu).toHaveAttribute('aria-expanded', 'false');
 });
 
