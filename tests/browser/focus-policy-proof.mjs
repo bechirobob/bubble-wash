@@ -35,8 +35,8 @@ export async function verifyFocusPolicy({ browser, fixture, origin, output }) {
         await tabTo(nativePage, nativeButton); await ring(nativeButton, true, 'unhydrated native keyboard fallback');
         await nativePage.screenshot({ path: output + `focus-${name}-native-fallback.png`, fullPage: true });
       } finally { await nativeContext.close(); }
-      const context = await engine.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
-        isMobile: mobile, hasTouch: mobile, reducedMotion: 'reduce' });
+      const contexts = [];
+      let page;
       const errors = [];
       let stage = 'created';
       const timeline = [];
@@ -56,32 +56,40 @@ export async function verifyFocusPolicy({ browser, fixture, origin, output }) {
       };
       const relevant = request => new URL(request.url()).searchParams.has('_rsc') || Boolean(request.redirectedFrom());
       try {
-        await context.route('**/*', route => {
-          const request = route.request();
-          // Browser proof is read-only even inside the synthetic environment.
-          const allowed = new URL(request.url()).origin === origin && ['GET','HEAD'].includes(request.method());
-          if (!allowed || relevant(request)) record({ event: allowed ? 'route-continue' : 'route-abort', ...requestInfo(request) });
-          return allowed ? route.continue() : route.abort();
-        });
-        const page = await context.newPage();
-        page.on('request', request => { if (relevant(request)) record({ event: 'request', ...requestInfo(request) }); });
-        page.on('response', response => {
-          if (relevant(response.request())) record({ event: 'response', ...requestInfo(response.request()), status: response.status() });
-        });
-        page.on('requestfinished', request => { if (relevant(request)) record({ event: 'requestfinished', ...requestInfo(request) }); });
-        page.on('requestfailed', request => {
-          const failure = request.failure()?.errorText ?? '';
-          // Only fixed engine failure categories: never emit arbitrary URL/query text.
-          const category = /cancel|abort|interrupted/i.test(failure) ? 'cancel-or-abort'
-            : /access.control|cors/i.test(failure) ? 'access-control'
-            : /connection|connect/i.test(failure) ? 'connection' : 'other';
-          record({ event: 'requestfailed', ...requestInfo(request), category });
-        });
-        page.on('pageerror', error => { errors.push(error.message); record({ event: 'pageerror', errorIndex: errors.length - 1 }); });
-        const navigate = async path => {
-          stage = 'navigation:' + path; record({ event: 'goto' });
+        // These are independent focus cases, not a cross-route customer journey.
+        // Keep each document alive and monitored instead of cancelling its reads
+        // through an unrelated goto or changing its session beneath it.
+        const navigate = async (path, session) => {
+          const recordScenario = event => record({ scenario: path, ...event });
+          const context = await engine.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
+            isMobile: mobile, hasTouch: mobile, reducedMotion: 'reduce' });
+          contexts.push(context);
+          if (session) await context.addCookies([{ name: 'bubblewash_staff_session', value: session, domain: 'localhost', path: '/', httpOnly: true, sameSite: 'Lax', secure: false }]);
+          await context.route('**/*', route => {
+            const request = route.request();
+            // Browser proof is read-only even inside the synthetic environment.
+            const allowed = new URL(request.url()).origin === origin && ['GET','HEAD'].includes(request.method());
+            if (!allowed || relevant(request)) recordScenario({ event: allowed ? 'route-continue' : 'route-abort', ...requestInfo(request) });
+            return allowed ? route.continue() : route.abort();
+          });
+          page = await context.newPage();
+          page.on('request', request => { if (relevant(request)) recordScenario({ event: 'request', ...requestInfo(request) }); });
+          page.on('response', response => {
+            if (relevant(response.request())) recordScenario({ event: 'response', ...requestInfo(response.request()), status: response.status() });
+          });
+          page.on('requestfinished', request => { if (relevant(request)) recordScenario({ event: 'requestfinished', ...requestInfo(request) }); });
+          page.on('requestfailed', request => {
+            const failure = request.failure()?.errorText ?? '';
+            // Only fixed engine failure categories: never emit arbitrary URL/query text.
+            const category = /cancel|abort|interrupted/i.test(failure) ? 'cancel-or-abort'
+              : /access.control|cors/i.test(failure) ? 'access-control'
+              : /connection|connect/i.test(failure) ? 'connection' : 'other';
+            recordScenario({ event: 'requestfailed', ...requestInfo(request), category });
+          });
+          page.on('pageerror', error => { errors.push(error.message); recordScenario({ event: 'pageerror', errorIndex: errors.length - 1 }); });
+          stage = 'navigation:' + path; recordScenario({ event: 'goto' });
           await page.goto(origin + path);
-          stage = 'document:' + path; record({ event: 'loaded' });
+          stage = 'document:' + path; recordScenario({ event: 'loaded' });
         };
         const press = async locator => mobile ? locator.tap() : locator.click();
         // Public customer control and editing cue, without attempting sign-in.
@@ -108,16 +116,12 @@ export async function verifyFocusPolicy({ browser, fixture, origin, output }) {
         await page.keyboard.press('Tab');
         await ring(page.locator(':focus'), true, 'survey switches back to keyboard');
         // Staff workspace uses its real server-rendered navigation with fixture session.
-        stage = 'role:vendor'; record({ event: 'cookie-switch' });
-        await context.addCookies([{ name: 'bubblewash_staff_session', value: fixture.sessions.vendor, domain: 'localhost', path: '/', httpOnly: true, sameSite: 'Lax', secure: false }]);
-        await navigate('/vendors');
+        await navigate('/vendors', fixture.sessions.vendor);
         const staffNav = page.getByRole('navigation', { name: 'vendor workspace sections', exact: true });
         await staffNav.waitFor(); const staffLink = staffNav.getByRole('link').first();
         await tabTo(page, staffLink); await ring(staffLink, true, 'staff keyboard navigation');
         // Owner Results reproduces both reported bugs with the actual scroll region/dialog.
-        stage = 'role:owner'; record({ event: 'cookie-switch' });
-        await context.addCookies([{ name: 'bubblewash_staff_session', value: fixture.sessions.owner, domain: 'localhost', path: '/', httpOnly: true, sameSite: 'Lax', secure: false }]);
-        await navigate('/admin/surveys');
+        await navigate('/admin/surveys', fixture.sessions.owner);
         await page.getByRole('heading', {name:'Survey results',exact:true}).waitFor();
         await page.getByText('73 answered',{exact:true}).waitFor();
         await verifyResearchShellLayout(page);
@@ -202,11 +206,12 @@ export async function verifyFocusPolicy({ browser, fixture, origin, output }) {
         await page.keyboard.press('Escape');
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
         assert.deepEqual(errors, []);
+        console.log('focus-scenarios', name, JSON.stringify({ contexts: contexts.length, unexpectedPageErrors: errors.length, isolated: true }));
         checks.push(`${name}: customer, survey, staff and Results pointer/keyboard focus, editing cues, repeated modal, scripted click + screenshots (real AT not tested)`);
       } catch (error) {
         console.error('focus-lifecycle', name, JSON.stringify(timeline));
         throw error;
-      } finally { await context.close(); }
+      } finally { await Promise.all(contexts.map(context => context.close())); }
     }
   } finally { await safari.close(); }
   return checks;
