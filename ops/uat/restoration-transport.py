@@ -3,6 +3,7 @@
 Only invoke after the coordinator establishes exact-source/access/storage approval.
 This module creates no secrets, downloads no credentials and performs no HTTP.
 """
+import ast
 import base64
 import json
 import os
@@ -17,6 +18,49 @@ import time
 REPOSITORY='bechirobob/bubble-wash'
 UUID=re.compile('[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
 SOURCE_FILES=('ops/uat/restoration-transport.py','ops/uat/restoration-preflight.py','ops/uat/restoration-collector.py','ops/uat/restoration-receiver.py','scripts/uat-restore-original.mjs','ops/uat/restoration-runtime-pins.json')
+INSPECTION_STAGES={'source-verification','transport','receipt-validation','host-inspection'}
+
+
+def diagnostic_sites(bundle):
+    """Static tokens derived only from the exact reviewed Python source bundle."""
+    sites={}
+    for index,name in enumerate(SOURCE_FILES):
+        if name.endswith('.py') and name in bundle:
+            tree=ast.parse(bundle[name])
+            sites[name]={node.lineno:'F'+str(index)+'-L'+str(node.lineno)
+                for node in ast.walk(tree) if isinstance(node,ast.stmt) and hasattr(node,'lineno')}
+    return sites
+
+
+def inspection_failure(error,bundle,stage):
+    """Never stringify exceptions, tracebacks, locals, paths or remote output."""
+    require(stage in INSPECTION_STAGES)
+    result={'ok':False,'readOnly':True,'automaticRetry':False,
+        'state':'inspection-failed','failureStage':stage,'failureSites':[]}
+    try:
+        sites=diagnostic_sites(bundle);trace=error.__traceback__;found=[]
+        while trace is not None:
+            filename=trace.tb_frame.f_code.co_filename
+            # Bootstrap compiles with these exact fixed relative names. Local
+            # imports use absolute names, which deliberately produce no token.
+            token=sites.get(filename,{}).get(trace.tb_lineno)
+            if token:found.append(token)
+            trace=trace.tb_next
+        result['failureSites']=found[-8:]
+    except BaseException:
+        pass
+    return result
+
+
+def validate_inspection_failure(value,bundle,host_only=False):
+    require(type(value) is dict and set(value)=={'ok','readOnly','automaticRetry','state','failureStage','failureSites'})
+    require(value['ok'] is False and value['readOnly'] is True and value['automaticRetry'] is False)
+    require(value['state']=='inspection-failed' and type(value['failureStage']) is str)
+    require(value['failureStage'] in ({'host-inspection'} if host_only else INSPECTION_STAGES))
+    allowed={token for sites in diagnostic_sites(bundle).values() for token in sites.values()}
+    require(type(value['failureSites']) is list and len(value['failureSites'])<=8)
+    require(all(type(token) is str and token in allowed for token in value['failureSites']))
+    return value
 
 
 def require(value):
@@ -48,7 +92,7 @@ def private_input(env):
     return dict(request,accounts=accounts)
 
 
-def exchange(command,payload,timeout=180,limit=16384):
+def exchange(command,payload,timeout=180,limit=16384,inspection_bundle=None):
     """Concurrent bounded stdin/stdout/stderr; returns no stderr, even on failure."""
     require(type(payload) is bytes and len(payload)<=16384)
     resource.setrlimit(resource.RLIMIT_CORE,(0,0))
@@ -71,8 +115,15 @@ def exchange(command,payload,timeout=180,limit=16384):
                     chunk=os.read(stream.fileno(),4096)
                     if not chunk:selector.unregister(stream);continue
                     outputs[stream].extend(chunk);require(len(outputs[stream])<=limit)
-        require(child.wait(timeout=2)==0)
-        return bytes(outputs[child.stdout])
+        code=child.wait(timeout=2)
+        raw=bytes(outputs[child.stdout])
+        if code!=0:
+            # Only the inspect caller opts in. Never relay arbitrary nonzero
+            # output or change the write/receipt transport's rejection rules.
+            require(inspection_bundle is not None)
+            value=validate_inspection_failure(json.loads(raw),inspection_bundle,host_only=True)
+            return json.dumps(value).encode()
+        return raw
     finally:
         selector.close()
         if child.poll() is None:child.kill();child.wait()
@@ -108,10 +159,13 @@ sys.modules['uat_restore_receiver'].main(bundle)
     return ['tailscale','ssh','root@hermes','python3 -I -B -c '+shlex.quote(code)]
 
 
-def validate_receipt(raw,mode):
+def validate_receipt(raw,mode,inspection_bundle=None):
     require(0<len(raw)<=16384);value=json.loads(raw)
     require(type(value) is dict)
     if mode=='inspect':
+        if value.get('ok') is False:
+            require(inspection_bundle is not None)
+            return validate_inspection_failure(value,inspection_bundle,host_only=True)
         allowed={'ok','readOnly','automaticRetry','runtimeRevision','filesystemObjectsVerified','installedRuntimeVerified','runtimeSourcesVerified','unitSourceVerified','configuredEnvironmentVerified','runningEnvironmentVerified','providerCredentialsAbsent','runningServiceIdentityVerified','effectiveSandboxVerified','loopbackListenerVerified','mountBackingsIndependent','runningNamespaceStorageVerified','originalCohortEligible','originalRoleCount','totalAccountCount','revokedAccountCount'}
         require(set(value)==allowed and value['ok'] is True and value['readOnly'] is True and value['automaticRetry'] is False)
         for k,v in value.items():
@@ -132,6 +186,16 @@ def validate_receipt(raw,mode):
 
 def perform(root,env):
     request=private_input(env)
+    if request['mode']=='inspect':
+        bundle={};stage='source-verification'
+        try:
+            bundle=source_bundle(root,env['SOURCE_SHA'])
+            stage='transport'
+            raw=exchange(remote_command(bundle),json.dumps(request).encode(),inspection_bundle=bundle)
+            stage='receipt-validation'
+            return validate_receipt(raw,'inspect',inspection_bundle=bundle)
+        except BaseException as error:
+            return inspection_failure(error,bundle,stage)
     bundle=source_bundle(root,env['SOURCE_SHA'])
     raw=exchange(remote_command(bundle),json.dumps(request).encode())
     return validate_receipt(raw,request['mode'])

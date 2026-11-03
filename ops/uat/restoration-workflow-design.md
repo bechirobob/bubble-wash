@@ -220,3 +220,25 @@ The protected operation job does not install dependencies or run project tests.
 Those run in unprotected Pilot CI on a separate runner, before the exact-source
 CI gate. This prevents an install/test background process from sharing the later
 credential-bearing runner.
+
+## Inspection failure diagnostics
+
+Inspection failures now carry only `ok:false`, `readOnly:true`,
+`automaticRetry:false`, `state:inspection-failed`, a fixed `failureStage`, and up
+to eight static `failureSites`. Stages distinguish source verification, transport,
+receipt validation and host inspection. No exception message, stack text, local
+variable, raw output, configuration value or account field is returned.
+
+Site tokens such as `F1-L64` mean source-file index 1 in the transport's fixed
+`SOURCE_FILES` tuple, line 64, at the exact workflow commit. Tokens are derived
+from statement locations in the verified source bundle and checked again by the
+runner. They identify executed validation code, not the underlying host cause.
+Unknown locations produce an empty list. Local absolute-path frames are omitted.
+
+Only inspection accepts a bounded, strictly validated failure receipt from a
+nonzero remote exit. Restore and receipt mode retain their existing rejection
+behavior. A diagnostic causes nonzero receiver and workflow exits; it cannot
+satisfy preflight or authorize retry. Administrative-route, exact-source CI,
+first-attempt, concurrency and separate restoration/secret gates remain in force.
+The previously captured generic failure cannot be diagnosed retroactively. A new
+inspection needs coordinator review after this change passes exact-source CI.
