@@ -1,0 +1,73 @@
+import assert from 'node:assert/strict';
+import Database from 'better-sqlite3';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const directory = mkdtempSync(join(tmpdir(), 'uat-restore-test-'));
+Object.assign(process.env, { NODE_ENV:'production', BUBBLEWASH_UAT_ENABLED:'true', BUBBLEWASH_UAT_ISOLATION_CONFIRMED:'true', BUBBLEWASH_PUBLIC_URL:'https://uat.example.invalid', BUBBLEWASH_DATABASE_PATH:join(directory,'uat.sqlite'), BUBBLEWASH_UAT_DATA_ROOT:directory, NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED:'false', NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED:'false', BUBBLEWASH_RESEARCH_EMAIL_ENABLED:'false', BUBBLEWASH_DISABLE_DEMO_LOGIN:'true', BUBBLEWASH_SESSION_SECRET:'synthetic-session-secret-only-for-test-123' });
+const { initializeUatAccountsSchema, issueUatCohort, createUatTeamAccount, revokeUatAccount, currentUatUsers } = await import('../src/lib/uat-accounts.ts');
+const { inspectOriginalUat, restoreOriginalUat } = await import('../scripts/uat-restore-original.mjs');
+const { verifyPasswordHash } = await import('../src/lib/passwords.ts');
+const realNow = Date.now;
+let now = Date.parse('2026-10-26T23:19:33.802Z');
+Date.now = () => now;
+const db = new Database(':memory:');
+const accounts = ['admin','vendor','driver','support'].map(role => ({ username:'test-'+role, name:'Synthetic '+role, role, entityId:['vendor','driver'].includes(role)?'synthetic-'+role:undefined, password:'synthetic-restoration-test-password-'+role }));
+const dump = table => db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all();
+try {
+  initializeUatAccountsSchema(db);
+  db.exec("CREATE TABLE vendor_availability(vendor_id TEXT); INSERT INTO vendor_availability VALUES ('synthetic-vendor'); CREATE TABLE driver_availability(driver_id TEXT); INSERT INTO driver_availability VALUES ('synthetic-driver'); CREATE TABLE test_records(id TEXT, value TEXT); INSERT INTO test_records VALUES ('preserve','existing test work');");
+  issueUatCohort(accounts,'approved-uat-issuance',db);
+  const actor = {email:'test-admin',role:'admin',temporaryAccess:true};
+  createUatTeamAccount({username:'child-revoked',name:'Child',role:'support',password:'synthetic-child-password-only'},actor,db);
+  createUatTeamAccount({username:'child-expired',name:'Child',role:'support',password:'synthetic-child-password-only'},actor,db);
+  revokeUatAccount('child-revoked','test',db);
+  assert.throws(()=>inspectOriginalUat(db),'active cohort cannot be extended');
+  const originalRows = dump('staff_uat_accounts');
+  now += 604800000;
+  currentUatUsers(db);
+  const before = dump('staff_uat_accounts');
+  const audit = dump('staff_uat_audit');
+  const records = dump('test_records');
+  const fp = inspectOriginalUat(db).fingerprint;
+  const request = { fingerprint:fp, accounts };
+  assert.throws(()=>restoreOriginalUat(db,{...request,fingerprint:'0'.repeat(64)}));
+  assert.throws(()=>restoreOriginalUat(db,{...request,accounts:[...accounts.slice(0,3),accounts[0]]}));
+  assert.throws(()=>restoreOriginalUat(db,{...request,accounts:[...accounts.slice(0,3),{...accounts[3],username:'child-revoked'}]}));
+  db.exec("CREATE TRIGGER fail_restore BEFORE UPDATE ON staff_uat_accounts WHEN NEW.username='test-support' BEGIN SELECT RAISE(ABORT,'synthetic refusal'); END;");
+  assert.throws(()=>restoreOriginalUat(db,request));
+  assert.deepEqual(dump('staff_uat_accounts'),before,'mid-transaction failure rolls back all roles');
+  assert.deepEqual(dump('staff_uat_audit'),audit,'failed transaction adds no audit');
+  db.exec('DROP TRIGGER fail_restore');
+  db.exec('SAVEPOINT revoked_check');
+  revokeUatAccount('test-support','synthetic-concurrent-revocation',db);
+  assert.throws(()=>restoreOriginalUat(db,request),'concurrent revocation invalidates inspection');
+  assert.throws(()=>inspectOriginalUat(db),'revoked original never eligible');
+  db.exec('ROLLBACK TO revoked_check; RELEASE revoked_check');
+  db.exec('SAVEPOINT roster_check');
+  db.exec('DELETE FROM vendor_availability');
+  assert.throws(()=>restoreOriginalUat(db,request),'missing roster aborts restoration');
+  assert.deepEqual(dump('staff_uat_accounts'),before);
+  db.exec('ROLLBACK TO roster_check; RELEASE roster_check');
+  const receipt = restoreOriginalUat(db,request);
+  assert.equal(receipt.expiresAt-receipt.startsAt,604800000);
+  assert.equal(receipt.startsAt,now);
+  assert.equal(currentUatUsers(db).length,4);
+  for (const row of dump('staff_uat_accounts')) {
+    const old = originalRows.find(a=>a.username===row.username);
+    if (row.username.startsWith('child-')) assert.deepEqual(row,before.find(a=>a.username===row.username));
+    else {
+      for(const key of ['username','name','role','entity_id','created_at']) assert.equal(row[key],old[key]);
+      assert.notEqual(row.credential_version,old.credential_version);
+      assert.ok(verifyPasswordHash(accounts.find(a=>a.username===row.username).password,row.password_hash));
+    }
+  }
+  assert.deepEqual(dump('test_records'),records);
+  assert.deepEqual(dump('staff_uat_audit').slice(0,audit.length),audit);
+  assert.equal(dump('staff_uat_audit').length,audit.length+8);
+  assert.throws(()=>restoreOriginalUat(db,request),'replay refused');
+  now += 604800000;
+  assert.equal(currentUatUsers(db).length,0,'exact fresh deadline enforced');
+  assert.throws(()=>inspectOriginalUat(db),'second restoration refused');
+  console.log('UAT restoration: fixed window, exact four targets, preservation, rollback, revoked exclusion and replay guards passed');
+} finally { Date.now=realNow; db.close(); rmSync(directory,{recursive:true,force:true}); }
