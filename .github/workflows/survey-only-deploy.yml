@@ -74,7 +74,7 @@ jobs:
             assert not path.is_symlink() and path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest()==digest
           PY
           python3 -B -m unittest discover -s controls/tests -p 'test_survey_only_deploy.py' -v
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
       - name: Install exact runtime lock and run preserved unit/data/auth checks
