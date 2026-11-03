@@ -115,7 +115,7 @@ test('customer recovery reports unavailable email transport without claiming a l
   const received = page.waitForResponse(response => new URL(response.url()).pathname === '/api/customer/recover' && response.request().method() === 'POST');
   await page.getByRole('button',{name:'Send recovery link',exact:true}).click();
   expect((await received).status()).toBe(503);
-  const status = page.locator('.manageAccessForm').getByRole('status');
+  const status = page.locator('details.invoicePanel').getByRole('status');
   await expect(status).toContainText('Email recovery is temporarily unavailable.');
   await expect(status).not.toContainText('a recovery link will be sent');
   await expect(page.getByLabel('Booking email',{exact:true})).toHaveValue('recovery-audit@example.invalid');
