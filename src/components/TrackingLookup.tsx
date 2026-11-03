@@ -28,8 +28,16 @@ export function TrackingLookup() {
     setPending(true);
     setTone("info");
     setStatus("Checking the order…");
+    // Keep the UI deadline independent of fetch rejection: some browser/network
+    // combinations leave an aborted request pending until transport teardown.
+    const deadline = window.setTimeout(() => {
+      if (activeRequest.current !== controller || controller.signal.aborted) return;
+      activeRequest.current = null;
+      controller.abort();
+      setTone("error"); setStatus("Tracking is taking too long. Try again."); setPending(false);
+    }, 15000);
     try {
-      const response = await fetch(`/api/track?trackingToken=${encodeURIComponent(reference)}`, { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
+      const response = await fetch(`/api/track?trackingToken=${encodeURIComponent(reference)}`, { cache: "no-store", signal: controller.signal });
       const data = await response.json();
       if (activeRequest.current !== controller || controller.signal.aborted) return;
       if (!response.ok || !data.ok) throw new Error(data.error ?? "Tracking lookup failed.");
@@ -38,8 +46,9 @@ export function TrackingLookup() {
       setTone("success");
     } catch (error) {
       if (activeRequest.current !== controller || controller.signal.aborted) return;
-      setTone("error"); setStatus(error instanceof Error && error.name === "TimeoutError" ? "Tracking is taking too long. Try again." : error instanceof Error ? error.message : "Unable to load tracking details.");
+      setTone("error"); setStatus(error instanceof TypeError || error instanceof SyntaxError ? "We couldn’t load tracking details. Check your connection and try again." : error instanceof Error ? error.message : "Unable to load tracking details. Try again.");
     } finally {
+      window.clearTimeout(deadline);
       if (activeRequest.current === controller && !controller.signal.aborted) setPending(false);
     }
   }, []);

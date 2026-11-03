@@ -1929,3 +1929,9 @@ html:not([data-input-modality="pointer"]) .focusedPlanSegment:has(input:focus-vi
 .focusedPlanCompareChoice:has(input:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: -3px; }
 
 @media (forced-colors: active) { .focusedPlanCompareChoice:has(input:focus-visible) { outline-color: Highlight; } }
+
+/* Enlarged text must wrap within customer content, without clipping or shrinking. */
+.publicSite .pageIntro h1, .publicSite .earlyAccessHero h1,
+.publicSite .policyContent :is(h2, h3), .publicSite .earlyAccessPanel h2 { overflow-wrap: anywhere; }
+.publicSite .serviceForm, .publicSite .serviceForm > *,
+.publicSite .serviceForm :is(label, input, select, textarea) { min-width: 0; }

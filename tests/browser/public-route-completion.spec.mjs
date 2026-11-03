@@ -27,8 +27,10 @@ for (const path of ['/', '/services', '/book', '/track', '/manage', '/early-acce
       await page.screenshot({ path: testInfo.outputPath('public-menu-expanded.png'), fullPage: true });
       await page.keyboard.press('Escape');
     }
-    for (const summary of await page.locator('details:not([open]) > summary').all()) {
-      if (await summary.isVisible()) await summary.click();
+    for (const summary of await page.locator('details > summary').all()) {
+      if (!(await summary.isVisible())) continue;
+      if (!(await summary.evaluate(node => node.parentElement.open))) await summary.click();
+      await expect(summary.locator('..')).toHaveAttribute('open', '');
     }
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath('public-expanded.png'), fullPage: true });
@@ -38,13 +40,18 @@ for (const path of ['/', '/services', '/book', '/track', '/manage', '/early-acce
       const sizes = nodes.map(node => parseFloat(getComputedStyle(node).fontSize));
       nodes.forEach((node, index) => { node.style.fontSize = `${sizes[index] * 2}px`; });
     });
-    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    const overflow = await page.evaluate(() => [...document.querySelectorAll('main *')].map(node => {
+      const box = node.getBoundingClientRect();
+      return { tag: node.tagName, className: String(node.className).slice(0, 100), x: Math.round(box.x), right: Math.round(box.right), width: Math.round(box.width) };
+    }).filter(box => box.width > 0 && (box.x < -1 || box.right > innerWidth + 1)).slice(0, 30));
+    console.log('CUSTOMER_OVERFLOW ' + JSON.stringify({ path, project: testInfo.project.name, overflow }));
     await page.screenshot({ path: testInfo.outputPath('public-enlarged-text.png'), fullPage: true });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   });
 }
 
 test('pricing to booking and Back retains the selected estimate', async ({ page }, testInfo) => {
-  await page.route('**/api/quote', route => route.fulfill({ json: { ok: true, quote: { estimatedMonthlyTotal: 3600, subscription: 1500, processingPerPickup: 450, routeFee: 0, perPickupTotal: 450, monthlyPickups: 4, occasionalLines: [], routeFeePending: false } } }));
+  await page.route('**/api/quote', route => route.fulfill({ json: { ok: true, quote: { estimatedMonthlyTotal: 3600, subscription: 1500, processingPerPickup: 450, addonsPerPickup: 0, zoneFee: 0, minimumAdjustment: 0, perPickupTotal: 450, monthlyPickups: 4, occasionalLines: [], routeFeePending: false } } }));
   await page.goto('/services?plan=Weekly');
   const form = page.locator('.quoteForm');
   await form.getByRole('combobox', { name: 'Collection plan', exact: true }).selectOption('Twice weekly');
@@ -56,6 +63,8 @@ test('pricing to booking and Back retains the selected estimate', async ({ page 
   await page.getByRole('link', { name: 'Continue to booking', exact: true }).click();
   await expect(page).toHaveURL(/\/book\?plan=Twice\+weekly&addons=ironing$/);
   await page.goBack();
+  await expect(form).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('pricing-return-before-assertion.png'), fullPage: true });
   await expect(form.getByRole('combobox', { name: 'Collection plan', exact: true })).toHaveValue('Twice weekly');
   await expect(form.locator('input[type="number"]')).toHaveValue('60.5');
   await expect(form.getByRole('checkbox').first()).toBeChecked();

@@ -36,6 +36,7 @@ test('private tracking link can retry in memory without exposing token in page o
   await page.goto('/track#tracking=synthetic-private-token');
   const retry = page.getByRole('button', { name: 'Try tracking again' });
   await expect(retry).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Check your connection and try again.");
   await expect(page).toHaveURL(/\/track$/);
   await expect(page.locator('body')).not.toContainText('synthetic-private-token');
   expect(await page.evaluate(() => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)]))).not.toContain('synthetic-private-token');
@@ -124,12 +125,13 @@ test('expired recovery link shows failure and leaves fresh recovery available', 
   await expect(page.getByRole('button', { name: 'Send recovery link' })).toBeEnabled();
 });
 
-test('stalled tracking times out into a usable retry', async ({ page }) => {
+test('stalled tracking times out into a usable retry', async ({ page }, testInfo) => {
   let calls = 0;
   expectCustomerFailure(page, { kind: 'requestfailed', path: '/api/track', method: 'GET' });
   await page.route('**/api/track?*', route => { if (++calls > 1) return route.fulfill({ json: tracking('Recovered result') }); });
   await page.goto('/track#tracking=synthetic-stalled');
-  await expect(page.getByRole('button', { name: 'Try tracking again' })).toBeVisible({ timeout: 20000 });
+  try { await expect(page.getByRole('button', { name: 'Try tracking again' })).toBeVisible({ timeout: 20000 }); }
+  finally { await page.screenshot({ path: testInfo.outputPath('tracking-timeout-state.png'), fullPage: true }); }
   await page.getByRole('button', { name: 'Try tracking again' }).click();
   await expect(page.locator('.trackingResult')).toContainText('Recovered result');
   expect(calls).toBe(2);

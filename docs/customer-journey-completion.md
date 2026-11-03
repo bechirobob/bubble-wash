@@ -39,7 +39,7 @@ The current task is restricted to source work with no publication or deployment.
 
 ## Content dependency from independent live review
 
-The public privacy page says operator details “will be published here.” Accurate legal/operator information remains a content launch dependency; this UI patch neither invents that information nor changes privacy commitments. Independent desktop live review found home/services/tracking/manage with expanded recovery/early-access/privacy visually clean, but does not cover this local candidate's dynamic outcomes or mobile layouts. Paused-booking review used no guessed link or live submission; available-booking acceptance remains synthetic-fixture work.
+The public privacy, terms and refund-policy pages say operator details “will be published here.” Accurate legal/operator information remains a content launch dependency; this UI patch neither invents that information nor changes privacy commitments. Independent desktop live review found home/services/tracking/manage with expanded recovery/early-access/privacy visually clean, but does not cover this local candidate's dynamic outcomes or mobile layouts. Paused-booking review used no guessed link or live submission; available-booking acceptance remains synthetic-fixture work.
 
 ## Final comparison correction and error checks
 
@@ -50,3 +50,13 @@ After an authorized push: inspect exact-head CI, TypeScript/lint/build results, 
 ## Customer error collection (test-only follow-up)
 
 The three new customer spec files share a bounded error collector. Every uncaught page error, failed script request and unexpected HTTP/transport failure fails the test. Intentional fixture errors are declared per test with same-origin path/method and exact HTTP status; these allowances never exempt JavaScript exceptions or failed scripts. Console warnings/errors remain visible diagnostics, not a universal console-error assertion. Details are capped at60 while the unexpected-event count is uncapped; absolute/relative URL query and fragment values are removed from diagnostic text. Network allowances describe event shapes, not occurrence counts; one-shot recovery tests separately assert request counts. Local520 unit tests and scoped lint pass. Hosted execution of this collector remains required; prior screenshots validate unchanged application bytes only.
+
+## Full-suite findings and combined correction
+
+Run41553217969 at9566abee completed with92 targeted checks and10 worklist checks passing; the full suite had329 passes,40 intentional skips and11 failures. Preserve this failed run:5 enlarged-text overflow failures (early access320, privacy320, terms320/390/WebKit390),4 pricing Back state-loss failures,1 WebKit tracking-timeout failure,1 WebKit staff dispatch-location pageerror. The later open-survey stage was skipped.
+
+The combined candidate wraps long public/policy/early-access headings and allows form tracks to shrink without clipping or reducing text size. Pricing restores validated plan/zone/weight/extras from the same browser-history entry, preserving framework state; no identity/payment data or persistent local/session storage is added, and no quote/API call is restored automatically. Tracking has an independent15-second UI deadline so retry does not depend on an aborted transport rejecting; plain-language transport failures preserve server validation messages.
+
+The staff error coincided with hard navigation9ms after the prior RSC-only quiet guard. This is a navigation-collision hypothesis, not proven CORS or authorization failure. Test observation now includes exact same-origin dispatch GET lifecycles/status, preserving strict failure and pageerror assertions. No staff application or access configuration changed.
+
+Expanded-state capture now uses stable summary locators so opening one disclosure cannot skip the next. Enlarged-text screenshots and bounded overflow rectangles are captured before the unchanged containment assertion; pricing return and tracking-timeout diagnostics are likewise available on failure. Prior pre-enlargement images do not prove enlarged-text correctness. Final combined browser/pixel verification remains mandatory.

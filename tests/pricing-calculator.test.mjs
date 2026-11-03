@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { readPricingHistory, withPricingHistory } from '../src/lib/pricing-history.ts';
 import { plans, zones, addons, calculateQuote } from '../src/lib/pricing.ts';
 
 // Exercise the component's edit and submit handlers without a browser dependency.
-function calculator({ deferred = false, hydrated = true, available = true } = {}) {
+function calculator({ deferred = false, hydrated = true, available = true, initialHistory = null } = {}) {
+  const browser = { location: { pathname: "/services", search: "?plan=Weekly" }, history: { state: initialHistory, replaceState(state) { this.state = state; } }, requestAnimationFrame(callback) { callback(); return 1; }, cancelAnimationFrame() {}, addEventListener() {}, removeEventListener() {} };
   const slots = [];
   const requests = [];
   const responses = [];
@@ -22,6 +24,7 @@ function calculator({ deferred = false, hydrated = true, available = true } = {}
       slots[index] ??= { current: initial };
       return slots[index];
     },
+    useEffect(callback) { const index = cursor++; if (!slots[index]) { slots[index] = true; callback(); } },
     useMemo: fn => fn(),
     useSyncExternalStore: (_subscribe, clientReady, serverReady) => hydrated ? clientReady() : serverReady(),
   };
@@ -32,6 +35,7 @@ function calculator({ deferred = false, hydrated = true, available = true } = {}
     'next/link': { default: 'a' },
     'lucide-react': { Calculator: 'icon', CalendarPlus: 'icon', BadgeCheck: 'icon', ArrowRight: 'icon', CalendarDays: 'icon', ChevronDown: 'icon', Info: 'icon' },
     '@/lib/pricing': { plans, zones, addons },
+    '@/lib/pricing-history': { readPricingHistory, withPricingHistory },
     '@/lib/public-ui': {
       formatMoney: value => `GHS ${value}`,
       postJSON: async (url, payload) => {
@@ -46,7 +50,7 @@ function calculator({ deferred = false, hydrated = true, available = true } = {}
     const source = readFileSync(new URL(`../src/components/${file}.tsx`, import.meta.url), 'utf8');
     const { outputText } = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS } });
     const exports = {};
-    vm.runInNewContext(outputText, { exports, URLSearchParams, require: name => {
+    vm.runInNewContext(outputText, { exports, URLSearchParams, window: browser, require: name => {
       assert.ok(Object.hasOwn(modules, name), `Unexpected dependency: ${name}`);
       return modules[name];
     } });
@@ -54,7 +58,7 @@ function calculator({ deferred = false, hydrated = true, available = true } = {}
   }
   modules['@/components/PlanCatalogue'] = loadComponent('PlanCatalogue');
   const { PricingCalculator } = loadComponent('PricingCalculator');
-  const render = () => { cursor = 0; return PricingCalculator({ initialPlan: 'Weekly', showCatalogue: true, available }); };
+  const render = () => { cursor = 0; PricingCalculator({ initialPlan: 'Weekly', showCatalogue: true, available }); cursor = 0; return PricingCalculator({ initialPlan: 'Weekly', showCatalogue: true, available }); };
   const find = (node, match) => {
     if (!node || typeof node !== 'object') return;
     if (match(node)) return node;
@@ -66,12 +70,14 @@ function calculator({ deferred = false, hydrated = true, available = true } = {}
   };
   return {
     requests,
+    history: browser.history,
+    bookingLink: () => find(render(), n => n.type === "a" && n.props.href?.startsWith("/book?")),
     responses,
     render,
     find,
     hydrate: () => { hydrated = true; },
     form: () => find(render(), n => n.type === "form"),
-    zone: () => find(render(), n => n.type === "select" && n.props.value === "core"),
+    zone: () => find(render(), n => n.type === "select" && Object.hasOwn(zones, n.props.value)),
     submitButton: () => find(render(), n => n.type === "button" && n.props.type === "submit"),
     select: name => find(render(), n => n.type === 'input' && n.props.type === 'radio' && n.props.value === name),
     compare: name => find(render(), n => n.type === 'input' && n.props.name === 'comparison-plan' && n.props['aria-label'].startsWith(`Choose ${name},`)),
@@ -229,4 +235,26 @@ test('minimum adjustment displays the rounded domain value, never floating-point
   await view.submit();
   const row = view.find(view.render(), n => n.type === 'div' && Array.isArray(n.props.children) && n.props.children[0]?.props?.children === 'Minimum adjustment per pickup');
   assert.equal(row.props.children[1].props.children, 'GHS 0');
+});
+
+
+test('booking navigation saves only estimate choices in the current history entry and Back restores without quoting', async () => {
+  const nextState = { __NA: true, tree: ['preserved-next-tree'], unrelated: 'keep' };
+  const view = calculator({ initialHistory: nextState });
+  view.plan().props.onChange({ target: { value: 'Twice weekly' } });
+  view.weight().props.onChange({ target: { value: '60.5' } });
+  view.zone().props.onChange({ target: { value: Object.keys(zones).find(key => key !== 'core') } });
+  view.extra().props.onChange();
+  await view.submit();
+  view.bookingLink().props.onClick();
+  assert.equal(view.history.state.__NA, true);
+  assert.equal(view.history.state.tree, nextState.tree);
+  assert.equal(view.history.state.unrelated, 'keep');
+  const returned = calculator({ initialHistory: view.history.state });
+  assert.equal(returned.plan().props.value, 'Twice weekly');
+  assert.equal(returned.weight().props.value, '60.5');
+  assert.equal(returned.zone().props.value, Object.keys(zones).find(key => key !== 'core'));
+  assert.equal(returned.extra().props.checked, true);
+  assert.equal(returned.requests.length, 0);
+  assert.equal(returned.bookingLink(), undefined, 'saved estimates are not restored as fresh quotes');
 });
