@@ -156,7 +156,8 @@ sys.modules['uat_restore_receiver'].main(bundle)
     encoded=base64.b64encode(bootstrap.encode()).decode()
     require(len(encoded)<120000)
     code="import base64;exec(compile(base64.b64decode("+repr(encoded)+"),'reviewed-uat-restore','exec'))"
-    return ['tailscale','ssh','root@hermes','python3 -I -B -c '+shlex.quote(code)]
+    # The pinned Tailscale action installs here; keep exchange's restricted PATH.
+    return ['/usr/local/bin/tailscale','ssh','root@hermes','python3 -I -B -c '+shlex.quote(code)]
 
 
 def validate_receipt(raw,mode,inspection_bundle=None):
