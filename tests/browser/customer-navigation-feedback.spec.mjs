@@ -14,7 +14,12 @@ const order = { orderId: 'synthetic', customer: 'Synthetic customer', createdAt:
 test('mobile menu Escape restores focus and route history leaves it closed', async ({ page }) => {
   await page.goto('/services');
   const menu = page.getByRole('button', { name: 'Menu', exact: true });
-  if (!(await menu.isVisible())) { await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible(); return; }
+  if (page.viewportSize().width > 780) {
+    await expect(menu).toBeHidden();
+    await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
+    return;
+  }
+  await expect(menu).toBeVisible();
   await menu.click();
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Track order', exact: true }).focus();
   await page.keyboard.press('Escape');
