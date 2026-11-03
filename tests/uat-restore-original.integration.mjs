@@ -7,6 +7,7 @@ const directory = mkdtempSync(join(tmpdir(), 'uat-restore-test-'));
 Object.assign(process.env, { NODE_ENV:'production', BUBBLEWASH_UAT_ENABLED:'true', BUBBLEWASH_UAT_ISOLATION_CONFIRMED:'true', BUBBLEWASH_PUBLIC_URL:'https://uat.example.invalid', BUBBLEWASH_DATABASE_PATH:join(directory,'uat.sqlite'), BUBBLEWASH_UAT_DATA_ROOT:directory, NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED:'false', NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED:'false', BUBBLEWASH_RESEARCH_EMAIL_ENABLED:'false', BUBBLEWASH_DISABLE_DEMO_LOGIN:'true', BUBBLEWASH_SESSION_SECRET:'synthetic-session-secret-only-for-test-123' });
 const { initializeUatAccountsSchema, issueUatCohort, createUatTeamAccount, revokeUatAccount, currentUatUsers } = await import('../src/lib/uat-accounts.ts');
 const { inspectOriginalUat, restoreOriginalUat } = await import('../scripts/uat-restore-original.mjs');
+const { encodeSession, decodeSession } = await import('../src/lib/auth.ts');
 const { verifyPasswordHash } = await import('../src/lib/passwords.ts');
 const realNow = Date.now;
 let now = Date.parse('2026-10-26T23:19:33.802Z');
@@ -24,6 +25,7 @@ try {
   revokeUatAccount('child-revoked','test',db);
   assert.throws(()=>inspectOriginalUat(db),'active cohort cannot be extended');
   const originalRows = dump('staff_uat_accounts');
+  const oldSessions = currentUatUsers(db).map(user => encodeSession(user));
   now += 604800000;
   currentUatUsers(db);
   const before = dump('staff_uat_accounts');
@@ -52,7 +54,15 @@ try {
   const receipt = restoreOriginalUat(db,request);
   assert.equal(receipt.expiresAt-receipt.startsAt,604800000);
   assert.equal(receipt.startsAt,now);
-  assert.equal(currentUatUsers(db).length,4);
+  const restoredUsers = currentUatUsers(db);
+  assert.equal(restoredUsers.length,4);
+  for (const session of oldSessions) assert.equal(decodeSession(session,restoredUsers,db),null,'old sessions do not revive');
+  for (const user of restoredUsers) {
+    const session = encodeSession(user);
+    assert.equal(decodeSession(session,restoredUsers,db).role,user.role,'fresh session authorizes exact role');
+    const staleVersionUsers = restoredUsers.map(u => ({...u,credentialVersion:originalRows.find(a=>a.username===u.username).credential_version}));
+    assert.equal(decodeSession(session,staleVersionUsers,db),null,'credential version mismatch rejected independently of deadline');
+  }
   for (const row of dump('staff_uat_accounts')) {
     const old = originalRows.find(a=>a.username===row.username);
     if (row.username.startsWith('child-')) assert.deepEqual(row,before.find(a=>a.username===row.username));
