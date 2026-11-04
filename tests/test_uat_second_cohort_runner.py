@@ -35,6 +35,7 @@ class Runner(unittest.TestCase):
 
     def test_prepare_derives_only_reviewed_runtime_and_verified_context(self):
         transport=mock.Mock();handoff=mock.Mock()
+        transport.SECOND_OPERATION_ID=environment()['UAT_OPERATION_ID']
         transport.source_bundle.return_value={'ops/uat/restoration-runtime-pins.json':json.dumps({'runtimeRevision':'c'*40})}
         handoff.context.return_value={'publicKey':'synthetic-public-key'}
         with mock.patch.object(r.subprocess,'check_output',side_effect=lambda args,**kw:(ROOT/args[-1].split(':',1)[1]).read_bytes()),mock.patch.object(r,'pinned_module',side_effect=[mock.Mock(),transport,handoff]):
@@ -45,7 +46,8 @@ class Runner(unittest.TestCase):
         handoff.context.assert_called_once();transport.authorize.assert_called_once()
 
     def test_wrong_recipient_context_prevents_all_host_work(self):
-        transport=mock.Mock();handoff=mock.Mock();handoff.context.side_effect=ValueError('synthetic key mismatch')
+        transport=mock.Mock();handoff=mock.Mock()
+        transport.SECOND_OPERATION_ID=environment()['UAT_OPERATION_ID'];handoff.context.side_effect=ValueError('synthetic key mismatch')
         transport.source_bundle.return_value={'ops/uat/restoration-runtime-pins.json':'{"runtimeRevision":"synthetic"}'}
         with mock.patch.object(r.subprocess,'check_output',side_effect=lambda args,**kw:(ROOT/args[-1].split(':',1)[1]).read_bytes()),mock.patch.object(r,'pinned_module',side_effect=[mock.Mock(),transport,handoff]):
             with self.assertRaises(ValueError):r.prepare(ROOT,environment())

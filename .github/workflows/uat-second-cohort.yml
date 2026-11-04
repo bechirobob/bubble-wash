@@ -8,11 +8,11 @@ on:
         type: string
         required: true
       operation_id:
-        description: Approved UUID; retain the same UUID for recovery
+        description: Pinned one-operation UUID; retain the same UUID for recovery
         type: string
         required: true
       handoff_public_key:
-        description: Existing pinned recipient PUBLIC key as base64 SPKI DER; never a private key
+        description: Approved second-cohort recipient PUBLIC key as base64 SPKI DER; never a private key
         type: string
         required: true
       mode:
@@ -32,7 +32,7 @@ on:
         type: boolean
         default: false
       recipient_key_verified:
-        description: Matching existing private-key custody was verified privately outside this workflow
+        description: Matching approved one-operation private-key custody was verified privately outside this workflow
         type: boolean
         default: false
       private_retrieval_verified:

@@ -1,4 +1,6 @@
 import importlib.util
+import base64
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -84,20 +86,47 @@ class Integration(unittest.TestCase):
         self.assertFalse(json.loads(result.stdout)['entrypointEnabled'])
 
 
+class RecipientBinding(unittest.TestCase):
+    def test_historical_instance_is_not_modified(self):
+        isolated=load('uat_second_private_handoff','ops/uat/private-handoff.py')
+        historical=load('uat_original_private_handoff','ops/uat/private-handoff.py')
+        old=historical.RECIPIENT
+        s.bind_second_recipient(isolated)
+        self.assertEqual(isolated.RECIPIENT,s.SECOND_RECIPIENT)
+        self.assertEqual(historical.RECIPIENT,old)
+        self.assertEqual(old,s.HISTORICAL_RECIPIENT)
+        with self.assertRaises(ValueError):s.bind_second_recipient(historical)
+
+    def test_new_operation_cannot_use_this_delivery_key(self):
+        env={'GITHUB_REPOSITORY':'bechirobob/bubble-wash','GITHUB_REF':'refs/heads/main',
+             'GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_RUN_ATTEMPT':'1','SOURCE_SHA':'a'*40,
+             'GITHUB_SHA':'a'*40,'ADMIN_ROUTE_APPROVED':'true','PRIVATE_HANDOVER_APPROVED':'true',
+             'RECIPIENT_KEY_VERIFIED':'true','SECOND_COHORT_ISSUANCE_APPROVED':'true'}
+        for action in ('issue','retrieve'):
+            with self.assertRaises(ValueError):s.authorize(env,{'action':action,'operationId':'different-operation'})
+            pem='-----BEGIN PUBLIC KEY-----\n'+base64.b64encode(b's'*400).decode()+'\n-----END PUBLIC KEY-----\n'
+            with self.assertRaises(ValueError):s.authorize(env,{'action':action,'operationId':s.SECOND_OPERATION_ID,'publicKey':pem})
+            with mock.patch.object(s,'SECOND_RECIPIENT',hashlib.sha256(b's'*400).hexdigest()):
+                s.authorize(env,{'action':action,'operationId':s.SECOND_OPERATION_ID,'publicKey':pem})
+
+
 class PrivateStorage(unittest.TestCase):
     def setUp(self):
         self.env={'GITHUB_REPOSITORY':'bechirobob/bubble-wash','GITHUB_REF':'refs/heads/main',
              'GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_RUN_ATTEMPT':'1','SOURCE_SHA':'a'*40,
              'GITHUB_SHA':'a'*40,'ADMIN_ROUTE_APPROVED':'true','PRIVATE_HANDOVER_APPROVED':'true',
              'RECIPIENT_KEY_VERIFIED':'true','SECOND_COHORT_ISSUANCE_APPROVED':'true'}
-        self.request={'action':'issue','publicKey':'synthetic-public-key'}
+        self.pem='-----BEGIN PUBLIC KEY-----\n'+base64.b64encode(b's'*400).decode()+'\n-----END PUBLIC KEY-----\n'
+        self.request={'action':'issue','publicKey':self.pem,'operationId':s.SECOND_OPERATION_ID}
         self.handoff=mock.Mock();self.backup=mock.Mock()
+        self.handoff.__name__='uat_second_private_handoff';self.handoff.RECIPIENT=s.HISTORICAL_RECIPIENT
         runtime=json.loads((ROOT/'ops/uat/restoration-runtime-pins.json').read_text())['runtimeRevision']
-        self.handoff.context.return_value={'mode':'issue','publicKey':'synthetic-public-key','runtimeSha':runtime}
+        self.handoff.context.return_value={'mode':'issue','publicKey':self.pem,'runtimeSha':runtime}
         self.events=[]
         self.handoff.private_store.side_effect=lambda *args:self.events.append('store')
         self.handoff.publish.side_effect=lambda *args:self.events.append('publish') or {'ok':True}
         self.stack=__import__('contextlib').ExitStack();self.addCleanup(self.stack.close)
+        self.stack.enter_context(mock.patch.object(s,'SECOND_RECIPIENT',hashlib.sha256(b's'*400).hexdigest()))
         self.stack.enter_context(mock.patch.object(s,'source_bundle',return_value={}))
         self.stack.enter_context(mock.patch.object(s.subprocess,'check_output',side_effect=lambda args,**kw:(ROOT/args[-1].split(':',1)[1]).read_bytes()))
         self.stack.enter_context(mock.patch.object(s.importlib.util,'spec_from_file_location',return_value=mock.Mock()))

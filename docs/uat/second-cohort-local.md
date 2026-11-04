@@ -83,7 +83,8 @@ test and reported no remaining blocking findings for this local-only module.
   prepared locally but is not published or dispatched.
 - `perform_private_handoff` verifies the existing private storage repository before
   issuance and uses the unchanged first-handover publisher for ciphertext only.
-  It retains the existing recipient pin and never uses first-issuance host guards.
+  It binds only a separately loaded publisher instance to the approved second-cohort
+  recipient. The historical recipient and first-issuance host guards are unchanged.
 - `scripts/uat-second-cohort-unseal.mjs`: authenticated recipient-side decryption and
   exclusive mode-0600 output in a caller-owned directory with no group/other access.
   It never generates keys, sends data, or prints plaintext.
@@ -101,7 +102,7 @@ Neither is published/dispatched; this is not permission to execute now.
    `uat_restore_transport`, then `second-cohort-transport.py`. Never reroute after
    a denial.
 2. Require coordinator approval for this operation UUID, four fresh roles, exact
-   runtime/control source, existing recipient key and private storage/delivery.
+   runtime/control source, approved one-operation recipient key and private storage/delivery.
    Establish that the recipient actually possesses the matching private key BEFORE
    any issuance. Do not infer this from a public key or old storage receipt.
 3. The runner receives only the nonsecret approved operation UUID and public key;
@@ -119,7 +120,7 @@ Neither is published/dispatched; this is not permission to execute now.
 request = {
     'action': 'issue', 'approved': True, 'ready': True,
     'operationId': approved_operation_uuid,
-    'publicKey': verified_existing_recipient_public_pem,
+    'publicKey': verified_second_cohort_recipient_public_pem,
     'expectedStateSha256': snapshot['stateSha256'],
     'notBefore': snapshot['inspectedAt'],
     'approvedUntil': snapshot['inspectedAt'] + 300000,
@@ -163,29 +164,30 @@ establish a user-facing delivery channel.
 - Publication of this local control code and exact-main CI, plus a reviewed
   protected runner workflow are not authorized/completed. The missing step is now
   implemented locally; the existing first-issuance workflow remains unchanged.
-- Existing private recipient fingerprint is
-  `a479abb3611e11c65eb89e1a437577873e26798161e284572e0bf29ccdc8b4c9`.
-  Matching private-key availability has NOT been verified. If unavailable, stop;
-  do not relax its pin or generate a live replacement key under this authorization.
+- The user separately authorized the one-operation delivery key documented below.
+  Its local custody is verified. Keep this selected environment and protected key
+  directory intact until successful verified handover; do not replace or delete early.
 - Existing private-store authorization/bindings and user-only final delivery are
   not verified. Local mocks do not establish remote access.
 
 The 16:00 UTC+1 / 15:00 UTC deadline remains at risk until those gates are resolved.
-No host contact, real credentials/keys, workflow dispatch, deployment, publication,
-security-setting changes, or denied secret/log endpoint access occurred here.
+No host contact, real account credentials, workflow dispatch, deployment, publication,
+remote security-setting changes, or denied secret/log endpoint access occurred here.
+The only live cryptographic material created is the separately authorized local
+one-operation delivery key described below.
 
 
 ## Prepared workflow confirmation scope
 
 The new workflow has ten inputs: exact `source_sha`, retained `operation_id`,
-existing pinned `handoff_public_key` (public DER only), `mode` (`issue` or
+approved second-cohort `handoff_public_key` (public DER only), `mode` (`issue` or
 `retrieve`), and six false-default attestations. Every attestation must be true:
 
 - `admin_route_approved`: existing administrative route approved for this action.
 - `operation_approved`: restart/isolation work passed and coordinator authorized
   this precise issue or recovery, UUID, four roles, reviewed code and target.
 - `private_handover_approved`: existing private encrypted release storage approved.
-- `recipient_key_verified`: matching existing private key is demonstrably available
+- `recipient_key_verified`: matching approved one-operation private key is demonstrably available
   to its authorized holder outside the runner. Public-key presence is insufficient.
 - `private_retrieval_verified`: authorized private asset download capability has
   been established without denied log or secret-metadata endpoints.
@@ -201,9 +203,38 @@ existing validated nonsecret encrypted-storage receipt is printed.
 
 Publication scope is this branch's reviewed patch plus refreshed runner-only
 source commitment, followed by exact-main CI. No new persistent access, token,
-secret, storage repository, recipient pin or transport route is introduced. The
+remote secret, storage repository or transport route is introduced. The explicitly
+authorized recipient pin applies only to the separate second-cohort path. The
 existing protected environment and three existing secret bindings remain required:
 Tailscale OAuth ID/secret and `BACKUP_STORE_TOKEN`; their availability is unverified.
 If any binding/access/key is missing, stop and seek specific authorization; do not
 create or broaden it. A replacement key/pin, new storage destination, permission
 expansion or alternative transport would be a new action requiring confirmation.
+
+
+## Authorized one-operation key custody
+
+The user explicitly approved creating a new delivery encryption key because the
+original key could not be located, using it for the four fresh test logins, and
+removing it only after successful verified handover.
+
+- Operation UUID: `ba2a58a3-d37f-4a20-985c-1f7fcbbf2aef`.
+- Public SPKI SHA-256: `dc87a41bd34beee0dd64bb165ae968ea266b84ac9b86fe8d642e5ffbdcb6c154`.
+- RSA-3072; custody verified at `2026-11-04T13:15:50.635Z` by reopening the retained key
+  and completing an RSA-OAEP/SHA-256 encrypt/decrypt roundtrip locally.
+- The private key is outside the repository, in a caller-owned mode-0700 directory;
+  its file mode is 0600. No private key bytes are in this source, patch, workflow
+  input, log, message or public artifact.
+- Issuance and retrieval both reject any other operation UUID or recipient key,
+  including calls through the lower-level transport helper.
+- The historical first-issuance fingerprint and original handover are unchanged.
+  A separate loaded publisher instance receives the second-cohort pin; it cannot
+  modify a first-issuance instance.
+
+Custody evidence and the public dispatch input are retained with the private key
+in the selected execution environment. The key is NOT deleted yet: successful
+handover has not happened. No automatic deletion is attached to failed issuance,
+transfer, publication or verification. After the user-only handover is verified,
+remove the retained private key under the user's approval and record only a
+nonsecret cleanup receipt. Recheck custody immediately before issuance; this
+record does not establish remote storage retrieval or final delivery readiness.

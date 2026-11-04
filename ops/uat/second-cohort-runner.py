@@ -47,7 +47,9 @@ def prepare(root, supplied):
     pinned_module(root, sha, 'uat_restore_transport', 'ops/uat/restoration-transport.py')
     transport = pinned_module(root, sha, 'uat_second_transport', 'ops/uat/second-cohort-transport.py')
     bundle = transport.source_bundle(root, sha)
-    handoff = pinned_module(root, sha, 'uat_private_handoff', 'ops/uat/private-handoff.py')
+    handoff = pinned_module(root, sha, 'uat_second_private_handoff', 'ops/uat/private-handoff.py')
+    require(env['UAT_OPERATION_ID'] == transport.SECOND_OPERATION_ID)
+    transport.bind_second_recipient(handoff)
     env['RUNTIME_SHA'] = json.loads(bundle['ops/uat/restoration-runtime-pins.json'])['runtimeRevision']
     # These attest separately verified facts; this code cannot verify off-runner
     # private-key custody or user-only delivery and must never claim to do so.
