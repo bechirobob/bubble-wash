@@ -1,7 +1,13 @@
-name: Restart isolated UAT once
+name: Inspect or restart isolated UAT once
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: Read-only precheck diagnosis or separately approved single restart
+        type: choice
+        options: [inspect, restart]
+        default: inspect
+        required: true
       source_sha:
         description: Exact reviewed main control commit
         type: string
@@ -36,6 +42,7 @@ jobs:
       SOURCE_SHA: ${{ inputs.source_sha }}
       UAT_OPERATION_ID: ${{ inputs.operation_id }}
       UAT_RESTORE_MODE: inspect
+      UAT_RESTART_MODE: ${{ inputs.mode }}
       ADMIN_ROUTE_APPROVED: ${{ inputs.admin_route_approved }}
       UAT_RESTART_APPROVED: ${{ inputs.restart_approved }}
       UAT_QUIET_WINDOW_COORDINATED: ${{ inputs.quiet_window_coordinated }}
@@ -48,7 +55,12 @@ jobs:
           set -euo pipefail
           [[ "$GITHUB_REPOSITORY" == bechirobob/bubble-wash && "$GITHUB_REF" == refs/heads/main ]]
           [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
-          [[ "$ADMIN_ROUTE_APPROVED" == true && "$UAT_RESTART_APPROVED" == true && "$UAT_QUIET_WINDOW_COORDINATED" == true ]]
+          [[ "$ADMIN_ROUTE_APPROVED" == true ]]
+          if [[ "$UAT_RESTART_MODE" == restart ]]; then
+            [[ "$UAT_RESTART_APPROVED" == true && "$UAT_QUIET_WINDOW_COORDINATED" == true ]]
+          else
+            [[ "$UAT_RESTART_MODE" == inspect ]]
+          fi
           python3 -B ops/integration-release/select_source.py --release . --runner-only
       - name: Require successful exact-source CI
         env:
@@ -63,5 +75,5 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: hermes
-      - name: Verify isolation and request one UAT restart
+      - name: Run selected bounded UAT control
         run: python3 -I -B ops/uat/single-restart.py

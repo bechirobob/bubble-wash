@@ -1,4 +1,5 @@
 """One coordinated UAT restart; no account, secret, deployment or configuration writes."""
+import ast
 import base64
 import importlib.util
 import json
@@ -160,11 +161,66 @@ def execute(bundle,request):
         return receipt(stage)
 
 
+DIAGNOSTIC_STAGES={'isolation','loaded-unit','quiescence','identity-confirmation','complete','unavailable'}
+SOURCE_LABELS={SELF:'R','ops/uat/restoration-collector.py':'C',
+               'ops/uat/restoration-preflight.py':'P','ops/uat/restoration-transport.py':'T'}
+REMOTE_FILES=(*SOURCE_LABELS,'ops/uat/restoration-runtime-pins.json')
+
+
+def diagnostic_sites(bundle):
+    return {name:{node.lineno:label+'-L'+str(node.lineno) for node in ast.walk(ast.parse(bundle[name]))
+            if isinstance(node,ast.stmt) and hasattr(node,'lineno')}
+            for name,label in SOURCE_LABELS.items()}
+
+
+def inspection_receipt(stage,sites=()):
+    require(stage in DIAGNOSTIC_STAGES)
+    return {'ok':False,'readOnly':True,'automaticRetry':False,'state':'precheck-inspected',
+            'precheckPassed':stage=='complete','failureStage':stage,'failureSites':list(sites)}
+
+
+def validate_inspection(value,bundle):
+    require(type(value) is dict and set(value)==set(inspection_receipt('unavailable')))
+    require(type(value['failureStage']) is str and value['failureStage'] in DIAGNOSTIC_STAGES)
+    require(type(value['failureSites']) is list and len(value['failureSites'])<=8)
+    allowed={token for rows in diagnostic_sites(bundle).values() for token in rows.values()}
+    require(all(type(token) is str and token in allowed for token in value['failureSites']))
+    require(value==inspection_receipt(value['failureStage'],value['failureSites']))
+    require(all(type(value[k]) is bool for k in ('ok','readOnly','automaticRetry','precheckPassed')))
+    if value['precheckPassed']:require(not value['failureSites'])
+    return value
+
+
+def inspect_prechecks(bundle,request):
+    require(os.geteuid()==0 and type(request) is dict and set(request)=={'mode','operationId'})
+    require(request['mode']=='inspect' and t.UUID.fullmatch(request['operationId']))
+    pins=json.loads(bundle['ops/uat/restoration-runtime-pins.json']);stage='isolation'
+    try:
+        first=c.collect_restart_isolation(pins,before_restart=True)
+        stage='loaded-unit';loaded=loaded_unit()
+        stage='quiescence';quiet_sample()
+        stage='identity-confirmation'
+        require(c.collect_restart_isolation(pins,before_restart=True)==first)
+        require(loaded_unit()==loaded);quiet_sample()
+        return inspection_receipt('complete')
+    except Exception as error:
+        allowed=diagnostic_sites(bundle);trace=error.__traceback__;sites=[]
+        while trace is not None:
+            token=allowed.get(trace.tb_frame.f_code.co_filename,{}).get(trace.tb_lineno)
+            if token:sites.append(token)
+            trace=trace.tb_next
+        return inspection_receipt(stage,sites[-8:])
+
+
 def host_main(bundle):
     resource.setrlimit(resource.RLIMIT_CORE,(0,0))
     raw=sys.stdin.buffer.read(1025);require(len(raw)<=1024)
-    result=execute(bundle,json.loads(raw))
-    print(json.dumps(validate_receipt(result),sort_keys=True))
+    request=json.loads(raw)
+    if type(request) is dict and request.get('mode')=='inspect':
+        result=validate_inspection(inspect_prechecks(bundle,request),bundle)
+    else:
+        result=validate_receipt(execute(bundle,request))
+    print(json.dumps(result,sort_keys=True))
     # The runner interprets the closed receipt. No exception details leave the host.
 
 
@@ -172,6 +228,8 @@ def context(env):
     # Reuse exact-main/first-attempt/admin/debug/credential-absence validation.
     require(env.get('UAT_RESTORE_MODE')=='inspect')
     original=t.private_input(env)
+    mode=env.get('UAT_RESTART_MODE','restart');require(mode in ('inspect','restart'))
+    if mode=='inspect':return {'mode':'inspect','operationId':original['operationId']}
     require(env.get('UAT_RESTART_APPROVED')=='true' and env.get('UAT_QUIET_WINDOW_COORDINATED')=='true')
     return {'operationId':original['operationId'],'restartApproved':True,'quietWindowCoordinated':True}
 
@@ -181,6 +239,8 @@ def perform(root,env):
     raw=(Path(root)/SELF).read_bytes();require(0<len(raw)<=16384 and not (Path(root)/SELF).is_symlink())
     require(subprocess.check_output(['git','show',env['SOURCE_SHA']+':'+SELF],cwd=root)==raw)
     bundle[SELF]=raw.decode()
+    # Full source verification above; unused account code is never transmitted.
+    bundle={name:bundle[name] for name in REMOTE_FILES}
     bootstrap="""import json,sys,types,signal
 signal.alarm(150)
 bundle=json.loads(BUNDLE)
@@ -192,11 +252,13 @@ sys.modules['uat_single_restart'].host_main(bundle)
     encoded=base64.b64encode(bootstrap.encode()).decode();require(len(encoded)<120000)
     code="import base64;exec(compile(base64.b64decode("+repr(encoded)+"),'reviewed-uat-single-restart','exec'))"
     command=['/usr/local/bin/tailscale','ssh','root@hermes','python3 -I -B -c '+shlex.quote(code)]
-    return validate_receipt(json.loads(t.exchange(command,json.dumps(request).encode(),timeout=180)))
+    value=json.loads(t.exchange(command,json.dumps(request).encode(),timeout=180))
+    return validate_inspection(value,bundle) if request.get('mode')=='inspect' else validate_receipt(value)
 
 
 if __name__=='__main__':
     try:result=perform(HERE.parents[1],os.environ)
-    except BaseException:result=receipt('restart-uncertain')
+    except BaseException:
+        result=inspection_receipt('unavailable') if os.environ.get('UAT_RESTART_MODE')=='inspect' else receipt('restart-uncertain')
     print(json.dumps(result,sort_keys=True))
     raise SystemExit(0 if result['ok'] else 1)

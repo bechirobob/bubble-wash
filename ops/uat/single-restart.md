@@ -54,3 +54,13 @@ compared across both prechecks and postchecks. No arbitrary mount/dependency is
 accepted, and Upholds/UpheldBy relationships are refused. Missing/unsupported
 properties fail closed. The reserved window must exclude unit-file/configuration
 changes; this control does not lock out privileged operators.
+
+The workflow now defaults to `inspect`, a structurally separate read-only path.
+It repeats the same restart prechecks without entering the restart function or
+calling health/account operations. The receipt contains only a fixed stage and
+source-statement tokens derived from the exact transmitted Python sources.
+Exception text, values, paths and stack details are never returned. Even when
+`precheckPassed` is true, diagnostic `ok` remains false: this is not historical
+chronology proof or account admission. A restart still requires explicit
+`mode=restart` and both original restart/quiet-window attestations. An unavailable
+diagnostic never authorizes a retry of a mutation-capable control.
