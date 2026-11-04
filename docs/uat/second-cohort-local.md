@@ -1,6 +1,11 @@
 # Second UAT cohort: local preparation only
 
-Base: `a9cf60982ed5efdfc6e77f58156df56ca2995a87` (origin/main inspected at preparation).
+Initial base: `a9cf60982ed5efdfc6e77f58156df56ca2995a87`.
+Reconciled locally with current main `a277bfa321fe153d554675903ddb14afd8316193`
+(PR #161, bounded isolated UAT restart). Normal second-cohort collection continues
+to enforce timestamp and account checks; it never uses the restart-only precheck.
+Only the generated runner manifest conflicted and was recomputed. Publication
+remains on hold after the coordinator reported a pre-admission authorization denial.
 
 `scripts/uat-second-cohort.mjs` is an operator module, with no CLI, HTTP endpoint,
 workflow, or host transport. Installing/importing it does not issue accounts.
