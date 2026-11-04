@@ -72,6 +72,10 @@ def inspection_failure(error,bundle,stage):
             if evidence is not None:
                 validate_environment_timestamp_evidence(evidence,details)
                 result['environmentTimestampEvidence']=evidence
+            identity=getattr(error,'environment_identity_evidence',None)
+            if identity is not None:
+                validate_environment_identity_evidence(identity,details)
+                result['environmentIdentityEvidence']=identity
     except BaseException:
         pass
     return result
@@ -105,10 +109,18 @@ def validate_environment_timestamp_evidence(value,failures):
             {'before-recorded-service-start','within-recorded-microsecond','after-recorded-service-start'})
 
 
+def validate_environment_identity_evidence(value,failures):
+    require(failures and all(row['category']=='environment' for row in failures))
+    require(type(value) is dict and set(value)=={'state'})
+    require(type(value['state']) is str and value['state'] in {'matched','mismatched','unavailable'})
+
+
 def validate_inspection_failure(value,bundle,host_only=False):
     fields={'ok','readOnly','automaticRetry','state','failureStage','failureSites'}
     require(type(value) is dict and set(value) in (fields,fields|{'timestampFailures'},
-        fields|{'timestampFailures','environmentTimestampEvidence'}))
+        fields|{'timestampFailures','environmentTimestampEvidence'},
+        fields|{'timestampFailures','environmentIdentityEvidence'},
+        fields|{'timestampFailures','environmentTimestampEvidence','environmentIdentityEvidence'}))
     require(value['ok'] is False and value['readOnly'] is True and value['automaticRetry'] is False)
     require(value['state']=='inspection-failed' and type(value['failureStage']) is str)
     require(value['failureStage'] in ({'host-inspection'} if host_only else INSPECTION_STAGES))
@@ -120,6 +132,8 @@ def validate_inspection_failure(value,bundle,host_only=False):
         validate_timestamp_failures(value['timestampFailures'])
     if 'environmentTimestampEvidence' in value:
         validate_environment_timestamp_evidence(value['environmentTimestampEvidence'],value['timestampFailures'])
+    if 'environmentIdentityEvidence' in value:
+        validate_environment_identity_evidence(value['environmentIdentityEvidence'],value['timestampFailures'])
     return value
 
 

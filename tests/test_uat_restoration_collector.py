@@ -102,7 +102,7 @@ class Collector(unittest.TestCase):
                 self.assertEqual(evidence.call_count,int(diagnostic))
                 self.assertEqual(hasattr(captured.exception,'environment_evidence'),diagnostic)
                 c.production_inventory.assert_not_called();p.verify_runtime.assert_not_called()
-                p.verify_environment.assert_not_called();p.inspect_accounts.assert_not_called()
+                self.assertEqual(p.verify_environment.call_count,int(diagnostic));p.inspect_accounts.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()
