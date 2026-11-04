@@ -5,8 +5,8 @@
   },
   "controlRunner": {
     "schema": "bubblewash-control-runner/v1",
-    "files": 691,
-    "contentSha256": "186f3e05f543dc337922101914f01b790a7ab89ffd13d2554803065ad39dddc3"
+    "files": 692,
+    "contentSha256": "59c7b4b4889ef8e90e62ec4b144bf23f1ec8b9863d2d2e66126dc09bc35ef3c1"
   },
   "ownerFiles": {
     "src/lib/admin-mfa.ts": "15c78716d909d298542ce777d98b8d2dae5f67a8327aa427117f9656b6dcf4f5",
