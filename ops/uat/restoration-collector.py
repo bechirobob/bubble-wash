@@ -69,6 +69,8 @@ def normalize(raw):
         elif key in LISTS:
             tokens=value.split()
             if key=='InaccessiblePaths': tokens=[x.removeprefix('-') for x in tokens]
+            # systemctl show can omit the protocol/port separator for this rule.
+            if key=='SocketBindAllow': tokens=['ipv4:tcp:3108' if x=='ipv4:tcp3108' else x for x in tokens]
             require(len(set(tokens))==len(tokens));result[key]=sorted(tokens)
         elif key=='MainPID':require(re.fullmatch('[1-9][0-9]*',value));result[key]=int(value)
         elif key=='BindPaths':
