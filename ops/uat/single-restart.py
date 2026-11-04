@@ -173,10 +173,11 @@ def diagnostic_sites(bundle):
             for name,label in SOURCE_LABELS.items()}
 
 
-def inspection_receipt(stage,sites=()):
+def inspection_receipt(stage,sites=(),properties=()):
     require(stage in DIAGNOSTIC_STAGES)
     return {'ok':False,'readOnly':True,'automaticRetry':False,'state':'precheck-inspected',
-            'precheckPassed':stage=='complete','failureStage':stage,'failureSites':list(sites)}
+            'precheckPassed':stage=='complete','failureStage':stage,'failureSites':list(sites),
+            'failureProperties':list(properties)}
 
 
 def validate_inspection(value,bundle):
@@ -185,7 +186,12 @@ def validate_inspection(value,bundle):
     require(type(value['failureSites']) is list and len(value['failureSites'])<=8)
     allowed={token for rows in diagnostic_sites(bundle).values() for token in rows.values()}
     require(all(type(token) is str and token in allowed for token in value['failureSites']))
-    require(value==inspection_receipt(value['failureStage'],value['failureSites']))
+    properties=value['failureProperties']
+    require(type(properties) is list and len(properties)<=len(p.SERVICE_PROPERTY_NAMES))
+    require(all(type(name) is str and name in p.SERVICE_PROPERTY_NAMES for name in properties))
+    require(properties==sorted(set(properties)))
+    if properties:require(value['failureStage'] in ('isolation','identity-confirmation'))
+    require(value==inspection_receipt(value['failureStage'],value['failureSites'],properties))
     require(all(type(value[k]) is bool for k in ('ok','readOnly','automaticRetry','precheckPassed')))
     if value['precheckPassed']:require(not value['failureSites'])
     return value
@@ -209,7 +215,8 @@ def inspect_prechecks(bundle,request):
             token=allowed.get(trace.tb_frame.f_code.co_filename,{}).get(trace.tb_lineno)
             if token:sites.append(token)
             trace=trace.tb_next
-        return inspection_receipt(stage,sites[-8:])
+        properties=error.names if type(error) is p.ServicePropertyGuardFailure else ()
+        return validate_inspection(inspection_receipt(stage,sites[-8:],properties),bundle)
 
 
 def host_main(bundle):
