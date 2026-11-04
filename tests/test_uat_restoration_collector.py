@@ -27,6 +27,39 @@ class Serialization(unittest.TestCase):
     def test_supported_systemd_serialization(self):
         values=raw_properties();normal=c.normalize('\n'.join(k+'='+v for k,v in values.items()))
         f=fixture.Service();f.setUp();self.assertTrue(p.verify_service(normal,f.proc,1001,1001)['effectiveSandboxVerified'])
+    def test_socket_bind_allow_exact_systemd_alias(self):
+        for value in ('ipv4:tcp:3108','ipv4:tcp3108'):
+            with self.subTest(value=value):
+                values=dict(raw_properties(),SocketBindAllow=value)
+                normal=c.normalize('\n'.join(k+'='+v for k,v in values.items()))
+                self.assertEqual(normal['SocketBindAllow'],['ipv4:tcp:3108'])
+                f=fixture.Service();f.setUp()
+                self.assertTrue(p.verify_service(normal,f.proc,1001,1001)['effectiveSandboxVerified'])
+    def test_socket_bind_allow_other_rules_still_fail_verification(self):
+        for value in ('ipv6:tcp3108','ipv6:tcp:3108','ipv4:udp3108','ipv4:udp:3108',
+                      'ipv4:tcp3109','ipv4:tcp:3109','ipv4:tcp3108-3109','ipv4:tcp:3108-3109',
+                      'any','3108','tcp3108','ipv4:tcp03108','ipv4:tcp:03108','',
+                      'ipv4:tcp3108 any','ipv4:tcp3108 ipv4:tcp3109',
+                      'ipv4:tcp:3108 ipv6:tcp:3108'):
+            with self.subTest(value=value):
+                values=dict(raw_properties(),SocketBindAllow=value)
+                normal=c.normalize('\n'.join(k+'='+v for k,v in values.items()))
+                f=fixture.Service();f.setUp()
+                with self.assertRaises(p.ServicePropertyGuardFailure):p.verify_service(normal,f.proc,1001,1001)
+    def test_socket_bind_allow_duplicates_fail_after_alias_normalization(self):
+        for value in ('ipv4:tcp3108 ipv4:tcp3108','ipv4:tcp:3108 ipv4:tcp:3108',
+                      'ipv4:tcp3108 ipv4:tcp:3108','ipv4:tcp:3108 ipv4:tcp3108'):
+            with self.subTest(value=value):
+                values=dict(raw_properties(),SocketBindAllow=value)
+                with self.assertRaises(ValueError):c.normalize('\n'.join(k+'='+v for k,v in values.items()))
+    def test_socket_bind_alias_does_not_apply_to_deny_or_preflight(self):
+        values=dict(raw_properties(),SocketBindDeny='ipv4:tcp3108')
+        normal=c.normalize('\n'.join(k+'='+v for k,v in values.items()))
+        self.assertEqual(normal['SocketBindDeny'],['ipv4:tcp3108'])
+        f=fixture.Service();f.setUp()
+        with self.assertRaises(p.ServicePropertyGuardFailure):p.verify_service(normal,f.proc,1001,1001)
+        f.props['SocketBindAllow']=['ipv4:tcp3108']
+        with self.assertRaises(p.ServicePropertyGuardFailure):p.verify_service(f.props,f.proc,1001,1001)
     def test_unknown_missing_ambiguous_or_reloaded_properties_fail(self):
         baseline=raw_properties()
         for key,value in [('EnvironmentFiles',p.ENVIRONMENT+' (ignore_errors=yes)'),('BindPaths','/other:/other'),('SystemCallFilter','connect'),('SystemCallErrorNumber','0'),('NeedDaemonReload','yes'),('PrivateTmp','disconnected')]:
