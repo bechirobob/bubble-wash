@@ -1,0 +1,97 @@
+# Prepared locally; publication and dispatch require separate action-time approval.
+name: Issue or recover approved second UAT cohort
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact independently reviewed main control commit
+        type: string
+        required: true
+      operation_id:
+        description: Pinned one-operation UUID; retain the same UUID for recovery
+        type: string
+        required: true
+      handoff_public_key:
+        description: Approved second-cohort recipient PUBLIC key as base64 SPKI DER; never a private key
+        type: string
+        required: true
+      mode:
+        type: choice
+        options: [issue, retrieve]
+        required: true
+      admin_route_approved:
+        description: Coordinator authorized the existing administrative route for this action
+        type: boolean
+        default: false
+      operation_approved:
+        description: Restart and isolation work passed; coordinator authorized this exact issue or recovery action
+        type: boolean
+        default: false
+      private_handover_approved:
+        description: Encrypted release storage in the existing private repository is specifically authorized
+        type: boolean
+        default: false
+      recipient_key_verified:
+        description: Matching approved one-operation private-key custody was verified privately outside this workflow
+        type: boolean
+        default: false
+      private_retrieval_verified:
+        description: Authorized private asset download access was verified without denied logs or secret endpoints
+        type: boolean
+        default: false
+      user_delivery_verified:
+        description: A verified user-only final delivery route is ready
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  handover:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      UAT_OPERATION_ID: ${{ inputs.operation_id }}
+      HANDOFF_PUBLIC_KEY: ${{ inputs.handoff_public_key }}
+      MODE: ${{ inputs.mode }}
+      ADMIN_ROUTE_APPROVED: ${{ inputs.admin_route_approved }}
+      OPERATION_APPROVED: ${{ inputs.operation_approved }}
+      PRIVATE_HANDOVER_APPROVED: ${{ inputs.private_handover_approved }}
+      RECIPIENT_KEY_VERIFIED: ${{ inputs.recipient_key_verified }}
+      PRIVATE_RETRIEVAL_VERIFIED: ${{ inputs.private_retrieval_verified }}
+      USER_DELIVERY_VERIFIED: ${{ inputs.user_delivery_verified }}
+      BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+      BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Reject unapproved or unverified actions before any connectivity
+        run: |
+          python3 -I -B ops/uat/second-cohort-runner.py --check
+          python3 -B ops/integration-release/select_source.py --release . --runner-only
+      - name: Require successful exact-source CI
+        env:
+          TARGET_SHA: ${{ inputs.source_sha }}
+        run: python3 -B ops/check-release-ci.py
+      - name: Verify synthetic runner and confidential transport guards
+        run: |
+          python3 -B -m unittest discover -s tests -p 'test_uat_second_cohort_*.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_uat_private_handoff.py' -v
+      - name: Connect using only the existing approved administrative identity
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: One approved attempt with ciphertext-only private storage
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+        run: python3 -I -B ops/uat/second-cohort-runner.py

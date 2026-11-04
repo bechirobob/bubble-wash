@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const directory = mkdtempSync(join(tmpdir(), 'bw-uat-second-operator-'));
+Object.assign(process.env, { NODE_ENV: 'production', BUBBLEWASH_UAT_ENABLED: 'true', BUBBLEWASH_UAT_ISOLATION_CONFIRMED: 'true', BUBBLEWASH_PUBLIC_URL: 'https://uat.example.invalid', BUBBLEWASH_DATABASE_PATH: join(directory,'synthetic.sqlite'), BUBBLEWASH_UAT_DATA_ROOT: directory, NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED:'false', NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED:'false', BUBBLEWASH_RESEARCH_EMAIL_ENABLED:'false', BUBBLEWASH_DISABLE_DEMO_LOGIN:'true', BUBBLEWASH_SESSION_SECRET:'synthetic-session-secret-only-for-test-123' });
+const {generateKeyPairSync,randomUUID}=await import('node:crypto');
+const {getDatabase}=await import('../src/lib/data-store.ts');
+const {upsertVendorAvailability,upsertDriverAvailability}=await import('../src/lib/availability-store.ts');
+const {issueSealedHandover}=await import('../scripts/uat-sealed-handover.mjs');
+const {operate}=await import('../scripts/uat-second-cohort-operator.mjs');
+const {default:Database}=await import('better-sqlite3');
+const pair=generateKeyPairSync('rsa',{modulusLength:3072});
+const publicKey=pair.publicKey.export({type:'spki',format:'pem'});
+let db=getDatabase();
+try {
+  upsertVendorAvailability({vendorId:'uat-vendor-one',vendorName:'Synthetic',serviceZones:['Osu'],serviceTypes:['Wash + fold'],capacityRemaining:10,availabilityStatus:'available',updatedBy:'synthetic-test'});
+  upsertDriverAvailability({driverId:'uat-driver-one',driverName:'Synthetic',serviceZones:['Osu'],capacityRemaining:10,availabilityStatus:'active',updatedBy:'synthetic-test'});
+  issueSealedHandover({approved:true,ready:true,action:'issue',publicKey});
+  const before=JSON.stringify(db.prepare('SELECT * FROM staff_uat_accounts ORDER BY username').all());
+  db.close();
+  const info=statSync(process.env.BUBBLEWASH_DATABASE_PATH,{bigint:true});
+  const expectedDatabaseIdentity={device:String(info.dev),inode:String(info.ino)};
+  await assert.rejects(operate({action:'inspect',expectedDatabaseIdentity:{device:'0',inode:'0'}}));
+  await assert.rejects(operate({action:'inspect',expectedDatabaseIdentity,extra:'no'}));
+  const snapshot=await operate({action:'inspect',expectedDatabaseIdentity});
+  assert.match(snapshot.stateSha256,/^[a-f0-9]{64}$/);
+  const request={action:'issue',expectedDatabaseIdentity,operationId:randomUUID(),approved:true,ready:true,publicKey,
+    expectedStateSha256:snapshot.stateSha256,notBefore:snapshot.inspectedAt,approvedUntil:snapshot.inspectedAt+300000};
+  const envelope=await operate(request);
+  await assert.rejects(operate(request));
+  const recovery={...request,action:'retrieve'};delete recovery.notBefore;delete recovery.approvedUntil;
+  assert.deepEqual(await operate(recovery),envelope);
+  delete recovery.expectedStateSha256;assert.deepEqual(await operate(recovery),envelope);
+  db=new Database(process.env.BUBBLEWASH_DATABASE_PATH,{readonly:true,fileMustExist:true});
+  assert.equal(JSON.stringify(db.prepare("SELECT * FROM staff_uat_accounts WHERE username LIKE 'review-%' ORDER BY username").all()),before);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM staff_uat_accounts').get().n,8);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM uat_second_cohort_handover').get().n,1);
+  db.close();
+  process.env.BUBBLEWASH_UAT_ENABLED='false';await assert.rejects(operate(recovery));
+  console.log('Second cohort operator: existing-file identity, read-only inspection/recovery, exact request, atomic issuance and original preservation passed.');
+} finally {if(db.open)db.close();rmSync(directory,{recursive:true,force:true});}
