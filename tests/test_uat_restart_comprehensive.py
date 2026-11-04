@@ -63,6 +63,20 @@ class Comprehensive(unittest.TestCase):
         self.assertEqual(value['loadedSchema'],'missing')
         self.assertEqual([call.args[0] for call in dep.call_args_list],list(s.DEPENDENCIES))
         self.assertNotIn('canary',json.dumps(self.calls))
+    def test_wants_fixed_membership_without_host_names(self):
+        for required,wanted,match,outside,unknown in (
+            ('sysinit.target system.slice','sysinit.target system.slice tmp.mount','match','absent','absent'),
+            ('sysinit.target system.slice -.mount','-.mount','match','absent','absent'),
+            ('sysinit.target system.slice','-.mount','mismatch','present','absent'),
+            ('sysinit.target system.slice canary.service','canary.service','mismatch','present','present'),
+            ('sysinit.target system.slice','sysinit.target sysinit.target','mismatch','absent','absent')):
+            self.rows.update(Requires=required,Wants=wanted)
+            value,_,_=self.run_probe()
+            self.assertEqual(value['properties']['Wants'],match)
+            self.assertEqual(value['wantsMembership']['unknown'],unknown)
+            self.assertEqual(value['wantsMembership']['duplicate'],'present' if len(wanted.split())!=len(set(wanted.split())) else 'absent')
+            self.assertEqual(value['wantsMembership']['outsideValidatedRequired'],outside)
+            for name in s.DEPENDENCIES:self.assertEqual(value['wantsMembership'][name],'present' if name in wanted.split() else 'absent')
     def test_unknown_duplicate_and_malformed_rows_never_export_names_or_values(self):
         for suffix,outcome in (('\n/private/canary=secret','unexpected'),('\nType=canary','duplicate'),('\ncanary','malformed')):
             self.overrides['loaded']='\n'.join(k+'='+v for k,v in self.rows.items())+suffix
