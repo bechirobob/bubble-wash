@@ -33,10 +33,10 @@ export function secondCohortState(database) {
     ? db.prepare(`SELECT * FROM ${name} ORDER BY ${order}`).all() : null))).digest('hex');
 }
 
-function validate(request) {
+function validate(request, recovery = false) {
   if (!request || request.approved !== true || request.ready !== true ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(request.operationId) ||
-      !/^[0-9a-f]{64}$/.test(request.expectedStateSha256) || typeof request.publicKey !== 'string') reject();
+      (!(recovery && request.expectedStateSha256 === undefined) && !/^[0-9a-f]{64}$/.test(request.expectedStateSha256)) || typeof request.publicKey !== 'string') reject();
 }
 
 export function issueSecondCohort(request, database) {
@@ -83,12 +83,12 @@ export function issueSecondCohort(request, database) {
 export function retrieveSecondCohort(request, database) {
   assertUatEnvironment();
   const input = { ...request };
-  validate(input);
+  validate(input, true);
   const recipient = fingerprint(input.publicKey);
   const db = checkedDatabase(database);
   if (!exists(db, table)) reject();
   const row = db.prepare(`SELECT * FROM ${table} WHERE id=1`).get();
-  if (!row || row.operation_id !== input.operationId || row.state_sha256 !== input.expectedStateSha256 || row.recipient_sha256 !== recipient) reject();
+  if (!row || row.operation_id !== input.operationId || (input.expectedStateSha256 !== undefined && row.state_sha256 !== input.expectedStateSha256) || row.recipient_sha256 !== recipient) reject();
   const envelope = JSON.parse(row.envelope);
   if (envelope.schema !== 'bubblewash-uat-handover/v1' || envelope.recipientSha256 !== recipient) reject();
   // Recovery never invokes issuance and does not require the state/window still

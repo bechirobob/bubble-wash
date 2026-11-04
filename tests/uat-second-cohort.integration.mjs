@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const directory = mkdtempSync(join(tmpdir(), 'bw-uat-second-'));
@@ -88,6 +88,17 @@ try {
   const issuedBefore=Date.now();
   const envelope=issueSecondCohort(request);
   const value=decrypt(envelope,request.operationId,request.expectedStateSha256);
+  const {unsealSecondCohort,savePrivateHandover}=await import('../scripts/uat-second-cohort-unseal.mjs');
+  const expected={operationId:request.operationId,expectedStateSha256:request.expectedStateSha256,recipientSha256:envelope.recipientSha256};
+  const privatePem=pair.privateKey.export({type:'pkcs8',format:'pem'});
+  const raw=Buffer.from(JSON.stringify(envelope));
+  assert.deepEqual(unsealSecondCohort(raw,privatePem,expected),value);
+  assert.deepEqual(unsealSecondCohort(raw,privatePem,{operationId:expected.operationId,recipientSha256:expected.recipientSha256}),value);
+  for(const change of [{operationId:randomUUID()},{expectedStateSha256:'0'.repeat(64)},{recipientSha256:'0'.repeat(64)}])assert.throws(()=>unsealSecondCohort(raw,privatePem,{...expected,...change}));
+  const privateFile=join(directory,'private-handover.json');
+  savePrivateHandover(raw,privatePem,expected,privateFile);
+  assert.deepEqual(JSON.parse(readFileSync(privateFile)),value);assert.equal(statSync(privateFile).mode&0o777,0o600);
+  assert.throws(()=>savePrivateHandover(raw,privatePem,expected,privateFile),'never overwrite private delivery');
   assert.ok(Date.parse(value.issued_at)>=issuedBefore && Date.parse(value.issued_at)<=Date.now());
   assert.equal(Date.parse(value.expires_at)-Date.parse(value.issued_at),604800000);
   assert.deepEqual(Object.keys(value.accounts),['admin','vendor','driver','support']);
@@ -109,6 +120,8 @@ try {
   assert.throws(()=>retrieveSecondCohort({...request,publicKey:other.publicKey.export({type:'spki',format:'pem'})}));
   for(const override of [{},{operationId:randomUUID()},{expectedStateSha256:secondCohortState()}])assert.throws(()=>issueSecondCohort({...request,...override}));
   assert.deepEqual(retrieveSecondCohort({...request,approvedUntil:0}),envelope);
+  const lostState={...request};delete lostState.expectedStateSha256;
+  assert.deepEqual(retrieveSecondCohort(lostState),envelope,'operation and recipient suffice for exact ciphertext recovery');
   for(const override of [{operationId:randomUUID()},{expectedStateSha256:'0'.repeat(64)},{publicKey:weak.publicKey.export({type:'spki',format:'pem'})}])assert.throws(()=>retrieveSecondCohort({...request,...override}));
   assert.throws(()=>decrypt(envelope,randomUUID(),request.expectedStateSha256),'encrypted binding rejects a substituted operation');
   const damaged=Buffer.from(envelope.ciphertext,'base64');damaged[0]^=1;
