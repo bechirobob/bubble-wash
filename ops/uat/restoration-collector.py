@@ -228,6 +228,20 @@ def environment_identity_evidence(identity,props,pid,ticks):
 
 
 def collect(pins,eligible=True,private=False,timestamp_diagnostic=False):
+    return _collect(pins,eligible,private,timestamp_diagnostic)
+
+
+def collect_restart_isolation(pins,*,before_restart):
+    """Host isolation only; never an account-admission or chronology receipt.
+
+    Only pre-restart may tolerate the known environment timestamp obstruction.
+    Post-restart uses the original timestamp guard without exception.
+    """
+    require(type(before_restart) is bool)
+    return _collect(pins,False,True,False,'before' if before_restart else 'after')['private']
+
+
+def _collect(pins,eligible,private,timestamp_diagnostic,restart_phase=None):
     require(os.geteuid()==0)
     require(set(pins)=={'runtimeRevision','runtimeFiles','unitSha256'})
     account=pwd.getpwnam('bubblewash-uat')
@@ -254,7 +268,10 @@ def collect(pins,eligible=True,private=False,timestamp_diagnostic=False):
             error.environment_evidence=environment_timestamp_evidence(config_objects[p.ENVIRONMENT],started_ns,pid,ticks,hz)
         if timestamp_diagnostic and all(category=='environment' for category,_ in error.failures):
             error.environment_identity_evidence=environment_identity_evidence(config_objects[p.ENVIRONMENT],props,pid,ticks)
-        raise
+        if restart_phase=='before':
+            require(error.failures and all(category=='environment' for category,_ in error.failures))
+        else:
+            raise
     parts=[p.verify_runtime(p.APP,p.UNIT,pins['runtimeRevision'],pins['runtimeFiles'],pins['unitSha256']),
         p.verify_environment(read(p.ENVIRONMENT,16384),read('/proc/'+str(pid)+'/environ')),
         p.verify_service(props,process,account.pw_uid,account.pw_gid)]
@@ -264,7 +281,7 @@ def collect(pins,eligible=True,private=False,timestamp_diagnostic=False):
             other=os.stat(item);require((other.st_dev,other.st_ino)!=db_identity[:2])
     parts.append(p.verify_storage_isolation([p.APP,p.DATA,p.DATABASE,p.ENVIRONMENT],production,
         read('/proc/self/mountinfo',1048576).decode(),read('/proc/'+str(pid)+'/mountinfo',1048576).decode()))
-    parts.append(p.inspect_accounts(p.DATABASE,require_eligible=eligible))
+    if restart_phase is None:parts.append(p.inspect_accounts(p.DATABASE,require_eligible=eligible))
     require(show()==props and start(pid)==ticks and production_inventory()==production)
     require(trusted(p.DATABASE,account.pw_uid,mode=0o600)[:2]==db_identity[:2])
     require(all(trusted(path,mode=0o600 if path==p.ENVIRONMENT else None)==identity for path,identity in config_objects.items()))

@@ -1,0 +1,67 @@
+name: Restart isolated UAT once
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed main control commit
+        type: string
+        required: true
+      operation_id:
+        description: Unique coordinator-recorded UUID for this single approved attempt
+        type: string
+        required: true
+      admin_route_approved:
+        type: boolean
+        default: false
+      restart_approved:
+        description: Owner approved one restart of bubblewash-uat.service
+        type: boolean
+        default: false
+      quiet_window_coordinated:
+        description: Coordinator reserved quiet UAT window with host and account operators
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  restart:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      UAT_OPERATION_ID: ${{ inputs.operation_id }}
+      UAT_RESTORE_MODE: inspect
+      ADMIN_ROUTE_APPROVED: ${{ inputs.admin_route_approved }}
+      UAT_RESTART_APPROVED: ${{ inputs.restart_approved }}
+      UAT_QUIET_WINDOW_COORDINATED: ${{ inputs.quiet_window_coordinated }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Require exact reviewed main and first attempt
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == bechirobob/bubble-wash && "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          [[ "$ADMIN_ROUTE_APPROVED" == true && "$UAT_RESTART_APPROVED" == true && "$UAT_QUIET_WINDOW_COORDINATED" == true ]]
+          python3 -B ops/integration-release/select_source.py --release . --runner-only
+      - name: Require successful exact-source CI
+        env:
+          TARGET_SHA: ${{ inputs.source_sha }}
+        run: python3 -B ops/check-release-ci.py
+      - name: Verify restart boundaries
+        run: python3 -B -m unittest discover -s tests -p 'test_uat_*restart*.py' -v
+      - name: Connect through approved administrative route
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Verify isolation and request one UAT restart
+        run: python3 -I -B ops/uat/single-restart.py
