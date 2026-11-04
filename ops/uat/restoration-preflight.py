@@ -43,6 +43,29 @@ def require(condition):
         raise ValueError('UAT restoration preflight refused')
 
 
+SERVICE_PROPERTY_NAMES=frozenset({
+    'ActiveState','AmbientCapabilities','BindPaths','CapabilityBoundingSet',
+    'DropInPaths','EnvironmentFiles','FragmentPath','Group',
+    'IPAddressAllow','IPAddressDeny','InaccessiblePaths','LockPersonality',
+    'NoNewPrivileges','PrivateDevices','PrivateTmp','ProtectClock',
+    'ProtectControlGroups','ProtectHome','ProtectKernelLogs','ProtectKernelModules',
+    'ProtectKernelTunables','ProtectSystem','ReadWritePaths','RestrictAddressFamilies',
+    'RestrictNamespaces','RestrictRealtime','RestrictSUIDSGID','SocketBindAllow',
+    'SocketBindDeny','SubState','SystemCallErrorNumber','SystemCallFilterDeny',
+    'UMask','User','WorkingDirectory',
+})
+
+
+class ServicePropertyGuardFailure(ValueError):
+    """Fixed property names only; never observed values or configuration paths."""
+    def __init__(self,names):
+        require(type(names) is list and 1<=len(names)<=len(SERVICE_PROPERTY_NAMES))
+        require(all(type(name) is str and name in SERVICE_PROPERTY_NAMES for name in names))
+        require(names==sorted(set(names)))
+        super().__init__('UAT service property guard refused')
+        self.names=tuple(names)
+
+
 class TimestampGuardFailure(ValueError):
     """Carries fixed categories only, never paths, times, identities or values."""
     def __init__(self,failures):
@@ -134,7 +157,11 @@ def verify_service(properties, process, uid, gid):
         'SystemCallFilterDeny':['connect'], 'SystemCallErrorNumber':'EPERM',
         'SocketBindDeny':['any'], 'SocketBindAllow':['ipv4:tcp:3108'],
         'EnvironmentFiles':[ENVIRONMENT], 'UMask':'0077'}
-    require(all(properties.get(k) == v for k, v in expected.items()))
+    try:
+        require(all(properties.get(k) == v for k, v in expected.items()))
+    except ValueError:
+        raise ServicePropertyGuardFailure(sorted(k for k,v in expected.items()
+            if properties.get(k)!=v)) from None
     pid = properties.get('MainPID')
     require(type(pid) is int and pid > 1 and process.get('pid') == pid)
     require(process.get('uids') == [uid]*4 and process.get('gids') == [gid]*4 and process.get('groups') == [gid])
