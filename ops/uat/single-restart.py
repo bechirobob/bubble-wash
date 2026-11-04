@@ -26,23 +26,67 @@ p=c.p
 require=t.require
 ARGV=['/usr/bin/node','node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port','3108']
 EMPTY=('ExecStartPre','ExecStartPost','ExecReload','ExecStop','ExecStopPost','ConsistsOf','BoundBy',
-       'PropagatesStopTo','OnFailure','OnSuccess','Requisite','Wants','BindsTo','PartOf','RequiredBy','Triggers','TriggeredBy')
+       'PropagatesStopTo','OnFailure','OnSuccess','Requisite','BindsTo','PartOf','RequiredBy','Triggers','TriggeredBy','Upholds','UpheldBy')
 FIXED={'Type':'simple','Restart':'on-failure','RestartUSec':'10s','TimeoutStopUSec':'30s',
        'KillMode':'control-group','KillSignal':'15','SendSIGKILL':'yes','SuccessAction':'none','FailureAction':'none'}
 
 
+DEPENDENCIES={'sysinit.target':('sysinit_2etarget',None),
+              'system.slice':('system_2eslice',None),
+              '-.mount':('_2d_2emount','/'), 'tmp.mount':('tmp_2emount','/tmp')}
+
+
+def dependency_state(name):
+    """Fixed implicit dependencies only: active, or a non-loadable weak tmp.mount."""
+    require(name in DEPENDENCIES)
+    object_name,where=DEPENDENCIES[name]
+    keys=('Id','LoadState','ActiveState','SubState','NeedDaemonReload','DropInPaths','FragmentPath','SourcePath')
+    if where:keys+=('Where',)
+    raw=c.command(['/usr/bin/systemctl','show',*[a for key in keys for a in ('-p',key)],'--',name])
+    value={}
+    for line in raw.splitlines():
+        key,sep,item=line.partition('=');require(sep and key in keys and key not in value);value[key]=item
+    require(set(value)==set(keys) and value['Id']==name and value['NeedDaemonReload']=='no' and value['DropInPaths']=='')
+    job=c.command(['/usr/bin/busctl','--system','get-property','org.freedesktop.systemd1',
+        '/org/freedesktop/systemd1/unit/'+object_name,'org.freedesktop.systemd1.Unit','Job'],limit=128)
+    require(shlex.split(job)==['(uo)','0','/'])
+    if name=='tmp.mount' and value['LoadState'] in ('masked','not-found'):
+        require(value['ActiveState']=='inactive' and value['SubState']=='dead')
+        require(value['SourcePath']=='' and value['FragmentPath']==('/dev/null' if value['LoadState']=='masked' else ''))
+        require(value['Where'] in ('','/tmp'))
+    else:
+        require(value['LoadState']=='loaded' and value['ActiveState']=='active')
+        require(value['SubState']==('mounted' if where else 'active'))
+        if value['FragmentPath']:value['fragmentIdentity']=c.trusted(value['FragmentPath'])
+        if value['SourcePath'] and not (where and value['SourcePath'] in ('/proc/self/mountinfo','/proc/1/mountinfo')):
+            value['sourceIdentity']=c.trusted(value['SourcePath'])
+        if where:
+            require(value['Where']==where)
+            mountinfo=c.read('/proc/1/mountinfo',1048576).decode()
+            matches=[]
+            for line in mountinfo.splitlines():
+                left,sep,right=line.partition(' - ');fields=left.split()
+                require(sep and len(fields)>=6 and right.split())
+                if fields[4]==where:
+                    require(right.split()[0]!='autofs');matches.append(line)
+            require(len(matches)==1)
+            value['mountIdentity']=matches[0]
+    return value
+
+
 def loaded_unit():
-    names=(*EMPTY,*FIXED,'Requires','Conflicts')
+    names=(*EMPTY,*FIXED,'Requires','Wants','Conflicts')
     raw=c.command(['/usr/bin/systemctl','show',p.SERVICE,*[arg for key in names for arg in ('-p',key)]])
     rows={}
     for line in raw.splitlines():
         key,sep,value=line.partition('=');require(sep and key in names and key not in rows);rows[key]=value
     require(set(rows)==set(names) and all(rows[key]=='' for key in EMPTY))
     require(all(rows[key]==value for key,value in FIXED.items()))
-    require(set(rows['Requires'].split())=={'sysinit.target','system.slice'})
-    require(rows['Conflicts']=='shutdown.target')
-    for dependency in ('sysinit.target','system.slice'):
-        require(c.command(['/usr/bin/systemctl','is-active',dependency]).strip()=='active')
+    required=rows['Requires'].split();wanted=rows['Wants'].split()
+    require(len(required)==len(set(required)) and len(wanted)==len(set(wanted)))
+    require({'sysinit.target','system.slice'}<=set(required)<= {'sysinit.target','system.slice','-.mount'})
+    require(set(wanted)<= {'tmp.mount'} and rows['Conflicts']=='shutdown.target')
+    rows['dependencyEvidence']={name:dependency_state(name) for name in sorted(set(required+wanted))}
     # Typed D-Bus text avoids systemctl's human-facing ExecStart formatting.
     raw=c.command(['/usr/bin/busctl','--system','get-property','org.freedesktop.systemd1',
         '/org/freedesktop/systemd1/unit/bubblewash_2duat_2eservice','org.freedesktop.systemd1.Service','ExecStart'])

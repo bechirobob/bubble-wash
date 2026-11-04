@@ -42,3 +42,15 @@ request/transport outcome cannot be inferred. `postcheck-failed` means the reque
 returned successfully but verification did not complete. `verified` means a new
 process passed unchanged host timestamp/isolation checks and non-database health.
 No receipt permits credential issuance or claims the original accounts restored.
+
+Implicit dependencies are bounded separately from propagation relationships.
+`Requires` permits only the existing active sysinit target/system slice and an
+optional existing active root mount. `Wants` permits only systemd's implicit
+`tmp.mount`: it must already be mounted at exactly `/tmp`, or be verified
+masked/not-found, inactive/dead and without a job, so it cannot activate.
+An inactive loadable mount is refused. Mount identities are checked against exact
+PID1 mount entries; dependency identity, configuration metadata and state are
+compared across both prechecks and postchecks. No arbitrary mount/dependency is
+accepted, and Upholds/UpheldBy relationships are refused. Missing/unsupported
+properties fail closed. The reserved window must exclude unit-file/configuration
+changes; this control does not lock out privileged operators.
