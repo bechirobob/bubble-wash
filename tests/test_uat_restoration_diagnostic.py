@@ -66,13 +66,18 @@ r.main(bundle)
         after="""def fail(*args,**kwargs):
  objects={p.APP+'/'+name:(1,2,50,50) for name in ('SOURCE_REVISION',*p.PIN_FILES)}
  objects[p.UNIT]=(1,2,50,50);objects[p.ENVIRONMENT]=(1,2,50,101)
- c.verify_config_timestamps(objects,100)"""
+ try:c.verify_config_timestamps(objects,100)
+ except p.TimestampGuardFailure as error:
+  error.environment_evidence={'state':'observed','comparisons':[{'comparison':'ctime-after-process-start','coarseGap':'within-nominal-quantization-budget','recordedStartRelation':'before-recorded-service-start'}]}
+  raise"""
         self.assertEqual(self.child().count(before),1)
         command=[sys.executable,'-c',self.child().replace(before,after),json.dumps(self.bundle)]
         raw=t.exchange(command,json.dumps({'mode':'inspect','operationId':OP}).encode(),inspection_bundle=self.bundle)
         result=t.validate_receipt(raw,'inspect',inspection_bundle=self.bundle)
         self.assertFalse(result['ok'])
         self.assertEqual(result['timestampFailures'],[{'category':'environment','comparison':'ctime-after-process-start'}])
+        self.assertEqual(result['environmentTimestampEvidence'],{'state':'observed','comparisons':[
+            {'comparison':'ctime-after-process-start','coarseGap':'within-nominal-quantization-budget','recordedStartRelation':'before-recorded-service-start'}]})
         for mode in ('restore','receipt'):
             request={'mode':mode,'operationId':OP}
             if mode=='restore':request['accounts']=[]

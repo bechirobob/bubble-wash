@@ -68,6 +68,10 @@ def inspection_failure(error,bundle,stage):
             details=[{'category':category,'comparison':comparison} for category,comparison in error.failures]
             validate_timestamp_failures(details)
             result['timestampFailures']=details
+            evidence=getattr(error,'environment_evidence',None)
+            if evidence is not None:
+                validate_environment_timestamp_evidence(evidence,details)
+                result['environmentTimestampEvidence']=evidence
     except BaseException:
         pass
     return result
@@ -86,9 +90,25 @@ def validate_timestamp_failures(value):
     require(pairs==sorted(set(pairs)))
 
 
+def validate_environment_timestamp_evidence(value,failures):
+    expected=[row['comparison'] for row in failures if row['category']=='environment']
+    require(expected and type(value) is dict)
+    if value=={'state':'unavailable'}:return
+    require(set(value)=={'state','comparisons'} and value['state']=='observed')
+    rows=value['comparisons'];require(type(rows) is list and len(rows)==len(expected))
+    for row,comparison in zip(rows,expected):
+        require(type(row) is dict and set(row)=={'comparison','coarseGap','recordedStartRelation'})
+        require(row['comparison']==comparison)
+        require(type(row['coarseGap']) is str and row['coarseGap'] in
+            {'within-nominal-quantization-budget','beyond-nominal-quantization-budget'})
+        require(type(row['recordedStartRelation']) is str and row['recordedStartRelation'] in
+            {'before-recorded-service-start','within-recorded-microsecond','after-recorded-service-start'})
+
+
 def validate_inspection_failure(value,bundle,host_only=False):
     fields={'ok','readOnly','automaticRetry','state','failureStage','failureSites'}
-    require(type(value) is dict and set(value) in (fields,fields|{'timestampFailures'}))
+    require(type(value) is dict and set(value) in (fields,fields|{'timestampFailures'},
+        fields|{'timestampFailures','environmentTimestampEvidence'}))
     require(value['ok'] is False and value['readOnly'] is True and value['automaticRetry'] is False)
     require(value['state']=='inspection-failed' and type(value['failureStage']) is str)
     require(value['failureStage'] in ({'host-inspection'} if host_only else INSPECTION_STAGES))
@@ -98,6 +118,8 @@ def validate_inspection_failure(value,bundle,host_only=False):
     if 'timestampFailures' in value:
         require(value['failureStage']=='host-inspection')
         validate_timestamp_failures(value['timestampFailures'])
+    if 'environmentTimestampEvidence' in value:
+        validate_environment_timestamp_evidence(value['environmentTimestampEvidence'],value['timestampFailures'])
     return value
 
 

@@ -104,4 +104,66 @@ class Timestamps(unittest.TestCase):
                 t.validate_inspection_failure(dict(result,timestampFailures=details),self.bundle())
 
 
+class EnvironmentEvidence(unittest.TestCase):
+    objects=Timestamps.objects
+    bundle=Timestamps.bundle
+    receipt=Timestamps.receipt
+    def evidence(self,mtime,ctime,recorded=101_800_000,**patches):
+        identity=(1,2,mtime,ctime)
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            mocks={name:stack.enter_context(mock.patch.object(c,name,**options)) for name,options in {
+                'command':{'return_value':f'u 123\nu 123\nt {recorded}\n'},
+                'trusted':{'return_value':identity},'start':{'return_value':100},**patches}.items()}
+            value=c.environment_timestamp_evidence(identity,101_000_000_000,123,100,100)
+            self.assertLessEqual(mocks['command'].call_count,2)
+            return value
+
+    def test_precision_consistent_and_beyond_window_comparisons(self):
+        value=self.evidence(101_700_000_000,101_800_000_500)
+        self.assertEqual(value,{'state':'observed','comparisons':[
+            {'comparison':'ctime-after-process-start','coarseGap':'within-nominal-quantization-budget','recordedStartRelation':'within-recorded-microsecond'},
+            {'comparison':'mtime-after-process-start','coarseGap':'within-nominal-quantization-budget','recordedStartRelation':'before-recorded-service-start'}]})
+        value=self.evidence(102_010_000_000,102_009_999_999)
+        self.assertEqual([row['coarseGap'] for row in value['comparisons']],
+            ['within-nominal-quantization-budget','beyond-nominal-quantization-budget'])
+        self.assertTrue(all(row['recordedStartRelation']=='after-recorded-service-start' for row in value['comparisons']))
+
+    def test_recorded_microsecond_boundary(self):
+        for offset,expected in ((-1,'before-recorded-service-start'),(0,'within-recorded-microsecond'),
+                (999,'within-recorded-microsecond'),(1000,'after-recorded-service-start')):
+            value=self.evidence(101_800_000_000+offset,1)
+            self.assertEqual(value['comparisons'][0]['recordedStartRelation'],expected)
+
+    def test_missing_tool_malformed_clock_or_changed_process_and_file_are_unavailable(self):
+        for patches in (
+            {'command':{'side_effect':FileNotFoundError('private-canary')}},
+            {'command':{'return_value':'u 124\nu 123\nt 101800000\n'}},
+            {'command':{'return_value':'u 123\nu 124\nt 101800000\n'}},
+            {'command':{'return_value':'u 123\nu 123\nt 0\n'}},
+            {'command':{'return_value':'u 123\nu 123\nt 18446744073709551616\n'}},
+            {'command':{'return_value':'u 123\nu 123\nt 101800000\nprivate-canary'}},
+            {'command':{'side_effect':['u 123\nu 123\nt 101800000\n','u 123\nu 123\nt 101800001\n']}},
+            {'start':{'side_effect':[100,101]}},
+            {'trusted':{'return_value':(1,3,101_700_000_000,1)}}):
+            with self.subTest(patches=patches):
+                self.assertEqual(self.evidence(101_700_000_000,1,**patches),{'state':'unavailable'})
+
+    def test_receipt_closed_schema_and_original_failure_preserved(self):
+        objects=self.objects();objects[p.ENVIRONMENT]=(1,2,101_700_000_000,1)
+        with self.assertRaises(p.TimestampGuardFailure) as captured:c.verify_config_timestamps(objects,101_000_000_000)
+        captured.exception.environment_evidence=self.evidence(101_700_000_000,1)
+        result=self.receipt(captured.exception)
+        self.assertFalse(result['ok']);self.assertFalse(result['automaticRetry'])
+        t.validate_inspection_failure(result,self.bundle(),host_only=True)
+        for forbidden in ('private-canary','101700000000','101800000','123',p.ENVIRONMENT):
+            self.assertNotIn(forbidden,json.dumps(result))
+        for invalid in ({'state':'secret'},{'state':'unavailable','raw':'private-canary'},
+                {'state':'observed','comparisons':[]},
+                {'state':'observed','comparisons':[{'comparison':'mtime-after-process-start','coarseGap':'private-canary','recordedStartRelation':'before-recorded-service-start'}]}):
+            with self.assertRaises(ValueError):t.validate_inspection_failure(dict(result,environmentTimestampEvidence=invalid),self.bundle())
+        for mode in ('restore','receipt'):
+            with self.assertRaises(ValueError):t.validate_receipt(json.dumps(result).encode(),mode,inspection_bundle=self.bundle())
+
+
 if __name__=='__main__':unittest.main()

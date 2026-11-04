@@ -54,7 +54,7 @@ def execute(bundle,request):
     pins=json.loads(bundle['ops/uat/restoration-runtime-pins.json'])
     if mode=='inspect':
         try:
-            return c.collect(pins,eligible=True,private=True)['public']
+            return c.collect(pins,eligible=True,private=True,timestamp_diagnostic=True)['public']
         except BaseException as error:
             return t.inspection_failure(error,bundle,'host-inspection')
     first=c.collect(pins,eligible=mode!='receipt',private=True)

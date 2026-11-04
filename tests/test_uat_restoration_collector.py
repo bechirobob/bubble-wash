@@ -90,5 +90,19 @@ class Collector(unittest.TestCase):
             p.verify_environment.assert_not_called()
             p.inspect_accounts.assert_not_called()
 
+    def test_environment_diagnostic_is_inspect_only_and_never_admits_failure(self):
+        import contextlib
+        for diagnostic in (False,True):
+            with self.subTest(diagnostic=diagnostic),contextlib.ExitStack() as stack:
+                self.setup_context(stack)
+                self.trusted.side_effect=lambda path,*args,**kwargs:(1,2,1000000000000,1) if str(path)==p.ENVIRONMENT else (1,2,1,1)
+                evidence=stack.enter_context(mock.patch.object(c,'environment_timestamp_evidence',return_value={'state':'unavailable'}))
+                with self.assertRaises(c.p.TimestampGuardFailure) as captured:
+                    c.collect({'runtimeRevision':'a'*40,'runtimeFiles':{},'unitSha256':'b'*64},timestamp_diagnostic=diagnostic)
+                self.assertEqual(evidence.call_count,int(diagnostic))
+                self.assertEqual(hasattr(captured.exception,'environment_evidence'),diagnostic)
+                c.production_inventory.assert_not_called();p.verify_runtime.assert_not_called()
+                p.verify_environment.assert_not_called();p.inspect_accounts.assert_not_called()
+
 
 if __name__=='__main__':unittest.main()
