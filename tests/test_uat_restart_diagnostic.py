@@ -17,6 +17,9 @@ s=importlib.util.module_from_spec(spec);spec.loader.exec_module(s)
 
 class Diagnostic(unittest.TestCase):
     def setUp(self):
+        # Existing strict-precheck tests isolate the separate read-only enrichment.
+        patch=mock.patch.object(s.d,'collect',return_value=s.d.blank((*s.EMPTY,*s.FIXED,'Requires','Wants','Conflicts'),s.DEPENDENCIES))
+        patch.start();self.addCleanup(patch.stop)
         self.bundle={name:(ROOT/name).read_text() for name in s.REMOTE_FILES}
         self.request={'mode':'inspect','operationId':'e01f1a5d-3297-4c22-b246-7bdb509289ca'}
         self.evidence={'pid':123,'private':'configuration-canary'}
@@ -89,7 +92,7 @@ class Diagnostic(unittest.TestCase):
             self.assertNotIn('scripts/uat-restore-original.mjs',sent)
             self.assertNotIn('ops/uat/restoration-receiver.py',sent)
             return json.dumps(s.inspection_receipt('complete')).encode()
-        with mock.patch.object(s,'context',return_value=self.request),mock.patch.object(s.t,'source_bundle',side_effect=source),mock.patch.object(s.subprocess,'check_output',return_value=(ROOT/s.SELF).read_bytes()),mock.patch.object(s.t,'exchange',side_effect=exchange):
+        with mock.patch.object(s,'context',return_value=self.request),mock.patch.object(s.t,'source_bundle',side_effect=source),mock.patch.object(s.subprocess,'check_output',side_effect=lambda args,**kwargs:(ROOT/args[-1].split(':',1)[1]).read_bytes()),mock.patch.object(s.t,'exchange',side_effect=exchange):
             self.assertTrue(s.perform(ROOT,{'SOURCE_SHA':'a'*40})['precheckPassed'])
 
 

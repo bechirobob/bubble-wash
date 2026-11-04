@@ -24,6 +24,7 @@ def load(name,file):
 t=load('uat_restore_transport','restoration-transport.py')
 c=load('uat_restore_collector','restoration-collector.py')
 p=c.p
+d=load('uat_restart_diagnostic','restart-diagnostic.py')
 require=t.require
 ARGV=['/usr/bin/node','node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port','3108']
 EMPTY=('ExecStartPre','ExecStartPost','ExecReload','ExecStop','ExecStopPost','ConsistsOf','BoundBy',
@@ -164,7 +165,7 @@ def execute(bundle,request):
 DIAGNOSTIC_STAGES={'isolation','loaded-unit','quiescence','identity-confirmation','complete','unavailable'}
 SOURCE_LABELS={SELF:'R','ops/uat/restoration-collector.py':'C',
                'ops/uat/restoration-preflight.py':'P','ops/uat/restoration-transport.py':'T'}
-REMOTE_FILES=(*SOURCE_LABELS,'ops/uat/restoration-runtime-pins.json')
+REMOTE_FILES=(*SOURCE_LABELS,d.SELF,'ops/uat/restoration-runtime-pins.json')
 
 
 def diagnostic_sites(bundle):
@@ -177,7 +178,7 @@ def inspection_receipt(stage,sites=(),properties=()):
     require(stage in DIAGNOSTIC_STAGES)
     return {'ok':False,'readOnly':True,'automaticRetry':False,'state':'precheck-inspected',
             'precheckPassed':stage=='complete','failureStage':stage,'failureSites':list(sites),
-            'failureProperties':list(properties)}
+            'failureProperties':list(properties),'diagnostics':d.blank((*EMPTY,*FIXED,'Requires','Wants','Conflicts'),DEPENDENCIES)}
 
 
 def validate_inspection(value,bundle):
@@ -191,13 +192,15 @@ def validate_inspection(value,bundle):
     require(all(type(name) is str and name in p.SERVICE_PROPERTY_NAMES for name in properties))
     require(properties==sorted(set(properties)))
     if properties:require(value['failureStage'] in ('isolation','identity-confirmation'))
-    require(value==inspection_receipt(value['failureStage'],value['failureSites'],properties))
+    d.validate(value['diagnostics'],(*EMPTY,*FIXED,'Requires','Wants','Conflicts'),DEPENDENCIES,require,allowed)
+    expected=inspection_receipt(value['failureStage'],value['failureSites'],properties)
+    expected['diagnostics']=value['diagnostics'];require(value==expected)
     require(all(type(value[k]) is bool for k in ('ok','readOnly','automaticRetry','precheckPassed')))
     if value['precheckPassed']:require(not value['failureSites'])
     return value
 
 
-def inspect_prechecks(bundle,request):
+def strict_inspection(bundle,request):
     require(os.geteuid()==0 and type(request) is dict and set(request)=={'mode','operationId'})
     require(request['mode']=='inspect' and t.UUID.fullmatch(request['operationId']))
     pins=json.loads(bundle['ops/uat/restoration-runtime-pins.json']);stage='isolation'
@@ -217,6 +220,17 @@ def inspect_prechecks(bundle,request):
             trace=trace.tb_next
         properties=error.names if type(error) is p.ServicePropertyGuardFailure else ()
         return validate_inspection(inspection_receipt(stage,sites[-8:],properties),bundle)
+
+
+def inspect_prechecks(bundle,request):
+    result=strict_inspection(bundle,request)
+    pins=json.loads(bundle['ops/uat/restoration-runtime-pins.json'])
+    try:
+        details=d.collect(c,p,EMPTY,FIXED,DEPENDENCIES,ARGV,loaded_unit,quiet_sample,dependency_state,pins,diagnostic_sites(bundle))
+        result['diagnostics']=d.validate(details,(*EMPTY,*FIXED,'Requires','Wants','Conflicts'),DEPENDENCIES,require,{token for rows in diagnostic_sites(bundle).values() for token in rows.values()})
+    except Exception:
+        result['diagnostics']['collection']='unavailable'
+    return validate_inspection(result,bundle)
 
 
 def host_main(bundle):
@@ -243,15 +257,16 @@ def context(env):
 
 def perform(root,env):
     request=context(env);bundle=t.source_bundle(root,env['SOURCE_SHA'])
-    raw=(Path(root)/SELF).read_bytes();require(0<len(raw)<=16384 and not (Path(root)/SELF).is_symlink())
-    require(subprocess.check_output(['git','show',env['SOURCE_SHA']+':'+SELF],cwd=root)==raw)
-    bundle[SELF]=raw.decode()
+    for name in (SELF,d.SELF):
+        raw=(Path(root)/name).read_bytes();require(0<len(raw)<=16384 and not (Path(root)/name).is_symlink())
+        require(subprocess.check_output(['git','show',env['SOURCE_SHA']+':'+name],cwd=root)==raw)
+        bundle[name]=raw.decode()
     # Full source verification above; unused account code is never transmitted.
     bundle={name:bundle[name] for name in REMOTE_FILES}
     bootstrap="""import json,sys,types,signal
 signal.alarm(150)
 bundle=json.loads(BUNDLE)
-for name,path in [('uat_restore_transport','ops/uat/restoration-transport.py'),('uat_restore_preflight','ops/uat/restoration-preflight.py'),('uat_restore_collector','ops/uat/restoration-collector.py'),('uat_single_restart','ops/uat/single-restart.py')]:
+for name,path in [('uat_restore_transport','ops/uat/restoration-transport.py'),('uat_restore_preflight','ops/uat/restoration-preflight.py'),('uat_restore_collector','ops/uat/restoration-collector.py'),('uat_restart_diagnostic','ops/uat/restart-diagnostic.py'),('uat_single_restart','ops/uat/single-restart.py')]:
  module=types.ModuleType(name);module.__file__='/reviewed/'+path;sys.modules[name]=module
  exec(compile(bundle[path],path,'exec'),module.__dict__)
 sys.modules['uat_single_restart'].host_main(bundle)
