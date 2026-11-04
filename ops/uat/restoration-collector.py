@@ -206,6 +206,27 @@ def environment_timestamp_evidence(identity,started_ns,pid,ticks,hz):
         return {'state':'unavailable'}
 
 
+def environment_identity_evidence(identity,props,pid,ticks):
+    """Private current-value check only; never overrides a timestamp failure."""
+    def stable():
+        require(show()==props and start(pid)==ticks)
+        require(trusted(p.ENVIRONMENT,mode=0o600)==identity)
+    try:
+        stable()
+        configured=read(p.ENVIRONMENT,16384)
+        running=read('/proc/'+str(pid)+'/environ',65536)
+        stable()
+        try:
+            p.verify_environment(configured,running)
+            state='matched'
+        except ValueError:
+            state='mismatched'
+        stable()
+        return {'state':state}
+    except Exception:
+        return {'state':'unavailable'}
+
+
 def collect(pins,eligible=True,private=False,timestamp_diagnostic=False):
     require(os.geteuid()==0)
     require(set(pins)=={'runtimeRevision','runtimeFiles','unitSha256'})
@@ -231,6 +252,8 @@ def collect(pins,eligible=True,private=False,timestamp_diagnostic=False):
     except p.TimestampGuardFailure as error:
         if timestamp_diagnostic and any(category=='environment' for category,_ in error.failures):
             error.environment_evidence=environment_timestamp_evidence(config_objects[p.ENVIRONMENT],started_ns,pid,ticks,hz)
+        if timestamp_diagnostic and all(category=='environment' for category,_ in error.failures):
+            error.environment_identity_evidence=environment_identity_evidence(config_objects[p.ENVIRONMENT],props,pid,ticks)
         raise
     parts=[p.verify_runtime(p.APP,p.UNIT,pins['runtimeRevision'],pins['runtimeFiles'],pins['unitSha256']),
         p.verify_environment(read(p.ENVIRONMENT,16384),read('/proc/'+str(pid)+'/environ')),
