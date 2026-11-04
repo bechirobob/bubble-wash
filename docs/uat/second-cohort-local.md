@@ -79,7 +79,8 @@ test and reported no remaining blocking findings for this local-only module.
 - `ops/uat/second-cohort-transport.py`: exact-source administrative caller using the
   existing bounded Tailscale SSH exchange to `root@hermes`. Reviewed operator source
   is loaded in memory; no app deployment, account reset, or runtime file overwrite.
-  Its CLI remains disabled and no new workflow is installed.
+  Its direct CLI remains disabled. The separate protected workflow below is
+  prepared locally but is not published or dispatched.
 - `perform_private_handoff` verifies the existing private storage repository before
   issuance and uses the unchanged first-handover publisher for ciphertext only.
   It retains the existing recipient pin and never uses first-issuance host guards.
@@ -89,8 +90,9 @@ test and reported no remaining blocking findings for this local-only module.
 
 ## Concrete invocation after the hold is lifted
 
-This is the callable sequence for a separately authorized, exact-source protected
-runner step, not an enabled workflow or permission to execute now:
+The callable sequence below is implemented by the locally prepared
+`.github/workflows/uat-second-cohort.yml` and `ops/uat/second-cohort-runner.py`.
+Neither is published/dispatched; this is not permission to execute now.
 
 1. Verify successful CI for the exact reviewed main control commit using existing
    `ops/check-release-ci.py`. Keep `backup-storage`, first-attempt/exact-main guards,
@@ -159,8 +161,8 @@ establish a user-facing delivery channel.
   runtime needs independently reviewed pins; never derive approval from whatever
   files happen to be on the host. Timestamp failures remain fatal.
 - Publication of this local control code and exact-main CI, plus a reviewed
-  protected runner step invoking the sequence above, are not authorized/completed.
-  The existing first-issuance workflow cannot be dispatched for this operation.
+  protected runner workflow are not authorized/completed. The missing step is now
+  implemented locally; the existing first-issuance workflow remains unchanged.
 - Existing private recipient fingerprint is
   `a479abb3611e11c65eb89e1a437577873e26798161e284572e0bf29ccdc8b4c9`.
   Matching private-key availability has NOT been verified. If unavailable, stop;
@@ -171,3 +173,37 @@ establish a user-facing delivery channel.
 The 16:00 UTC+1 / 15:00 UTC deadline remains at risk until those gates are resolved.
 No host contact, real credentials/keys, workflow dispatch, deployment, publication,
 security-setting changes, or denied secret/log endpoint access occurred here.
+
+
+## Prepared workflow confirmation scope
+
+The new workflow has ten inputs: exact `source_sha`, retained `operation_id`,
+existing pinned `handoff_public_key` (public DER only), `mode` (`issue` or
+`retrieve`), and six false-default attestations. Every attestation must be true:
+
+- `admin_route_approved`: existing administrative route approved for this action.
+- `operation_approved`: restart/isolation work passed and coordinator authorized
+  this precise issue or recovery, UUID, four roles, reviewed code and target.
+- `private_handover_approved`: existing private encrypted release storage approved.
+- `recipient_key_verified`: matching existing private key is demonstrably available
+  to its authorized holder outside the runner. Public-key presence is insufficient.
+- `private_retrieval_verified`: authorized private asset download capability has
+  been established without denied log or secret-metadata endpoints.
+- `user_delivery_verified`: final user-only delivery route is established.
+
+The local `--check` rejects missing gates, mismatched source, reruns, debug modes,
+wrong recipient and unsupported context before Tailscale is invoked. It reports
+only local gate acceptance, not independently verified key custody or handover
+readiness. The real step recollects live isolation and rejects any failed check.
+The state digest stays in runner memory. Neither private keys nor passwords are
+workflow inputs, environment secrets, artifacts or output variables. Only the
+existing validated nonsecret encrypted-storage receipt is printed.
+
+Publication scope is this branch's reviewed patch plus refreshed runner-only
+source commitment, followed by exact-main CI. No new persistent access, token,
+secret, storage repository, recipient pin or transport route is introduced. The
+existing protected environment and three existing secret bindings remain required:
+Tailscale OAuth ID/secret and `BACKUP_STORE_TOKEN`; their availability is unverified.
+If any binding/access/key is missing, stop and seek specific authorization; do not
+create or broaden it. A replacement key/pin, new storage destination, permission
+expansion or alternative transport would be a new action requiring confirmation.
