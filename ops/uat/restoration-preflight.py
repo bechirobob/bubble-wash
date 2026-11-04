@@ -186,9 +186,11 @@ def mount_backing(path, mountinfo):
         fields, tail = left.split(), right.split()
         require(len(fields) >= 6 and len(tail) >= 3 and re.fullmatch(r'\d+:\d+', fields[2]))
         root, mountpoint = PurePosixPath(unescape(fields[3])), PurePosixPath(unescape(fields[4]))
-        require(root.is_absolute() and mountpoint.is_absolute())
+        require(mountpoint.is_absolute())
         try: relative = PurePosixPath(path).relative_to(mountpoint)
         except ValueError: continue
+        # Unrelated mounts may expose opaque roots (for example nsfs net:[inode]).
+        require(root.is_absolute())
         # Overlay/union backing cannot be established from mountinfo alone.
         require(tail[0] not in ('overlay', 'aufs'))
         candidates.append((len(mountpoint.parts), fields[2], str(root / relative)))

@@ -101,7 +101,45 @@ class Mounts(unittest.TestCase):
         bad=self.service+'3 1 8:1 /home/ubuntu/live/data /var/lib/bubblewash-uat/hidden rw - ext4 /dev/sda1 rw\n'
         with self.assertRaises(ValueError):m.verify_storage_isolation(self.uat,self.production,self.host,bad)
     def test_unknown_union_backing_refused(self):
-        with self.assertRaises(ValueError):m.mount_backing(m.DATA,'1 0 0:1 / / rw - overlay overlay rw\n')
+        for filesystem in ('overlay','aufs'):
+            with self.subTest(filesystem=filesystem),self.assertRaises(ValueError):
+                m.mount_backing(m.DATA,f'1 0 0:1 / / rw - {filesystem} {filesystem} rw\n')
+    def test_unrelated_opaque_roots_pass(self):
+        for filesystem in ('nsfs','other'):
+            opaque=f'3 1 0:4 net:[4026531840] /run/netns/example rw - {filesystem} {filesystem} rw\n'
+            with self.subTest(filesystem=filesystem):
+                self.assertTrue(all(m.verify_storage_isolation(self.uat,self.production,
+                    self.host+opaque,self.service+opaque).values()))
+    def test_relevant_opaque_roots_refused(self):
+        for point in (m.DATA,m.DATA+'/cache',m.APP+'/.next/cache',m.APP+'/hidden',m.DATA+'/hidden'):
+            opaque=f'3 1 0:4 net:[4026531840] {point} rw - nsfs nsfs rw\n'
+            with self.subTest(point=point),self.assertRaises(ValueError):
+                m.verify_storage_isolation(self.uat,self.production,self.host,self.service+opaque)
+    def test_sibling_prefix_is_not_a_relevant_mount(self):
+        for point in (m.DATA+'-sibling',m.APP+'-sibling'):
+            opaque=f'3 1 0:4 net:[4026531840] {point} rw - nsfs nsfs rw\n'
+            with self.subTest(point=point):
+                self.assertTrue(all(m.verify_storage_isolation(self.uat,self.production,
+                    self.host+opaque,self.service+opaque).values()))
+    def test_malformed_unrelated_records_refused_globally(self):
+        for record in (
+            '3 1 0:4 / run/netns/example rw - nsfs nsfs rw',
+            '3 1 invalid / /run/netns/example rw - nsfs nsfs rw',
+            '3 1 0:4 / /run/netns/example - nsfs nsfs rw',
+            '3 1 0:4 / /run/netns/example rw - nsfs nsfs',
+            '3 1 0:4 / /run/netns/example rw nsfs nsfs rw',
+        ):
+            with self.subTest(record=record),self.assertRaises(ValueError):
+                m.mount_backing(m.DATA,self.host+record+'\n')
+    def test_deepest_mount_selected_and_ambiguity_refused(self):
+        child=f'2 1 8:2 /backing {m.DATA} rw - ext4 /dev/sdb1 rw\n'
+        self.assertEqual(m.mount_backing(m.DATA+'/cache',self.host+child),('8:2','/backing/cache'))
+        with self.assertRaises(ValueError):m.mount_backing(m.DATA,self.host+child+child)
+    def test_escaped_root_preserved(self):
+        root=r'/backing\040space\011tab\012newline\134slash'
+        child=f'2 1 8:2 {root} {m.DATA} rw - ext4 /dev/sdb1 rw\n'
+        self.assertEqual(m.mount_backing(m.DATA+'/cache',self.host+child),
+            ('8:2','/backing space\ttab\nnewline\\slash/cache'))
 
 
 class Accounts(unittest.TestCase):
