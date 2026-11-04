@@ -172,7 +172,41 @@ def verify_config_timestamps(config_objects,started_ns):
     if failures:raise p.TimestampGuardFailure(sorted(failures))
 
 
-def collect(pins,eligible=True,private=False):
+def environment_timestamp_evidence(identity,started_ns,pid,ticks,hz):
+    """Read only fixed service-start properties; return comparisons, never values."""
+    args=['/usr/bin/busctl','--system','get-property','org.freedesktop.systemd1',
+        '/org/freedesktop/systemd1/unit/bubblewash_2duat_2eservice',
+        'org.freedesktop.systemd1.Service','MainPID','ExecMainPID','ExecMainStartTimestamp']
+    def sample():
+        raw=command(args,limit=128)
+        match=re.fullmatch(r'u ([1-9][0-9]{0,9})\nu ([1-9][0-9]{0,9})\nt ([1-9][0-9]{0,19})\n',raw)
+        require(match is not None and int(match[1])==int(match[2])==pid and int(match[3])<2**64)
+        return int(match[3])*1000
+    try:
+        require(type(hz) is int and 0<hz<=10**9)
+        require(start(pid)==ticks and trusted(p.ENVIRONMENT,mode=0o600)==identity)
+        recorded=sample()
+        require(start(pid)==ticks and trusted(p.ENVIRONMENT,mode=0o600)==identity)
+        require(sample()==recorded and start(pid)==ticks)
+        require(trusted(p.ENVIRONMENT,mode=0o600)==identity)
+        window=10**9+(10**9+hz-1)//hz
+        rows=[]
+        for index,comparison in ((3,'ctime-after-process-start'),(2,'mtime-after-process-start')):
+            value=identity[index]
+            if value<=started_ns:continue
+            relation=('before-recorded-service-start' if value<recorded else
+                'after-recorded-service-start' if value>=recorded+1000 else 'within-recorded-microsecond')
+            rows.append({'comparison':comparison,
+                'coarseGap':'within-nominal-quantization-budget' if value-started_ns<window else 'beyond-nominal-quantization-budget',
+                'recordedStartRelation':relation})
+        require(rows)
+        return {'state':'observed','comparisons':rows}
+    except Exception:
+        # Missing tooling, malformed evidence or a race must never mask the guard.
+        return {'state':'unavailable'}
+
+
+def collect(pins,eligible=True,private=False,timestamp_diagnostic=False):
     require(os.geteuid()==0)
     require(set(pins)=={'runtimeRevision','runtimeFiles','unitSha256'})
     account=pwd.getpwnam('bubblewash-uat')
@@ -189,9 +223,15 @@ def collect(pins,eligible=True,private=False):
         sibling=Path(p.DATABASE+suffix)
         if os.path.lexists(sibling):trusted(sibling,account.pw_uid,mode=0o600)
     boot=re.search(r'^btime ([0-9]+)$',read('/proc/stat').decode(),re.M);require(boot)
-    started_ns=(int(boot[1])*1000000000)+(ticks*1000000000//os.sysconf('SC_CLK_TCK'))
+    hz=os.sysconf('SC_CLK_TCK')
+    started_ns=(int(boot[1])*1000000000)+(ticks*1000000000//hz)
     # Reject file replacement/reload after the process started. Not an outbound probe.
-    verify_config_timestamps(config_objects,started_ns)
+    try:
+        verify_config_timestamps(config_objects,started_ns)
+    except p.TimestampGuardFailure as error:
+        if timestamp_diagnostic and any(category=='environment' for category,_ in error.failures):
+            error.environment_evidence=environment_timestamp_evidence(config_objects[p.ENVIRONMENT],started_ns,pid,ticks,hz)
+        raise
     parts=[p.verify_runtime(p.APP,p.UNIT,pins['runtimeRevision'],pins['runtimeFiles'],pins['unitSha256']),
         p.verify_environment(read(p.ENVIRONMENT,16384),read('/proc/'+str(pid)+'/environ')),
         p.verify_service(props,process,account.pw_uid,account.pw_gid)]

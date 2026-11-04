@@ -284,3 +284,37 @@ but does not identify the live host's cause. A ctime comparison alone also does
 not establish a content change. The diagnostic is an observed comparison, not
 permission to restart, alter files, or weaken the guard. It stops before runtime
 content, environment content, production inventory or account-state validation.
+
+On an environment timestamp failure, inspect mode alone may attach
+`environmentTimestampEvidence`. The collector reads only three fixed systemd
+Service properties using bounded `/usr/bin/busctl --system get-property`:
+`MainPID`, `ExecMainPID`, and `ExecMainStartTimestamp`. Both PIDs must match the
+observed process. Two identical property samples, repeated process-start ticks,
+and unchanged protected environment-file metadata are required. Missing tooling,
+malformed output or changing evidence yields only `state: unavailable`; the
+original guard failure is still raised. Restore/receipt mode does not perform
+these additional reads.
+
+Observed evidence contains one or two fixed comparison records, matching only
+the failed environment mtime/ctime comparisons. Each reports whether the positive
+gap is within or beyond the nominal quantization budget of one second plus the
+ceiling of one clock tick, and whether it is before, within the recorded
+microsecond, or after systemd's recorded service-start event. No raw timestamp,
+delta, PID, path, contents or command output is returned. These labels never
+change admission, trigger retry, or authorize a restart.
+
+Within-budget and before/within the recorded event is consistent with truncation,
+not proof of a precision-only false positive. Beyond-budget and after the event
+cannot be explained by that quantization alone assuming a stable wall clock.
+Other combinations are inconclusive. systemd records a supervisor event after
+spawning/adopting the process, not exact kernel birth; its timestamp is explicitly
+not a replacement guard. Wall-clock adjustments can also alter Linux's boot-time
+reference, so these observations cannot establish historical chronology or prove
+file-content modification. Full runtime, environment and cohort validation
+remains blocked in every diagnostic outcome.
+
+Evidence semantics: [systemd service API](https://www.freedesktop.org/software/systemd/man/latest/org.freedesktop.systemd1.html),
+[busctl property reads](https://www.freedesktop.org/software/systemd/man/latest/busctl.html),
+[systemd recorded process start](https://github.com/systemd/systemd/blob/v255/src/core/execute.c#L1793),
+[Linux proc boot-time serialization](https://github.com/torvalds/linux/blob/v6.8/fs/proc/stat.c#L175),
+and [Linux boot wall-time behavior](https://github.com/torvalds/linux/blob/v6.8/kernel/time/timekeeping.c#L2236).
