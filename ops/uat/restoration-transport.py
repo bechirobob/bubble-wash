@@ -14,6 +14,7 @@ import resource
 import selectors
 import shlex
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -61,19 +62,42 @@ def inspection_failure(error,bundle,stage):
             if token:found.append(token)
             trace=trace.tb_next
         result['failureSites']=found[-8:]
+        preflight=sys.modules.get('uat_restore_preflight')
+        failure_type=getattr(preflight,'TimestampGuardFailure',None)
+        if stage=='host-inspection' and isinstance(failure_type,type) and isinstance(error,failure_type):
+            details=[{'category':category,'comparison':comparison} for category,comparison in error.failures]
+            validate_timestamp_failures(details)
+            result['timestampFailures']=details
     except BaseException:
         pass
     return result
 
 
+def validate_timestamp_failures(value):
+    categories={'runtime-revision','runtime-source','service-unit','environment'}
+    comparisons={'mtime-after-process-start','ctime-after-process-start'}
+    require(type(value) is list and 1<=len(value)<=8)
+    pairs=[]
+    for row in value:
+        require(type(row) is dict and set(row)=={'category','comparison'})
+        require(type(row['category']) is str and row['category'] in categories)
+        require(type(row['comparison']) is str and row['comparison'] in comparisons)
+        pairs.append((row['category'],row['comparison']))
+    require(pairs==sorted(set(pairs)))
+
+
 def validate_inspection_failure(value,bundle,host_only=False):
-    require(type(value) is dict and set(value)=={'ok','readOnly','automaticRetry','state','failureStage','failureSites'})
+    fields={'ok','readOnly','automaticRetry','state','failureStage','failureSites'}
+    require(type(value) is dict and set(value) in (fields,fields|{'timestampFailures'}))
     require(value['ok'] is False and value['readOnly'] is True and value['automaticRetry'] is False)
     require(value['state']=='inspection-failed' and type(value['failureStage']) is str)
     require(value['failureStage'] in ({'host-inspection'} if host_only else INSPECTION_STAGES))
     allowed={token for sites in diagnostic_sites(bundle).values() for token in sites.values()}
     require(type(value['failureSites']) is list and len(value['failureSites'])<=8)
     require(all(type(token) is str and token in allowed for token in value['failureSites']))
+    if 'timestampFailures' in value:
+        require(value['failureStage']=='host-inspection')
+        validate_timestamp_failures(value['timestampFailures'])
     return value
 
 

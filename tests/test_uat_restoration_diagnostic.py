@@ -61,6 +61,25 @@ r.main(bundle)
         self.assertTrue(any(x.startswith('F1-L') for x in result['failureSites']))
         self.assertTrue(all(x.startswith(('F1-L','F3-L')) for x in result['failureSites']))
 
+    def test_timestamp_details_survive_only_inspection_transport(self):
+        before="def fail(*args,**kwargs):return p.parse_environment(b'PRIVATE-DIAGNOSTIC-CANARY')"
+        after="""def fail(*args,**kwargs):
+ objects={p.APP+'/'+name:(1,2,50,50) for name in ('SOURCE_REVISION',*p.PIN_FILES)}
+ objects[p.UNIT]=(1,2,50,50);objects[p.ENVIRONMENT]=(1,2,50,101)
+ c.verify_config_timestamps(objects,100)"""
+        self.assertEqual(self.child().count(before),1)
+        command=[sys.executable,'-c',self.child().replace(before,after),json.dumps(self.bundle)]
+        raw=t.exchange(command,json.dumps({'mode':'inspect','operationId':OP}).encode(),inspection_bundle=self.bundle)
+        result=t.validate_receipt(raw,'inspect',inspection_bundle=self.bundle)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['timestampFailures'],[{'category':'environment','comparison':'ctime-after-process-start'}])
+        for mode in ('restore','receipt'):
+            request={'mode':mode,'operationId':OP}
+            if mode=='restore':request['accounts']=[]
+            child=subprocess.run(command,input=json.dumps(request).encode(),capture_output=True)
+            self.assertEqual(child.returncode,1)
+            self.assertEqual(json.loads(child.stdout),{'ok':False,'automaticRetry':False,'state':'uncertain-stop'})
+
     def test_restore_receiver_failure_remains_generic_and_nonzero(self):
         request={'mode':'restore','operationId':OP,'accounts':[]}
         child=subprocess.run([sys.executable,'-c',self.child(),json.dumps(self.bundle)],

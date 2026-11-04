@@ -43,6 +43,20 @@ def require(condition):
         raise ValueError('UAT restoration preflight refused')
 
 
+class TimestampGuardFailure(ValueError):
+    """Carries fixed categories only, never paths, times, identities or values."""
+    def __init__(self,failures):
+        categories={'runtime-revision','runtime-source','service-unit','environment'}
+        comparisons={'mtime-after-process-start','ctime-after-process-start'}
+        require(type(failures) is list and 1<=len(failures)<=8)
+        require(all(type(row) is tuple and len(row)==2 and
+            type(row[0]) is str and row[0] in categories and
+            type(row[1]) is str and row[1] in comparisons for row in failures))
+        require(failures==sorted(set(failures)))
+        super().__init__('UAT restoration timestamp guard refused')
+        self.failures=tuple(failures)
+
+
 def parse_environment(raw):
     require(isinstance(raw, bytes) and 0 < len(raw) <= 16384)
     values = {}
