@@ -1,3 +1,4 @@
+import { canEnterOperationalWorkspaces } from "@/lib/staff-permissions";
 import { redirect } from "next/navigation";
 import { DriverWorkspace } from "@/components/StaffWorkspaces";
 import { getCurrentStaffUser } from "@/lib/auth";
@@ -23,7 +24,7 @@ function firstSearchParam(value: string | string[] | undefined) {
 export default async function DriversPage({ searchParams }: DriversPageProps) {
   const user = await getCurrentStaffUser();
   if (!user) redirect("/login?next=/drivers");
-  if (user.role !== "driver" && !(user.role === "admin" && user.allStaffAccess)) redirect(user.role === "admin" ? "/admin" : "/login?next=/drivers");
+  if (user.role !== "driver" && !canEnterOperationalWorkspaces(user)) redirect(user.role === "admin" ? "/admin" : "/login?next=/drivers");
 
   const params = await searchParams;
   const requestedView = firstSearchParam(params.view) as DriverView;
@@ -33,6 +34,8 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
       userName={user.name}
       role={user.role}
       allStaffAccess={user.allStaffAccess}
+      operationalWorkspaceAccess={user.operationalWorkspaceAccess}
+      surveyResultsAccess={user.surveyResultsAccess}
       initialView={driverViews.has(requestedView) ? requestedView : "route"}
       selectedOrderId={firstSearchParam(params.order)}
       selectedCaseId={firstSearchParam(params.case)}

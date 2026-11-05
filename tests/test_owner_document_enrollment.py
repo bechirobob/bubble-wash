@@ -421,17 +421,21 @@ class WorkflowOrderingTests(unittest.TestCase):
         self.assertLess(workflow.index('"$(git rev-parse HEAD)" == "$GITHUB_SHA"'),workflow.index(control))
         self.assertLess(workflow.index(runtime),workflow.index('BUBBLEWASH_ADDITIONAL_OWNER_INPUT:'))
     def test_actual_strict_selector_accepts_clean_control_and_rejects_nested_runtime(self):
-        contracts=load('workflow_order_contracts','ops/integration-release/contracts.py')
-        contract=json.loads((ROOT/'ops/integration-release/source-contracts.json').read_bytes())
-        profile=contract['profiles']['integration-candidate-v1']
         # Reproduce a pristine control checkout, excluding the intentional later
         # runtime checkout and installed/generated root dependencies. Never relax
         # the real selector or its approved root-directory policy.
         with tempfile.TemporaryDirectory(prefix='owner-control-order-') as temporary:
             clean=Path(temporary)/'control';clean.mkdir()
-            for name in contracts.SOURCE_DIRS:
-                if (ROOT/name).exists():shutil.copytree(ROOT/name,clean/name)
-            for name in profile['rootFiles']:shutil.copyfile(ROOT/name,clean/name)
+            # Use the indexed control source, not historical app rootFiles.
+            # The workflow has already checked out an untracked runtime-artifact.
+            names = subprocess.check_output(['git', '-C', str(ROOT), 'ls-files', '-z'], text=True).split('\0')
+            names = [name for name in names if name]
+            self.assertTrue(names)
+            for name in names:
+                self.assertFalse((ROOT/name).is_symlink())
+                target = clean/name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT/name, target)
             command=['python3','-B',str(clean/'ops/integration-release/select_source.py'),'--release',str(clean),'--runner-only']
             accepted=subprocess.run(command,capture_output=True,text=True,timeout=30)
             self.assertEqual(accepted.returncode,0,accepted.stderr);self.assertEqual(accepted.stdout.strip(),'reviewed-runner-only-v1')

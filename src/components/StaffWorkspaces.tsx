@@ -24,6 +24,8 @@ type PortalShellProps = {
   headingAction?: ReactNode;
   heading?: { eyebrow: string; title: string; subtitle: string };
   allStaffAccess?: boolean;
+  operationalWorkspaceAccess?: boolean;
+  surveyResultsAccess?: boolean;
   title: string;
   role: StaffRole;
   pageRole?: StaffRole;
@@ -128,6 +130,8 @@ type WorkspaceProps = {
   temporaryAccess?: boolean;
   accessExpiresAt?: number;
   allStaffAccess?: boolean;
+  operationalWorkspaceAccess?: boolean;
+  surveyResultsAccess?: boolean;
   userName: string;
   role: StaffRole;
   initialView?: string;
@@ -1526,7 +1530,7 @@ async function postJSON<T>(url: string, payload: unknown): Promise<T> {
   return data;
 }
 
-export function PortalShell({ headingAction, heading, title, allStaffAccess = false, role, pageRole = role, userName, currentView, navigation, children }: PortalShellProps) {
+export function PortalShell({ headingAction, heading, title, allStaffAccess = false, operationalWorkspaceAccess = false, surveyResultsAccess = false, role, pageRole = role, userName, currentView, navigation, children }: PortalShellProps) {
   const promise = heading ?? (currentView === "reconciliation" ? { eyebrow: "Read-only review", title: "Payments to check", subtitle: "" } : currentView === "notifications" ? { eyebrow: "Message review", title: "Notification follow-up", subtitle: "" } : currentView === "worklist" ? { eyebrow: "Staff operations", title: "Worklist", subtitle: "" } : rolePromise(pageRole, currentView));
 
   async function logoutStaff() {
@@ -1548,8 +1552,8 @@ export function PortalShell({ headingAction, heading, title, allStaffAccess = fa
           <summary>{pageRole === "admin" ? "Operations" : pageRole === "driver" ? "Rider" : pageRole === "vendor" ? "Vendor" : "Support"}<svg className="staffWorkspaceSwitcherIcon" width="20" height="20" viewBox="-10 -10 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M-8 -4H8M-8 4H3" /></svg></summary>
           <div className="staffAccountMenuBody"><strong>{userName}</strong><small>{title}</small>
             <nav aria-label="More workspace sections">{moreNavigation.map((item) => <Link key={item.view} href={item.href} aria-current={item.view === currentView ? "page" : undefined}>{item.label}</Link>)}</nav>
-            {role === "admin" && allStaffAccess ? <nav aria-label="Staff workspaces"><Link href="/admin">Operations</Link><Link href="/vendors">Vendor workspace</Link><Link href="/drivers">Rider workspace</Link><Link href="/support">Support workspace</Link><Link href="/admin/surveys">Survey results</Link></nav> : null}
-            {role === "admin" && pageRole !== "admin" && !allStaffAccess ? <Link href="/admin">Admin home</Link> : null}
+            {role === "admin" && (allStaffAccess || operationalWorkspaceAccess || surveyResultsAccess) ? <nav aria-label="Staff workspaces"><Link href="/admin">Operations</Link>{allStaffAccess || operationalWorkspaceAccess ? <><Link href="/vendors">Vendor workspace</Link><Link href="/drivers">Rider workspace</Link><Link href="/support">Support workspace</Link></> : null}{allStaffAccess || surveyResultsAccess ? <Link href="/admin/surveys">Survey results</Link> : null}</nav> : null}
+            {role === "admin" && pageRole !== "admin" && !allStaffAccess && !operationalWorkspaceAccess ? <Link href="/admin">Admin home</Link> : null}
             <button className="staffSignOut" type="button" onClick={logoutStaff}>Sign out</button>
           </div>
         </details>
@@ -1894,7 +1898,7 @@ function SupportTicketDesk({ userName, selectedCaseId = "", basePath, refreshTok
 }
 
 
-export function AdminWorkspace({ userName, role, allStaffAccess = false, temporaryAccess = false, accessExpiresAt, initialView = "overview", selectedOrderId, selectedCaseId, selectedActivityId }: WorkspaceProps) {
+export function AdminWorkspace({ userName, role, allStaffAccess = false, operationalWorkspaceAccess = false, surveyResultsAccess = false, temporaryAccess = false, accessExpiresAt, initialView = "overview", selectedOrderId, selectedCaseId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const pendingSubmission = useRef(false);
   const [pendingType, setPendingType] = useState("");
@@ -1937,7 +1941,7 @@ export function AdminWorkspace({ userName, role, allStaffAccess = false, tempora
   ];
 
   return (
-    <PortalShell role={role} allStaffAccess={allStaffAccess} userName={userName} title="Admin workspace" currentView={initialView} navigation={navigation}>
+    <PortalShell operationalWorkspaceAccess={operationalWorkspaceAccess} surveyResultsAccess={surveyResultsAccess} role={role} allStaffAccess={allStaffAccess} userName={userName} title="Admin workspace" currentView={initialView} navigation={navigation}>
       {temporaryAccess ? <p className="status" role="note">Isolated UAT · Operational admin access only. You may add Vendor, Driver and Support test users. Production accounts, privacy administration and owner research are excluded.{accessExpiresAt ? ` Access ends ${new Date(accessExpiresAt).toISOString().replace("T", " ").replace(".000Z", " UTC")}.` : ""}</p> : null}
       {initialView === "overview" ? <AdminOverview userName={userName} /> : null}
       {initialView === "dispatch" ? <AdminDispatchWorkspace /> : null}
@@ -2039,7 +2043,7 @@ function AdminOperationsHealth() {
   </>;
 }
 
-export function VendorWorkspace({ userName, role, allStaffAccess = false, initialView = "jobs", selectedOrderId, selectedActivityId }: WorkspaceProps) {
+export function VendorWorkspace({ userName, role, allStaffAccess = false, operationalWorkspaceAccess = false, surveyResultsAccess = false, initialView = "jobs", selectedOrderId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const pendingSubmission = useRef(false);
   const [pendingType, setPendingType] = useState("");
@@ -2074,7 +2078,7 @@ export function VendorWorkspace({ userName, role, allStaffAccess = false, initia
   ];
 
   return (
-    <PortalShell role={role} allStaffAccess={allStaffAccess} pageRole="vendor" userName={userName} title="Vendor workspace" currentView={initialView} navigation={navigation}>
+    <PortalShell operationalWorkspaceAccess={operationalWorkspaceAccess} surveyResultsAccess={surveyResultsAccess} role={role} allStaffAccess={allStaffAccess} pageRole="vendor" userName={userName} title="Vendor workspace" currentView={initialView} navigation={navigation}>
       {initialView === "jobs" ? <><SharedOrderBoard allStaffAccess={allStaffAccess} presentationRole="vendor" role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/vendors?view=jobs" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a production exception</strong><small>Open a case when the verified job actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="vendor" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
       {initialView === "capacity" && role === "admin" ? <section className="staffContentSection"><p>Manage an explicitly selected vendor from <Link href="/admin?view=people">People &amp; onboarding</Link>. Owner actions retain your identity.</p></section> : null}
       {initialView === "capacity" && role !== "admin" ? <><AvailabilityBoard role={role} mode="vendors" refreshToken={availabilityVersion} /><VendorCapacityForm onSaved={() => setAvailabilityVersion((current) => current + 1)} /></> : null}
@@ -2083,7 +2087,7 @@ export function VendorWorkspace({ userName, role, allStaffAccess = false, initia
   );
 }
 
-export function DriverWorkspace({ userName, role, allStaffAccess = false, initialView = "route", selectedOrderId, selectedActivityId }: WorkspaceProps) {
+export function DriverWorkspace({ userName, role, allStaffAccess = false, operationalWorkspaceAccess = false, surveyResultsAccess = false, initialView = "route", selectedOrderId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const pendingSubmission = useRef(false);
   const [pendingType, setPendingType] = useState("");
@@ -2115,14 +2119,14 @@ export function DriverWorkspace({ userName, role, allStaffAccess = false, initia
   ];
 
   return (
-    <PortalShell role={role} allStaffAccess={allStaffAccess} pageRole="driver" userName={userName} title="Driver route board" currentView={initialView} navigation={navigation}>
+    <PortalShell operationalWorkspaceAccess={operationalWorkspaceAccess} surveyResultsAccess={surveyResultsAccess} role={role} allStaffAccess={allStaffAccess} pageRole="driver" userName={userName} title="Driver route board" currentView={initialView} navigation={navigation}>
       {initialView === "route" ? <><SharedOrderBoard allStaffAccess={allStaffAccess} presentationRole="driver" role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/drivers?view=route" />{selectedOrderId ? <section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Report a route exception</strong><small>Use when the delay or handoff actions do not cover it</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="driver" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section> : null}</> : null}
       {initialView === "activity" ? <RecentActivity filter="driver-route-log" selectedId={selectedActivityId} basePath="/drivers?view=activity" /> : null}
     </PortalShell>
   );
 }
 
-export function SupportWorkspace({ userName, role, allStaffAccess = false, initialView = "cases", selectedOrderId, selectedCaseId, selectedActivityId }: WorkspaceProps) {
+export function SupportWorkspace({ userName, role, allStaffAccess = false, operationalWorkspaceAccess = false, surveyResultsAccess = false, initialView = "cases", selectedOrderId, selectedCaseId, selectedActivityId }: WorkspaceProps) {
   const [formStatus, setFormStatus] = useState<Record<string, string>>({});
   const pendingSubmission = useRef(false);
   const [pendingType, setPendingType] = useState("");
@@ -2157,7 +2161,7 @@ export function SupportWorkspace({ userName, role, allStaffAccess = false, initi
   ];
 
   return (
-    <PortalShell role={role} allStaffAccess={allStaffAccess} pageRole="support" userName={userName} title="Support workspace" currentView={initialView} navigation={navigation}>
+    <PortalShell operationalWorkspaceAccess={operationalWorkspaceAccess} surveyResultsAccess={surveyResultsAccess} role={role} allStaffAccess={allStaffAccess} pageRole="support" userName={userName} title="Support workspace" currentView={initialView} navigation={navigation}>
       {initialView === "cases" ? <><SupportTicketDesk userName={userName} selectedCaseId={selectedCaseId} basePath="/support?view=cases" refreshToken={casesVersion} /><section className="staffContentSection"><details className="staffRosterEditor staffStandaloneEditor"><summary><span><strong>Open a new case</strong><small>Use when an existing case does not cover the issue</small></span><b>Open form</b></summary><SupportTicketForm userName={userName} role="support" onSubmit={submitLead} status={formStatus["support-ticket"]} pending={pendingType === "support-ticket"} /></details></section></> : null}
       {initialView === "orders" ? <SharedOrderBoard allStaffAccess={allStaffAccess} role={role} userName={userName} selectedOrderId={selectedOrderId} basePath="/support?view=orders" /> : null}
       {initialView === "activity" ? <RecentActivity filter="support" selectedId={selectedActivityId} basePath="/support?view=activity" /> : null}

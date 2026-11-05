@@ -33,6 +33,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       userName={user.name}
       role={user.role}
       allStaffAccess={user.allStaffAccess}
+      operationalWorkspaceAccess={user.operationalWorkspaceAccess}
+      surveyResultsAccess={user.surveyResultsAccess}
       temporaryAccess={user.temporaryAccess}
       accessExpiresAt={user.accessExpiresAt}
       initialView={adminViews.has(requestedView) ? requestedView : "overview"}

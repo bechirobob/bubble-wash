@@ -61,7 +61,12 @@ function recoveryCodeHash(adminEmail: string, code: string) {
 function configuredEnvironmentSecret(adminEmail: string, database?: Parameters<typeof readAdminMfaSetting>[1]) {
   // An additional personal owner must enroll their own authenticator. Never
   // inherit the legacy master's environment seed or recovery state.
-  if (listStaffAccounts(database).some((account) => account.email.toLowerCase() === adminEmail.trim().toLowerCase() && account.allStaffAccess)) return "";
+  // Abigail's approved non-owner transition isolates her authenticator only.
+  // This does not require MFA when the normal administrator policy is off,
+  // and does not change the legacy seed behavior of any other non-owner account.
+  const email = adminEmail.trim().toLowerCase();
+  if (listStaffAccounts(database).some((account) => account.email.toLowerCase() === email &&
+      (account.allStaffAccess || (account.role === "admin" && email === "abigail@bubblewash.co")))) return "";
   const secret = process.env.BUBBLEWASH_ADMIN_TOTP_SECRET?.trim() ?? "";
   return validTotpSecret(secret) ? secret : "";
 }
