@@ -64,14 +64,14 @@ class Restart(unittest.TestCase):
                     collect.assert_not_called()
     def test_loaded_unit_typed_execstart_and_exact_properties(self):
         rows={**{key:'' for key in s.EMPTY},**s.FIXED,'Requires':'sysinit.target system.slice','Wants':'','Conflicts':'shutdown.target'}
-        raw='\n'.join(k+'='+v for k,v in rows.items())
+        raw='\n'.join(k+'='+v for k,v in rows.items() if not k.startswith('Exec'))
         typed=shlex.join(['a(sasbttttuii)','1',s.ARGV[0],str(len(s.ARGV)),*s.ARGV,'false',*['0']*7])
-        with mock.patch.object(s,'dependency_state',return_value={'verified':True}),mock.patch.object(s.c,'command',side_effect=[raw,typed]):
+        with mock.patch.object(s,'dependency_state',return_value={'verified':True}),mock.patch.object(s.c,'command',side_effect=[raw,*['a(sasbttttuii) 0']*6,typed]):
             self.assertEqual(s.loaded_unit(),dict(rows,dependencyEvidence={name:{'verified':True} for name in ('sysinit.target','system.slice')}))
-        for bad in (raw+'\nUnknown=x',raw.replace('ExecStop=','ExecStop=/bin/false'),raw.replace('Requires=sysinit.target system.slice','Requires=production.service')):
+        for bad in (raw+'\nUnknown=x',raw+'\nExecStop=/bin/false',raw.replace('Requires=sysinit.target system.slice','Requires=production.service')):
             with mock.patch.object(s.c,'command',return_value=bad),self.assertRaises(ValueError):s.loaded_unit()
         for bad in (typed.replace('3108','3100'),typed.replace('false','true'),typed+' 0'):
-            with mock.patch.object(s,'dependency_state',return_value={'verified':True}),mock.patch.object(s.c,'command',side_effect=[raw,bad]),self.assertRaises(ValueError):s.loaded_unit()
+            with mock.patch.object(s,'dependency_state',return_value={'verified':True}),mock.patch.object(s.c,'command',side_effect=[raw,*['a(sasbttttuii) 0']*6,bad]),self.assertRaises(ValueError):s.loaded_unit()
     def test_source_mismatch_refuses_before_any_transport_action(self):
         with tempfile.TemporaryDirectory() as directory:
             file=Path(directory)/s.SELF;file.parent.mkdir(parents=True);file.write_text('reviewed-source')

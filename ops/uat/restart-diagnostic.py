@@ -23,6 +23,7 @@ SCHEMA={
  'loadedFirst':{'passed','failed',SKIP},'loadedSecond':{'passed','failed',SKIP},
  'isolationStability':{'stable','changed','unavailable'},'loadedStability':{'stable','changed','unavailable'}}
 GROUPS={
+ 'wantsMembership':{'present','absent',SKIP},
  'properties':{'empty','nonempty','match','mismatch','missing','unavailable',SKIP},
  'hooks':{'empty','nonempty','match','mismatch','malformed','read-failed',SKIP},
  'dependencies':{'active','masked-inert','missing-inert','failed',SKIP},
@@ -32,7 +33,7 @@ GROUPS={
 
 def blank(names,dependencies):
     value={key:('unavailable' if key.endswith('Stability') else SKIP) for key in SCHEMA}
-    for key,keys in (('properties',names),('hooks',HOOKS),('dependencies',dependencies),
+    for key,keys in (('wantsMembership',(*dependencies,'unknown','outsideValidatedRequired','duplicate')),('properties',names),('hooks',HOOKS),('dependencies',dependencies),
                      ('unitInterface',UNIT_PROPERTIES),('unitArrays',UNIT_PROPERTIES)):
         value[key]={name:SKIP for name in keys}
     value['dependencySites']={name:[] for name in dependencies}
@@ -126,6 +127,12 @@ def _collect(c,p,empty,fixed,dependencies,argv,loaded_unit,quiet_sample,dependen
             rows[key]=value
         if schema=='complete' and set(rows)!=set(names):schema='missing'
         result['loadedSchema']=schema
+        required=rows.get('Requires','').split();wanted=rows.get('Wants','').split()
+        validRequired=len(required)==len(set(required)) and {'sysinit.target','system.slice'}<=set(required)<={'sysinit.target','system.slice','-.mount'}
+        if schema in ('complete','missing') and 'Wants' in rows:
+            flags={name:name in wanted for name in dependencies}
+            flags.update(duplicate=len(wanted)!=len(set(wanted)),unknown=bool(set(wanted)-set(dependencies)),outsideValidatedRequired=bool(set(wanted)-({'tmp.mount'}|set(required) if validRequired else {'tmp.mount'})))
+            result['wantsMembership']={k:'present' if v else 'absent' for k,v in flags.items()}
         for name in names:
             if schema not in ('complete','missing'):outcome='unavailable'
             elif name not in rows:outcome='missing'
@@ -134,7 +141,7 @@ def _collect(c,p,empty,fixed,dependencies,argv,loaded_unit,quiet_sample,dependen
             elif name=='Conflicts':outcome='match' if rows[name]=='shutdown.target' else 'mismatch'
             else:
                 tokens=rows[name].split();unique=set(tokens)
-                valid=(len(tokens)==len(unique) and ({'sysinit.target','system.slice'}<=unique<={'sysinit.target','system.slice','-.mount'} if name=='Requires' else unique<={'tmp.mount'}))
+                valid=(len(tokens)==len(unique) and ({'sysinit.target','system.slice'}<=unique<={'sysinit.target','system.slice','-.mount'} if name=='Requires' else unique<=({'tmp.mount'}|set(required)) and validRequired))
                 outcome='match' if valid else 'mismatch'
             result['properties'][name]=outcome
     else:result['loadedSchema']='read-failed' if status=='failed' else SKIP

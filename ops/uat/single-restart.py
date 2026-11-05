@@ -27,7 +27,7 @@ p=c.p
 d=load('uat_restart_diagnostic','restart-diagnostic.py')
 require=t.require
 ARGV=['/usr/bin/node','node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port','3108']
-EMPTY=('ExecStartPre','ExecStartPost','ExecReload','ExecStop','ExecStopPost','ConsistsOf','BoundBy',
+EMPTY=('ExecCondition','ExecStartPre','ExecStartPost','ExecReload','ExecStop','ExecStopPost','ConsistsOf','BoundBy',
        'PropagatesStopTo','OnFailure','OnSuccess','Requisite','BindsTo','PartOf','RequiredBy','Triggers','TriggeredBy','Upholds','UpheldBy')
 FIXED={'Type':'simple','Restart':'on-failure','RestartUSec':'10s','TimeoutStopUSec':'30s',
        'KillMode':'control-group','KillSignal':'15','SendSIGKILL':'yes','SuccessAction':'none','FailureAction':'none'}
@@ -77,18 +77,22 @@ def dependency_state(name):
 
 
 def loaded_unit():
-    names=(*EMPTY,*FIXED,'Requires','Wants','Conflicts')
+    hooks=tuple(k for k in EMPTY if k.startswith('Exec'))
+    names=(*(k for k in EMPTY if k not in hooks),*FIXED,'Requires','Wants','Conflicts')
     raw=c.command(['/usr/bin/systemctl','show',p.SERVICE,*[arg for key in names for arg in ('-p',key)]])
     rows={}
     for line in raw.splitlines():
         key,sep,value=line.partition('=');require(sep and key in names and key not in rows);rows[key]=value
-    require(set(rows)==set(names) and all(rows[key]=='' for key in EMPTY))
+    require(set(rows)==set(names) and all(rows[key]=='' for key in EMPTY if key not in hooks))
     require(all(rows[key]==value for key,value in FIXED.items()))
     required=rows['Requires'].split();wanted=rows['Wants'].split()
     require(len(required)==len(set(required)) and len(wanted)==len(set(wanted)))
     require({'sysinit.target','system.slice'}<=set(required)<= {'sysinit.target','system.slice','-.mount'})
-    require(set(wanted)<= {'tmp.mount'} and rows['Conflicts']=='shutdown.target')
+    require(set(wanted)<=({'tmp.mount'}|set(required)) and rows['Conflicts']=='shutdown.target')
     rows['dependencyEvidence']={name:dependency_state(name) for name in sorted(set(required+wanted))}
+    for hook in hooks:
+        raw=c.command([*d.BASE,'get-property',d.DEST,d.OBJECT,d.SERVICE,hook])
+        require(shlex.split(raw)==['a(sasbttttuii)','0']);rows[hook]=''
     # Typed D-Bus text avoids systemctl's human-facing ExecStart formatting.
     raw=c.command(['/usr/bin/busctl','--system','get-property','org.freedesktop.systemd1',
         '/org/freedesktop/systemd1/unit/bubblewash_2duat_2eservice','org.freedesktop.systemd1.Service','ExecStart'])

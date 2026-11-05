@@ -54,11 +54,34 @@ class Dependencies(unittest.TestCase):
         mount_changed,_,_=self.check(self.row(),mounts=MOUNTS.replace('2 1 0:2','3 1 0:3'))
         self.assertNotEqual(first,mount_changed)
     def test_allowlist_and_duplicates_rejected_before_dependency_inspection(self):
-        for required,wanted in (('sysinit.target system.slice other.mount',''),('sysinit.target system.slice system.slice',''),('sysinit.target system.slice','tmp.mount tmp.mount'),('sysinit.target system.slice','other.service')):
+        for required,wanted in (('sysinit.target system.slice other.mount',''),('sysinit.target system.slice system.slice',''),('sysinit.target system.slice','tmp.mount tmp.mount'),('sysinit.target system.slice','other.service'),('sysinit.target system.slice','-.mount'),('sysinit.target system.slice unknown.service','unknown.service')):
             rows={**{k:'' for k in s.EMPTY},**s.FIXED,'Requires':required,'Wants':wanted,'Conflicts':'shutdown.target'}
-            with mock.patch.object(s.c,'command',return_value='\n'.join(k+'='+v for k,v in rows.items())),mock.patch.object(s,'dependency_state') as dep,self.assertRaises(ValueError):
+            with mock.patch.object(s.c,'command',return_value='\n'.join(k+'='+v for k,v in rows.items() if not k.startswith('Exec'))),mock.patch.object(s,'dependency_state') as dep,self.assertRaises(ValueError):
                 try:s.loaded_unit()
                 finally:dep.assert_not_called()
+    def loaded(self,required='sysinit.target system.slice',wanted='',hooks=None):
+        rows={**{k:'' for k in s.EMPTY if not k.startswith('Exec')},**s.FIXED,'Requires':required,'Wants':wanted,'Conflicts':'shutdown.target'}
+        def command(args):
+            if args[0]=='/usr/bin/systemctl':return '\n'.join(k+'='+v for k,v in rows.items())
+            key=args[-1]
+            if key=='ExecStart':return shlex.join(['a(sasbttttuii)','1',s.ARGV[0],str(len(s.ARGV)),*s.ARGV,'false',*['0']*7])
+            value=(hooks or {}).get(key,'a(sasbttttuii) 0')
+            if isinstance(value,Exception):raise value
+            return value
+        return mock.patch.object(s.c,'command',side_effect=command)
+    def test_redundant_wants_only_validated_required_and_same_proof(self):
+        for required,wanted in (('sysinit.target system.slice','sysinit.target system.slice tmp.mount'),('sysinit.target system.slice -.mount','-.mount sysinit.target')):
+            with self.loaded(required,wanted),mock.patch.object(s,'dependency_state',return_value={'verified':True}) as dep:
+                value=s.loaded_unit()
+                self.assertEqual([call.args[0] for call in dep.call_args_list],sorted(set(required.split()+wanted.split())))
+                self.assertEqual(value['ExecCondition'],'')
+        for failure in (ValueError('inactive'),ValueError('pending-job')):
+            with self.loaded(wanted='sysinit.target'),mock.patch.object(s,'dependency_state',side_effect=failure),self.assertRaises(ValueError):s.loaded_unit()
+    def test_every_empty_hook_is_typed_and_fail_closed(self):
+        bads=('', 'as 0','a(sasbttttuii) 00','a(sasbttttuii) 1','a(sasbttttuii) 0 extra','a(sasbttttuii) 1 /bin/false 1 /bin/false false 0 0 0 0 0 0 0',ValueError('unsupported'))
+        for hook in (k for k in s.EMPTY if k.startswith('Exec')):
+            for bad in bads:
+                with self.subTest(hook=hook,bad=bad),self.loaded(hooks={hook:bad}),mock.patch.object(s,'dependency_state',return_value={}),self.assertRaises(ValueError):s.loaded_unit()
     def test_dependency_failure_receipt_does_not_disclose_metadata(self):
         request={'operationId':'e01f1a5d-3297-4c22-b246-7bdb509289ca','restartApproved':True,'quietWindowCoordinated':True}
         with mock.patch.object(s.os,'geteuid',return_value=0),mock.patch.object(s.c,'collect_restart_isolation',return_value={}),mock.patch.object(s,'loaded_unit',side_effect=ValueError('/private/canary')),mock.patch.object(s.t,'exchange') as transport:
