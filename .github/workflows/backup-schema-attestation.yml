@@ -1,0 +1,98 @@
+name: Attest existing backup schema
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/backup-schema-attestation.yml
+      - ops/attest-backup-schema.py
+      - ops/stream-backup-schema.py
+      - tests/test_backup_schema_attestation.py
+      - ops/integration-release/source-contracts.json
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed main control commit
+        type: string
+        required: true
+      expected_live_sha:
+        description: Exact reviewed runtime commit
+        type: string
+        required: true
+      backup_sha256:
+        description: Independently download-verified existing encrypted archive SHA256
+        type: string
+        required: true
+      receipt_run:
+        description: Exact existing backup receipt run
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && 'bubblewash-production' || format('backup-schema-ci-{0}', github.ref) }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Verify focused schema-copy checks and exact runner
+        run: |
+          python3 -B -m unittest discover -s tests -p 'test_backup_schema_attestation.py' -v
+          python3 -B ops/integration-release/select_source.py --release "$PWD" --runner-only
+  attest:
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      BACKUP_SHA256: ${{ inputs.backup_sha256 }}
+      RECEIPT_RUN: ${{ inputs.receipt_run }}
+      BACKUP_STORE_SHA: ${{ vars.BACKUP_STORE_SHA }}
+      BACKUP_STORE_ID: ${{ vars.BACKUP_STORE_ID }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Require exact reviewed source and first attempt
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact runner before protected host access
+        run: |
+          set -euo pipefail
+          python3 -B ops/integration-release/select_source.py --release "$PWD" --runner-only
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+      - name: Check existing private backup destination without mutation
+        env:
+          GH_TOKEN: ${{ secrets.BACKUP_STORE_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 -B .github/backup/check_store.py >/dev/null 2>&1
+      - name: Connect through existing approved production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Attest only the protected backup copy
+        shell: bash
+        run: |
+          set -euo pipefail
+          # No key is present on this runner. Never retry an uncertain host result.
+          if ! python3 -B ops/stream-backup-schema.py | tailscale ssh root@hermes 'python3 -I -B -' 2>/dev/null; then
+            echo 'Backup attestation blocked. Inspect outcome and scratch cleanup before any retry.'
+            exit 1
+          fi
