@@ -7,6 +7,7 @@ on:
       - ops/attest-backup-schema.py
       - ops/stream-backup-schema.py
       - tests/test_backup_schema_attestation.py
+      - tests/test_backup_schema_marker.py
       - ops/integration-release/source-contracts.json
       - ops/inspect-backup-schema-outcome.py
       - ops/stream-backup-schema-outcome.py
@@ -54,6 +55,7 @@ jobs:
         run: |
           python3 -B -m unittest discover -s tests -p 'test_backup_schema_attestation.py' -v
           python3 -B -m unittest discover -s tests -p 'test_backup_schema_outcome.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_backup_schema_marker.py' -v
           python3 -B ops/integration-release/select_source.py --release "$PWD" --runner-only
   attest:
     needs: verify
