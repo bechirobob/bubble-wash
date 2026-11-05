@@ -1,0 +1,298 @@
+{
+  "allowedChanges": [
+    ".github/workflows/administrator-invitation-transition.yml",
+    ".github/workflows/customer-update-deploy.yml",
+    ".github/workflows/pilot-ci.yml",
+    ".github/workflows/uat-restore-original.yml",
+    ".github/workflows/uat-second-cohort.yml",
+    ".github/workflows/uat-single-restart.yml",
+    "docs/uat/second-cohort-local.md",
+    "ops/administrator-invitation-transition.ts",
+    "ops/administrator-transition-acceptance.json",
+    "ops/administrator-transition-capsule.mjs",
+    "ops/administrator-transition-contract.py",
+    "ops/administrator-transition-host.py",
+    "ops/administrator-transition-source-pins.json",
+    "ops/administrator-transition-transport.py",
+    "ops/customer-update-source-pins.json",
+    "ops/deploy-customer-update.py",
+    "ops/integration-release/source-contracts.json",
+    "ops/owner-renewal-host.py",
+    "ops/owner-renewal-source-pins.json",
+    "ops/owner-renewal-transport.py",
+    "ops/uat/restart-diagnostic.py",
+    "ops/uat/restoration-collector.py",
+    "ops/uat/restoration-preflight.py",
+    "ops/uat/restoration-receiver.py",
+    "ops/uat/restoration-runtime-pins.json",
+    "ops/uat/restoration-transport.py",
+    "ops/uat/restoration-workflow-design.md",
+    "ops/uat/restoration-workflow.template.yml",
+    "ops/uat/restore-original.md",
+    "ops/uat/second-cohort-receiver.py",
+    "ops/uat/second-cohort-runner.py",
+    "ops/uat/second-cohort-transport.py",
+    "ops/uat/single-restart.md",
+    "ops/uat/single-restart.py",
+    "package.json",
+    "scripts/uat-restore-original.mjs",
+    "scripts/uat-second-cohort-operator.mjs",
+    "scripts/uat-second-cohort-unseal.mjs",
+    "scripts/uat-second-cohort.mjs",
+    "src/app/admin/page.tsx",
+    "src/app/admin/surveys/page.tsx",
+    "src/app/api/admin/research/responses/[id]/route.ts",
+    "src/app/api/admin/research/responses/route.ts",
+    "src/app/api/admin/research/results/route.ts",
+    "src/app/drivers/page.tsx",
+    "src/app/support/page.tsx",
+    "src/app/vendors/page.tsx",
+    "src/components/StaffWorklistWorkspace.tsx",
+    "src/components/StaffWorkspaces.tsx",
+    "src/components/research/ResearchResults.tsx",
+    "src/lib/admin-mfa.ts",
+    "src/lib/auth.ts",
+    "src/lib/research/access.ts",
+    "src/lib/staff-accounts.ts",
+    "src/lib/staff-identity.ts",
+    "src/lib/staff-permissions.ts",
+    "tests/abigail-mfa-isolation.integration.mjs",
+    "tests/administrator-boundaries.integration.mjs",
+    "tests/administrator-pages-loader.mjs",
+    "tests/administrator-permissions.test.mjs",
+    "tests/administrator-sealed-transition.integration.mjs",
+    "tests/administrator-transition.integration.mjs",
+    "tests/browser/abigail-transition.e2e.mjs",
+    "tests/browser/customer-error-fixture.mjs",
+    "tests/browser/customer-navigation-feedback.spec.mjs",
+    "tests/browser/navigation-response-proof.mjs",
+    "tests/navigation-response-proof.test.mjs",
+    "tests/research-results.test.mjs",
+    "tests/test_administrator_transition_host.py",
+    "tests/test_customer_update_deploy.py",
+    "tests/test_owner_document_enrollment.py",
+    "tests/test_owner_renewal_host.py",
+    "tests/test_uat_restart_collector.py",
+    "tests/test_uat_restart_comprehensive.py",
+    "tests/test_uat_restart_dependencies.py",
+    "tests/test_uat_restart_diagnostic.py",
+    "tests/test_uat_restoration_collector.py",
+    "tests/test_uat_restoration_diagnostic.py",
+    "tests/test_uat_restoration_environment_identity.py",
+    "tests/test_uat_restoration_preflight.py",
+    "tests/test_uat_restoration_timestamp.py",
+    "tests/test_uat_restoration_transport.py",
+    "tests/test_uat_second_cohort_runner.py",
+    "tests/test_uat_second_cohort_transport.py",
+    "tests/test_uat_single_restart.py",
+    "tests/uat-restore-original.integration.mjs",
+    "tests/uat-second-cohort-operator.integration.mjs",
+    "tests/uat-second-cohort.integration.mjs"
+  ],
+  "approvedApplicationChanges": [
+    {
+      "candidateSha256": "57c2bef550ffb359e9e3b481f0afd7cee1c32e6d35df8f7e153b2da0d7b18400",
+      "path": "package.json",
+      "referenceSha256": "99648bbbb7a7e97a4c75870a358fef1dd55a81c592e81f0d885f8276f2edf4b0"
+    },
+    {
+      "candidateSha256": "aad8debb8b12ab4560ba40c33aaf9c9501fb2ba84c4ae88f6b0bb50229fe2973",
+      "path": "src/app/admin/page.tsx",
+      "referenceSha256": "cf810f620ca485a24031793282a81f23349eed4b64600ef91643e41833520cb4"
+    },
+    {
+      "candidateSha256": "2ff850c0c2594f17ea6d5c5d0b7ff602c60aa573863f2d0c4ae28b7aee4823d2",
+      "path": "src/app/admin/surveys/page.tsx",
+      "referenceSha256": "283202489dbc640885c2c2966f988d51f3d5809ccdafa98dd0835fe2a3afbc89"
+    },
+    {
+      "candidateSha256": "44a35f5ccefe211f874f024c66f3e1bf58cb3f1a50cf320e23c1f60ef2c32ec4",
+      "path": "src/app/api/admin/research/responses/[id]/route.ts",
+      "referenceSha256": "93a62b627b70b0cf68a03d46086a741d3a05dc4d2c787187487239695664cca3"
+    },
+    {
+      "candidateSha256": "e7831ab6678eaeb7fd72c9070423fa3aca72e697af64640032e78351f39965ea",
+      "path": "src/app/api/admin/research/responses/route.ts",
+      "referenceSha256": "3c875d0ff8aa580fe5fdbff913a826908d1c23ce58a0a6ab9e9937cf39dc082f"
+    },
+    {
+      "candidateSha256": "6cd54c19e9452ba5216e02e612160e90a0ad1c79494c66e6759bb002bd1e247c",
+      "path": "src/app/api/admin/research/results/route.ts",
+      "referenceSha256": "eb670a79440a0a3bbbdde6d28a790feb5ea7b93bddbb1f631bfd9a25bb8f8eef"
+    },
+    {
+      "candidateSha256": "e7fabeee4f75d8043de3d26066cf5f640a6c8523abd87c374bc614f01733c609",
+      "path": "src/app/drivers/page.tsx",
+      "referenceSha256": "27cedba3b116456bc3dc91f2f78f5084bd6ac07fab967d8c8d0046c336356f07"
+    },
+    {
+      "candidateSha256": "39d57581e701691ea457130ea4e06b2e138aa0e910f3b1b5045068b0c4dc00b0",
+      "path": "src/app/support/page.tsx",
+      "referenceSha256": "30a8a5321fbc6dda38f4202e8e7907fcb66e4f21528eb881d491b45d8774a843"
+    },
+    {
+      "candidateSha256": "f7043c261f4c95ee0594d3d9506bb53143ad144a440349a904bb364f1393fd62",
+      "path": "src/app/vendors/page.tsx",
+      "referenceSha256": "2f3479726b1f11b84b1112574610f6dc0fd481a55f6502e4635feb9a026da8b4"
+    },
+    {
+      "candidateSha256": "77ffc4821c448df481f5b5191fa5cd14670a7e2d5b0066619689599c188c8b9d",
+      "path": "src/components/StaffWorklistWorkspace.tsx",
+      "referenceSha256": "887a0ccc95d5700b613fe6e458853ed637a218ac50634e33384b1ed5426ddd36"
+    },
+    {
+      "candidateSha256": "dc2eaef1074b4147b56a21da89c408229016c3fe1488dac3ba0059b89dfbd1e5",
+      "path": "src/components/StaffWorkspaces.tsx",
+      "referenceSha256": "03c40efc6e8e73b856eee7c22267603ffb28be20382667437cc0b9f4b36d04e9"
+    },
+    {
+      "candidateSha256": "341d8531b426e3413caa00223984a690d8263124a5d8ec1d5fe7101269562032",
+      "path": "src/components/research/ResearchResults.tsx",
+      "referenceSha256": "b922fd85c0c6e8c84d340dfe46fe55236ef484741f87b9ee16d6b12f936fd604"
+    },
+    {
+      "candidateSha256": "d1ebe511d3dbe8505c7d966ee65ce79b0942e4de598e69465a666536ed3b8a18",
+      "path": "src/lib/admin-mfa.ts",
+      "referenceSha256": "15c78716d909d298542ce777d98b8d2dae5f67a8327aa427117f9656b6dcf4f5"
+    },
+    {
+      "candidateSha256": "fcc76c82c7b3b00e8d8e30080e7a0c4e6246d378d3f790dcadf6883fa98ed422",
+      "path": "src/lib/auth.ts",
+      "referenceSha256": "c84c967a9c48458624528e2d6aba4cdb6dc354d2b63d9c5ede431134558aa603"
+    },
+    {
+      "candidateSha256": "c868943a4977a467c25487ddc14596d85cbcdaed157a514899294cbfd4e29e5d",
+      "path": "src/lib/research/access.ts",
+      "referenceSha256": "14f40e77b07fa54b0b31cf37afcf6d97b1afc861d8f92847cc530096f2965122"
+    },
+    {
+      "candidateSha256": "e52d8d58779729ece155e304b0749df6c3d76db8a908e26d9772a6b0dcac1975",
+      "path": "src/lib/staff-accounts.ts",
+      "referenceSha256": "5314295fc51095e4017864e95487f4d11e37e27e833304771832868ea595f85e"
+    },
+    {
+      "candidateSha256": "eb628a6e36583478ab416dae9f081cde99255ef5b71d607f47e1588c62d5ecee",
+      "path": "src/lib/staff-identity.ts",
+      "referenceSha256": "a725b69dfc14e3a0d4c7d8abac0a5823c31320157e60bdd3d21b6c059c8fb4ee"
+    },
+    {
+      "candidateSha256": "17377a9158ba163cae70d88d86d1134480e4d31e574dbefc30b5eca3e2ca8939",
+      "path": "src/lib/staff-permissions.ts",
+      "referenceSha256": null
+    }
+  ],
+  "baseSha": "277a3f8df85068f3245ddc30a6c446d10d9bdc39",
+  "baseTree": "ec1c605bb1146fb7be5334c8f97ac9023eb16846",
+  "baselineContent": {
+    "directories": 118,
+    "files": 652,
+    "sha256": "0f51faabc32ad704507b5c4f946f067e8c01557831064a395b97e8b2610ac908"
+  },
+  "baselineScope": {
+    "directories": [
+      ".github",
+      "db",
+      "docs",
+      "ops",
+      "public",
+      "scripts",
+      "src",
+      "tests",
+      "tooling"
+    ],
+    "excludedSubtrees": [
+      "tooling/next-eslint-glob/node_modules",
+      "tooling/minimatch-compat/node_modules"
+    ],
+    "rootFiles": [
+      ".env.production.example",
+      ".env.uat.example",
+      ".gitignore",
+      "DESIGN.md",
+      "README.md",
+      "eslint.config.mjs",
+      "next.config.mjs",
+      "package-lock.json",
+      "package.json",
+      "playwright.config.mjs",
+      "playwright.worklists.config.mjs",
+      "tsconfig.json"
+    ]
+  },
+  "baselineSource": {
+    "next.config.mjs": "99485a62a52b87f6b17c2732d43bd7eb090984b3fbf74dfcf0637db17831fc02",
+    "package-lock.json": "9ccc8d6a3295ef01cb10a3c54e2be0381fbb5593300444e686e5c19923f35323",
+    "package.json": "99648bbbb7a7e97a4c75870a358fef1dd55a81c592e81f0d885f8276f2edf4b0",
+    "src": "2bd4449b834c7e45fa0cde377b5a1dc079366eed57381535083af6d43076f836",
+    "tsconfig.json": "2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c"
+  },
+  "candidateSource": {
+    "next.config.mjs": "99485a62a52b87f6b17c2732d43bd7eb090984b3fbf74dfcf0637db17831fc02",
+    "package-lock.json": "9ccc8d6a3295ef01cb10a3c54e2be0381fbb5593300444e686e5c19923f35323",
+    "package.json": "57c2bef550ffb359e9e3b481f0afd7cee1c32e6d35df8f7e153b2da0d7b18400",
+    "src": "e4acb8e94e0387021166f4503d82b3aba2cc94acb8b74e6ab270e064185ec232",
+    "tsconfig.json": "2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c"
+  },
+  "criticalFiles": [
+    "src/lib/data-store.ts",
+    "src/lib/operational-store.ts",
+    "src/lib/availability-store.ts",
+    "src/app/api/health/route.ts",
+    "src/lib/research/store.ts",
+    "db/proposed/research-v1.sql",
+    "src/lib/staff-accounts.ts"
+  ],
+  "dependencies": {
+    "deploy-preserving.py": "29006085ee39680daa30fc34d05c3761b410f0f860835943eab8a60168da076a",
+    "deploy-pwa-update.py": "b57f53f848f3f574d7b4e92b5760cec8fdb32716aa0c7c0b08d1036acd1cb61b",
+    "deploy-survey-only.py": "bb435e7a32baa516b8d89e65e64f2b2db0779657f6c25039130c9520f5d5e509",
+    "deploy-survey-update.py": "8de4ce5d5f543bc52a4d81590490058681df4450dbe44702f426c97cf0fd4e0a",
+    "deploy-workspace-update.py": "bd0c3f512ab3039167cbbf5e87ad5d3f6bfdc7ac8d2cc7eea35e6ca86766fe0e",
+    "inactive-staging/prepare_pair.py": "c9d8329ec106562ad900b0326774a2ea8c7e7808013d087421fb8b3e8694f7e7",
+    "inactive-staging/stage_artifact.py": "31079a9443057bb79ff3d92eeea3dbf7ded5d052b24aca3b755e3f03dc8b630f",
+    "survey-only-source-pins.json": "3bf997b7dd856d6c3679c6afa514cd605b19ef1061bd8769f4229f76cb022697"
+  },
+  "providerPair": [
+    "22bbf607e2cb466cd6809c668d8a7c06877236526647bfd171691ce50e0f23b1",
+    "22bbf607e2cb466cd6809c668d8a7c06877236526647bfd171691ce50e0f23b1"
+  ],
+  "runtimeContent": {
+    "directories": 119,
+    "files": 713,
+    "sha256": "8e4e46a137db09fc884ac10a59728e495f5eb3a3bf152872b3fb2e57010355ea"
+  },
+  "runtimeSha": "81ffd4acdff7f64d67767318813c75380a5d0b9c",
+  "runtimeTree": "381f1ab9bd9f5200955c3afc15a920ff047541b3",
+  "schema": "bubblewash-abigail-code-review/v1",
+  "sourceScope": {
+    "directories": [
+      ".github",
+      "db",
+      "docs",
+      "ops",
+      "public",
+      "scripts",
+      "src",
+      "tests",
+      "tooling"
+    ],
+    "excludedSubtrees": [
+      "tooling/next-eslint-glob/node_modules",
+      "tooling/minimatch-compat/node_modules"
+    ],
+    "rootFiles": [
+      ".env.production.example",
+      ".env.uat.example",
+      ".gitignore",
+      "DESIGN.md",
+      "README.md",
+      "eslint.config.mjs",
+      "next.config.mjs",
+      "package-lock.json",
+      "package.json",
+      "playwright.config.mjs",
+      "playwright.worklists.config.mjs",
+      "tsconfig.json"
+    ]
+  }
+}

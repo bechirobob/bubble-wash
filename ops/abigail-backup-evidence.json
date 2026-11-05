@@ -1,0 +1,33 @@
+{
+  "schema": "bubblewash-abigail-backup-evidence/v1",
+  "source": {
+    "runUrl": "https://github.com/bechirobob/bubble-wash/actions/runs/42039240864",
+    "jobId": 127285512084
+  },
+  "attestation": {
+    "archiveSize": 446501,
+    "backupCreatedAt": "2026-11-05T07:55:55.484Z",
+    "checkedAt": "2026-11-05T13:50:33.043788+00:00",
+    "context": {
+      "backupSha256": "900a2d14c1f4dd9ffa3cdcaac34e34c8ef055393b5566de1b98394a4076f3b39",
+      "controlSha": "e3587641d528e80da8db4e260aa8b8be5f2149c7",
+      "receiptRun": "41990651643",
+      "runAttempt": "1",
+      "runId": "42039240864",
+      "runtimeSha": "277a3f8df85068f3245ddc30a6c446d10d9bdc39",
+      "storeId": "1403152795",
+      "storeSha": "2fe787ae243bb8eb82827e224be87ed00796fccc"
+    },
+    "liveDatabaseOpened": false,
+    "liveSchemaVerified": false,
+    "permissionDdlSha256": "3e1e50935984130c5ae8a5102f25b17a4080f9d3e97b46590bd689d18682efdb",
+    "runtimeContentSha256": "0f51faabc32ad704507b5c4f946f067e8c01557831064a395b97e8b2610ac908",
+    "schema": "bubblewash-backup-schema-attestation/v1",
+    "schemaAfterSha256": "d49dadc10e6e27a3d7f3f7191f0288ca999dd8a53adca395f0c23a7615f61c8e",
+    "schemaBeforeSha256": "e08ba6c4178d96dbb177a057cf0b98ca4bd8f8ce4a9aee3b7cba28f6d73799cd",
+    "scratchRemoved": true,
+    "snapshotOnly": true
+  },
+  "liveSchemaAcceptance": null,
+  "deploymentAccepted": false
+}
