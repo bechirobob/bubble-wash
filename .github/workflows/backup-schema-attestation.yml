@@ -8,8 +8,16 @@ on:
       - ops/stream-backup-schema.py
       - tests/test_backup_schema_attestation.py
       - ops/integration-release/source-contracts.json
+      - ops/inspect-backup-schema-outcome.py
+      - ops/stream-backup-schema-outcome.py
+      - tests/test_backup_schema_outcome.py
   workflow_dispatch:
     inputs:
+      inspect_outcome:
+        description: Metadata only for failed run42022520775; never decrypt or retry
+        type: boolean
+        default: false
+        required: false
       source_sha:
         description: Exact reviewed main control commit
         type: string
@@ -45,10 +53,11 @@ jobs:
       - name: Verify focused schema-copy checks and exact runner
         run: |
           python3 -B -m unittest discover -s tests -p 'test_backup_schema_attestation.py' -v
+          python3 -B -m unittest discover -s tests -p 'test_backup_schema_outcome.py' -v
           python3 -B ops/integration-release/select_source.py --release "$PWD" --runner-only
   attest:
     needs: verify
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && !inputs.inspect_outcome && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
     environment: backup-storage
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -96,3 +105,41 @@ jobs:
             echo 'Backup attestation blocked. Inspect outcome and scratch cleanup before any retry.'
             exit 1
           fi
+  outcome:
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' && inputs.inspect_outcome && github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      INSPECT_OUTCOME: 'true'
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      EXPECTED_LIVE_SHA: ${{ inputs.expected_live_sha }}
+      BACKUP_SHA256: ${{ inputs.backup_sha256 }}
+      RECEIPT_RUN: ${{ inputs.receipt_run }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Require exact reviewed source and first attempt
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact runner before metadata inspection
+        run: |
+          set -euo pipefail
+          python3 -B ops/integration-release/select_source.py --release "$PWD" --runner-only
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+      - name: Connect through existing approved production tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Inspect only fixed failed-operation metadata
+        run: |
+          set -euo pipefail
+          python3 -B ops/stream-backup-schema-outcome.py | tailscale ssh root@hermes 'python3 -I -B -' 2>/dev/null
