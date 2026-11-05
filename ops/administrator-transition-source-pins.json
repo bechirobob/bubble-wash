@@ -3,7 +3,7 @@
   "sourceHashes": {
     ".github/backup/backup_release.py": "86d085e65b0e6dba906b57c296868da41b01c83982e5b93d6430fd73f05f6992",
     "ops/administrator-invitation-transition.ts": "110102f7136fae5d6b9231fa04dfff726fea737a43005971eed1677cde85421b",
-    "ops/administrator-transition-acceptance.json": "72ba858bad927fc47700330cd9427b65ef44f74c19507cd543140087a4d88eb4",
+    "ops/administrator-transition-acceptance.json": "468f62e31c7a3cbc687a7f304f5fa9dc1112a33282bfb301878e05620a62e3f4",
     "ops/administrator-transition-capsule.mjs": "d671e3eba0c1f539a32d7e621e35017a4067710bc1e8c1605e13c96fca6e30c2",
     "ops/administrator-transition-contract.py": "a87f12c8d0533eb82a492824819a92267217a652191ad304822356ed08eb34e4",
     "ops/administrator-transition-host.py": "1b06e30791becd92485f7a0851a7730428525e7d782b7511506985fa0099779f",
