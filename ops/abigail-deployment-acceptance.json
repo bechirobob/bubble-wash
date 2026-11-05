@@ -1,0 +1,24 @@
+{
+  "schema": "bubblewash-abigail-deployment-acceptance/v1",
+  "deploymentAccepted": true,
+  "actualBaseline": {
+    "runtimeSha": "277a3f8df85068f3245ddc30a6c446d10d9bdc39",
+    "runtimeContentSha256": "0f51faabc32ad704507b5c4f946f067e8c01557831064a395b97e8b2610ac908"
+  },
+  "runtimeAcceptance": {
+    "runtimeSha": "81ffd4acdff7f64d67767318813c75380a5d0b9c",
+    "runtimeTree": "381f1ab9bd9f5200955c3afc15a920ff047541b3",
+    "ciRun": "41995449420",
+    "browserRun": "41995449648"
+  },
+  "schemaAcceptance": {
+    "expectedBeforeSha256": "e08ba6c4178d96dbb177a057cf0b98ca4bd8f8ce4a9aee3b7cba28f6d73799cd",
+    "liveEqualityRequiredDuringExecution": true
+  },
+  "hostAcceptance": {
+    "walReadCoordination": true,
+    "serviceStopStart": true,
+    "codeOnlyRollback": true,
+    "sampledSchemaDoesNotExcludeOtherWriters": true
+  }
+}

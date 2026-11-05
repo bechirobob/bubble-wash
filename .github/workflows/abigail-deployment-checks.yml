@@ -1,0 +1,45 @@
+name: Verify guarded Abigail deployment controls
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/abigail-deployment-checks.yml
+      - .github/workflows/abigail-update-deploy.yml
+      - ops/abigail-*
+      - ops/deploy-abigail-update.py
+      - ops/integration-release/source-contracts.json
+      - tests/test_abigail_*.py
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/abigail-deployment-checks.yml
+      - .github/workflows/abigail-update-deploy.yml
+      - ops/abigail-*
+      - ops/deploy-abigail-update.py
+      - ops/integration-release/source-contracts.json
+      - tests/test_abigail_*.py
+permissions:
+  contents: read
+concurrency:
+  group: abigail-controls-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Verify complete reviewed control source
+        run: python3 -B ops/integration-release/select_source.py --release "$PWD" --runner-only
+      - name: Verify pinned invocation and source, schema and recovery gates
+        run: python3 -B -m unittest discover -s tests -p 'test_abigail_*.py' -v
+      - name: Verify unchanged inherited release recovery and holds
+        working-directory: tests
+        run: python3 -B -m unittest test_pwa_update_deploy.ReusedTransition.test_code_only_success test_pwa_update_deploy.ReusedTransition.test_code_rollback_preserves_late_data test_pwa_update_deploy.ReusedTransition.test_receipt_refuses test_pwa_update_deploy.ReleaseBaselineBinding test_pwa_update_deploy.Holds -v
