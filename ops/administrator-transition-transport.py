@@ -84,23 +84,52 @@ def write_private(path,raw):
     with os.fdopen(fd,'wb') as handle:handle.write(raw);handle.flush();os.fsync(handle.fileno())
 
 
+def release_body(raw):
+    # The caller has already validated this encrypted envelope. Never plaintext.
+    require(type(raw) is bytes and 0 < len(raw) <= 16384)
+    return json.dumps({'schema':'bubblewash-sealed-release-body/v1','bytes':len(raw),
+                      'sha256':hashlib.sha256(raw).hexdigest(),
+                      'envelopeBase64':base64.b64encode(raw).decode('ascii')},
+                     sort_keys=True,separators=(',',':'))
+
+
+def recover_release_body(body,expected_size,expected_sha256):
+    # Expected size/hash come from trusted issuance output, never this body alone.
+    require(type(body) is str and len(body) <= 23000 and
+            type(expected_size) is int and 0 < expected_size <= 16384 and
+            type(expected_sha256) is str and re.fullmatch('[a-f0-9]{64}',expected_sha256))
+    value=json.loads(body)
+    require(type(value) is dict and set(value)=={'schema','bytes','sha256','envelopeBase64'} and
+            value['schema']=='bubblewash-sealed-release-body/v1' and
+            type(value['bytes']) is int and value['bytes']==expected_size and
+            value['sha256']==expected_sha256 and type(value['envelopeBase64']) is str)
+    raw=base64.b64decode(value['envelopeBase64'],validate=True)
+    require(len(raw)==expected_size and hashlib.sha256(raw).hexdigest()==expected_sha256 and
+            release_body(raw)==body)
+    return raw
+
+
 def publish(backup,api,env,request,raw,host):
-    host.old.envelope(raw,request);store_preflight(backup,api,env)
+    host.old.envelope(raw,request);body=release_body(raw);store_preflight(backup,api,env)
     tag='bubblewash-administrator-transition-'+request['context']['runId']+'-1';ctx={'tag':tag,'storageSha':env['BACKUP_STORE_SHA']}
     with tempfile.TemporaryDirectory(prefix='sealed-administrator-transition-') as directory:
         work=Path(directory);encrypted=work/(tag+'.enc');write_private(encrypted,raw)
         digest=hashlib.sha256(raw).hexdigest();checksum=work/(tag+'.enc.sha256');write_private(checksum,(digest+'  '+encrypted.name+'\n').encode())
         expected={p.name:(p.stat().st_size,backup.digest(p)) for p in (encrypted,checksum)}
         release=api.api('releases','POST',{'tag_name':tag,'target_commitish':ctx['storageSha'],'name':tag,
-                  'body':'One-operation encrypted administrator handover. Not a database backup. No plaintext credentials or recipient metadata.',
+                  'body':body,
                   'draft':True,'prerelease':True,'make_latest':'false'})
-        identity=release['id'];require(type(identity) is int and identity>0)
+        identity=release['id'];require(type(identity) is int and identity>0 and release.get('body')==body)
         for item in (encrypted,checksum):api.upload(identity,item)
-        assets=backup.validate_release(api.api(f'releases/{identity}'),ctx,expected,True)
+        draft=api.api(f'releases/{identity}');require(draft.get('body')==body)
+        assets=backup.validate_release(draft,ctx,expected,True)
         for asset in assets:
             target=work/('verify-'+asset['name']);api.download(asset['id'],target,asset['size']);require(backup.digest(target)==expected[asset['name']][1])
         store_preflight(backup,api,env)
         final=api.api(f'releases/{identity}','PATCH',{'draft':False,'make_latest':'false'})
+        require(final.get('body')==body)
+        final=api.api(f'releases/{identity}');require(final.get('body')==body)
+        require(recover_release_body(final['body'],len(raw),digest)==raw)
         verified=backup.validate_release(final,ctx,expected,False);require(final.get('published_at') and {a['name']:a['id'] for a in verified}=={a['name']:a['id'] for a in assets})
         store_preflight(backup,api,env)
         return {'ok':True,'state':'sealed-handover-stored','retryPermitted':False,'context':host.old.context(request),'releaseId':identity,
