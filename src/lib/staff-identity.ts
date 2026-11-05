@@ -11,6 +11,8 @@ export type StaffUser = {
   role: StaffRole;
   entityId?: string;
   allStaffAccess?: boolean;
+  operationalWorkspaceAccess?: boolean;
+  surveyResultsAccess?: boolean;
   username?: string;
   temporaryAccess?: boolean;
   accessStartsAt?: number;

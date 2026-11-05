@@ -1,0 +1,20 @@
+{
+  "schema": "bubblewash-administrator-transition-sources/v1",
+  "sourceHashes": {
+    ".github/backup/backup_release.py": "86d085e65b0e6dba906b57c296868da41b01c83982e5b93d6430fd73f05f6992",
+    "ops/administrator-invitation-transition.ts": "110102f7136fae5d6b9231fa04dfff726fea737a43005971eed1677cde85421b",
+    "ops/administrator-transition-acceptance.json": "72ba858bad927fc47700330cd9427b65ef44f74c19507cd543140087a4d88eb4",
+    "ops/administrator-transition-capsule.mjs": "d671e3eba0c1f539a32d7e621e35017a4067710bc1e8c1605e13c96fca6e30c2",
+    "ops/administrator-transition-contract.py": "a87f12c8d0533eb82a492824819a92267217a652191ad304822356ed08eb34e4",
+    "ops/administrator-transition-host.py": "1b06e30791becd92485f7a0851a7730428525e7d782b7511506985fa0099779f",
+    "ops/customer-update-source-pins.json": "8c7b3397c658201b22474f4ac17b7aa2329c04d6cc0af03e5f41195ed443f6ba",
+    "ops/deploy-preserving.py": "29006085ee39680daa30fc34d05c3761b410f0f860835943eab8a60168da076a",
+    "ops/deploy-survey-only.py": "bb435e7a32baa516b8d89e65e64f2b2db0779657f6c25039130c9520f5d5e509",
+    "ops/deploy-survey-update.py": "8de4ce5d5f543bc52a4d81590490058681df4450dbe44702f426c97cf0fd4e0a",
+    "ops/exact-cleanup-host.py": "01593ea3cc688d43d489e929b7f391671f2abb381eb884d946996c8d8b3354c7",
+    "ops/host-facts/facts.py": "42ff5948773808b941ad2c9f8a7b6a6db95329b812d9d42ff2cf92b06df0f0eb",
+    "ops/owner-document-host.py": "02409c3032e86cf7897a7e939322425cb8c642d11fa3af8011d1c400f6ab362f",
+    "ops/owner-renewal-capsule.mjs": "a4da54a5a75e92c0dd60b1c066e4188055c5b43297452dd5a8120dd8c6c17b37",
+    "ops/owner-renewal-host.py": "6c3adbb9bd137f6e8e4176109a4ca29e853f79a4c7ac5850d810c2a4b5bee4d1"
+  }
+}

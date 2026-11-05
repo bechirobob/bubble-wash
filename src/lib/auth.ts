@@ -1,3 +1,4 @@
+import { canEnterOperationalWorkspaces } from "./staff-permissions.ts";
 import "server-only";
 import { environmentStaffUsers, resolveStaffUsers, type StaffRole, type StaffUser } from "./staff-identity.ts";
 import { listStaffAccounts } from "./staff-accounts.ts";
@@ -62,8 +63,8 @@ export function sanitizeNextPath(value?: string) {
 }
 
 // Only use with a server-validated session; workspace authorization stays in place.
-export function staffSessionDestination(user: Pick<StaffUser, "role" | "allStaffAccess">, next?: string) {
-  if (user.role === "admin") return user.allStaffAccess ? sanitizeNextPath(next) : "/admin";
+export function staffSessionDestination(user: Pick<StaffUser, "role" | "allStaffAccess" | "operationalWorkspaceAccess" | "temporaryAccess">, next?: string) {
+  if (user.role === "admin") return canEnterOperationalWorkspaces(user) ? sanitizeNextPath(next) : "/admin";
   return { vendor: "/vendors", driver: "/drivers", support: "/support" }[user.role];
 }
 
@@ -123,7 +124,10 @@ export function decodeSession(value?: string, users?: StaffUser[], database?: Pa
       const proof = ownerMfaProof(user, database);
       if (!proof || !session.ownerMfaProof || !safeEqual(session.ownerMfaProof, proof)) return null;
     }
-    return { email: session.email, role: session.role, name: user.name, entityId: user.entityId, allStaffAccess: user.role === "admin" && user.allStaffAccess === true && !user.temporaryAccess, ...(user.temporaryAccess ? { temporaryAccess: true, username: user.username, accessExpiresAt: user.accessExpiresAt } : {}) };
+    return {
+      operationalWorkspaceAccess: user.role === "admin" && !user.temporaryAccess && user.operationalWorkspaceAccess === true,
+      surveyResultsAccess: user.role === "admin" && !user.temporaryAccess && user.surveyResultsAccess === true,
+      email: session.email, role: session.role, name: user.name, entityId: user.entityId, allStaffAccess: user.role === "admin" && user.allStaffAccess === true && !user.temporaryAccess, ...(user.temporaryAccess ? { temporaryAccess: true, username: user.username, accessExpiresAt: user.accessExpiresAt } : {}) };
   } catch {
     return null;
   }

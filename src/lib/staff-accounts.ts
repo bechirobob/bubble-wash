@@ -18,7 +18,9 @@ export function initializeStaffAccountsSchema(database: ReturnType<typeof getDat
 export function listStaffAccounts(database = db()) {
   const hasCapabilities = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'staff_owner_capabilities'").get());
   const capability = hasCapabilities ? "EXISTS (SELECT 1 FROM staff_owner_capabilities c WHERE c.email = staff_accounts.email AND c.all_staff_access = 1)" : "0";
-  return database.prepare(`SELECT email, name, role, entity_id AS entityId, password_hash AS passwordHash, credential_version AS credentialVersion, status, updated_at AS updatedAt, ${capability} AS allStaffAccess FROM staff_accounts ORDER BY name`).all().map((row) => ({ ...(row as StaffAccount), allStaffAccess: Boolean((row as StaffAccount).allStaffAccess) })) as StaffAccount[];
+  const hasPermissions = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'staff_admin_permissions'").get());
+  const permission = (column: string) => hasPermissions ? `EXISTS (SELECT 1 FROM staff_admin_permissions p WHERE p.email = staff_accounts.email AND p.${column} = 1)` : "0";
+  return database.prepare(`SELECT email, name, role, entity_id AS entityId, password_hash AS passwordHash, credential_version AS credentialVersion, status, updated_at AS updatedAt, ${capability} AS allStaffAccess, ${permission("operational_workspaces")} AS operationalWorkspaceAccess, ${permission("survey_results")} AS surveyResultsAccess FROM staff_accounts ORDER BY name`).all().map((row) => ({ ...(row as StaffAccount), allStaffAccess: Boolean((row as StaffAccount).allStaffAccess), operationalWorkspaceAccess: Boolean((row as StaffAccount).operationalWorkspaceAccess), surveyResultsAccess: Boolean((row as StaffAccount).surveyResultsAccess) })) as StaffAccount[];
 }
 function audit(email: string, action: string, actor: string) {
   appendSubmissionRecord({ id: `BW-${randomUUID()}`, createdAt: new Date().toISOString(), source: "staff-account-administration", data: { submissionType: "staff-account-action", staffEmail: email, actionType: action, submittedByEmail: actor } });

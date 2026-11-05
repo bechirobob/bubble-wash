@@ -10,5 +10,5 @@ export default async function SurveyResultsPage() {
   const user = await getCurrentStaffUser();
   if (!user) redirect('/login?next=/admin');
   if (!canViewResearchResults(user)) redirect('/admin');
-  return <ResearchResults userName={user.name} />;
+  return <ResearchResults userName={user.name} allStaffAccess={user.allStaffAccess} operationalWorkspaceAccess={user.operationalWorkspaceAccess} />;
 }

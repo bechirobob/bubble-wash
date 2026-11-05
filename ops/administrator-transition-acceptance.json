@@ -1,0 +1,9 @@
+{
+  "schema": "bubblewash-administrator-transition-acceptance/v1",
+  "deploymentAccepted": false,
+  "runtimeSha": null,
+  "runtimePins": null,
+  "runtimeSources": null,
+  "schemaBeforeSha256": null,
+  "schemaAfterSha256": null
+}
