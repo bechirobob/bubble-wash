@@ -1,9 +1,58 @@
 {
   "schema": "bubblewash-administrator-transition-acceptance/v1",
-  "deploymentAccepted": false,
-  "runtimeSha": null,
-  "runtimePins": null,
-  "runtimeSources": null,
-  "schemaBeforeSha256": null,
-  "schemaAfterSha256": null
+  "deploymentAccepted": true,
+  "runtimeSha": "81ffd4acdff7f64d67767318813c75380a5d0b9c",
+  "runtimePins": {
+    "runtimeSha": "81ffd4acdff7f64d67767318813c75380a5d0b9c",
+    "candidateSource": {
+      "next.config.mjs": "99485a62a52b87f6b17c2732d43bd7eb090984b3fbf74dfcf0637db17831fc02",
+      "package-lock.json": "9ccc8d6a3295ef01cb10a3c54e2be0381fbb5593300444e686e5c19923f35323",
+      "package.json": "57c2bef550ffb359e9e3b481f0afd7cee1c32e6d35df8f7e153b2da0d7b18400",
+      "src": "e4acb8e94e0387021166f4503d82b3aba2cc94acb8b74e6ab270e064185ec232",
+      "tsconfig.json": "2545dfb1c43a7c5ae010d7d6457b3dd3cf2df435f3116d8568f9e13b346ff42c"
+    },
+    "runtimeContent": {
+      "directories": 119,
+      "files": 713,
+      "sha256": "8e4e46a137db09fc884ac10a59728e495f5eb3a3bf152872b3fb2e57010355ea"
+    },
+    "sourceScope": {
+      "directories": [
+        ".github",
+        "db",
+        "docs",
+        "ops",
+        "public",
+        "scripts",
+        "src",
+        "tests",
+        "tooling"
+      ],
+      "excludedSubtrees": [
+        "tooling/next-eslint-glob/node_modules",
+        "tooling/minimatch-compat/node_modules"
+      ],
+      "rootFiles": [
+        ".env.production.example",
+        ".env.uat.example",
+        ".gitignore",
+        "DESIGN.md",
+        "README.md",
+        "eslint.config.mjs",
+        "next.config.mjs",
+        "package-lock.json",
+        "package.json",
+        "playwright.config.mjs",
+        "playwright.worklists.config.mjs",
+        "tsconfig.json"
+      ]
+    }
+  },
+  "runtimeSources": {
+    "ops/administrator-invitation-transition.ts": "110102f7136fae5d6b9231fa04dfff726fea737a43005971eed1677cde85421b",
+    "src/lib/staff-accounts.ts": "e52d8d58779729ece155e304b0749df6c3d76db8a908e26d9772a6b0dcac1975",
+    "src/lib/data-store.ts": "a2eace631471b4c3df5217396e3765c8981fd8735934b2d2fdd3165cac42fa24"
+  },
+  "schemaBeforeSha256": "e08ba6c4178d96dbb177a057cf0b98ca4bd8f8ce4a9aee3b7cba28f6d73799cd",
+  "schemaAfterSha256": "d49dadc10e6e27a3d7f3f7191f0288ca999dd8a53adca395f0c23a7615f61c8e"
 }

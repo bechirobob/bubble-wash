@@ -35,7 +35,7 @@ class AdapterTests(unittest.TestCase):
   for name in transport.SOURCE_PINS:transport.source(name)
   raw=transport.payload(req,pins);compile(raw,'synthetic','exec');self.assertIn(b'old.owner=owner',raw)
  def test_acceptance_false_stops_before_any_invocation(self):
-  with mock.patch.object(transport,'module',side_effect=AssertionError('No invocation permitted')),redirect_stdout(io.StringIO()) as out:
+  with mock.patch.object(transport,'source',return_value=json.dumps({'deploymentAccepted':False}).encode()),mock.patch.object(transport,'input_request',side_effect=AssertionError('No request permitted')),mock.patch.object(transport,'module',side_effect=AssertionError('No invocation permitted')),redirect_stdout(io.StringIO()) as out:
    with self.assertRaises(SystemExit):transport.main()
   result=json.loads(out.getvalue());self.assertEqual(result['state'],'blocked');self.assertEqual(result['stage'],'input');self.assertFalse(result['retryPermitted'])
  def test_ambiguous_host_and_storage_outcomes_stop(self):
