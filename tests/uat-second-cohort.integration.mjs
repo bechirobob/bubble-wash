@@ -35,7 +35,8 @@ const snapshot=()=>JSON.stringify(['staff_uat_accounts','staff_uat_audit','vendo
 const hasSecond=()=>db.prepare("SELECT 1 FROM sqlite_master WHERE name='uat_second_cohort_handover'").get();
 try {
   assert.throws(()=>second.secondCohortState());
-  const base={approved:true,ready:true,publicKey,operationId:randomUUID(),notBefore:Date.now(),approvedUntil:Date.now()+300000};
+  const notBefore=Date.now();
+  const base={approved:true,ready:true,publicKey,operationId:randomUUID(),notBefore,approvedUntil:notBefore+300000};
   assert.throws(()=>issueSecondCohort({...base,expectedStateSha256:secondCohortState()}),'cannot bootstrap originals');
   upsertVendorAvailability({vendorId:'uat-vendor-one',vendorName:'UAT Laundry One',serviceZones:['Osu'],serviceTypes:['Wash + fold'],capacityRemaining:10,availabilityStatus:'available',updatedBy:'synthetic-test'});
   upsertDriverAvailability({driverId:'uat-driver-one',driverName:'UAT Driver One',serviceZones:['Osu'],capacityRemaining:10,availabilityStatus:'active',updatedBy:'synthetic-test'});
