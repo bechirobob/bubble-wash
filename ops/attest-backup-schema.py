@@ -41,6 +41,11 @@ def validate(request):
     require(type(request['backupSha256']) is str and re.fullmatch('[a-f0-9]{64}', request['backupSha256']))
 
 
+def validate_marker(marker, current):
+    # Match the unchanged release writer, including its directory-name binding.
+    require(marker == {'sha': LIVE, 'release': current.name, 'path': str(current)})
+
+
 def decrypt(archive, key):
     require(37 < len(archive) <= MAX_BYTES + 37)
     require(type(key) is str and base64.b64encode(base64.b64decode(key, validate=True)).decode() == key and len(base64.b64decode(key)) == 32)
@@ -169,7 +174,16 @@ def snapshot_hashes(plain, directory):
         db.close()
 
 
-def attest(request):
+def diagnostics():
+    # Only code-selected labels/statuses; never copy request or exception values.
+    return {'phase': 'request', 'configurationRead': 'not-started',
+            'decryption': 'not-started', 'scratchCreation': 'not-started',
+            'cleanup': 'not-applicable'}
+
+
+def attest(request, progress=None):
+    if progress is None:
+        progress = diagnostics()
     validate(request)
     require(os.geteuid() == 0)
     owner = pwd.getpwnam('ubuntu')
@@ -178,21 +192,29 @@ def attest(request):
     signal.signal(signal.SIGTERM, stop); signal.signal(signal.SIGALRM, stop); signal.alarm(120)
     scratch = None
     try:
+        progress['phase'] = 'deployment-lock'
         with core.deployment_lock(core.RUNTIME, owner.pw_uid) as unchanged:
+            progress['phase'] = 'release-marker'
             current = core.CURRENT.resolve(strict=True)
             require(core.CURRENT.is_symlink())
             marker_path = core.RUNTIME/'current-release'
             marker_raw = guards.inspect_read(marker_path, owner, 'current')
             marker = core.parse(marker_raw)
-            require(marker == {'sha': LIVE, 'path': str(current)})
+            validate_marker(marker, current)
+            progress['phase'] = 'runtime-source'
             require(guards.inspect_read(current/'.release-sha', owner, 'current', 128).decode().strip() == LIVE)
             require(pins['runtimeSha'] == LIVE and core.source_manifest(current) == pins['candidateSource'])
             source_files, source_identity = scanner.source_snapshot(current, owner)
             require(scanner.content_commitment(source_files) == pins['runtimeContent'])
+            progress['phase'] = 'configuration'
+            progress['configurationRead'] = 'started'
             raw, env_identity = guards.environment_snapshot(core.ENV, owner, None)
+            progress['configurationRead'] = 'completed'
             values = core.parse(raw)
             require('BUBBLEWASH_UAT_ENABLED' not in values and values.get('NODE_ENV') in (None, 'production'))
+            progress['phase'] = 'runtime-process'
             core.check_runtime(current, values)  # Process/config reads only; no health endpoint.
+            progress['phase'] = 'backup-receipt'
             protected_backup_path(core.RECEIPT, values, owner)
             receipt_raw = read_backup(core.RECEIPT, values, owner)
             receipt = json.loads(receipt_raw)
@@ -205,19 +227,31 @@ def attest(request):
             status_raw = read_backup(status_path, values, owner)
             core.verify_receipt(receipt, json.loads(status_raw), time.time(), request['receiptRun'], request['storeSha'], int(request['storeId']))
             require(receipt['sha256'] == request['backupSha256'] and 37 < receipt['size'] <= MAX_BYTES + 37)
+            progress['phase'] = 'backup-archive'
             archive_bytes = read_backup(archive, values, owner, MAX_BYTES + 37)
             require(len(archive_bytes) == receipt['size'] and hashlib.sha256(archive_bytes).hexdigest() == request['backupSha256'])
+            progress['phase'] = 'node-identity'
             node = Path('/usr/bin/node')
             require(node.resolve(strict=True) == node and node.stat().st_uid == 0 and not node.stat().st_mode & 0o022 and core.digest(node) == NODE_SHA)
             # Existing key is used only inside this host process and its private pipe.
+            progress['phase'] = 'scratch-guard'
             guards.safe_path(Path('/run'), pwd.getpwuid(0), True)
             require(not list(Path('/run').glob('bubblewash-schema-attestation-*')))
             scratch_path = Path('/run')/('bubblewash-schema-attestation-'+request['runId'])
+            progress['phase'] = 'scratch-create'
+            progress['scratchCreation'] = 'started'
+            progress['cleanup'] = 'unknown'
             scratch_path.mkdir(mode=0o700)
             scratch = scratch_path
+            progress['scratchCreation'] = 'completed'
+            progress['phase'] = 'decryption'
+            progress['decryption'] = 'started'
             plain = decrypt(archive_bytes, values.get('BUBBLEWASH_BACKUP_ENCRYPTION_KEY'))
+            progress['decryption'] = 'completed'
+            progress['phase'] = 'snapshot-schema'
             before_hash, after_hash = snapshot_hashes(plain, scratch)
             del plain
+            progress['phase'] = 'binding-revalidation'
             unchanged()
             require(core.CURRENT.resolve(strict=True) == current and guards.inspect_read(marker_path, owner, 'current') == marker_raw)
             require(guards.environment_snapshot(core.ENV, owner, hashlib.sha256(raw).hexdigest()) == (raw, env_identity))
@@ -238,14 +272,25 @@ def attest(request):
                       'checkedAt': core.dt.datetime.now(core.dt.timezone.utc).isoformat()}
         return result
     finally:
-        clean_scratch(scratch)
+        if scratch is not None:
+            progress['cleanup'] = 'started'
+        try:
+            clean_scratch(scratch)
+        except Exception:
+            progress['phase'] = 'cleanup'
+            raise
+        if scratch is not None:
+            progress['cleanup'] = 'removed-verified'
 
 
 def main(request):
+    progress = diagnostics()
     try:
-        result = attest(request)
+        result = attest(request, progress)
     except Exception:
         # Fixed failure only: never serialize SQL, config, keys, filenames or stderr.
-        print('{"schema":"bubblewash-backup-schema-attestation/v1","state":"blocked-inspect-outcome-before-retry"}')
+        print(json.dumps({'schema': 'bubblewash-backup-schema-attestation/v1',
+                          'state': 'blocked-inspect-outcome-before-retry',
+                          'diagnostics': progress}, sort_keys=True))
         raise SystemExit(1)
     print(json.dumps({**result, 'scratchRemoved': True}, sort_keys=True))
