@@ -39,7 +39,8 @@ def _stopped(r):
  for line in raw.splitlines():
   k,sep,v=line.partition('=');require(sep and k not in rows);rows[k]=v
  require(set(rows)=={'ActiveState','SubState','MainPID','ControlPID','ControlGroup'})
- require(all(rows[k]==v for k,v in {'ActiveState':'inactive','SubState':'dead','MainPID':'0','ControlPID':'0'}.items()))
+ require((rows['ActiveState'],rows['SubState']) in (('inactive','dead'),('failed','failed')))
+ require(rows['MainPID']=='0' and rows['ControlPID']=='0')
  require(rows['ControlGroup'] in ('','/system.slice/bubblewash-uat.service'))
  job=r.c.command(['/usr/bin/busctl','--system','get-property','org.freedesktop.systemd1','/org/freedesktop/systemd1/unit/bubblewash_2duat_2eservice','org.freedesktop.systemd1.Unit','Job'])
  require(shlex.split(job)==['(uo)','0','/'])

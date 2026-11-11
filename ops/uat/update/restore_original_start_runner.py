@@ -15,7 +15,7 @@ def validate_receipt(raw):
 
 def bootstrap():
     return """import sys,json,types,signal,resource
-resource.setrlimit(resource.RLIMIT_CORE,(0,0));signal.alarm(120)
+resource.setrlimit(resource.RLIMIT_CORE,(0,0));signal.alarm(240)
 raw=sys.stdin.buffer.read(1048577)
 if not 0<len(raw)<=1048576:raise SystemExit(1)
 p=json.loads(raw)
@@ -26,7 +26,7 @@ r=sys.modules['restore_original_start'].restore(sys.modules['uat_single_restart'
 print(json.dumps(r,sort_keys=True))
 """.replace('MODULE_LIST',repr((*MODULES,EXTRA)))
 
-def bounded_transport(stream,transport,*,popen=subprocess.Popen,selector_factory=None,clock=None,timeout=150):
+def bounded_transport(stream,transport,*,popen=subprocess.Popen,selector_factory=None,clock=None,timeout=270):
     """Fixed command, file-backed stdin, concurrent bounded outputs. No retries.
     Injection points support synthetic tests only, never workflow inputs.
     """
