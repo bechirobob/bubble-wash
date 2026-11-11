@@ -1,8 +1,9 @@
 # Isolated UAT update controls: prepared, not deployed
 
 This package implements one guarded update of the existing isolated UAT service.
-There is no installed GitHub workflow: `uat-update.workflow.template.yml` is a
-hard-disabled template. No host operation has been performed by this change.
+The reviewed `.github/workflows/uat-update.yml` supports explicit approved dispatch only.
+`uat-update.workflow.template.yml` remains hard-disabled as the review baseline.
+No host operation occurs on push or pull request.
 
 ## Scope
 - Existing original runtime f4fd4ce; exact reviewed main candidate/control SHA.
