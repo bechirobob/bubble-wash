@@ -230,3 +230,20 @@ test("failed close append rolls back its capacity release transaction", () => {
   assert.equal(store.listDriverAvailability()[0].capacityRemaining, 0);
   assert.deepEqual(store.releaseAssignmentCapacity(assigned.reservationId), { vendorReleases: 1, driverReleases: 1 });
 });
+
+test("assignment failure explains independent service, coverage, state and capacity restrictions without reserving", () => {
+  store.resetDataStoreForTests();
+  store.upsertVendorAvailability({ vendorId: "fold", vendorName: "Fold only", serviceZones: ["Osu"], serviceTypes: ["Wash + fold"], capacityRemaining: 20, availabilityStatus: "available", updatedBy: "Admin" });
+  store.upsertVendorAvailability({ vendorId: "iron", vendorName: "Ironing vendor", serviceZones: ["Accra"], serviceTypes: ["Wash + iron + fold"], capacityRemaining: 0, availabilityStatus: "paused", updatedBy: "Admin" });
+  store.upsertDriverAvailability({ driverId: "driver", driverName: "Driver", serviceZones: ["Osu"], capacityRemaining: 19, availabilityStatus: "active", updatedBy: "Admin" });
+  const order = { orderId: "BW-UAT-REASONS", area: "Osu", serviceType: "Wash + iron + fold", vendor: "Unassigned", driver: "Unassigned" };
+  const before = store.listDriverAvailability()[0].capacityRemaining;
+  assert.throws(() => assignment.assignOrderFromAvailability(order), error => {
+    assert.match(error.message, /^No eligible vendor matches Osu/);
+    for (const reason of ["Service capability does not match", "Approved coverage does not match", "Partner is not accepting orders", "No available capacity"]) assert.ok(error.message.includes(reason));
+    assert.doesNotMatch(error.message, /Fold only|Ironing vendor|No eligible driver/);
+    return true;
+  });
+  assert.equal(store.listDriverAvailability()[0].capacityRemaining, before);
+  assert.equal(store.listVendorAvailability().find(row => row.vendorId === "fold").capacityRemaining, 20);
+});
