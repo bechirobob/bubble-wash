@@ -120,7 +120,14 @@ try {
   assert.equal((await teamPost({...child,role:'admin'})).status,400);
   assert.equal((await teamPost({...child,role:'owner'})).status,400);
   assert.equal((await teamPost({...child,expiresAt:now+UAT_WINDOW_MS})).status,400);
-  assert.equal((await teamPost({...child,role:'vendor',entityId:'missing'})).status,400);
+  const missingVendor = await teamPost({...child,role:'vendor',entityId:'missing'});
+  assert.equal(missingVendor.status,400);
+  assert.match((await missingVendor.json()).error,/Choose an existing vendor/);
+  const shortPassword = await teamPost({...child,password:'short'});
+  assert.equal(shortPassword.status,400); assert.match((await shortPassword.json()).error,/14–200/);
+  const chooser = await (await withSession(teamCookie,team.GET)).json();
+  assert.deepEqual(chooser.roster.map(row=>[row.id,row.role]).sort(), [['synthetic-driver','driver'],['synthetic-vendor','vendor']]);
+  assert.doesNotMatch(JSON.stringify(chooser.roster),/password|capacity|email|phone/);
   const childResponse=await teamPost(child); assert.equal(childResponse.status,200);
   const childData=await childResponse.json();
   assert.equal(childData.account.startsAt,startsAt);
@@ -130,6 +137,9 @@ try {
   const childSession=auth.encodeSession(auth.findStaffUser(child.username,password));
   assert.equal((await teamPost({action:'revoke',username:child.username})).status,200);
   assert.equal(auth.decodeSession(childSession),null,'admin revocation invalidates existing child session');
+  const revokedDuplicate = await teamPost(child);
+  assert.equal(revokedDuplicate.status,400); assert.match((await revokedDuplicate.json()).error,/revoked usernames cannot be reused/);
+  assert.equal(auth.findStaffUser(child.username,password),null,'failed recreation cannot restore revoked access');
   assert.equal((await teamPost({action:'revoke',username:'uat.general-admin'})).status,400,'cannot revoke administrator');
   createUatAccount({...child,username:'different-cohort',startsAt:now},'operator',db);
   assert.throws(()=>revokeUatTeamAccount('different-cohort',adminIdentity,db),/test group/);

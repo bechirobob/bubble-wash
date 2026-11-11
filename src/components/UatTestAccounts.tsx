@@ -1,6 +1,6 @@
 "use client";
 import { FormEvent, useEffect, useState } from "react";
-type Team = { accounts: { username: string; name: string; role: string; entityId: string; status: string }[]; expiresAt: number; remaining: number; limit: number };
+type Team = { accounts: { username: string; name: string; role: string; entityId: string; status: string }[]; roster: { id: string; name: string; role: string }[]; expiresAt: number; remaining: number; limit: number };
 export function UatTestAccounts() {
   const [team, setTeam] = useState<Team | null>(null);
   const [status, setStatus] = useState("");
@@ -45,10 +45,10 @@ export function UatTestAccounts() {
         <label>Name<input name="name" required maxLength={100} /></label>
         <label>Username<input name="username" required minLength={3} maxLength={64} pattern="[a-z][a-z0-9._\-]{2,63}" autoComplete="off" /></label>
         <label>Role<select name="role" value={newRole} onChange={event => setNewRole(event.target.value)}><option value="support">Support</option><option value="vendor">Vendor</option><option value="driver">Driver</option></select></label>
-        <label>Staff record ID<input name="entityId" disabled={newRole === "support"} required={newRole !== "support"} placeholder="Required for Vendor and Driver" /></label>
+        {newRole !== "support" && <label>Staff record<select key={newRole} name="entityId" required defaultValue=""><option value="" disabled>Choose a {newRole}</option>{team?.roster.filter(record => record.role === newRole).map(record => <option key={record.id} value={record.id}>{record.name} · {record.id}</option>)}</select></label>}
         <label>Temporary password<input name="password" type="password" required minLength={14} maxLength={200} autoComplete="new-password" /></label>
       </div>
-      <p>Use a unique password of at least 14 characters. Keep it in the approved private handover: it cannot be viewed here again. Vendor and Driver users need an existing test staff record.</p>
+      <p>Use a unique password of at least 14 characters. Keep it in the approved private handover: it cannot be viewed here again. Choose the matching staff record for Vendor or Driver access. This does not make a paused vendor or driver available for orders.</p>
       <button className="button primary" disabled={pending || !team || team.remaining === 0}>{pending ? "Saving…" : "Create test user"}</button>
     </form></details>
     <p role="status">{status}</p>
