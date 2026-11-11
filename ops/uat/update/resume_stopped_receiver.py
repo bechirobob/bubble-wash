@@ -18,7 +18,15 @@ def require(ok):
 
 def commitments(path):
  require(path in (DATABASE,WORK/'snapshot.sqlite'))
- db=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=2)
+ wal=Path(str(path)+'-wal');shm=Path(str(path)+'-shm')
+ owner=path.stat().st_uid
+ for sibling in (wal,shm,Path(str(path)+'-journal')):
+  if os.path.lexists(sibling):
+   info=sibling.lstat();require(stat.S_ISREG(info.st_mode) and info.st_uid==owner and stat.S_IMODE(info.st_mode)==0o600 and info.st_nlink==1)
+   if sibling.name.endswith('-journal'):require(info.st_size==0)
+ has_wal=wal.exists() and wal.stat().st_size>0
+ require(not has_wal or (shm.exists() and shm.stat().st_size>0))
+ db=sqlite3.connect(path.as_uri()+'?mode=ro'+('' if has_wal else '&immutable=1'),uri=True,timeout=2)
  try:
   db.execute('PRAGMA query_only=ON');db.execute('PRAGMA trusted_schema=OFF');db.execute('BEGIN')
   fp=fs.database_fingerprints(db)
@@ -96,6 +104,7 @@ def receive(stream,request,r,original,candidate,execution_deadline):
   try:fs.closed_snapshot(data,DATABASE.name,work,'snapshot.sqlite',baseline['schema'],baseline['accounts'])
   finally:os.close(data)
   require(commitments(WORK/'snapshot.sqlite')==baseline);stable();event('done:'+stage)
+  require(execution_deadline-time.monotonic()>=120 and int(time.time()*1000)<OLD_EXPIRY-120000)
   stage='extension';event('enter:'+stage)
   extend_offline(r,baseline,request['operationId'],owner)
   extended=commitments(DATABASE)
