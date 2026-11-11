@@ -105,6 +105,7 @@ export function issueUatCohort(accounts: Omit<UatAccountInput, "startsAt">[], ac
   }).immediate();
 }
 
+export class UatAccountInputError extends Error {}
 export const UAT_COHORT_ACCOUNT_LIMIT = 20;
 type UatActor = { email: string; role: string; temporaryAccess?: boolean };
 function uatAdministrator(actor: UatActor, database: Database) {
@@ -120,16 +121,31 @@ export function listUatTeam(actor: UatActor, database?: Database) {
   const administrator = uatAdministrator(actor, db);
   const accounts = rows(db).filter(a => a.startsAt === administrator.accessStartsAt && a.expiresAt === administrator.accessExpiresAt);
   return { expiresAt: administrator.accessExpiresAt, limit: UAT_COHORT_ACCOUNT_LIMIT, remaining: Math.max(0, UAT_COHORT_ACCOUNT_LIMIT - accounts.length),
-    accounts: accounts.filter(a => a.role !== "admin").map(({username,name,role,entityId,status}) => ({username,name,role,entityId,status})) };
+    accounts: accounts.filter(a => a.role !== "admin").map(({username,name,role,entityId,status}) => ({username,name,role,entityId,status})),
+    roster: [
+      ...(db.prepare("SELECT 1 FROM sqlite_master WHERE name='vendor_availability'").get()
+        ? (db.prepare("SELECT vendor_id AS id, vendor_name AS name FROM vendor_availability ORDER BY vendor_name, vendor_id").all() as {id:string;name:string}[]).map(record => ({...record, role: "vendor"})) : []),
+      ...(db.prepare("SELECT 1 FROM sqlite_master WHERE name='driver_availability'").get()
+        ? (db.prepare("SELECT driver_id AS id, driver_name AS name FROM driver_availability ORDER BY driver_name, driver_id").all() as {id:string;name:string}[]).map(record => ({...record, role: "driver"})) : []),
+    ] };
 }
 export function createUatTeamAccount(input: Omit<UatAccountInput, "startsAt">, actor: UatActor, database?: Database) {
   assertUatEnvironment();
-  if (!["vendor", "driver", "support"].includes(input.role)) throw new Error("Choose Vendor, Driver or Support test access.");
+  if (!["vendor", "driver", "support"].includes(input.role)) throw new UatAccountInputError("Choose Vendor, Driver or Support test access.");
   const db = database ?? getDatabase();
   return db.transaction(() => {
     const administrator = uatAdministrator(actor, db);
     const count = rows(db).filter(a => a.startsAt === administrator.accessStartsAt && a.expiresAt === administrator.accessExpiresAt).length;
-    if (count >= UAT_COHORT_ACCOUNT_LIMIT) throw new Error("This test group's account limit has been reached.");
+    if (count >= UAT_COHORT_ACCOUNT_LIMIT) throw new UatAccountInputError("This test group's account limit has been reached, including revoked users.");
+    const username = input.username.trim().toLowerCase();
+    if (!usernamePattern.test(username)) throw new UatAccountInputError("Use 3–64 lowercase letters, numbers, dots, underscores or hyphens. Start with a letter.");
+    if (!input.name.trim() || input.name.trim().length > 100) throw new UatAccountInputError("Enter a name of 1–100 characters.");
+    if (input.password.length < 14 || input.password.length > 200) throw new UatAccountInputError("Use a unique password of 14–200 characters.");
+    if (rows(db).some(account => account.username === username)) throw new UatAccountInputError("That username is already used. Choose a new one; revoked usernames cannot be reused.");
+    const entityId = input.entityId?.trim() ?? "";
+    if (input.role === "support" && entityId) throw new UatAccountInputError("Support users do not need a staff record.");
+    if (input.role === "vendor" && !db.prepare("SELECT 1 FROM vendor_availability WHERE vendor_id=?").get(entityId)) throw new UatAccountInputError("Choose an existing vendor from the staff list.");
+    if (input.role === "driver" && !db.prepare("SELECT 1 FROM driver_availability WHERE driver_id=?").get(entityId)) throw new UatAccountInputError("Choose an existing driver from the staff list.");
     const account = createUatAccountAt({...input, startsAt: administrator.accessStartsAt!}, actor.email, db, administrator.accessStartsAt!);
     // A slow password hash or concurrent deadline must never create usable access
     // after the original reviewer window. The transaction rolls back on failure.

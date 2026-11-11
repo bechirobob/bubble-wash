@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentStaffUser, type StaffRole } from "@/lib/auth";
 import { staffWriteGuard } from "@/lib/security";
-import { createUatTeamAccount, listUatTeam, revokeUatTeamAccount } from "@/lib/uat-accounts";
+import { createUatTeamAccount, listUatTeam, revokeUatTeamAccount, UatAccountInputError } from "@/lib/uat-accounts";
 import { uatModeEnabled } from "@/lib/uat-environment";
 import { clientKey, isRateLimited } from "@/lib/rate-limit";
 const headers = { "Cache-Control": "no-store" };
@@ -34,7 +34,8 @@ export async function POST(request: NextRequest) {
       entityId: typeof body.entityId === "string" ? body.entityId : "", password: typeof body.password === "string" ? body.password : "" };
     const account = createUatTeamAccount(input, user);
     return NextResponse.json({ ok: true, account, message: "Test user created. Share their username and password privately. Access ends with this test period." }, { headers });
-  } catch {
+  } catch (error) {
+    if (error instanceof UatAccountInputError) return NextResponse.json({ ok: false, error: error.message }, { status: 400, headers });
     return NextResponse.json({ ok: false, error: "Unable to update test access. Check the username, role, staff record, password and remaining account allowance." }, { status: 400, headers });
   }
 }
