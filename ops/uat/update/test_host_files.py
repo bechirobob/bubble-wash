@@ -32,6 +32,24 @@ class Tests(unittest.TestCase):
   self.assertGreater((self.root/'release.tgz').stat().st_size,1024*1024)
   extract_candidate(self.fd,'release.tgz','candidate',sha,'a'*40,pins)
   self.assertEqual((self.root/'candidate/public/random.bin').read_bytes(),payload)
+ def test_1500_directories_with_files_under_fd_limit256(self):
+  import resource
+  _,pins=self.artifact()
+  raw=(self.root/'release.tgz').read_bytes()
+  with tarfile.open(fileobj=io.BytesIO(raw),mode='r:gz') as original,tarfile.open(self.root/'release.tgz','w:gz') as archive:
+   for member in original:archive.addfile(member,original.extractfile(member) if member.isfile() else None)
+   for i in range(1500):
+    name='node_modules/fd-regression-%04d'%i
+    directory=tarfile.TarInfo(name);directory.type=tarfile.DIRTYPE;archive.addfile(directory)
+    item=tarfile.TarInfo(name+'/index.js');payload=b'synthetic';item.size=len(payload);archive.addfile(item,io.BytesIO(payload))
+  sha=hashlib.sha256((self.root/'release.tgz').read_bytes()).hexdigest()
+  previous=resource.getrlimit(resource.RLIMIT_NOFILE)
+  try:
+   resource.setrlimit(resource.RLIMIT_NOFILE,(min(256,previous[1]),previous[1]))
+   extract_candidate(self.fd,'release.tgz','candidate',sha,'a'*40,pins)
+  finally:resource.setrlimit(resource.RLIMIT_NOFILE,previous)
+  self.assertEqual((self.root/'candidate/node_modules/fd-regression-1499/index.js').read_bytes(),b'synthetic')
+  self.assertEqual((self.root/'candidate/node_modules/fd-regression-0000').stat().st_mode&0o777,0o755)
  def test_cross_parent_exchange(self):
   (self.root/'update').mkdir();(self.root/'app').mkdir();(self.root/'update/candidate').mkdir();(self.root/'app/old').touch();(self.root/'update/candidate/new').touch()
   other=os.open(self.root/'update',os.O_RDONLY|os.O_DIRECTORY)
