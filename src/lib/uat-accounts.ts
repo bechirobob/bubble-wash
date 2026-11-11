@@ -23,6 +23,49 @@ function rows(database: Database): UatAccount[] {
   if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='staff_uat_accounts'").get()) return [];
   return database.prepare("SELECT username, name, role, entity_id AS entityId, password_hash AS passwordHash, credential_version AS credentialVersion, starts_at AS startsAt, expires_at AS expiresAt, status FROM staff_uat_accounts").all() as UatAccount[];
 }
+// Extension grants leave the original issuance record and seven-day CHECK intact.
+// A grant is tied to the exact credential version and cannot revive an account.
+function effectiveDeadline(database: Database, account: UatAccount): number {
+  if (account.status !== "active" || !database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='staff_uat_extensions'").get()) return account.expiresAt;
+  const grant = database.prepare("SELECT starts_at, original_expires_at, expires_at, credential_version FROM staff_uat_extensions WHERE username=?").get(account.username) as {starts_at:number; original_expires_at:number; expires_at:number; credential_version:string} | undefined;
+  return grant && grant.credential_version === account.credentialVersion && grant.starts_at === account.startsAt &&
+    grant.original_expires_at === account.expiresAt && Number.isSafeInteger(grant.expires_at) &&
+    grant.expires_at === account.expiresAt + UAT_WINDOW_MS ? grant.expires_at : account.expiresAt;
+}
+
+// Operator-only, explicit one-week extension. No HTTP route and no credential reset.
+// expectedUsernames must enumerate the complete active cohort observed by the operator.
+export function extendUatCohort(input: {startsAt:number; originalExpiresAt:number; expiresAt:number; expectedUsernames:string[]; operationId:string}, actor:string, database?:Database) {
+  assertUatEnvironment();
+  const db = database ?? getDatabase();
+  const now = Date.now();
+  if (!Number.isSafeInteger(input.startsAt) || !Number.isSafeInteger(input.originalExpiresAt) || !Number.isSafeInteger(input.expiresAt) ||
+      input.originalExpiresAt - input.startsAt !== UAT_WINDOW_MS || input.expiresAt - input.originalExpiresAt !== UAT_WINDOW_MS ||
+      now < input.startsAt || now >= input.originalExpiresAt || !actor.trim() || actor.length > 160 ||
+      !/^[a-zA-Z0-9-]{8,80}$/.test(input.operationId) || !Array.isArray(input.expectedUsernames) ||
+      !input.expectedUsernames.length || input.expectedUsernames.some(name => typeof name !== "string" || !usernamePattern.test(name)) ||
+      new Set(input.expectedUsernames).size !== input.expectedUsernames.length) throw new Error("Invalid approved UAT extension.");
+  return db.transaction(() => {
+    const active = rows(db).filter(a => a.status === "active" && a.startsAt === input.startsAt && a.expiresAt === input.originalExpiresAt);
+    if (JSON.stringify(active.map(a => a.username).sort()) !== JSON.stringify([...input.expectedUsernames].sort()) ||
+        !active.some(a => a.role === "admin") || active.some(a => !validPasswordHash(a.passwordHash) || matchesKnownDemoPassword(a.passwordHash))) throw new Error("UAT cohort changed; inspect before extending.");
+    db.exec("CREATE TABLE IF NOT EXISTS staff_uat_extensions (username TEXT PRIMARY KEY COLLATE NOCASE, credential_version TEXT NOT NULL, starts_at INTEGER NOT NULL, original_expires_at INTEGER NOT NULL, expires_at INTEGER NOT NULL CHECK (expires_at - original_expires_at = 604800000), operation_id TEXT NOT NULL, created_at INTEGER NOT NULL)");
+    let applied = 0;
+    for (const account of active) {
+      const existing = db.prepare("SELECT * FROM staff_uat_extensions WHERE username=?").get(account.username) as {credential_version:string; starts_at:number; original_expires_at:number; expires_at:number; operation_id:string} | undefined;
+      if (existing) {
+        if (existing.credential_version !== account.credentialVersion || existing.starts_at !== account.startsAt || existing.original_expires_at !== account.expiresAt || existing.expires_at !== input.expiresAt || existing.operation_id !== input.operationId) throw new Error("Conflicting UAT extension; no changes applied.");
+        continue;
+      }
+      db.prepare("INSERT INTO staff_uat_extensions VALUES (?,?,?,?,?,?,?)").run(account.username, account.credentialVersion, account.startsAt, account.expiresAt, input.expiresAt, input.operationId, now);
+      audit(db, account.username, "extended-seven-days", actor, account.startsAt, input.expiresAt);
+      applied++;
+    }
+    if (Date.now() >= input.originalExpiresAt) throw new Error("Original UAT period ended during extension.");
+    return {extended:applied, total:active.length, expiresAt:input.expiresAt};
+  }).immediate();
+}
+
 export function currentUatUsers(database?: Database, now = Date.now()): StaffUser[] {
   // An unsafe or disabled environment cannot authenticate temporary identities.
   try { assertUatEnvironment(); } catch { return []; }
@@ -30,20 +73,20 @@ export function currentUatUsers(database?: Database, now = Date.now()): StaffUse
   const accounts = rows(db);
   // Authorization uses the deadline itself, not this audit housekeeping. Even
   // without a scheduler, the first post-deadline request is denied immediately.
-  const expired = accounts.filter(a => a.status === "active" && now >= a.expiresAt);
+  const expired = accounts.filter(a => a.status === "active" && now >= effectiveDeadline(db, a));
   if (expired.length && !db.readonly) db.transaction(() => {
     for (const a of expired) {
       const changed = db.prepare("UPDATE staff_uat_accounts SET status='expired', password_hash='', credential_version=? WHERE username=? AND status='active'").run(randomUUID(), a.username).changes;
-      if (changed) audit(db, a.username, "expired", "system:deadline", a.startsAt, a.expiresAt);
+      if (changed) audit(db, a.username, "expired", "system:deadline", a.startsAt, effectiveDeadline(db, a));
     }
   }).immediate();
   return accounts.filter(a => a.status === "active" && usernamePattern.test(a.username) &&
     Number.isSafeInteger(a.startsAt) && Number.isSafeInteger(a.expiresAt) && a.expiresAt - a.startsAt === UAT_WINDOW_MS &&
-    now >= a.startsAt && now < a.expiresAt && validPasswordHash(a.passwordHash) && !matchesKnownDemoPassword(a.passwordHash) &&
+    now >= a.startsAt && now < effectiveDeadline(db, a) && validPasswordHash(a.passwordHash) && !matchesKnownDemoPassword(a.passwordHash) &&
     ["admin", "vendor", "driver", "support"].includes(a.role) && (!(a.role === "vendor" || a.role === "driver") || Boolean(a.entityId)))
     .map(a => ({ name: a.name, email: a.username, username: a.username, role: a.role, entityId: a.entityId || undefined,
       passwordHash: a.passwordHash, credentialVersion: a.credentialVersion, temporaryAccess: true,
-      accessStartsAt: a.startsAt, accessExpiresAt: a.expiresAt, allStaffAccess: false }));
+      accessStartsAt: a.startsAt, accessExpiresAt: effectiveDeadline(db, a), allStaffAccess: false }));
 }
 
 // Operator-only local provisioning primitive. No HTTP endpoint, email, token or
@@ -113,13 +156,14 @@ function uatAdministrator(actor: UatActor, database: Database) {
   if (actor.role !== "admin" || !actor.temporaryAccess) throw new Error("UAT administrator access is required.");
   const administrator = currentUatUsers(database).find(user => user.email === actor.email && user.role === "admin");
   if (!administrator?.temporaryAccess || !administrator.accessStartsAt || !administrator.accessExpiresAt) throw new Error("UAT administrator access is unavailable.");
-  return administrator;
+  const original = rows(database).find(a => a.username === administrator.email)!;
+  return {...administrator, cohortExpiresAt: original.expiresAt};
 }
 export function listUatTeam(actor: UatActor, database?: Database) {
   assertUatEnvironment();
   const db = database ?? getDatabase();
   const administrator = uatAdministrator(actor, db);
-  const accounts = rows(db).filter(a => a.startsAt === administrator.accessStartsAt && a.expiresAt === administrator.accessExpiresAt);
+  const accounts = rows(db).filter(a => a.startsAt === administrator.accessStartsAt && a.expiresAt === administrator.cohortExpiresAt);
   return { expiresAt: administrator.accessExpiresAt, limit: UAT_COHORT_ACCOUNT_LIMIT, remaining: Math.max(0, UAT_COHORT_ACCOUNT_LIMIT - accounts.length),
     accounts: accounts.filter(a => a.role !== "admin").map(({username,name,role,entityId,status}) => ({username,name,role,entityId,status})),
     roster: [
@@ -135,7 +179,8 @@ export function createUatTeamAccount(input: Omit<UatAccountInput, "startsAt">, a
   const db = database ?? getDatabase();
   return db.transaction(() => {
     const administrator = uatAdministrator(actor, db);
-    const count = rows(db).filter(a => a.startsAt === administrator.accessStartsAt && a.expiresAt === administrator.accessExpiresAt).length;
+    if (Date.now() >= administrator.cohortExpiresAt) throw new UatAccountInputError("This test group is closed to new users.");
+    const count = rows(db).filter(a => a.startsAt === administrator.accessStartsAt && a.expiresAt === administrator.cohortExpiresAt).length;
     if (count >= UAT_COHORT_ACCOUNT_LIMIT) throw new UatAccountInputError("This test group's account limit has been reached, including revoked users.");
     const username = input.username.trim().toLowerCase();
     if (!usernamePattern.test(username)) throw new UatAccountInputError("Use 3–64 lowercase letters, numbers, dots, underscores or hyphens. Start with a letter.");
@@ -149,7 +194,7 @@ export function createUatTeamAccount(input: Omit<UatAccountInput, "startsAt">, a
     const account = createUatAccountAt({...input, startsAt: administrator.accessStartsAt!}, actor.email, db, administrator.accessStartsAt!);
     // A slow password hash or concurrent deadline must never create usable access
     // after the original reviewer window. The transaction rolls back on failure.
-    if (Date.now() >= administrator.accessExpiresAt!) throw new Error("This test period has ended.");
+    if (Date.now() >= administrator.cohortExpiresAt) throw new Error("This test period has ended.");
     return account;
   }).immediate();
 }
@@ -159,7 +204,7 @@ export function revokeUatTeamAccount(username: string, actor: UatActor, database
   return db.transaction(() => {
     const administrator = uatAdministrator(actor, db);
     const target = rows(db).find(a => a.username === username.trim().toLowerCase() && a.role !== "admin" &&
-      a.startsAt === administrator.accessStartsAt && a.expiresAt === administrator.accessExpiresAt);
+      a.startsAt === administrator.accessStartsAt && a.expiresAt === administrator.cohortExpiresAt);
     if (!target) throw new Error("Choose a staff test account from this test group.");
     revokeUatAccount(target.username, actor.email, db);
   }).immediate();

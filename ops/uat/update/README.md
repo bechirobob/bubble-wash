@@ -47,3 +47,15 @@ It does not claim to defend against a concurrently malicious root operator.
 Do not invoke the adapter manually, remove retained update folders/markers to
 retry, repin historical restoration controls or use the production deployment
 workflow as a substitute.
+
+
+### Stopped-attempt continuation with approved extension
+`uat-resume-extension.yml` is a separate first-attempt route for the exact
+2026-11-11 stopped journal. It must never be used as a generic recovery.
+It preserves that journal and old app, stages a fixed candidate and an identical
+extension-aware recovery build, snapshots the stopped database, and appends
+explicit seven-day grants for the complete active original cohort. It does not
+reset passwords, change original account rows, revive revoked users, or alter
+production. There is no automatic retry or rollback. After grant issuance,
+never start the pre-extension original code: it would expire credentials at
+the original deadline. Any uncertain receipt requires inspection first.
