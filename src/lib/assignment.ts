@@ -141,7 +141,15 @@ export function assignOrderFromAvailability(order: AvailabilityAssignmentOrder):
     isUnassigned(order.driver) && !driverRow ? "driver" : "",
   ].filter(Boolean);
   if (missing.length) {
-    throw new Error(`No eligible ${missing.join(" or ")} matches ${order.area || "this order's route"}. Update approved coverage or capacity before assigning.`);
+    const candidates = assignmentCandidates(order);
+    const details = missing.map((kind) => {
+      const rows = kind === "vendor" ? candidates.vendors : candidates.drivers;
+      if (!rows.length) return `No ${kind}s are in the roster.`;
+      const counts = new Map<string, number>();
+      for (const row of rows) for (const reason of row.reasons) counts.set(reason, (counts.get(reason) ?? 0) + 1);
+      return `${kind === "vendor" ? "Vendors" : "Drivers"}: ${[...counts].map(([reason, count]) => `${reason} (${count})`).join("; ")}.`;
+    });
+    throw new Error(`No eligible ${missing.join(" or ")} matches ${order.area || "this order's route"}. ${details.join(" ")} Check the roster before assigning.`);
   }
   const { vendor: reservedVendor, driver: reservedDriver, reservationId } = reserveAssignmentCapacity(order.orderId, vendorRow?.vendorId, driverRow?.driverId);
   const vendorNameValue = isUnassigned(order.vendor) ? (reservedVendor?.vendorName ?? "Needs admin review") : order.vendor;
@@ -169,7 +177,8 @@ export function assignmentCandidates(order: AvailabilityAssignmentOrder) {
   const declined = new Set(listVendorDeclines(order.orderId).map((item) => item.vendorId));
   const vendors = listVendorAvailability().map((vendor) => {
     const reasons = [
-      ...(!statusAllowsVendor(vendor) ? ["No available capacity or partner is paused"] : []),
+      ...(!vendorStatusAssignable(vendor.availabilityStatus) ? ["Partner is not accepting orders"] : []),
+      ...(vendor.capacityRemaining <= 0 ? ["No available capacity"] : []),
       ...(!serviceMatches(vendor, order.serviceType) ? ["Service capability does not match"] : []),
       ...(!listMatches(vendor.serviceZones, order.area) ? ["Approved coverage does not match"] : []),
       ...(declined.has(vendor.vendorId) ? ["Partner declined this order"] : []),
@@ -178,7 +187,8 @@ export function assignmentCandidates(order: AvailabilityAssignmentOrder) {
   });
   const drivers = listDriverAvailability().map((driver) => {
     const reasons = [
-      ...(!statusAllowsDriver(driver) ? ["No route slots or rider is not active"] : []),
+      ...(/(inactive|suspended|offboarded|paused|training|tomorrow)/.test(driver.availabilityStatus.toLowerCase()) ? ["Driver is not active"] : []),
+      ...(driver.capacityRemaining <= 0 ? ["No route slots available"] : []),
       ...(!listMatches(driver.serviceZones, order.area) ? ["Approved coverage does not match"] : []),
     ];
     return { driverId: driver.driverId, name: driver.driverName, capacityRemaining: driver.capacityRemaining, reasons, eligible: reasons.length === 0 };
