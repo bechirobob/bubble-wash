@@ -50,7 +50,7 @@ def diagnose(r,original,candidate):
    live=resume.commitments(resume.DATABASE);result['live-readable']=True
    result['original-expiry']=all(start==resume.OLD_EXPIRY-604800000 and end==resume.OLD_EXPIRY for _,start,end in live['active'])
    result['extension-absent']='staff_uat_extensions' not in live['records']
-   if result['snapshot-private']:
+   if result['snapshot-integrity']:
     copy=resume.commitments(snapshot);result['snapshot-readable']=True
     result['snapshot-schema-matches']=copy['schema']==live['schema'];result['snapshot-accounts-match']=copy['accounts']==live['accounts'];result['snapshot-records-match']=copy['records']==live['records']
   except Exception:pass
