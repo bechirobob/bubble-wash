@@ -64,6 +64,16 @@ def artifact_digest(fd):
     while chunk:=os.pread(fd,1024*1024,offset):h.update(chunk);offset+=len(chunk)
     return h.hexdigest()
 
+def open_relative_directory(root,name):
+    """Bounded descriptors: root plus at most two traversal descriptors."""
+    fd=os.dup(root)
+    try:
+        for part in name.split('/') if name else ():
+            nxt=os.open(component(part),os.O_RDONLY|os.O_DIRECTORY|NOFOLLOW,dir_fd=fd)
+            os.close(fd);fd=nxt
+        return fd
+    except BaseException:os.close(fd);raise
+
 def extract_candidate(parent,artifact_name,candidate_name,expected_sha,revision,source_pins):
     """Verify one held regular archive; extract into new private directory.
     source_pins must come from independent reviewed source, not archive contents.
@@ -101,7 +111,6 @@ def extract_candidate(parent,artifact_name,candidate_name,expected_sha,revision,
             # Re-hash held archive after inspection to detect concurrent edits.
             if artifact_digest(fd)!=expected_sha or identity(os.fstat(fd))!=identity(before):raise Refused('archive changed')
             out=private_directory(parent,candidate_name)
-            dirs={'':out}
             try:
                 if '.next/cache' in seen and not seen['.next/cache'].isdir():raise Refused('cache target must be a directory')
                 all_dirs={'','.next','.next/cache'}
@@ -110,22 +119,32 @@ def extract_candidate(parent,artifact_name,candidate_name,expected_sha,revision,
                     for i in range(1,len(parts)+(1 if m.isdir() else 0)):all_dirs.add('/'.join(parts[:i]))
                 for name in sorted(all_dirs-{''},key=lambda x:(x.count('/'),x)):
                     parentname,_,base=name.rpartition('/')
-                    dirs[name]=private_directory(dirs[parentname],base)
+                    parent_fd=open_relative_directory(out,parentname)
+                    try:
+                        child=private_directory(parent_fd,base)
+                        os.close(child)
+                    finally:os.close(parent_fd)
                 for name,m in seen.items():
                     if not m.isfile():continue
                     parentname,_,base=name.rpartition('/')
-                    target=os.open(base,os.O_WRONLY|os.O_CREAT|os.O_EXCL|NOFOLLOW,0o644,dir_fd=dirs[parentname])
+                    parent_fd=open_relative_directory(out,parentname)
                     try:
-                        src=archive.extractfile(m);size=0
-                        while chunk:=src.read(1024*1024):_write(target,chunk);size+=len(chunk)
-                        if size!=m.size:raise Refused('archive truncated')
-                        os.fchmod(target,0o644);os.fsync(target)
-                    finally:os.close(target)
-                # App tree becomes service-readable only after full extraction.
-                # The enclosing protected update directory remains 0700.
-                for d in dirs.values():os.fchmod(d,0o755);os.fsync(d)
-            finally:
-                for d in dirs.values():os.close(d)
+                        target=os.open(base,os.O_WRONLY|os.O_CREAT|os.O_EXCL|NOFOLLOW,0o644,dir_fd=parent_fd)
+                        try:
+                            src=archive.extractfile(m);size=0
+                            while chunk:=src.read(1024*1024):_write(target,chunk);size+=len(chunk)
+                            if size!=m.size:raise Refused('archive truncated')
+                            os.fchmod(target,0o644);os.fsync(target)
+                        finally:os.close(target)
+                        os.fsync(parent_fd)
+                    finally:os.close(parent_fd)
+                # Candidate stays beneath private WORK; chmod only after complete
+                # extraction. Open/close each directory rather than retaining N fds.
+                for name in sorted(all_dirs,key=lambda x:(-x.count('/'),x)):
+                    directory_fd=open_relative_directory(out,name)
+                    try:os.fchmod(directory_fd,0o755);os.fsync(directory_fd)
+                    finally:os.close(directory_fd)
+            finally:os.close(out)
         if artifact_digest(fd)!=expected_sha or identity(os.fstat(fd))!=identity(before):raise Refused('archive changed during extraction')
         # Parent must be exclusively controlled by reviewed root operator.
         # Holding inode prevents pathname replacement, not privileged concurrent writes.
