@@ -48,7 +48,42 @@ try {
   assert.ok(auth.findStaffUser('review-admin',account.password),'same password works beyond original expiry');
   assert.equal(auth.decodeSession(session),null,'old cookie retains its own cutoff');
   assert.equal(database.prepare("SELECT status FROM staff_uat_accounts WHERE username='review-admin'").get().status,'active');
-  assert.throws(()=>createUatTeamAccount({...account,username:'new-user',role:'support'},actor));
+  database.exec("CREATE TABLE vendor_availability (vendor_id TEXT PRIMARY KEY, vendor_name TEXT); INSERT INTO vendor_availability VALUES ('synthetic-vendor','Synthetic Vendor'); CREATE TABLE driver_availability (driver_id TEXT PRIMARY KEY, driver_name TEXT); INSERT INTO driver_availability VALUES ('synthetic-driver','Synthetic Driver');");
+  const originalRows=database.prepare("SELECT * FROM staff_uat_accounts WHERE username IN ('review-admin','review-support') ORDER BY username").all();
+  const newTeam = (username, role='support', entityId) => createUatTeamAccount({...account,username,role,entityId},actor);
+  for (const role of ['admin','owner']) assert.throws(()=>newTeam('forbidden-'+role,role));
+  assert.throws(()=>newTeam('bad-vendor','vendor','not-a-vendor'));
+  assert.throws(()=>newTeam('bad-driver','driver','not-a-driver'));
+  assert.throws(()=>createUatTeamAccount({...account,username:'not-admin',role:'support'},{...actor,role:'support'}));
+  database.exec("CREATE TRIGGER fail_inheritance BEFORE INSERT ON staff_uat_audit WHEN NEW.action='inherited-cohort-extension' BEGIN SELECT RAISE(ABORT,'synthetic inheritance failure'); END");
+  assert.throws(()=>newTeam('rollback-user'),/synthetic inheritance failure/);
+  assert.equal(database.prepare("SELECT 1 FROM staff_uat_accounts WHERE username='rollback-user'").get(),undefined);
+  assert.equal(database.prepare("SELECT 1 FROM staff_uat_extensions WHERE username='rollback-user'").get(),undefined);
+  database.exec('DROP TRIGGER fail_inheritance');
+  const vendorId=database.prepare('SELECT vendor_id FROM vendor_availability LIMIT 1').get().vendor_id;
+  const driverId=database.prepare('SELECT driver_id FROM driver_availability LIMIT 1').get().driver_id;
+  for (const [username,role,entityId] of [['new-support','support',undefined],['new-vendor','vendor',vendorId],['new-driver','driver',driverId]]) {
+    assert.equal(newTeam(username,role,entityId).expiresAt,request.expiresAt);
+    const user=auth.findStaffUser(username,account.password);
+    assert.equal(user.accessExpiresAt,request.expiresAt);
+    assert.equal(user.role,role); assert.equal(user.allStaffAccess,false);
+    assert.equal(user.entityId,entityId);
+  }
+  assert.deepEqual(database.prepare("SELECT * FROM staff_uat_accounts WHERE username IN ('review-admin','review-support') ORDER BY username").all(),originalRows,'existing credentials and issuance records unchanged');
+  assert.equal(listUatTeam(actor).remaining,14,'inherited users remain in original cohort cap');
+  revokeUatTeamAccount('new-support',actor);
+  assert.equal(auth.findStaffUser('new-support',account.password),null);
+  assert.throws(()=>newTeam('new-support'),'revoked usernames cannot be reused');
+  database.function('advance_to_deadline',()=>{ now=request.expiresAt; return 1; });
+  database.exec("CREATE TRIGGER cross_deadline AFTER INSERT ON staff_uat_audit WHEN NEW.action='created' AND NEW.username='deadline-race' BEGIN SELECT advance_to_deadline(); END");
+  assert.throws(()=>newTeam('deadline-race'),/test period has ended/);
+  assert.equal(database.prepare("SELECT 1 FROM staff_uat_accounts WHERE username='deadline-race'").get(),undefined,'deadline crossing rolls back account');
+  assert.equal(database.prepare("SELECT 1 FROM staff_uat_extensions WHERE username='deadline-race'").get(),undefined,'deadline crossing rolls back grant');
+  database.exec('DROP TRIGGER cross_deadline'); now=expiresAt;
+  for(let i=0;i<14;i++) newTeam('cap-user-'+i);
+  assert.equal(listUatTeam(actor).remaining,0);
+  assert.throws(()=>newTeam('over-cap'),/account limit/);
+  const inheritedSession=auth.encodeSession(auth.findStaffUser('new-vendor',account.password));
   assert.throws(()=>extendUatCohort(request,'test'),'no fresh writes after original cutoff');
   revokeUatTeamAccount('review-support',actor);
   assert.equal(auth.findStaffUser('review-support',account.password),null,'extension does not bypass revocation');
@@ -57,6 +92,9 @@ try {
   now=request.expiresAt; assert.equal(auth.findStaffUser('review-admin',account.password),null,'exact new deadline enforced');
   assert.equal(database.prepare("SELECT status FROM staff_uat_accounts WHERE username='review-admin'").get().status,'expired');
   assert.equal(auth.decodeSession(fresh),null);
+  assert.equal(auth.findStaffUser('new-vendor',account.password),null,'inherited access ends at same exact deadline');
+  assert.equal(auth.decodeSession(inheritedSession),null);
+  assert.throws(()=>newTeam('after-deadline'));
   process.env.BUBBLEWASH_UAT_ENABLED='false'; assert.throws(()=>extendUatCohort(request,'test'));
   console.log('UAT explicit extension, original records, revoked users, cohort, session and deadline checks passed');
 } finally { Date.now=realNow; database.close(); rmSync(directory,{recursive:true,force:true}); }

@@ -179,7 +179,7 @@ export function createUatTeamAccount(input: Omit<UatAccountInput, "startsAt">, a
   const db = database ?? getDatabase();
   return db.transaction(() => {
     const administrator = uatAdministrator(actor, db);
-    if (Date.now() >= administrator.cohortExpiresAt) throw new UatAccountInputError("This test group is closed to new users.");
+    if (Date.now() >= administrator.accessExpiresAt!) throw new UatAccountInputError("This test group is closed to new users.");
     const count = rows(db).filter(a => a.startsAt === administrator.accessStartsAt && a.expiresAt === administrator.cohortExpiresAt).length;
     if (count >= UAT_COHORT_ACCOUNT_LIMIT) throw new UatAccountInputError("This test group's account limit has been reached, including revoked users.");
     const username = input.username.trim().toLowerCase();
@@ -192,10 +192,18 @@ export function createUatTeamAccount(input: Omit<UatAccountInput, "startsAt">, a
     if (input.role === "vendor" && !db.prepare("SELECT 1 FROM vendor_availability WHERE vendor_id=?").get(entityId)) throw new UatAccountInputError("Choose an existing vendor from the staff list.");
     if (input.role === "driver" && !db.prepare("SELECT 1 FROM driver_availability WHERE driver_id=?").get(entityId)) throw new UatAccountInputError("Choose an existing driver from the staff list.");
     const account = createUatAccountAt({...input, startsAt: administrator.accessStartsAt!}, actor.email, db, administrator.accessStartsAt!);
-    // A slow password hash or concurrent deadline must never create usable access
-    // after the original reviewer window. The transaction rolls back on failure.
-    if (Date.now() >= administrator.cohortExpiresAt) throw new Error("This test period has ended.");
-    return account;
+    // Keep the original cohort record and cap. A new permitted team member may
+    // inherit only this administrator's validated, already-approved deadline.
+    if (administrator.accessExpiresAt! > administrator.cohortExpiresAt) {
+      const grant = db.prepare("SELECT operation_id FROM staff_uat_extensions WHERE username=?").get(administrator.email) as {operation_id:string};
+      const created = rows(db).find(a => a.username === account.username)!;
+      db.prepare("INSERT INTO staff_uat_extensions VALUES (?,?,?,?,?,?,?)").run(created.username, created.credentialVersion, created.startsAt, created.expiresAt, administrator.accessExpiresAt!, grant.operation_id, Date.now());
+      audit(db, created.username, "inherited-cohort-extension", actor.email, created.startsAt, administrator.accessExpiresAt!);
+    }
+    // A slow password hash must not issue access past the approved deadline.
+    // Both the account and inherited grant roll back together on failure.
+    if (Date.now() >= administrator.accessExpiresAt!) throw new Error("This test period has ended.");
+    return {...account, expiresAt: administrator.accessExpiresAt!};
   }).immediate();
 }
 export function revokeUatTeamAccount(username: string, actor: UatActor, database?: Database) {
