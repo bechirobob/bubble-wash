@@ -1,0 +1,58 @@
+name: Inspect or complete retained UAT code snapshot
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed main controls for inspect or approved snapshot completion
+        required: true
+        type: string
+      mode: {type: choice, options: [inspect, complete], default: inspect, required: true}
+      admin_route_approved: {type: boolean, default: false}
+      interruption_approved: {type: boolean, default: false}
+      quiet_window_coordinated: {type: boolean, default: false}
+permissions:
+  contents: read
+concurrency:
+  group: bubblewash-production
+  cancel-in-progress: false
+jobs:
+  inspect:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main'
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      PYTHONDONTWRITEBYTECODE: '1'
+      RECOVERY_MODE: ${{ inputs.mode }}
+      ADMIN_ROUTE_APPROVED: ${{ inputs.admin_route_approved }}
+      INTERRUPTION_APPROVED: ${{ inputs.interruption_approved }}
+      QUIET_WINDOW_COORDINATED: ${{ inputs.quiet_window_coordinated }}
+    steps:
+      - name: Require exact reviewed source and first attempt
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Exact runner and successful main release checks
+        run: |
+          [[ "$ADMIN_ROUTE_APPROVED" == true ]]
+          python3 -B ops/integration-release/select_source.py --release . --runner-only
+          TARGET_SHA="$SOURCE_SHA" python3 -B ops/check-release-ci.py
+          if [[ "$RECOVERY_MODE" == complete ]]; then
+            [[ "$ADMIN_ROUTE_APPROVED" == true && "$INTERRUPTION_APPROVED" == true && "$QUIET_WINDOW_COORDINATED" == true ]]
+          fi
+      - name: Test exact stopped recovery
+        run: python3 -B -m unittest discover -s ops/uat/update -p 'test_*.py' -v
+      - name: Connect through the existing approved tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Inspect retained state or continue exact approved candidate
+        run: python3 -B ops/uat/update/code_snapshot_runner.py
