@@ -332,7 +332,9 @@ export async function submitForm(request: Request, nativeBooking = false) {
       const adminIsOnboarding = staffUser.role === "admin" && ["vendor-application", "driver-onboarding", "staff-onboarding"].includes(submissionType);
       if (!adminIsOnboarding) {
         body.name = staffUser.name;
-        body.email = staffUser.email;
+        // UAT usernames are audit identities, not contact email addresses.
+        // New-contact onboarding keeps its own validation above this branch.
+        body.email = staffUser.temporaryAccess ? "" : staffUser.email;
         body.company = text(body.company) || (staffUser.role === "vendor" ? "Vendor partner" : staffUser.role === "driver" ? "Bubble Wash Route Team" : staffUser.role === "support" ? "Bubble Wash Support" : "Bubble Wash Operations");
       }
     }

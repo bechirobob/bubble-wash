@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { projectStaffActivityRecord, staffActivitySubject } from "../src/lib/staff-activity-projection.ts";
+import { projectStaffActivityRecord, staffActivitySubject, recordedIntakeCount } from "../src/lib/staff-activity-projection.ts";
 
 const source = {
   id: "BW-ACTIVITY-PRIVACY",
@@ -165,4 +165,18 @@ test("linked activity headings use visible references while audit identities rem
   for (const role of ["support", "vendor", "driver"]) {
     assert.equal(projectStaffActivityRecord({ ...event, data: { ...event.data, bookingReference: "customer@example.invalid" } }, role).data.bookingReference, null);
   }
+});
+
+
+test("recorded intake reads persisted bagCount without using later journey counts", () => {
+  const entry = (minute, submissionType, data) => ({ id: String(minute), createdAt: new Date(2026, 0, 1, 0, minute).toISOString(), data: { orderId: "synthetic-order", submissionType, ...data } });
+  const intake = entry(1, "qr-bag-intake", { bagCount: "2", receivedWeightKg: "6.00 kg" });
+  const later = [entry(2, "vendor-job-update", { bagCount: "7" }), entry(3, "driver-route-log", { bagCount: "9" })];
+  const projected = [intake, ...later].map(record => projectStaffActivityRecord(record, "vendor"));
+  assert.equal(recordedIntakeCount(projected, "synthetic-order"), 2);
+  assert.equal(recordedIntakeCount(later, "synthetic-order"), null);
+  assert.equal(recordedIntakeCount(projected, "different-order"), null);
+  assert.equal(recordedIntakeCount([intake, entry(4, "qr-bag-intake", { bagCount: "3" })], "synthetic-order"), 3);
+  assert.equal(recordedIntakeCount([entry(1, "legacy-intake", { intakeBagCount: "4" })], "synthetic-order"), 4);
+  for (const bagCount of ["", "0", "-1", "2.5", "invalid", "10001"]) assert.equal(recordedIntakeCount([entry(1, "qr-bag-intake", { bagCount })], "synthetic-order"), null);
 });
