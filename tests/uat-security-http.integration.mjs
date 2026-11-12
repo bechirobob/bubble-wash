@@ -19,7 +19,7 @@ Object.assign(process.env, {
   BUBBLEWASH_TRUST_PROXY_HEADERS: 'true',
 });
 for (const key of ['PAYSTACK_SECRET_KEY','RESEND_API_KEY','WHATSAPP_ACCESS_TOKEN','WHATSAPP_PHONE_NUMBER_ID','BUBBLEWASH_RESEARCH_RESEND_KEY','BUBBLEWASH_OWNER_RESEND_KEY','NEXT_PUBLIC_BUBBLEWASH_WHATSAPP','NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL']) delete process.env[key];
-const { getDatabase } = await import('../src/lib/data-store.ts');
+const { getDatabase, appendSubmissionRecord, findSubmissionRecordById } = await import('../src/lib/data-store.ts');
 const { issueUatCohort, createUatTeamAccount, createUatAccount, revokeUatTeamAccount, UAT_WINDOW_MS } = await import('../src/lib/uat-accounts.ts');
 const auth = await import('../src/lib/auth.ts');
 const { GET: readiness } = await import('../src/app/api/uat/ready/route.ts');
@@ -115,6 +115,27 @@ try {
   assert.equal((await withSession('',team.GET)).status,403);
   const supportCookie=auth.encodeSession(auth.findStaffUser('uat.support',password));
   assert.equal((await withSession(supportCookie,()=>team.POST(request('/api/uat/accounts',child)))).status,403);
+  const ticketId='BW-SYNTHETIC-SUPPORT';
+  appendSubmissionRecord({id:ticketId,createdAt:new Date(now).toISOString(),source:'synthetic-route',data:{submissionType:'support-ticket',company:'Bubble Wash Route Team',ticketStatus:'Open',message:'Synthetic pickup delay'}});
+  const caseAction={submissionType:'support-ticket-action',ticketId,ticketStatus:'Resolved',message:'Synthetic route delay investigated and resolved.'};
+  const caseResult=await withSession(supportCookie,()=>submissions.POST(request('/api/submit',caseAction)));
+  assert.equal(caseResult.status,200,'username-authenticated support can resolve system case without contact email');
+  const savedAction=findSubmissionRecordById((await caseResult.json()).id);
+  assert.equal(savedAction.data.ticketStatus,'Resolved');
+  assert.equal(savedAction.data.email,'');
+  assert.equal(savedAction.data.submittedByEmail,'uat.support','audit identity retained separately');
+  assert.equal((await withSession(supportCookie,()=>submissions.POST(request('/api/submit',{...caseAction,ticketStatus:'Open',message:'Synthetic follow-up requires reopening.'})))).status,200);
+  const careId='BW-SYNTHETIC-CARE';
+  appendSubmissionRecord({id:careId,createdAt:new Date(now).toISOString(),source:'synthetic-customer',data:{submissionType:'support-ticket',customerAction:'care',ticketStatus:'Resolved',message:'Synthetic garment care request'}});
+  assert.equal((await withSession(supportCookie,()=>submissions.POST(request('/api/submit',{...caseAction,ticketId:careId,ticketStatus:'Open'})))).status,200,'customer care case can reopen without actor email');
+  assert.equal((await withSession(supportCookie,()=>submissions.POST(request('/api/submit',{...caseAction,ticketId:careId})))).status,409,'customer decisions retain their separate approval control');
+  const vendorCookie=auth.encodeSession(auth.findStaffUser('uat.vendor',password));
+  assert.equal((await withSession(vendorCookie,()=>submissions.POST(request('/api/submit',caseAction)))).status,403,'vendor cannot take support action');
+  const badVendor={submissionType:'vendor-application',company:'Synthetic Vendor',name:'Synthetic Contact',email:'invalid-contact',phone:'0240000000',area:'Accra',services:'Wash and fold',capacity:'5',message:'Synthetic onboarding note'};
+  const invalidContact=await withSession(teamCookie,()=>submissions.POST(request('/api/submit',badVendor)));
+  assert.equal(invalidContact.status,400);
+  assert.match((await invalidContact.json()).error,/valid vendor contact email/,'new-contact validation retained');
+
   const wrongOrigin=request('/api/uat/accounts',child); wrongOrigin.headers.set('origin','https://other.invalid');
   assert.equal((await withSession(teamCookie,()=>team.POST(wrongOrigin))).status,403);
   assert.equal((await teamPost({...child,role:'admin'})).status,400);
