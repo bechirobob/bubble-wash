@@ -30,7 +30,7 @@ class Deadlines(unittest.TestCase):
    db.close()
  def test_scope_is_separate_and_fixed(self):
   self.assertEqual(h.PREVIOUS,'8bd37b028b550967f9a3eefcd60a52cbcb4f2da9')
-  self.assertEqual(h.CANDIDATE,'0bc1a37ad4a59e57a6e07bee9fa6c11c6cf6b804')
+  self.assertEqual(h.CANDIDATE,'e3eda2a57fcb542ea78a103a8aee8d0a2573fa96')
   self.assertEqual(str(h.WORK),'/opt/bubblewash-uat/code-update-20261112')
   self.assertEqual(str(h.SHARED_LOCK),'/opt/bubblewash-uat/update/host.lock')
   root=Path(__file__).resolve().parents[3]

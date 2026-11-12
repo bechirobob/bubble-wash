@@ -22,7 +22,7 @@ from host_files import canonical, database_fingerprints
 APP=Path('/opt/bubblewash-uat/app')
 WORK=Path('/opt/bubblewash-uat/code-update-20261112')
 PREVIOUS='8bd37b028b550967f9a3eefcd60a52cbcb4f2da9'
-CANDIDATE='0bc1a37ad4a59e57a6e07bee9fa6c11c6cf6b804'
+CANDIDATE='e3eda2a57fcb542ea78a103a8aee8d0a2573fa96'
 CANDIDATE_TREE='0085fdaece59368e2bd60845245e3325fc3042ae'
 EXPIRY=1795062608095
 SHARED_LOCK=Path('/opt/bubblewash-uat/update/host.lock')

@@ -3,7 +3,7 @@
 Prepared controls only. No host execution or deployment has occurred.
 
 - Previous application: `8bd37b028b550967f9a3eefcd60a52cbcb4f2da9`.
-- Application candidate: `0bc1a37ad4a59e57a6e07bee9fa6c11c6cf6b804`, tree `0085fdaece59368e2bd60845245e3325fc3042ae`.
+- Application candidate: `e3eda2a57fcb542ea78a103a8aee8d0a2573fa96`, tree `0085fdaece59368e2bd60845245e3325fc3042ae`.
 - Changes only the existing isolated UAT application. No production service, routing, account issuance, credential reset, schema change or extension issuance.
 - Each active account must have a valid credential-bound grant ending at the existing approved expiry, `1795062608095` milliseconds UTC. Original issuance dates remain unchanged.
 - Uses new staging and journal under `/opt/bubblewash-uat/code-update-20261112`. Historical recovery folders and journals remain untouched. Retains the existing shared update lock.
