@@ -9,6 +9,15 @@ export type StaffActivityRecord = {
   data: Record<string, unknown>;
 };
 
+/** Read the latest intake, never a later pickup, ready or delivery count. */
+export function recordedIntakeCount(records: StaffActivityRecord[], orderId: string): number | null {
+  const intake = records.filter(record => record.data.orderId === orderId &&
+    (record.data.submissionType === "qr-bag-intake" || record.data.intakeBagCount != null))
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+  const count = Number(intake?.data.intakeBagCount ?? intake?.data.bagCount);
+  return Number.isSafeInteger(count) && count > 0 && count <= 10000 ? count : null;
+}
+
 /** Ordinary activity headings never fall back to a private order identity. */
 export function staffActivitySubject(record: StaffActivityRecord) {
   const value = (key: string) => typeof record.data[key] === "string" ? (record.data[key] as string).trim() : "";

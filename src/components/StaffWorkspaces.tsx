@@ -4,7 +4,7 @@ import { UatTestAccounts } from "./UatTestAccounts";
 import "./staff-desk.css";
 import { ClipboardList, Check, MapPin, ScanLine } from "lucide-react";
 import { bookingLabel } from "@/lib/booking-label";
-import { staffActivitySubject as activitySubject } from "@/lib/staff-activity-projection";
+import { staffActivitySubject as activitySubject, recordedIntakeCount } from "@/lib/staff-activity-projection";
 import { StaffAccountPanel, StaffInvoicePanel, CustomerDecisionPanel } from "./StaffAdminControls";
 
 import Link from "next/link";
@@ -1278,7 +1278,7 @@ function AdminDispatchWorkspace() {
 
 function RecordedIntakeCount({ orderId }: { orderId: string }) {
   const [value, setValue] = useState("Loading…");
-  useEffect(() => { let active = true; fetch("/api/submissions").then(async (response) => { const data = await response.json(); if (!response.ok || !data.ok) throw new Error(); const records = (data.records as SubmissionRecord[]).filter((record) => record.data.orderId === orderId && record.data.intakeBagCount).sort((a,b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)); const count = Number(records[0]?.data.intakeBagCount); if (active) setValue(Number.isSafeInteger(count) && count > 0 ? `${count} bags/items` : "Not recorded"); }).catch(() => { if (active) setValue("Unavailable"); }); return () => { active = false; }; }, [orderId]);
+  useEffect(() => { let active = true; fetch("/api/submissions").then(async (response) => { const data = await response.json(); if (!response.ok || !data.ok) throw new Error(); const count = recordedIntakeCount(data.records as SubmissionRecord[], orderId); if (active) setValue(count !== null ? `${count} bags/items` : "Not recorded"); }).catch(() => { if (active) setValue("Unavailable"); }); return () => { active = false; }; }, [orderId]);
   return <>{value}</>;
 }
 
