@@ -1,0 +1,93 @@
+# Explicit dispatch only: approval and quiet-window attestations are mandatory.
+name: Code-only isolated UAT successor
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: {type: string, required: true}
+      expected_expiry_ms: {type: string, required: true}
+      operation_id: {type: string, required: true}
+      admin_route_approved: {type: boolean, default: false}
+      interruption_approved: {type: boolean, default: false}
+      quiet_window_coordinated: {type: boolean, default: false}
+permissions: {contents: read}
+concurrency: {group: bubblewash-production, cancel-in-progress: false}
+jobs:
+  update:
+    if: github.repository == 'bechirobob/bubble-wash' && github.ref == 'refs/heads/main' && inputs.admin_route_approved && inputs.interruption_approved && inputs.quiet_window_coordinated
+    environment: backup-storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      CANDIDATE_SHA: 0bc1a37ad4a59e57a6e07bee9fa6c11c6cf6b804
+      ADMIN_ROUTE_APPROVED: ${{ inputs.admin_route_approved }}
+      INTERRUPTION_APPROVED: ${{ inputs.interruption_approved }}
+      UAT_OPERATION_ID: ${{ inputs.operation_id }}
+      EXPECTED_EXPIRY_MS: ${{ inputs.expected_expiry_ms }}
+      QUIET_WINDOW_COORDINATED: ${{ inputs.quiet_window_coordinated }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with: {persist-credentials: false, fetch-depth: 0}
+      - name: Exact-main, first-attempt, no-debug admission
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == bechirobob/bubble-wash && "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$SOURCE_SHA" == "$GITHUB_SHA" ]]
+          [[ "$CANDIDATE_SHA" == 0bc1a37ad4a59e57a6e07bee9fa6c11c6cf6b804 ]]
+          [[ "$ADMIN_ROUTE_APPROVED" == true && "$INTERRUPTION_APPROVED" == true && "$QUIET_WINDOW_COORDINATED" == true ]]
+          [[ -z "${ACTIONS_STEP_DEBUG:-}" && -z "${ACTIONS_RUNNER_DEBUG:-}" && -z "${RUNNER_DEBUG:-}" ]]
+          python3 -B ops/integration-release/select_source.py --release . --runner-only
+      - name: Require control and candidate release checks
+        run: |
+          TARGET_SHA="$SOURCE_SHA" python3 -B ops/check-release-ci.py
+          TARGET_SHA="$CANDIDATE_SHA" python3 -B ops/check-release-ci.py
+      - name: Test exact successor controls before selecting reviewed application
+        run: python3 -B -m unittest discover -s ops/uat/update -p 'test_code_update*.py' -v
+      - name: Select fixed application candidate
+        run: |
+          git checkout --detach "$CANDIDATE_SHA"
+          [[ "$(git rev-parse HEAD^{tree})" == 0085fdaece59368e2bd60845245e3325fc3042ae ]]
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: {node-version: 22}
+      - name: Verify preparation tests and build exact UAT candidate
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          BUBBLEWASH_DISABLE_DEMO_LOGIN: 'true'
+          NEXT_PUBLIC_BUBBLEWASH_WHATSAPP: ''
+          NEXT_PUBLIC_BUBBLEWASH_CONTACT_EMAIL: ''
+          NEXT_PUBLIC_BUBBLEWASH_ONLINE_PAYMENTS_ENABLED: 'false'
+          NEXT_PUBLIC_BUBBLEWASH_AUTOMATED_UPDATES_ENABLED: 'false'
+          BUBBLEWASH_RESEARCH_EMAIL_ENABLED: 'false'
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$CANDIDATE_SHA" ]]
+          python3 -B -m unittest discover -s ops/uat/update -p 'test_*.py' -v
+          npm ci
+          npm run test:uat
+          npm run typecheck
+          npm run audit:prod
+          mkdir -m 700 "$RUNNER_TEMP/bubblewash-uat-build"
+          export BUBBLEWASH_UAT_ENABLED=true BUBBLEWASH_UAT_ISOLATION_CONFIRMED=true
+          export BUBBLEWASH_UAT_DATA_ROOT="$RUNNER_TEMP/bubblewash-uat-build"
+          export BUBBLEWASH_DATABASE_PATH="$BUBBLEWASH_UAT_DATA_ROOT/synthetic.sqlite"
+          export BUBBLEWASH_DATABASE_DRIVER=sqlite BUBBLEWASH_PUBLIC_URL=https://uat.bubblewash.co
+          unset PAYSTACK_SECRET_KEY RESEND_API_KEY WHATSAPP_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID BUBBLEWASH_RESEARCH_RESEND_KEY BUBBLEWASH_OWNER_RESEND_KEY
+          npm run build
+          npm prune --omit=dev --ignore-scripts
+          git diff --exit-code --quiet
+          SOURCE_SHA="$CANDIDATE_SHA" python3 -B ops/uat/package-release.py --output "$RUNNER_TEMP/uat-update.tar.gz"
+      - name: Restore exact reviewed controls
+        run: |
+          git checkout --detach "$SOURCE_SHA"
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          git diff --exit-code --quiet
+      - name: Connect using existing approved tailnet
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: hermes
+      - name: Single guarded attempt; never retry uncertain outcome
+        run: python3 -B ops/uat/update/code_update_runner.py --apply --artifact "$RUNNER_TEMP/uat-update.tar.gz"
